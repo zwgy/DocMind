@@ -4,7 +4,14 @@
 
 function New-RandomHex($ByteCount) {
     $bytes = [byte[]]::new($ByteCount)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    # Windows PowerShell 5.1 基于 .NET Framework，不支持静态 Fill 方法，
+    # 必须用 Create().GetBytes() 实例方法（.NET Framework / .NET Core 通用）。
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    } finally {
+        $rng.Dispose()
+    }
     return -join ($bytes | ForEach-Object { $_.ToString("x2") })
 }
 
