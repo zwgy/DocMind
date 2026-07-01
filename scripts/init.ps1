@@ -91,17 +91,17 @@ function Remove-EmptyPlaceholders {
 
 # 询问用户输入并写回 .env：
 #   - 已有非空值 → 跳过
-#   - 必填（required）：非交互式报错退出；交互式空输入会循环要求重新输入
+#   - 必填（required）：非交互式写入明显占位符 + 警告（不退出）；交互式空输入循环要求重新输入
 #   - 可选（optional）：非交互式静默跳过；交互式空输入也跳过
 function Read-UserInput($Name, $Prompt, [string]$Required = "required") {
     if (Test-EnvValue $Name) {
         return
     }
-    # 非交互式环境（管道 / 重定向）处理
+    # 非交互式环境（管道 / 重定向）处理：required 写占位符 + 警告，optional 静默跳过
     if ([Console]::IsInputRedirected) {
         if ($Required -eq "required") {
-            Write-Host "❌ 非交互式环境无法询问 $Name，请手动编辑 .env 后重跑 init.ps1" -ForegroundColor Red
-            exit 1
+            Write-Host "⚠️  非交互式环境无法询问 $Name，已写入占位符 __REPLACE_ME__$Name__；请事后手动编辑 .env 替换为真实值" -ForegroundColor Yellow
+            Update-EnvVar $Name "__REPLACE_ME__$Name__"
         }
         return
     }

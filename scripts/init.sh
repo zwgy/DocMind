@@ -54,7 +54,7 @@ cleanup_empty_placeholders() {
 
 # 询问用户输入并写回 .env：
 #   - 已有非空值 → 跳过
-#   - 必填（required）：非交互式报错退出；交互式空输入会循环要求重新输入
+#   - 必填（required）：非交互式写入明显占位符 + 警告（不退出，保证后续密钥能继续生成）；交互式空输入循环要求重新输入
 #   - 可选（optional）：非交互式静默跳过；交互式空输入也跳过
 ask_or_skip() {
     local var_name="$1"
@@ -65,11 +65,11 @@ ask_or_skip() {
         return 0
     fi
 
-    # 非交互式环境（管道 / 重定向）处理：required 报错退出，optional 静默跳过
+    # 非交互式环境（管道 / 重定向）处理：required 写占位符 + 警告，optional 静默跳过
     if [ ! -t 0 ]; then
         if [ "$required" = "required" ]; then
-            echo "❌ 非交互式环境无法询问 ${var_name}，请手动编辑 .env 后重跑 init.sh" >&2
-            exit 1
+            echo "⚠️  非交互式环境无法询问 ${var_name}，已写入占位符 __REPLACE_ME__${var_name}__；请事后手动编辑 .env 替换为真实值" >&2
+            ensure_env_var "$var_name" "__REPLACE_ME__${var_name}__"
         fi
         return 0
     fi
