@@ -123,3 +123,7 @@ make format        # 格式化代码
 1. 参考 [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) 规范编写提交信息。
 2. 使用中文提交信息，标题简洁明了，描述具体改动内容和原因。
 3. 创建 PR 必须参考 [contributing.md](docs/develop-guides/contributing.md) 以及 PR 模板[PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)，并在提交前完成其中的检查项。
+
+**注意**
+
+- 项目使用模型是本地部署模型，如Qwen3.6-27、Qwen3.6-35B-A3B等模型，在涉及框架设计、性能、问答效果等问题时应充分考虑这个限制。
