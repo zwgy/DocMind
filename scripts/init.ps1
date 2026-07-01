@@ -1,11 +1,15 @@
 # Yuxi Initialization Script for PowerShell
-# This script helps set up the environment for the Yuxi project
+# 基于 .env.template 蓝本生成 .env；询问缺失的必填项，自动生成缺失的密钥。
 # Note: API keys will be visible during input - use with care
 
+###############################################################################
+# 通用 helper
+###############################################################################
+
+# 生成指定字节数的随机十六进制串（Windows PowerShell 5.1 基于 .NET Framework，
+# 不支持静态 Fill 方法，必须用 Create().GetBytes() 实例方法）
 function New-RandomHex($ByteCount) {
     $bytes = [byte[]]::new($ByteCount)
-    # Windows PowerShell 5.1 基于 .NET Framework，不支持静态 Fill 方法，
-    # 必须用 Create().GetBytes() 实例方法（.NET Framework / .NET Core 通用）。
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     try {
         $rng.GetBytes($bytes)
@@ -15,162 +19,127 @@ function New-RandomHex($ByteCount) {
     return -join ($bytes | ForEach-Object { $_.ToString("x2") })
 }
 
+# 检查 .env 中某变量是否已有非空值
 function Test-EnvValue($Name) {
     return [bool](Select-String -Path ".env" -Pattern "^$Name=.+" -Quiet)
 }
 
-function Ensure-JwtEnv {
-    if ((Test-EnvValue "JWT_SECRET_KEY") -and (Test-EnvValue "YUXI_INSTANCE_ID")) {
-        return
+# 读取 .env 中某变量的当前值（不含键名），不存在则返回空串
+function Get-EnvValue($Name) {
+    $match = Select-String -Path ".env" -Pattern "^$Name=(.*)$" -Quiet:$false | Select-Object -First 1
+    if ($null -eq $match) {
+        return ""
     }
-
-    Write-Host "JWT security settings are missing in .env." -ForegroundColor Yellow
-    $JWT_SECRET_KEY = Read-Host "Please enter your JWT_SECRET_KEY (press Enter to auto-generate)"
-    if ([string]::IsNullOrEmpty($JWT_SECRET_KEY)) {
-        $JWT_SECRET_KEY = New-RandomHex 32
-        Write-Host "Generated JWT_SECRET_KEY and saved it to .env." -ForegroundColor Green
+    $line = $match.Line
+    $idx = $line.IndexOf('=')
+    if ($idx -lt 0) {
+        return ""
     }
-
-    $YUXI_INSTANCE_ID = Read-Host "Please enter your YUXI_INSTANCE_ID (press Enter to auto-generate)"
-    if ([string]::IsNullOrEmpty($YUXI_INSTANCE_ID)) {
-        $YUXI_INSTANCE_ID = "instance-$(New-RandomHex 8)"
-        Write-Host "Generated YUXI_INSTANCE_ID and saved it to .env." -ForegroundColor Green
-    }
-
-    @"
-
-# JWT security settings
-JWT_SECRET_KEY=$JWT_SECRET_KEY
-YUXI_INSTANCE_ID=$YUXI_INSTANCE_ID
-"@ | Add-Content -Path ".env" -Encoding UTF8
+    return $line.Substring($idx + 1)
 }
 
-# 把"宿主机端口"和"前端浏览器链接"两个核心可调点写入 .env（缺失时追加）。
-# 改 .env 中这几个值即可调整：容器端口映射、API 预签 URL、前端控制台跳转链接。
-function Ensure-PortEnv {
-    $portVars = @(
-        "REDIS_HOST_PORT",
-        "MINIO_API_HOST_PORT",
-        "MINIO_CONSOLE_HOST_PORT",
-        "MILVUS_GRPC_HOST_PORT",
-        "MILVUS_HEALTH_HOST_PORT"
-    )
-
-    $needWrite = $false
-    foreach ($var in $portVars) {
-        if (-not (Test-EnvValue $var)) {
-            $needWrite = $true
-            break
+# 幂等写入 .env：
+#   - 已存在且有真值（等号后第一个字符非空白/非 #） → 跳过（保护用户已有配置）
+#   - 存在但为模板占位（KEY=  # 注释）                 → 原地替换该行
+#   - 完全不存在                                         → 追加到末尾
+# 逐行处理避免 regex 多行模式在 PS 5.1 上的解析陷阱
+function Update-EnvVar($Name, $Value) {
+    $envPath = (Resolve-Path ".env").Path
+    $lines = [System.IO.File]::ReadAllLines($envPath)
+    $matchedLine = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -notmatch ('^' + [regex]::Escape($Name) + '=')) {
+            continue
+        }
+        # 提取等号后的内容
+        $idx = $lines[$i].IndexOf('=')
+        $val = $lines[$i].Substring($idx + 1)
+        if ($val -match '^\s*(#|$)') {
+            # 空值或仅注释 → 替换该行
+            $matchedLine = $i
+        } else {
+            # 已有真值 → 跳过整个写入
+            return
         }
     }
+    if ($matchedLine -ge 0) {
+        $lines[$matchedLine] = "$Name=$Value"
+        $content = ($lines -join "`n") + "`n"
+        [System.IO.File]::WriteAllText($envPath, $content, [System.Text.UTF8Encoding]::new($false))
+    } else {
+        Add-Content -Path ".env" -Value "`n$Name=$Value" -Encoding UTF8
+    }
+}
 
-    if (-not $needWrite) {
+# 询问用户输入并写回 .env：
+#   - 已有非空值 → 跳过
+#   - 必填（required）：空输入会循环要求重新输入
+#   - 可选（optional）：空输入则静默跳过，不写入
+function Read-UserInput($Name, $Prompt, [string]$Required = "required") {
+    if (Test-EnvValue $Name) {
         return
     }
-
-    @"
-
-# === 宿主机端口（部署时按本机环境调整，避免与其他服务冲突） ===
-# 留空 = 用默认值；改这里一处，所有相关组件（容器映射、浏览器链接、API 预签 URL）自动跟随。
-# 与同一台机器上其他项目（smart_ticket 等）冲突时，按需把任一项改为空闲端口。
-REDIS_HOST_PORT=6379
-MINIO_API_HOST_PORT=9000
-MINIO_CONSOLE_HOST_PORT=9001
-MILVUS_GRPC_HOST_PORT=19530
-MILVUS_HEALTH_HOST_PORT=9091
-
-# === 浏览器访问外部地址（前端打开 MinIO / Milvus 控制台用） ===
-# 默认值与上方宿主机端口一致；如改了宿主机端口，这里要同步改。
-VITE_MINIO_CONSOLE_URL=http://localhost:9001
-VITE_MILVUS_WEBUI_URL=http://localhost:9091/webui/
-"@ | Add-Content -Path ".env" -Encoding UTF8
-
-    Write-Host "✅ 已写入宿主机端口默认配置（如需调整请编辑 .env）" -ForegroundColor Green
+    $input = ""
+    if ($Required -eq "required") {
+        while ([string]::IsNullOrEmpty($input)) {
+            $input = Read-Host $Prompt
+            if ([string]::IsNullOrEmpty($input)) {
+                Write-Host "❌ 不能为空，请重新输入" -ForegroundColor Red
+            }
+        }
+    } else {
+        $input = Read-Host "$Prompt (直接回车跳过)"
+    }
+    if (-not [string]::IsNullOrEmpty($input)) {
+        Update-EnvVar $Name $input
+    }
 }
+
+###############################################################################
+# 主流程
+###############################################################################
 
 Write-Host "🚀 Initializing Yuxi project..." -ForegroundColor Cyan
 Write-Host "==================================" -ForegroundColor Cyan
 
-# Check if .env file exists
+# 第 1 步：确保 .env 存在（以 .env.template 为蓝本）
 if (Test-Path ".env") {
-    Write-Host "✅ .env file already exists. Skipping environment setup." -ForegroundColor Green
-    Ensure-JwtEnv
+    Write-Host "✅ .env 已存在，跳过复制" -ForegroundColor Green
 } else {
-    Write-Host "📝 .env file not found. Let's set up your environment variables." -ForegroundColor Yellow
-    Write-Host ""
-
-    # Get SILICONFLOW_API_KEY
-    Write-Host "🔑 SiliconFlow API Key required" -ForegroundColor Yellow
-    Write-Host "Get your API key from: https://cloud.siliconflow.cn/i/Eo5yTHGJ" -ForegroundColor Blue
-    Write-Host "Note: Press Ctrl+C at any time to cancel" -ForegroundColor Gray
-    Write-Host ""
-
-    do {
-        $apiKey = Read-Host "Please enter your SILICONFLOW_API_KEY"
-        if ([string]::IsNullOrEmpty($apiKey)) {
-            Write-Host "❌ API Key cannot be empty. Please try again." -ForegroundColor Red
-        }
-    } while ([string]::IsNullOrEmpty($apiKey))
-
-    # Get TAVILY_API_KEY (optional)
-    Write-Host ""
-    Write-Host "🔍 Tavily API Key (optional) - for search service" -ForegroundColor Yellow
-    Write-Host "Get your API key from: https://app.tavily.com/" -ForegroundColor Blue
-
-    $TAVILY_API_KEY = Read-Host "Please enter your TAVILY_API_KEY (press Enter to skip)"
-
-    Write-Host ""
-    Write-Host "JWT security settings" -ForegroundColor Yellow
-    $JWT_SECRET_KEY = Read-Host "Please enter your JWT_SECRET_KEY (press Enter to auto-generate)"
-    if ([string]::IsNullOrEmpty($JWT_SECRET_KEY)) {
-        $JWT_SECRET_KEY = New-RandomHex 32
-        Write-Host "Generated JWT_SECRET_KEY and saved it to .env." -ForegroundColor Green
+    if (-not (Test-Path ".env.template")) {
+        Write-Host "❌ .env.template 不存在，无法初始化" -ForegroundColor Red
+        exit 1
     }
-
-    $YUXI_INSTANCE_ID = Read-Host "Please enter your YUXI_INSTANCE_ID (press Enter to auto-generate)"
-    if ([string]::IsNullOrEmpty($YUXI_INSTANCE_ID)) {
-        $YUXI_INSTANCE_ID = "instance-$(New-RandomHex 8)"
-        Write-Host "Generated YUXI_INSTANCE_ID and saved it to .env." -ForegroundColor Green
-    }
-
-    # Create .env file
-    $envContent = @"
-# SiliconFlow API Key (required)
-SILICONFLOW_API_KEY=$apiKey
-
-# Tavily API Key (optional - for search service)
-"@
-
-    if (-not [string]::IsNullOrEmpty($TAVILY_API_KEY)) {
-        $envContent += "`nTAVILY_API_KEY=$TAVILY_API_KEY"
-    }
-
-    $envContent += @"
-
-# JWT security settings
-JWT_SECRET_KEY=$JWT_SECRET_KEY
-YUXI_INSTANCE_ID=$YUXI_INSTANCE_ID
-"@
-
-    $envContent | Out-File -FilePath ".env" -Encoding UTF8
-    Write-Host "✅ .env file created successfully!" -ForegroundColor Green
-
-    # Clear the variables from memory
-    Remove-Variable -Name "apiKey" -ErrorAction SilentlyContinue
-    Remove-Variable -Name "TAVILY_API_KEY" -ErrorAction SilentlyContinue
-    Remove-Variable -Name "JWT_SECRET_KEY" -ErrorAction SilentlyContinue
-    Remove-Variable -Name "YUXI_INSTANCE_ID" -ErrorAction SilentlyContinue
+    Copy-Item ".env.template" ".env"
+    Write-Host "✅ 基于 .env.template 创建 .env" -ForegroundColor Green
 }
 
-# 不论 .env 是新建的还是已存在的，统一在末尾追加宿主机端口默认值。
-# 函数内部已有幂等检查：5 个端口变量都已存在则跳过，无需在两个分支里各调一次。
-Ensure-PortEnv
+# 第 2 步：补齐缺失项
+Write-Host ""
+Write-Host "🔑 SiliconFlow API Key（首次必填，用于调用大模型）" -ForegroundColor Yellow
+Write-Host "Get your API key from: https://cloud.siliconflow.cn/i/Eo5yTHGJ" -ForegroundColor Blue
+Read-UserInput "SILICONFLOW_API_KEY" "请输入 SILICONFLOW_API_KEY" "required"
 
+Write-Host ""
+Write-Host "🔍 Tavily API Key（可选，用于搜索服务）" -ForegroundColor Yellow
+Write-Host "Get your API key from: https://app.tavily.com/" -ForegroundColor Blue
+Read-UserInput "TAVILY_API_KEY" "请输入 TAVILY_API_KEY" "optional"
+
+# 第 3 步：自动生成缺失的密钥（已有则跳过）
+if ([string]::IsNullOrEmpty((Get-EnvValue "JWT_SECRET_KEY"))) {
+    Update-EnvVar "JWT_SECRET_KEY" (New-RandomHex 32)
+    Write-Host "✅ 已生成 JWT_SECRET_KEY" -ForegroundColor Green
+}
+if ([string]::IsNullOrEmpty((Get-EnvValue "YUXI_INSTANCE_ID"))) {
+    Update-EnvVar "YUXI_INSTANCE_ID" "instance-$(New-RandomHex 8)"
+    Write-Host "✅ 已生成 YUXI_INSTANCE_ID" -ForegroundColor Green
+}
+
+# 第 4 步：拉取 Docker 镜像
 Write-Host ""
 Write-Host "📦 Pulling Docker images..." -ForegroundColor Cyan
 Write-Host "=========================" -ForegroundColor Cyan
 
-# List of Docker images to pull
 $images = @(
     "python:3.12-slim",
     "node:24-slim",
@@ -185,7 +154,6 @@ $images = @(
     "redis:7-alpine"
 )
 
-# Pull each image
 foreach ($image in $images) {
     Write-Host "🔄 Pulling ${image}..." -ForegroundColor Yellow
     try {
