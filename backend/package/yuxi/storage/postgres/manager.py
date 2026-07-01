@@ -255,6 +255,88 @@ class PostgresManager(metaclass=SingletonMeta):
             """,
             "ALTER TABLE IF EXISTS knowledge_chunks ADD COLUMN IF NOT EXISTS extraction_result JSONB",
             """
+            CREATE TABLE IF NOT EXISTS knowledge_business_extraction_runs (
+                id SERIAL PRIMARY KEY,
+                run_id VARCHAR(64) NOT NULL UNIQUE,
+                kb_id VARCHAR(80) NOT NULL REFERENCES knowledge_bases(kb_id) ON DELETE CASCADE,
+                file_id VARCHAR(64) NOT NULL REFERENCES knowledge_files(file_id) ON DELETE CASCADE,
+                status VARCHAR(32) DEFAULT 'running',
+                model_spec VARCHAR(512),
+                run_metadata JSONB,
+                error TEXT,
+                created_by VARCHAR(64),
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS knowledge_business_extraction_results (
+                id SERIAL PRIMARY KEY,
+                run_id VARCHAR(64) NOT NULL UNIQUE REFERENCES knowledge_business_extraction_runs(run_id)
+                    ON DELETE CASCADE,
+                kb_id VARCHAR(80) NOT NULL REFERENCES knowledge_bases(kb_id) ON DELETE CASCADE,
+                file_id VARCHAR(64) NOT NULL REFERENCES knowledge_files(file_id) ON DELETE CASCADE,
+                categories JSONB,
+                schema_ids JSONB,
+                status VARCHAR(32) DEFAULT 'draft',
+                confirmed_categories JSONB,
+                created_by VARCHAR(64),
+                confirmed_by VARCHAR(64),
+                confirmed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS knowledge_business_extraction_items (
+                id SERIAL PRIMARY KEY,
+                item_id VARCHAR(64) NOT NULL UNIQUE,
+                result_id INTEGER NOT NULL REFERENCES knowledge_business_extraction_results(id) ON DELETE CASCADE,
+                kb_id VARCHAR(80) NOT NULL REFERENCES knowledge_bases(kb_id) ON DELETE CASCADE,
+                file_id VARCHAR(64) NOT NULL REFERENCES knowledge_files(file_id) ON DELETE CASCADE,
+                chunk_id VARCHAR(128) REFERENCES knowledge_chunks(chunk_id) ON DELETE SET NULL,
+                item_type VARCHAR(64) NOT NULL,
+                data JSONB,
+                confirmed_data JSONB,
+                source_quote TEXT,
+                status VARCHAR(32) DEFAULT 'draft',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                confirmed_by VARCHAR(64),
+                confirmed_at TIMESTAMPTZ
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_runs_file_id ON knowledge_business_extraction_runs(file_id)",
+            "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_runs_kb_id ON knowledge_business_extraction_runs(kb_id)",
+            (
+                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_results_file_id "
+                "ON knowledge_business_extraction_results(file_id)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_results_kb_id "
+                "ON knowledge_business_extraction_results(kb_id)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_results_status "
+                "ON knowledge_business_extraction_results(status)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_items_result_id "
+                "ON knowledge_business_extraction_items(result_id)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_items_file_id "
+                "ON knowledge_business_extraction_items(file_id)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_items_chunk_id "
+                "ON knowledge_business_extraction_items(chunk_id)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_items_type_status "
+                "ON knowledge_business_extraction_items(item_type, status)"
+            ),
+            """
             CREATE TABLE IF NOT EXISTS knowledge_graph_entities (
                 id SERIAL PRIMARY KEY,
                 entity_id VARCHAR(64) NOT NULL UNIQUE,

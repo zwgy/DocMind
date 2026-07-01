@@ -106,6 +106,92 @@ class KnowledgeChunk(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
 
 
+class KnowledgeBusinessExtractionRun(Base):
+    """知识库业务抽取运行记录"""
+
+    __tablename__ = "knowledge_business_extraction_runs"
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uq_knowledge_business_extraction_runs_run_id"),
+        Index("ix_kb_business_extraction_runs_file_id", "file_id"),
+        Index("ix_kb_business_extraction_runs_kb_id", "kb_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(64), unique=True, nullable=False, index=True)
+    kb_id = Column(String(80), ForeignKey("knowledge_bases.kb_id", ondelete="CASCADE"), nullable=False)
+    file_id = Column(String(64), ForeignKey("knowledge_files.file_id", ondelete="CASCADE"), nullable=False)
+    status = Column(String(32), default="running", index=True)
+    model_spec = Column(String(512))
+    run_metadata = Column(JSON_VALUE)
+    error = Column(Text)
+    created_by = Column(String(64))
+    created_at = Column(DateTime(timezone=True), default=utc_now_naive)
+    updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class KnowledgeBusinessExtractionResult(Base):
+    """知识库文件级业务分类结果"""
+
+    __tablename__ = "knowledge_business_extraction_results"
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uq_knowledge_business_extraction_results_run_id"),
+        Index("ix_kb_business_extraction_results_file_id", "file_id"),
+        Index("ix_kb_business_extraction_results_kb_id", "kb_id"),
+        Index("ix_kb_business_extraction_results_status", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(
+        String(64),
+        ForeignKey("knowledge_business_extraction_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    kb_id = Column(String(80), ForeignKey("knowledge_bases.kb_id", ondelete="CASCADE"), nullable=False)
+    file_id = Column(String(64), ForeignKey("knowledge_files.file_id", ondelete="CASCADE"), nullable=False)
+    categories = Column(JSON_VALUE)
+    schema_ids = Column(JSON_VALUE)
+    status = Column(String(32), default="draft", index=True)
+    confirmed_categories = Column(JSON_VALUE)
+    created_by = Column(String(64))
+    confirmed_by = Column(String(64))
+    confirmed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), default=utc_now_naive)
+    updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class KnowledgeBusinessExtractionItem(Base):
+    """知识库业务抽取结构化条目"""
+
+    __tablename__ = "knowledge_business_extraction_items"
+    __table_args__ = (
+        UniqueConstraint("item_id", name="uq_knowledge_business_extraction_items_item_id"),
+        Index("ix_kb_business_extraction_items_result_id", "result_id"),
+        Index("ix_kb_business_extraction_items_file_id", "file_id"),
+        Index("ix_kb_business_extraction_items_chunk_id", "chunk_id"),
+        Index("ix_kb_business_extraction_items_type_status", "item_type", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    item_id = Column(String(64), unique=True, nullable=False, index=True)
+    result_id = Column(
+        Integer,
+        ForeignKey("knowledge_business_extraction_results.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    kb_id = Column(String(80), ForeignKey("knowledge_bases.kb_id", ondelete="CASCADE"), nullable=False)
+    file_id = Column(String(64), ForeignKey("knowledge_files.file_id", ondelete="CASCADE"), nullable=False)
+    chunk_id = Column(String(128), ForeignKey("knowledge_chunks.chunk_id", ondelete="SET NULL"))
+    item_type = Column(String(64), nullable=False)
+    data = Column(JSON_VALUE)
+    confirmed_data = Column(JSON_VALUE)
+    source_quote = Column(Text)
+    status = Column(String(32), default="draft", index=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now_naive)
+    updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
+    confirmed_by = Column(String(64))
+    confirmed_at = Column(DateTime(timezone=True))
+
+
 class KnowledgeGraphEntity(Base):
     """知识图谱实体"""
 
