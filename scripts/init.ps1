@@ -95,7 +95,6 @@ Write-Host "==================================" -ForegroundColor Cyan
 if (Test-Path ".env") {
     Write-Host "✅ .env file already exists. Skipping environment setup." -ForegroundColor Green
     Ensure-JwtEnv
-    Ensure-PortEnv
 } else {
     Write-Host "📝 .env file not found. Let's set up your environment variables." -ForegroundColor Yellow
     Write-Host ""
@@ -161,9 +160,11 @@ YUXI_INSTANCE_ID=$YUXI_INSTANCE_ID
     Remove-Variable -Name "TAVILY_API_KEY" -ErrorAction SilentlyContinue
     Remove-Variable -Name "JWT_SECRET_KEY" -ErrorAction SilentlyContinue
     Remove-Variable -Name "YUXI_INSTANCE_ID" -ErrorAction SilentlyContinue
-
-    Ensure-PortEnv
 }
+
+# 不论 .env 是新建的还是已存在的，统一在末尾追加宿主机端口默认值。
+# 函数内部已有幂等检查：5 个端口变量都已存在则跳过，无需在两个分支里各调一次。
+Ensure-PortEnv
 
 Write-Host ""
 Write-Host "📦 Pulling Docker images..." -ForegroundColor Cyan

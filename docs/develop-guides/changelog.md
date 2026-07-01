@@ -46,6 +46,7 @@
 - 下沉 AgentRun 基础能力：将「读取某个 run 的最终结果」（`get_agent_run_result`/`load_agent_run_result`，含状态、最终 assistant 输出、Langfuse trace id 与错误）与「阻塞至 run 终结再取结果」（`await_agent_run_result`，复用有限事件流、无额外轮询）提升进 `agent_run_service`，供 chat/eval 及未来定时任务统一复用；eval 运行入口改为非流式复用该能力（不再做 SSE 封装），移除其私有结果构建逻辑（结果不变）。
 - 重构 AgentRun 接口底座：`agent_run_service` 拆出内部 `create_agent_run`、`enqueue_agent_run` 与 `request_cancel_agent_run`，保留现有 `/api/agent/runs` 行为并新增 `/api/agent/runs/{run_id}/result` 结果读取接口；`AgentRunRepository` 增加按 `parent_agent_run_id` 查询 child run 的能力，为后续异步 subagent 生命周期控制预留统一入口。
 - 修复子智能体流式事件兼容：Yuxi task middleware 的 DeepAgents 子智能体 transformer 改用专用 `yuxi_subagents` projection，避免与 LangChain `create_agent` 默认注册的 `subagents` projection 冲突导致运行流式消息时报错；子线程路由收集优先读取 Yuxi projection，并保留原 `subagents` fallback。
+- 宿主机端口集中可配置：把所有宿主机端口（redis 6379、minio 9000/9001、milvus 19530/9091）和浏览器打开 MinIO / Milvus 控制台的链接统一收敛到 `.env`，通过 `REDIS_HOST_PORT` / `MINIO_API_HOST_PORT` / `MINIO_CONSOLE_HOST_PORT` / `MILVUS_GRPC_HOST_PORT` / `MILVUS_HEALTH_HOST_PORT` / `VITE_MINIO_CONSOLE_URL` / `VITE_MILVUS_WEBUI_URL` 一处调整即可同步 docker-compose 端口映射、API 预签 URL 和前端跳转链接，便于与同机其他项目共享端口时快速避让；`init.sh` / `init.ps1` 中 `ensure_port_env` 改为幂等追加并在 main 末尾统一调用一次（移除两个分支中的重复调用点），`docker-compose.prod.yml` 中移除 prod 未暴露的内网端口透传避免误导。
 
 ## v0.7.0 (2026-06-13)
 

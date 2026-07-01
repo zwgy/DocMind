@@ -18,8 +18,6 @@ x-api-worker-env: &api-worker-env
   MINERU_API_URI: ${MINERU_API_URI:-http://mineru-api:30001}
   PADDLEX_URI: ${PADDLEX_URI:-http://paddlex:8080}
   MINIO_URI: ${MINIO_URI:-http://minio:9000}
-  # 宿主机端口：透传到容器内供 client.py 拼 public_endpoint（与 MINIO_API_HOST_PORT 联动）
-  MINIO_API_HOST_PORT: ${MINIO_API_HOST_PORT:-9000}
   SANDBOX_PROVIDER: ${SANDBOX_PROVIDER:-provisioner}
   SANDBOX_PROVISIONER_URL: ${SANDBOX_PROVISIONER_URL:-http://sandbox-provisioner:8002}
   SANDBOX_VIRTUAL_PATH_PREFIX: ${SANDBOX_VIRTUAL_PATH_PREFIX:-/home/gem/user-data}

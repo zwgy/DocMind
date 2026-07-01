@@ -88,7 +88,6 @@ echo "=================================="
 if [ -f ".env" ]; then
     echo "✅ .env file already exists. Skipping environment setup."
     ensure_jwt_env
-    ensure_port_env
 else
     echo "📝 .env file not found. Let's set up your environment variables."
     echo ""
@@ -147,8 +146,11 @@ YUXI_INSTANCE_ID=${YUXI_INSTANCE_ID}
 EOF
 
     echo "✅ .env file created successfully!"
-    ensure_port_env
 fi
+
+# 不论 .env 是新建的还是已存在的，统一在末尾追加宿主机端口默认值。
+# 函数内部已有幂等检查：5 个端口变量都已存在则跳过，无需在两个分支里各调一次。
+ensure_port_env
 
 echo ""
 echo "📦 Pulling Docker images..."
