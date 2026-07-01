@@ -19,9 +19,10 @@ function New-RandomHex($ByteCount) {
     return -join ($bytes | ForEach-Object { $_.ToString("x2") })
 }
 
-# 检查 .env 中某变量是否已有非空值
+# 检查 .env 中某变量是否已有真值（等号后第一个字符非空白、非 #）
 function Test-EnvValue($Name) {
-    return [bool](Select-String -Path ".env" -Pattern "^$Name=.+" -Quiet)
+    $pattern = '^' + [regex]::Escape($Name) + '=[^\s#]'
+    return [bool](Select-String -Path ".env" -Pattern $pattern -Quiet)
 }
 
 # 读取 .env 中某变量的当前值（不含键名），不存在则返回空串
@@ -71,12 +72,37 @@ function Update-EnvVar($Name, $Value) {
     }
 }
 
+# 删除 .env 中所有 KEY=  后跟空白/可选注释的行（即模板占位但用户未填的行）
+# 保留所有 KEY=真值 行（包括基础设施默认值和用户实际填的值）
+function Remove-EmptyPlaceholders {
+    $envPath = (Resolve-Path ".env").Path
+    $lines = [System.IO.File]::ReadAllLines($envPath)
+    $kept = @()
+    foreach ($line in $lines) {
+        # 匹配：KEY=  后跟空白（0+）再可选注释的行
+        if ($line -match '^[A-Z_][A-Z0-9_]*=\s*(#.*)?$') {
+            continue
+        }
+        $kept += $line
+    }
+    $content = ($kept -join "`n") + "`n"
+    [System.IO.File]::WriteAllText($envPath, $content, [System.Text.UTF8Encoding]::new($false))
+}
+
 # 询问用户输入并写回 .env：
 #   - 已有非空值 → 跳过
-#   - 必填（required）：空输入会循环要求重新输入
-#   - 可选（optional）：空输入则静默跳过，不写入
+#   - 必填（required）：非交互式报错退出；交互式空输入会循环要求重新输入
+#   - 可选（optional）：非交互式静默跳过；交互式空输入也跳过
 function Read-UserInput($Name, $Prompt, [string]$Required = "required") {
     if (Test-EnvValue $Name) {
+        return
+    }
+    # 非交互式环境（管道 / 重定向）处理
+    if ([Console]::IsInputRedirected) {
+        if ($Required -eq "required") {
+            Write-Host "❌ 非交互式环境无法询问 $Name，请手动编辑 .env 后重跑 init.ps1" -ForegroundColor Red
+            exit 1
+        }
         return
     }
     $input = ""
@@ -93,6 +119,28 @@ function Read-UserInput($Name, $Prompt, [string]$Required = "required") {
     if (-not [string]::IsNullOrEmpty($input)) {
         Update-EnvVar $Name $input
     }
+}
+
+# 询问用户输入，传入 fallback 自动生成值：
+#   - 已有真值 → 跳过
+#   - 非交互式 → 直接用 fallback（自动生成，不询问）
+#   - 交互式：用户输入 → 用用户值；空输入 → 用 fallback
+function Read-AutoGen($Name, $Prompt, $Fallback) {
+    if (Test-EnvValue $Name) {
+        return
+    }
+    # 非交互式环境 → 直接用 fallback
+    if ([Console]::IsInputRedirected) {
+        Update-EnvVar $Name $Fallback
+        Write-Host "✅ 已自动生成 $Name" -ForegroundColor Green
+        return
+    }
+    $input = Read-Host "$Prompt（直接回车自动生成）"
+    if ([string]::IsNullOrEmpty($input)) {
+        $input = $Fallback
+        Write-Host "✅ 已自动生成 $Name" -ForegroundColor Green
+    }
+    Update-EnvVar $Name $input
 }
 
 ###############################################################################
@@ -114,6 +162,9 @@ if (Test-Path ".env") {
     Write-Host "✅ 基于 .env.template 创建 .env" -ForegroundColor Green
 }
 
+# 删除模板占位但用户未填的行（如 TAVILY_API_KEY= ），避免污染用户配置
+Remove-EmptyPlaceholders
+
 # 第 2 步：补齐缺失项
 Write-Host ""
 Write-Host "🔑 SiliconFlow API Key（首次必填，用于调用大模型）" -ForegroundColor Yellow
@@ -125,15 +176,9 @@ Write-Host "🔍 Tavily API Key（可选，用于搜索服务）" -ForegroundCol
 Write-Host "Get your API key from: https://app.tavily.com/" -ForegroundColor Blue
 Read-UserInput "TAVILY_API_KEY" "请输入 TAVILY_API_KEY" "optional"
 
-# 第 3 步：自动生成缺失的密钥（已有则跳过）
-if ([string]::IsNullOrEmpty((Get-EnvValue "JWT_SECRET_KEY"))) {
-    Update-EnvVar "JWT_SECRET_KEY" (New-RandomHex 32)
-    Write-Host "✅ 已生成 JWT_SECRET_KEY" -ForegroundColor Green
-}
-if ([string]::IsNullOrEmpty((Get-EnvValue "YUXI_INSTANCE_ID"))) {
-    Update-EnvVar "YUXI_INSTANCE_ID" "instance-$(New-RandomHex 8)"
-    Write-Host "✅ 已生成 YUXI_INSTANCE_ID" -ForegroundColor Green
-}
+# 第 3 步：补齐缺失的密钥（询问用户，可回车自动生成）
+Read-AutoGen "JWT_SECRET_KEY" "请输入 JWT_SECRET_KEY" (New-RandomHex 32)
+Read-AutoGen "YUXI_INSTANCE_ID" "请输入 YUXI_INSTANCE_ID" ("instance-" + (New-RandomHex 8))
 
 # 第 4 步：拉取 Docker 镜像
 Write-Host ""
