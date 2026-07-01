@@ -59,6 +59,9 @@ class MinIOClient:
         self._client = None
 
         # 设置公开访问端点
+        # 端口取自 MINIO_API_HOST_PORT（由 docker-compose 的 x-api-worker-env 透传），
+        # 宿主机端口与容器内端口解耦，改 .env 即可生效。
+        api_port = os.getenv("MINIO_API_HOST_PORT", "9000")
         if os.getenv("RUNNING_IN_DOCKER"):
             host_ip = (os.getenv("HOST_IP") or "").strip()
             if not host_ip:
@@ -66,11 +69,11 @@ class MinIOClient:
             if "://" in host_ip:
                 host_ip = host_ip.split("://")[-1]
             host_ip = host_ip.rstrip("/")
-            self.public_endpoint = f"{host_ip}:9000"
+            self.public_endpoint = f"{host_ip}:{api_port}"
             logger.debug(f"Docker MinIOClient public_endpoint: {self.public_endpoint}")
         else:
-            self.public_endpoint = "localhost:9000"
-            logger.debug(f"Default_client: {self.public_endpoint}")
+            self.public_endpoint = f"localhost:{api_port}"
+            logger.debug(f"Default MinIOClient public_endpoint: {self.public_endpoint}")
 
     @property
     def client(self) -> Minio:

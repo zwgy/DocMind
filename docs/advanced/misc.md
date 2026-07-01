@@ -68,6 +68,11 @@ LLM 检测会增加用户交互的延迟，请根据实际需求选择是否启�
 | 19530/9091 | Milvus | 向量数据库 |
 | 5432 | PostgreSQL | 业务数据库 |
 
+> 上述宿主机端口全部可在 `.env` 中调整：`REDIS_HOST_PORT`、`MINIO_API_HOST_PORT`、
+> `MINIO_CONSOLE_HOST_PORT`、`MILVUS_GRPC_HOST_PORT`、`MILVUS_HEALTH_HOST_PORT`。
+> 浏览器打开 MinIO / Milvus 控制台的链接对应调整 `VITE_MINIO_CONSOLE_URL` 和
+> `VITE_MILVUS_WEBUI_URL`。改 `.env` 一处即可同步生效。详见 `.env.template`。
+
 ### 可选服务端口
 
 | 端口 | 服务 | 说明 |

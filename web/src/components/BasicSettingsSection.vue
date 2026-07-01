@@ -131,7 +131,7 @@
           <a-button
             type="default"
             class="lucide-icon-btn"
-            @click="openLink('http://localhost:9001')"
+            @click="openLink(MINIO_CONSOLE_URL)"
             :icon="h(Globe, { size: 18 })"
           >
             访问
@@ -146,7 +146,7 @@
           <a-button
             type="default"
             class="lucide-icon-btn"
-            @click="openLink('http://localhost:9091/webui/')"
+            @click="openLink(MILVUS_WEBUI_URL)"
             :icon="h(Globe, { size: 18 })"
           >
             访问
@@ -165,6 +165,10 @@ import { Globe } from 'lucide-vue-next'
 import ModelSelectorComponent from '@/components/ModelSelectorComponent.vue'
 import EmbeddingModelSelector from '@/components/EmbeddingModelSelector.vue'
 import RerankModelSelector from '@/components/RerankModelSelector.vue'
+
+// Vite 构建时注入；改 .env 后需重启 web 容器（或 dev 下 HMR 自动生效）
+const MINIO_CONSOLE_URL = import.meta.env.VITE_MINIO_CONSOLE_URL || 'http://localhost:9001'
+const MILVUS_WEBUI_URL = import.meta.env.VITE_MILVUS_WEBUI_URL || 'http://localhost:9091/webui/'
 
 const configStore = useConfigStore()
 const userStore = useUserStore()

@@ -45,6 +45,49 @@ YUXI_INSTANCE_ID=$YUXI_INSTANCE_ID
 "@ | Add-Content -Path ".env" -Encoding UTF8
 }
 
+# 把"宿主机端口"和"前端浏览器链接"两个核心可调点写入 .env（缺失时追加）。
+# 改 .env 中这几个值即可调整：容器端口映射、API 预签 URL、前端控制台跳转链接。
+function Ensure-PortEnv {
+    $portVars = @(
+        "REDIS_HOST_PORT",
+        "MINIO_API_HOST_PORT",
+        "MINIO_CONSOLE_HOST_PORT",
+        "MILVUS_GRPC_HOST_PORT",
+        "MILVUS_HEALTH_HOST_PORT"
+    )
+
+    $needWrite = $false
+    foreach ($var in $portVars) {
+        if (-not (Test-EnvValue $var)) {
+            $needWrite = $true
+            break
+        }
+    }
+
+    if (-not $needWrite) {
+        return
+    }
+
+    @"
+
+# === 宿主机端口（部署时按本机环境调整，避免与其他服务冲突） ===
+# 留空 = 用默认值；改这里一处，所有相关组件（容器映射、浏览器链接、API 预签 URL）自动跟随。
+# 与同一台机器上其他项目（smart_ticket 等）冲突时，按需把任一项改为空闲端口。
+REDIS_HOST_PORT=6379
+MINIO_API_HOST_PORT=9000
+MINIO_CONSOLE_HOST_PORT=9001
+MILVUS_GRPC_HOST_PORT=19530
+MILVUS_HEALTH_HOST_PORT=9091
+
+# === 浏览器访问外部地址（前端打开 MinIO / Milvus 控制台用） ===
+# 默认值与上方宿主机端口一致；如改了宿主机端口，这里要同步改。
+VITE_MINIO_CONSOLE_URL=http://localhost:9001
+VITE_MILVUS_WEBUI_URL=http://localhost:9091/webui/
+"@ | Add-Content -Path ".env" -Encoding UTF8
+
+    Write-Host "✅ 已写入宿主机端口默认配置（如需调整请编辑 .env）" -ForegroundColor Green
+}
+
 Write-Host "🚀 Initializing Yuxi project..." -ForegroundColor Cyan
 Write-Host "==================================" -ForegroundColor Cyan
 
@@ -52,6 +95,7 @@ Write-Host "==================================" -ForegroundColor Cyan
 if (Test-Path ".env") {
     Write-Host "✅ .env file already exists. Skipping environment setup." -ForegroundColor Green
     Ensure-JwtEnv
+    Ensure-PortEnv
 } else {
     Write-Host "📝 .env file not found. Let's set up your environment variables." -ForegroundColor Yellow
     Write-Host ""
@@ -117,6 +161,8 @@ YUXI_INSTANCE_ID=$YUXI_INSTANCE_ID
     Remove-Variable -Name "TAVILY_API_KEY" -ErrorAction SilentlyContinue
     Remove-Variable -Name "JWT_SECRET_KEY" -ErrorAction SilentlyContinue
     Remove-Variable -Name "YUXI_INSTANCE_ID" -ErrorAction SilentlyContinue
+
+    Ensure-PortEnv
 }
 
 Write-Host ""

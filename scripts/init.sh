@@ -41,6 +41,46 @@ YUXI_INSTANCE_ID=${YUXI_INSTANCE_ID}
 EOF
 }
 
+# 把"宿主机端口"和"前端浏览器链接"两个核心可调点写入 .env（缺失时追加）。
+# 改 .env 中这几个值即可调整：容器端口映射、API 预签 URL、前端控制台跳转链接。
+ensure_port_env() {
+    local port_vars=(
+        "REDIS_HOST_PORT"
+        "MINIO_API_HOST_PORT"
+        "MINIO_CONSOLE_HOST_PORT"
+        "MILVUS_GRPC_HOST_PORT"
+        "MILVUS_HEALTH_HOST_PORT"
+    )
+    local missing=false
+    for var in "${port_vars[@]}"; do
+        if ! grep -Eq "^${var}=" .env; then
+            missing=true
+            break
+        fi
+    done
+    if [ "$missing" = false ]; then
+        return
+    fi
+
+    cat >> .env << 'EOF'
+
+# === 宿主机端口（部署时按本机环境调整，避免与其他服务冲突） ===
+# 留空 = 用默认值；改这里一处，所有相关组件（容器映射、浏览器链接、API 预签 URL）自动跟随。
+# 与同一台机器上其他项目（smart_ticket 等）冲突时，按需把任一项改为空闲端口。
+REDIS_HOST_PORT=6379
+MINIO_API_HOST_PORT=9000
+MINIO_CONSOLE_HOST_PORT=9001
+MILVUS_GRPC_HOST_PORT=19530
+MILVUS_HEALTH_HOST_PORT=9091
+
+# === 浏览器访问外部地址（前端打开 MinIO / Milvus 控制台用） ===
+# 默认值与上方宿主机端口一致；如改了宿主机端口，这里要同步改。
+VITE_MINIO_CONSOLE_URL=http://localhost:9001
+VITE_MILVUS_WEBUI_URL=http://localhost:9091/webui/
+EOF
+    echo "✅ 已写入宿主机端口默认配置（如需调整请编辑 .env）"
+}
+
 echo "🚀 Initializing Yuxi project..."
 echo "=================================="
 
@@ -48,6 +88,7 @@ echo "=================================="
 if [ -f ".env" ]; then
     echo "✅ .env file already exists. Skipping environment setup."
     ensure_jwt_env
+    ensure_port_env
 else
     echo "📝 .env file not found. Let's set up your environment variables."
     echo ""
@@ -106,6 +147,7 @@ YUXI_INSTANCE_ID=${YUXI_INSTANCE_ID}
 EOF
 
     echo "✅ .env file created successfully!"
+    ensure_port_env
 fi
 
 echo ""

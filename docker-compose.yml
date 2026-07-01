@@ -13,6 +13,8 @@ x-api-worker-env: &api-worker-env
   MILVUS_DB_NAME: ${MILVUS_DB_NAME:-default}
   MILVUS_TOKEN: ${MILVUS_TOKEN:-}
   MINIO_URI: ${MINIO_URI:-http://minio:9000}
+  # 宿主机端口：透传到容器内供 client.py 拼 public_endpoint（与 MINIO_API_HOST_PORT 联动）
+  MINIO_API_HOST_PORT: ${MINIO_API_HOST_PORT:-9000}
   # 文档解析
   MINERU_API_URI: ${MINERU_API_URI:-http://mineru-api:30001}
   PADDLEX_URI: ${PADDLEX_URI:-http://paddlex:8080}
@@ -198,6 +200,9 @@ services:
       - VITE_API_URL=http://api:5050
       - VITE_USE_RUNS_API=${VITE_USE_RUNS_API:-false}
       - VITE_LITE_MODE=${LITE_MODE:-}
+      # 浏览器控制台跳转链接（构建时注入；改 .env 后需重 build web 镜像）
+      - VITE_MINIO_CONSOLE_URL=${VITE_MINIO_CONSOLE_URL:-http://localhost:9001}
+      - VITE_MILVUS_WEBUI_URL=${VITE_MILVUS_WEBUI_URL:-http://localhost:9091/webui/}
     command: pnpm run server
     restart: unless-stopped
 
@@ -265,8 +270,8 @@ services:
       retries: 5
       start_period: 30s
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_API_HOST_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
     networks:
       - app-network
     restart: unless-stopped
@@ -291,8 +296,8 @@ services:
       timeout: 30s
       retries: 5
     ports:
-      - "19530:19530"
-      - "9091:9091"
+      - "${MILVUS_GRPC_HOST_PORT:-19530}:19530"
+      - "${MILVUS_HEALTH_HOST_PORT:-9091}:9091"
     depends_on:
       - "etcd"
       - "minio"
@@ -325,7 +330,7 @@ services:
     image: redis:7-alpine
     container_name: redis
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
     command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
