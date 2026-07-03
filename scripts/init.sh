@@ -45,10 +45,17 @@ ensure_env_var() {
     fi
 }
 
+# Linux 下从 Windows 保存的模板复制出来会带 CRLF；先转 LF，避免 .env 值末尾混入 \r。
+normalize_env_file() {
+    sed -i.bak $'s/\r$//' .env
+    rm -f .env.bak
+}
+
 # 删除 .env 中所有 KEY=  后跟空白/可选注释的行（即模板占位但用户未填的行）
 # 保留所有 KEY=真值 行（包括基础设施默认值和用户实际填的值）
 cleanup_empty_placeholders() {
-    sed -i.bak -E '/^[A-Z_][A-Z0-9_]*=[[:space:]]*(#.*)?$/d' .env
+    # 自动生成项必须留在模板原位置，后续 ensure_env_var 才能原地写入真实值。
+    sed -i.bak -E '/^(JWT_SECRET_KEY|YUXI_INSTANCE_ID)=/!{/^[A-Z_][A-Z0-9_]*=[[:space:]]*(#.*)?$/d;}' .env
     rm -f .env.bak
 }
 
@@ -87,35 +94,6 @@ ask_or_skip() {
     [ -n "$input" ] && ensure_env_var "$var_name" "$input"
 }
 
-# 询问用户输入，传入 fallback 自动生成值：
-#   - 已有非空值 → 跳过
-#   - 非交互式 → 直接用 fallback（自动生成，不询问）
-#   - 交互式：用户输入 → 用用户值；空输入 → 用 fallback
-ask_auto() {
-    local var_name="$1"
-    local prompt="$2"
-    local fallback="$3"
-
-    if grep -Eq "^${var_name}=[^[:space:]#]" .env; then
-        return 0
-    fi
-
-    # 非交互式环境 → 直接用 fallback
-    if [ ! -t 0 ]; then
-        ensure_env_var "$var_name" "$fallback"
-        echo "✅ 已自动生成 $var_name"
-        return 0
-    fi
-
-    local input
-    read -r -p "$prompt（直接回车自动生成）: " input
-    if [ -z "$input" ]; then
-        input="$fallback"
-        echo "✅ 已自动生成 $var_name"
-    fi
-    ensure_env_var "$var_name" "$input"
-}
-
 ###############################################################################
 # 主流程
 ###############################################################################
@@ -135,10 +113,17 @@ else
     echo "✅ .env 已存在，跳过复制"
 fi
 
+# 先统一行尾，再按模板规则清理和写入，避免 Linux vim 看到 ^M。
+normalize_env_file
+
 # 删除模板占位但用户未填的行（如 TAVILY_API_KEY= ），避免污染用户配置
 cleanup_empty_placeholders
 
-# 第 2 步：补齐缺失项
+# 第 2 步：补齐缺失的密钥（脚本可生成项先生成，避免后续交互中断留下空值）
+ensure_env_var JWT_SECRET_KEY "$(generate_hex 32)"
+ensure_env_var YUXI_INSTANCE_ID "instance-$(generate_hex 8)"
+
+# 第 3 步：补齐缺失项
 echo ""
 echo "🔑 SiliconFlow API Key（首次必填，用于调用大模型）"
 echo "Get your API key from: https://cloud.siliconflow.cn/i/Eo5yTHGJ" >&2
@@ -148,10 +133,6 @@ echo ""
 echo "🔍 Tavily API Key（可选，用于搜索服务）"
 echo "Get your API key from: https://app.tavily.com/" >&2
 ask_or_skip TAVILY_API_KEY "请输入 TAVILY_API_KEY" optional
-
-# 第 3 步：补齐缺失的密钥（询问用户，可回车自动生成）
-ask_auto JWT_SECRET_KEY "请输入 JWT_SECRET_KEY" "$(generate_hex 32)"
-ask_auto YUXI_INSTANCE_ID "请输入 YUXI_INSTANCE_ID" "instance-$(generate_hex 8)"
 
 # 第 4 步：拉取 Docker 镜像
 echo ""
