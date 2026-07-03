@@ -66,6 +66,63 @@ class KnowledgeFileRepository:
             result = await session.execute(select(KnowledgeFile).where(KnowledgeFile.kb_id == kb_id))
             return list(result.scalars().all())
 
+    async def list_by_source_key(self, source_key: str, source_system: str | None = None) -> list[KnowledgeFile]:
+        return await self._list_by_processing_params({"source_key": source_key, "source_system": source_system})
+
+    async def list_by_source_url(self, source_url: str, source_system: str | None = None) -> list[KnowledgeFile]:
+        return await self._list_by_processing_params({"source_url": source_url, "source_system": source_system})
+
+    async def list_by_source_doc_id_and_filename(
+        self,
+        source_doc_id: str,
+        filename: str,
+        source_system: str | None = None,
+    ) -> list[KnowledgeFile]:
+        candidates = await self._list_by_processing_params(
+            {"source_doc_id": source_doc_id, "source_system": source_system}
+        )
+        normalized = filename.strip().lower()
+        return [item for item in candidates if (item.filename or "").strip().lower() == normalized]
+
+    async def list_by_filename_and_size(self, filename: str, file_size: int) -> list[KnowledgeFile]:
+        normalized = filename.strip().lower()
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
+                select(KnowledgeFile)
+                .where(
+                    KnowledgeFile.is_folder.is_(False),
+                    func.lower(KnowledgeFile.filename) == normalized,
+                    KnowledgeFile.file_size == int(file_size),
+                )
+                .order_by(KnowledgeFile.created_at.desc())
+            )
+            return list(result.scalars().all())
+
+    async def list_by_filename(self, filename: str) -> list[KnowledgeFile]:
+        normalized = filename.strip().lower()
+        if not normalized:
+            return []
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
+                select(KnowledgeFile)
+                .where(KnowledgeFile.is_folder.is_(False), func.lower(KnowledgeFile.filename) == normalized)
+                .order_by(KnowledgeFile.created_at.desc())
+            )
+            return list(result.scalars().all())
+
+    async def _list_by_processing_params(self, params: dict[str, str | None]) -> list[KnowledgeFile]:
+        filters = [KnowledgeFile.is_folder.is_(False)]
+        for key, value in params.items():
+            if value:
+                filters.append(KnowledgeFile.processing_params[key].as_string() == value)
+        if len(filters) == 1:
+            return []
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
+                select(KnowledgeFile).where(*filters).order_by(KnowledgeFile.created_at.desc())
+            )
+            return list(result.scalars().all())
+
     async def list_by_kb_id_after(
         self,
         kb_id: str,

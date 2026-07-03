@@ -43,6 +43,8 @@ class Config(BaseModel):
         default="siliconflow-cn:Pro/BAAI/bge-reranker-v2-m3",
         description="默认 Re-Ranker 模型",
     )
+    incoming_default_kb_id: str | None = Field(default=None, description="生产系统来文默认知识库 ID")
+    business_extraction_model: str | None = Field(default=None, description="业务结构化抽取默认模型")
     content_guard_llm_model: str = Field(
         default="siliconflow-cn:Pro/MiniMaxAI/MiniMax-M2.5",
         description="内容审查LLM模型",
@@ -108,6 +110,10 @@ class Config(BaseModel):
         self.sandbox_keepalive_interval_seconds = int(
             os.getenv("SANDBOX_KEEPALIVE_INTERVAL_SECONDS") or self.sandbox_keepalive_interval_seconds or 30
         )
+        self.incoming_default_kb_id = (os.getenv("INCOMING_DEFAULT_KB_ID") or self.incoming_default_kb_id or "").strip()
+        self.business_extraction_model = (
+            os.getenv("BUSINESS_EXTRACTION_MODEL") or self.business_extraction_model or self.default_model
+        ).strip()
 
         if self.sandbox_provider.lower() != "provisioner":
             raise ValueError("Only sandbox_provider=provisioner is supported.")

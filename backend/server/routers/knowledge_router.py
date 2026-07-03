@@ -27,6 +27,7 @@ from yuxi.knowledge.utils.sample_question_utils import (
 )
 from yuxi.knowledge.utils.url_fetcher import fetch_url_content
 from yuxi.models.providers.cache import model_cache
+from yuxi.services.business_extraction_task_service import submit_business_extraction_task
 from yuxi.services.task_service import TaskContext, tasker
 from yuxi.services.workspace_service import MAX_WORKSPACE_UPLOAD_SIZE_BYTES, resolve_workspace_file_path
 from yuxi.storage.minio.client import MinIOClient, StorageError, aupload_file_to_minio, get_minio_client
@@ -734,6 +735,11 @@ async def add_documents(
                 file_id = record["file_id"]
                 try:
                     file_meta = await knowledge_base.parse_file(kb_id, file_id, operator_id=current_user.uid)
+                    await _submit_business_extraction_after_parse(
+                        kb_id=kb_id,
+                        file_meta=file_meta,
+                        operator_id=current_user.uid,
+                    )
                     record["file_meta"] = file_meta
                     if not auto_index or file_meta.get("status") != "parsed":
                         processed_items[record["index"]] = file_meta
@@ -934,6 +940,19 @@ def _is_failed_item(item: dict) -> bool:
     return item.get("status") == "failed" or bool(item.get("error"))
 
 
+async def _submit_business_extraction_after_parse(*, kb_id: str, file_meta: dict, operator_id: str) -> None:
+    markdown_file = file_meta.get("markdown_file")
+    file_id = file_meta.get("file_id")
+    if file_meta.get("status") != "parsed" or not file_id or not markdown_file:
+        return
+    await submit_business_extraction_task(
+        kb_id=kb_id,
+        file_id=file_id,
+        markdown_file=markdown_file,
+        operator_id=operator_id,
+    )
+
+
 async def _run_parse_file_ids(
     *,
     context: TaskContext,
@@ -954,6 +973,7 @@ async def _run_parse_file_ids(
 
         try:
             result = await knowledge_base.parse_file(kb_id, file_id, operator_id=operator_id)
+            await _submit_business_extraction_after_parse(kb_id=kb_id, file_meta=result, operator_id=operator_id)
             processed_items.append(result)
         except Exception as e:
             logger.error(f"Parse failed for {file_id}: {e}")
@@ -1052,6 +1072,7 @@ async def _run_parse_pending_statuses(
 
             try:
                 result = await knowledge_base.parse_file(kb_id, file_id, operator_id=operator_id)
+                await _submit_business_extraction_after_parse(kb_id=kb_id, file_meta=result, operator_id=operator_id)
                 _append_document_action_result_sample(result_items, result)
             except Exception as e:
                 failed_count += 1

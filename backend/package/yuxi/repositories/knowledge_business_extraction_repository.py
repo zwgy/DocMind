@@ -86,6 +86,98 @@ class KnowledgeBusinessExtractionRepository:
                 "items": [self._item_to_dict(item) for item in items_row.scalars().all()],
             }
 
+    async def get_success_by_file_markdown_model(
+        self,
+        *,
+        file_id: str,
+        markdown_file: str,
+        model_spec: str,
+    ) -> dict[str, Any] | None:
+        return await self.get_latest_success_view_by_file_id(
+            file_id=file_id,
+            markdown_file=markdown_file,
+            model_spec=model_spec,
+        )
+
+    async def get_latest_success_view_by_file_id(
+        self,
+        file_id: str,
+        markdown_file: str | None = None,
+        model_spec: str | None = None,
+    ) -> dict[str, Any] | None:
+        async with pg_manager.get_async_session_context() as session:
+            query = (
+                select(KnowledgeBusinessExtractionResult, KnowledgeBusinessExtractionRun)
+                .join(
+                    KnowledgeBusinessExtractionRun,
+                    KnowledgeBusinessExtractionRun.run_id == KnowledgeBusinessExtractionResult.run_id,
+                )
+                .where(
+                    KnowledgeBusinessExtractionResult.file_id == file_id,
+                    KnowledgeBusinessExtractionRun.status == "success",
+                )
+            )
+            if markdown_file:
+                markdown_path = KnowledgeBusinessExtractionRun.run_metadata["markdown_file"].as_string()
+                query = query.where(markdown_path == markdown_file)
+            if model_spec:
+                query = query.where(KnowledgeBusinessExtractionRun.model_spec == model_spec)
+            row = await session.execute(query.order_by(KnowledgeBusinessExtractionResult.created_at.desc()).limit(1))
+            pair = row.one_or_none()
+            if pair is None:
+                return None
+            result, run = pair
+            return await self._build_view(session, result, run)
+
+    async def get_latest_run_by_file_id(
+        self,
+        file_id: str,
+        markdown_file: str | None = None,
+    ) -> dict[str, Any] | None:
+        async with pg_manager.get_async_session_context() as session:
+            query = select(KnowledgeBusinessExtractionRun).where(KnowledgeBusinessExtractionRun.file_id == file_id)
+            if markdown_file:
+                markdown_path = KnowledgeBusinessExtractionRun.run_metadata["markdown_file"].as_string()
+                query = query.where(markdown_path == markdown_file)
+            row = await session.execute(query.order_by(KnowledgeBusinessExtractionRun.created_at.desc()).limit(1))
+            run = row.scalar_one_or_none()
+            if run is None:
+                return None
+            return {
+                "run_id": run.run_id,
+                "kb_id": run.kb_id,
+                "file_id": run.file_id,
+                "status": run.status,
+                "model_spec": run.model_spec,
+                "run_metadata": run.run_metadata or {},
+                "error": run.error,
+            }
+
+    async def _build_view(
+        self,
+        session,
+        result: KnowledgeBusinessExtractionResult,
+        run: KnowledgeBusinessExtractionRun,
+    ) -> dict[str, Any]:
+        items_row = await session.execute(
+            select(KnowledgeBusinessExtractionItem)
+            .where(KnowledgeBusinessExtractionItem.result_id == result.id)
+            .order_by(KnowledgeBusinessExtractionItem.id.asc())
+        )
+        return {
+            "run_id": result.run_id,
+            "kb_id": result.kb_id,
+            "file_id": result.file_id,
+            "categories": result.categories or {},
+            "confirmed_categories": result.confirmed_categories,
+            "schema_ids": result.schema_ids or [],
+            "status": result.status,
+            "run_status": run.status,
+            "run_metadata": run.run_metadata or {},
+            "error": run.error,
+            "items": [self._item_to_dict(item) for item in items_row.scalars().all()],
+        }
+
     async def confirm_item(
         self,
         *,

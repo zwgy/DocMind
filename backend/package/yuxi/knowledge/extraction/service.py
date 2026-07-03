@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,15 +15,21 @@ from yuxi.knowledge.extraction.schemas import (
     extraction_schema_ids_for_categories,
     get_extraction_schema,
 )
+from yuxi.knowledge.chunking.ragflow_like.dispatcher import chunk_markdown
+from yuxi.knowledge.utils import is_minio_url, parse_minio_url
 from yuxi.repositories.knowledge_business_extraction_repository import KnowledgeBusinessExtractionRepository
 from yuxi.repositories.knowledge_chunk_repository import KnowledgeChunkRepository
+from yuxi.storage.minio import get_minio_client
 from yuxi.utils import hashstr, logger
 from yuxi.utils.datetime_utils import utc_isoformat
+
+MarkdownReader = Callable[[str], str | Awaitable[str]]
+SHORT_MARKDOWN_EXTRACTION_LIMIT = 12_000
 
 
 @dataclass(slots=True)
 class ChunkInput:
-    chunk_id: str
+    chunk_id: str | None
     content: str
     chunk_index: int = 0
 
@@ -30,7 +38,7 @@ class ChunkInput:
 class ExtractedBusinessItem:
     kb_id: str
     file_id: str
-    chunk_id: str
+    chunk_id: str | None
     item_type: str
     data: dict[str, Any]
     source_quote: str
@@ -70,12 +78,12 @@ class BusinessExtractionService:
         llm = self._resolve_llm(model_spec)
         normalized_chunks = [
             ChunkInput(
-                chunk_id=str(chunk["chunk_id"]),
+                chunk_id=str(chunk["chunk_id"]) if chunk.get("chunk_id") is not None else None,
                 content=str(chunk.get("content") or ""),
                 chunk_index=int(chunk.get("chunk_index") or 0),
             )
             for chunk in chunks
-            if chunk.get("chunk_id") and chunk.get("content")
+            if chunk.get("content")
         ]
 
         category_result = await self._classify_chunks(llm, normalized_chunks)
@@ -175,6 +183,125 @@ class BusinessExtractionService:
         except Exception as exc:
             await self.extraction_repo.update_run(run_id, {"status": "failed", "error": str(exc)})
             raise
+
+    async def run_markdown_extraction(
+        self,
+        *,
+        kb_id: str,
+        file_id: str,
+        markdown_file: str,
+        model_spec: str,
+        filename: str = "",
+        processing_params: dict[str, Any] | None = None,
+        operator_id: str | None = None,
+        markdown_reader: MarkdownReader | None = None,
+    ) -> dict[str, Any]:
+        reusable = await self.extraction_repo.get_success_by_file_markdown_model(
+            file_id=file_id,
+            markdown_file=markdown_file,
+            model_spec=model_spec,
+        )
+        if reusable:
+            return {**reusable, "reused": True}
+
+        markdown = await self._read_markdown(markdown_file, markdown_reader)
+        segments = self._markdown_segments(
+            markdown=markdown,
+            file_id=file_id,
+            filename=filename or file_id,
+            processing_params=processing_params or {},
+        )
+        run_id = f"ber_{hashstr(f'{file_id}:{markdown_file}:{utc_isoformat()}', 16)}"
+        run_metadata = {
+            "markdown_file": markdown_file,
+            "model_spec": model_spec,
+            "segment_count": len(segments),
+        }
+        await self.extraction_repo.create_run(
+            {
+                "run_id": run_id,
+                "kb_id": kb_id,
+                "file_id": file_id,
+                "status": "running",
+                "model_spec": model_spec,
+                "created_by": operator_id,
+                "run_metadata": run_metadata,
+            }
+        )
+        try:
+            draft = await self.extract_chunks(kb_id=kb_id, file_id=file_id, model_spec=model_spec, chunks=segments)
+            await self.extraction_repo.replace_result(
+                run_id=run_id,
+                result_data={
+                    "kb_id": kb_id,
+                    "file_id": file_id,
+                    "categories": draft.categories.model_dump(),
+                    "schema_ids": draft.schema_ids,
+                    "status": "draft",
+                    "created_by": operator_id,
+                },
+                items=[
+                    {
+                        "item_id": f"bei_{hashstr(f'{run_id}:{idx}:{item.item_type}', 16)}",
+                        "kb_id": item.kb_id,
+                        "file_id": item.file_id,
+                        # Markdown 阶段的片段不写入 KnowledgeChunk，避免提前耦合向量入库。
+                        "chunk_id": None,
+                        "item_type": item.item_type,
+                        "data": item.data,
+                        "source_quote": item.source_quote,
+                        "status": item.status,
+                    }
+                    for idx, item in enumerate(draft.items)
+                ],
+            )
+            await self.extraction_repo.update_run(
+                run_id,
+                {"status": "success", "run_metadata": run_metadata | {"errors": draft.errors}},
+            )
+            return {
+                "run_id": run_id,
+                "categories": draft.categories.model_dump(),
+                "item_count": len(draft.items),
+                "errors": draft.errors,
+                "reused": False,
+            }
+        except Exception as exc:
+            await self.extraction_repo.update_run(
+                run_id,
+                {"status": "failed", "error": str(exc), "run_metadata": run_metadata | {"errors": [str(exc)]}},
+            )
+            raise
+
+    async def _read_markdown(self, markdown_file: str, markdown_reader: MarkdownReader | None) -> str:
+        if markdown_reader is not None:
+            content = markdown_reader(markdown_file)
+            if inspect.isawaitable(content):
+                content = await content
+            return str(content)
+        if not is_minio_url(markdown_file):
+            raise ValueError(f"Invalid MinIO markdown path: {markdown_file}")
+        bucket_name, object_name = parse_minio_url(markdown_file)
+        return (await get_minio_client().adownload_file(bucket_name, object_name)).decode("utf-8")
+
+    @staticmethod
+    def _markdown_segments(
+        *,
+        markdown: str,
+        file_id: str,
+        filename: str,
+        processing_params: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        text = markdown.strip()
+        if not text:
+            return []
+        if len(text) <= SHORT_MARKDOWN_EXTRACTION_LIMIT:
+            return [{"chunk_id": None, "content": text, "chunk_index": 0}]
+        chunks = chunk_markdown(text, file_id, filename, processing_params)
+        return [
+            {"chunk_id": None, "content": chunk["content"], "chunk_index": chunk["chunk_index"]}
+            for chunk in chunks
+        ]
 
     async def _classify_chunks(self, llm: JsonLLM, chunks: list[ChunkInput]) -> DocumentCategoryResult:
         merged = DocumentCategoryResult()
