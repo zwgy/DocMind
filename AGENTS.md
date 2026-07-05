@@ -71,6 +71,26 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
+## 架构与设计原则
+
+- 坚持模块化编程：每个模块只承担清晰职责，通过稳定接口协作。
+- 遵守开闭原则：优先通过新增实现、策略、适配器或注册机制扩展能力，避免频繁修改已稳定的核心流程。
+- 保持函数和类的单一职责。一个函数如果同时处理编排、IO、格式转换和业务判断，应优先拆分。
+- 不为尚未出现的场景提前构建复杂框架。
+- 不要过度设计，编写代码前先想想有没有现成库、模块、开源项目等，没有的话再自己动手写，保持代码易懂、易读、整洁。
+
+## 代码约定
+
+- 文档、代码和注释优先使用 UTF-8；中文文档保持中文表达，不要引入乱码内容。
+- 代码逻辑必须添加中文注释。注释优先解释 WHY，例如为什么要做边界隔离、为什么要降级、为什么要人工确认、为什么要限制工具调用；不要只复述代码在做什么。
+
+## 文档同步
+
+- 代码更新必须同步检查文档是否需要更新，尤其是 `README.md`、`docs/` 和本文件。
+- 改变安装、启动、测试、部署、依赖、配置、环境变量、目录结构、接口行为、架构边界、数据模型、任务流程、Skill 约束或安全策略时，必须同步更新对应文档。
+- `README.md` 面向人类开发者，记录项目介绍、快速开始、常用命令和导航。
+- `AGENTS.md` 面向编程智能体，记录稳定、可执行、会影响 Agent 行为的项目规则。
+
 ## 开发与调试工作流 (Development & Debugging Workflow)
 
 本项目完全通过 Docker Compose 进行管理。所有开发和调试都应在运行的容器环境中进行。使用 `docker compose up -d` 命令进行构建和启动。
@@ -124,6 +144,6 @@ make format        # 格式化代码
 2. 使用中文提交信息，标题简洁明了，描述具体改动内容和原因。
 3. 创建 PR 必须参考 [contributing.md](docs/develop-guides/contributing.md) 以及 PR 模板[PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)，并在提交前完成其中的检查项。
 
-**注意**
+**特别注意**
 
 - 项目使用模型是本地部署模型，如Qwen3.6-27、Qwen3.6-35B-A3B等模型，在涉及框架设计、性能、问答效果等问题时应充分考虑这个限制。
