@@ -1,4 +1,12 @@
-import type { ChatMessage, ChatThread, ExtractionResult, IncomingPageFile, PageContent } from '../types'
+import { normalizeChatMessage } from '../utils/chat-message.ts'
+import type {
+  ChatMessage,
+  ChatThread,
+  ExtractionResult,
+  IncomingPageFile,
+  PageContent,
+  RunStreamChunk
+} from '../types'
 
 const DEFAULT_AGENT_ID = 'default-chatbot'
 
@@ -12,6 +20,8 @@ type CreateConversationOptions = RequestOptions & {
 }
 
 type RunEventHandlers = {
+  onRunStart?: (runId: string, requestId: string) => void
+  onChunk?: (chunk: RunStreamChunk) => void
   onText?: (text: string) => void
   onTool?: (text: string) => void
   onError?: (message: string) => void
@@ -33,6 +43,8 @@ type SendMessagePayload = ChatContextInput &
     agentId?: string
     modelSpec?: string
     attachmentNames?: string[]
+    attachments?: Record<string, unknown>[]
+    imageContent?: string | null
     signal?: AbortSignal
   }
 
@@ -96,18 +108,6 @@ export function buildChatQuery(input: ChatContextInput) {
   return parts.join('\n\n')
 }
 
-function normalizeHistoryItem(item: Record<string, unknown>): ChatMessage {
-  const type = String(item.type || item.role || 'assistant')
-  const role = type === 'human' ? 'user' : type === 'ai' ? 'assistant' : type
-  return {
-    id: String(item.id || crypto.randomUUID()),
-    role: role === 'user' || role === 'assistant' || role === 'tool' || role === 'system' ? role : 'assistant',
-    content: String(item.content || ''),
-    status: item.error_message ? 'error' : 'done',
-    createdAt: typeof item.created_at === 'string' ? item.created_at : undefined
-  }
-}
-
 function extractTextDelta(payload: Record<string, unknown>) {
   const chunk = payload.chunk as Record<string, unknown> | undefined
   const streamEvent =
@@ -122,6 +122,49 @@ function extractTextDelta(payload: Record<string, unknown>) {
   ]
   const value = candidates.find((item) => typeof item === 'string' && item)
   return typeof value === 'string' ? value : ''
+}
+
+function emitChunk(handlers: RunEventHandlers, chunk: RunStreamChunk) {
+  handlers.onChunk?.(chunk)
+  if (chunk.type === 'text' && chunk.content) handlers.onText?.(chunk.content)
+  if (chunk.type === 'tool_call' && chunk.name) handlers.onTool?.(`工具调用：${chunk.name}`)
+  if (chunk.type === 'error') handlers.onError?.(chunk.message)
+  if (chunk.type === 'done') handlers.onDone?.()
+}
+
+function streamEventChunk(streamEvent: Record<string, unknown>): RunStreamChunk | null {
+  const eventType = String(streamEvent.type || '')
+  const messageId = typeof streamEvent.message_id === 'string' ? streamEvent.message_id : undefined
+  if (eventType === 'message_delta') {
+    return {
+      type: 'text',
+      messageId,
+      content: String(streamEvent.content || streamEvent.delta || ''),
+      reasoningContent: String(streamEvent.reasoning_content || streamEvent.additional_reasoning_content || '')
+    }
+  }
+  if (eventType === 'tool_call' || eventType === 'tool_call_delta') {
+    return {
+      type: 'tool_call',
+      messageId,
+      toolCallId: typeof streamEvent.tool_call_id === 'string' ? streamEvent.tool_call_id : undefined,
+      name: typeof streamEvent.name === 'string' ? streamEvent.name : undefined,
+      args: streamEvent.args || streamEvent.args_delta
+    }
+  }
+  return null
+}
+
+function toolResultChunk(payload: Record<string, unknown>): RunStreamChunk | null {
+  const event = payload.event as Record<string, unknown> | undefined
+  const data = event?.data as Record<string, unknown> | undefined
+  if (event?.method !== 'tools' || data?.event !== 'tool-finished') return null
+  const output = data.output as Record<string, unknown> | undefined
+  return {
+    type: 'tool_result',
+    toolCallId: String(output?.id || output?.tool_call_id || data.tool_call_id || ''),
+    content: output?.content ?? output
+  }
 }
 
 function extractToolEvent(payload: Record<string, unknown>) {
@@ -142,12 +185,32 @@ function handleRunPayload(payload: Record<string, unknown>, handlers: RunEventHa
   const chunk = body.chunk && typeof body.chunk === 'object' ? (body.chunk as Record<string, unknown>) : null
   const current = chunk || body
   const status = String(current.status || body.status || '')
-  const text = extractTextDelta(current)
-  if (text) handlers.onText?.(text)
-  const tool = extractToolEvent(current)
-  if (tool) handlers.onTool?.(tool)
-  if (status === 'error') handlers.onError?.(String(current.error_message || current.message || '对话失败'))
-  if (status === 'finished' || status === 'completed') handlers.onDone?.()
+  const streamEvent =
+    (current.stream_event as Record<string, unknown> | undefined) ||
+    ((current.chunk as Record<string, unknown> | undefined)?.stream_event as Record<string, unknown> | undefined)
+  const semanticChunk = streamEvent ? streamEventChunk(streamEvent) : null
+  const toolResult = toolResultChunk(current)
+  if (semanticChunk) {
+    emitChunk(handlers, semanticChunk)
+  } else if (toolResult) {
+    emitChunk(handlers, toolResult)
+  } else {
+    const text = extractTextDelta(current)
+    if (text) emitChunk(handlers, { type: 'text', content: text })
+    const tool = extractToolEvent(current)
+    if (tool) handlers.onTool?.(tool)
+  }
+  if (status === 'error') {
+    emitChunk(handlers, {
+      type: 'error',
+      message: String(current.error_message || current.message || '对话失败'),
+      errorType: typeof current.error_type === 'string' ? current.error_type : undefined
+    })
+  }
+  if (status === 'interrupted') {
+    emitChunk(handlers, { type: 'error', message: String(current.message || '回答生成已中断'), errorType: 'interrupted' })
+  }
+  if (status === 'finished' || status === 'completed' || status === 'cancelled') emitChunk(handlers, { type: 'done' })
 }
 
 function handleSseBlock(block: string, handlers: RunEventHandlers) {
@@ -222,7 +285,7 @@ export async function listMessages(threadId: string, token?: string): Promise<Ch
     headers: authHeaders(token, false)
   })
   const data = await parseResponse<{ history?: Record<string, unknown>[] }>(response, '获取聊天记录失败')
-  return (data.history || []).map(normalizeHistoryItem)
+  return (data.history || []).map(normalizeChatMessage)
 }
 
 export async function sendMessageStream(payload: SendMessagePayload, handlers: RunEventHandlers = {}) {
@@ -237,10 +300,12 @@ export async function sendMessageStream(payload: SendMessagePayload, handlers: R
       agent_id: payload.agentId || DEFAULT_AGENT_ID,
       thread_id: payload.threadId,
       model_spec: payload.modelSpec || null,
+      image_content: payload.imageContent || null,
       meta: {
         request_id: requestId,
         source: 'chat-iframe',
         attachment_names: payload.attachmentNames || [],
+        attachments: payload.attachments || [],
         page_content: payload.includePage ? payload.pageContent || null : null,
         selected_file: payload.includeFile ? payload.selectedFile || null : null,
         extraction_result: payload.includeFile ? payload.extractionResult || null : null
@@ -250,12 +315,75 @@ export async function sendMessageStream(payload: SendMessagePayload, handlers: R
   const run = await parseResponse<{ id?: string; run_id?: string; stream_url?: string }>(response, '发送消息失败')
   const runId = run.id || run.run_id
   if (!runId) throw new Error('发送消息失败：缺少运行任务 ID')
+  handlers.onRunStart?.(runId, requestId)
   const streamResponse = await fetch(`/api/agent/runs/${encodeURIComponent(runId)}/events?verbose=false`, {
     headers: authHeaders(payload.token, false),
     signal: payload.signal
   })
   await readRunEventStream(streamResponse, handlers)
   return { runId, requestId }
+}
+
+export async function cancelRun(runId: string, token?: string) {
+  const response = await fetch(`/api/agent/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({})
+  })
+  return parseResponse<Record<string, unknown>>(response, '停止回答失败')
+}
+
+export async function updateConversation(
+  threadId: string,
+  payload: { title?: string; isPinned?: boolean },
+  token?: string
+) {
+  const response = await fetch(`/api/chat/thread/${encodeURIComponent(threadId)}`, {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: JSON.stringify({ title: payload.title, is_pinned: payload.isPinned })
+  })
+  return parseResponse<ChatThread>(response, '更新对话失败')
+}
+
+export async function deleteConversation(threadId: string, token?: string) {
+  const response = await fetch(`/api/chat/thread/${encodeURIComponent(threadId)}`, {
+    method: 'DELETE',
+    headers: authHeaders(token, false)
+  })
+  return parseResponse<Record<string, unknown>>(response, '删除对话失败')
+}
+
+export async function submitMessageFeedback(
+  messageId: string,
+  rating: 'like' | 'dislike',
+  reason: string | null,
+  token?: string
+) {
+  const response = await fetch(`/api/chat/message/${encodeURIComponent(messageId)}/feedback`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ rating, reason })
+  })
+  return parseResponse<Record<string, unknown>>(response, '提交反馈失败')
+}
+
+export async function uploadImage(file: File, token?: string) {
+  const body = new FormData()
+  body.append('file', file)
+  const response = await fetch('/api/chat/image/upload', {
+    method: 'POST',
+    headers: authHeaders(token, false),
+    body
+  })
+  return parseResponse<{ image_content?: string } & Record<string, unknown>>(response, '上传图片失败')
+}
+
+export async function getThreadAttachments(threadId: string, token?: string) {
+  const response = await fetch(`/api/chat/thread/${encodeURIComponent(threadId)}/attachments`, {
+    headers: authHeaders(token, false)
+  })
+  return parseResponse<Record<string, unknown>>(response, '获取附件失败')
 }
 
 export async function uploadAttachment(file: File, token?: string) {

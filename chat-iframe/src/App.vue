@@ -53,11 +53,12 @@ async function createChat() {
   notifyConversationCreated({ conversationId: thread.id })
 }
 
-async function sendChat(payload: { text: string; files: File[] }) {
+async function sendChat(payload: { text: string; files: File[]; imageFile?: File | null }) {
   const result = await chat.send(
     {
       text: payload.text,
       files: payload.files,
+      imageFile: payload.imageFile,
       pageContent: context.pageContent,
       selectedFile: selectedFile.value,
       extractionResult: selectedResult.value
@@ -116,6 +117,9 @@ onMounted(() => {
           :loading="chat.isLoading"
           @new="createChat"
           @select="(threadId) => chat.selectThread(threadId, context.config.token)"
+          @rename="(event) => event.title && chat.renameConversation(event.threadId, event.title, context.config.token)"
+          @delete="(threadId) => chat.removeConversation(threadId, context.config.token)"
+          @pin="(threadId) => chat.togglePinConversation(threadId, context.config.token)"
         />
         <PageFileSelector
           :files="context.files"
@@ -132,9 +136,15 @@ onMounted(() => {
           :error="error"
           @refresh="refreshExtraction"
         />
-        <ChatMessages :messages="chat.messages" :loading="chat.isLoading" />
+        <ChatMessages
+          :messages="chat.messages"
+          :loading="chat.isLoading"
+          @retry="chat.retry(context.config.token, context.config.agentId)"
+          @feedback="(event) => chat.feedback(event, context.config.token)"
+        />
         <ChatInput
           :disabled="chat.isSending"
+          :streaming="chat.isStreaming"
           :ask-page="chat.askPage"
           :ask-file="chat.askFile"
           :models="chat.modelOptions"
@@ -143,6 +153,7 @@ onMounted(() => {
           @update:ask-file="chat.askFile = $event"
           @update:selected-model-spec="chat.selectedModelSpec = $event"
           @submit="sendChat"
+          @stop="chat.stop(context.config.token)"
         />
       </section>
     </section>

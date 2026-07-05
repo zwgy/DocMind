@@ -17,7 +17,7 @@
    - 调用 docMind 后端 `/api/incoming-documents/extractions/query`、`/api/chat/*`、`/api/agent/runs/*`。
    - 展示来文匹配状态、结构化抽取结果，并提供第一版聊天体验。
 
-第一版已接入聊天会话、流式回答、模型选择、输入框附件、问网页和问文件开关。复杂能力如中断恢复、子智能体详情、artifact 面板和聊天记录富渲染仍复用主站后续能力，不在 iframe 第一版里重复实现。
+第一版已接入聊天会话、流式回答、模型选择、输入框附件、问网页和问文件开关。当前已补齐 web 聊天核心体验中的 Markdown/代码/公式渲染、推理过程、工具调用摘要、停止生成、重试、复制、反馈、图片上传、附件预览以及会话重命名/删除/置顶。复杂能力如状态面板、文件工作区、人审、子智能体详情和完整 @ 提及仍保留在主站，不在 iframe 轻量嵌入版中全量复刻。
 
 ## 2. 技术栈
 
@@ -28,6 +28,7 @@
 | 构建 | Vite |
 | 状态管理 | Pinia |
 | 图标 | lucide-vue-next，父页面悬浮入口使用内联 SVG |
+| Markdown | markdown-it、highlight.js core、KaTeX |
 | 测试 | Node 内置 `node:test` |
 | 部署 | Docker + Nginx，支持 `/api` 反向代理 |
 | 包管理 | pnpm，通过 Corepack 固定版本 |
@@ -120,14 +121,24 @@ chat-iframe/
       ChatMessages.vue
       ChatSidebar.vue
       IncomingDocumentPanel.vue
+      MarkdownPreview.vue
+      MessageRefs.vue
       PageFileSelector.vue
+      ToolCallsPanel.vue
     composables/
       useIframeBridge.ts
     stores/
       chat.ts
       iframe-context.ts
+    utils/
+      chat-message.ts
+      markdown.ts
     assets/css/
   test/
+    chat-api.test.js
+    chat-message.test.js
+    incoming-documents-api.test.js
+    markdown-renderer.test.js
     parent-script.test.js
 ```
 
@@ -476,7 +487,10 @@ corepack pnpm test
 
 - 创建默认智能体会话时携带 Bearer Token
 - “问网页/问文件”开启时把上下文拼入 query
-- 解析 `/api/agent/runs/{runId}/events` 的 SSE 文本增量
+- 解析 `/api/agent/runs/{runId}/events` 的 SSE 文本增量、推理内容、工具调用和工具结果
+- 发送消息时携带模型、附件元数据和图片内容
+- 停止生成、会话重命名/删除/置顶、消息反馈使用主站兼容接口
+- Markdown 表格、代码块、公式和危险 HTML 处理有纯函数测试覆盖
 
 ## 15. 与参考项目的主要差异
 

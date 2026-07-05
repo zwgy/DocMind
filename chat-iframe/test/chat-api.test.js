@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildChatQuery, createConversation, listConversations, readRunEventStream } from '../src/apis/chat.ts'
+import {
+  buildChatQuery,
+  cancelRun,
+  createConversation,
+  deleteConversation,
+  listConversations,
+  readRunEventStream,
+  sendMessageStream,
+  submitMessageFeedback,
+  updateConversation,
+  uploadImage
+} from '../src/apis/chat.ts'
 import { listChatModels } from '../src/apis/models.ts'
 
 test('createConversation posts the default agent thread with bearer token', async () => {
@@ -125,6 +136,104 @@ test('readRunEventStream emits text from backend compact payload items', async (
   })
 
   assert.deepEqual(deltas, ['阶段八'])
+})
+
+test('readRunEventStream emits structured reasoning and tool call chunks', async () => {
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          [
+            'event: messages',
+            'data: {"payload":{"items":[{"status":"loading","stream_event":{"type":"message_delta","message_id":"m1","content":"回答","reasoning_content":"推理"}},{"status":"loading","stream_event":{"type":"tool_call","message_id":"m1","tool_call_id":"tool-1","name":"search_docs","args":{"q":"来文"}}},{"status":"stream_event","event":{"method":"tools","data":{"event":"tool-finished","tool_call_id":"tool-1","output":{"content":"命中"}}}}]}}',
+            '',
+            'event: end',
+            'data: {"payload":{"status":"completed"}}',
+            '',
+            ''
+          ].join('\n')
+        )
+      )
+      controller.close()
+    }
+  })
+  const chunks = []
+
+  await readRunEventStream(new Response(stream), {
+    onChunk: (chunk) => chunks.push(chunk)
+  })
+
+  assert.deepEqual(chunks, [
+    { type: 'text', messageId: 'm1', content: '回答', reasoningContent: '推理' },
+    { type: 'tool_call', messageId: 'm1', toolCallId: 'tool-1', name: 'search_docs', args: { q: '来文' } },
+    { type: 'tool_result', toolCallId: 'tool-1', content: '命中' },
+    { type: 'done' }
+  ])
+})
+
+test('sendMessageStream posts image content and attachment metadata', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, options })
+    if (url === '/api/agent/runs') return Response.json({ run_id: 'run-1' })
+    return new Response('event: end\ndata: {"payload":{"status":"completed"}}\n\n')
+  }
+
+  await sendMessageStream({
+    text: '识别图片',
+    threadId: 'thread-1',
+    token: 'token-1',
+    includePage: false,
+    includeFile: false,
+    imageContent: 'base64-image',
+    attachments: [{ file_id: 'file-1', file_name: 'demo.pdf' }]
+  })
+
+  const body = JSON.parse(calls[0].options.body)
+  assert.equal(body.image_content, 'base64-image')
+  assert.deepEqual(body.meta.attachments, [{ file_id: 'file-1', file_name: 'demo.pdf' }])
+})
+
+test('chat management APIs use web-compatible endpoints', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, options })
+    return Response.json({ ok: true })
+  }
+
+  await updateConversation('thread-1', { title: '新标题', isPinned: true }, 'token-1')
+  await deleteConversation('thread-1', 'token-1')
+  await cancelRun('run-1', 'token-1')
+  await submitMessageFeedback('message-1', 'like', null, 'token-1')
+
+  assert.deepEqual(
+    calls.map((call) => [call.url, call.options.method, call.options.headers.Authorization]),
+    [
+      ['/api/chat/thread/thread-1', 'PUT', 'Bearer token-1'],
+      ['/api/chat/thread/thread-1', 'DELETE', 'Bearer token-1'],
+      ['/api/agent/runs/run-1/cancel', 'POST', 'Bearer token-1'],
+      ['/api/chat/message/message-1/feedback', 'POST', 'Bearer token-1']
+    ]
+  )
+  assert.deepEqual(JSON.parse(calls[0].options.body), { title: '新标题', is_pinned: true })
+})
+
+test('uploadImage posts image multipart payload', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, options })
+    return Response.json({ success: true, image_content: 'base64' })
+  }
+
+  const file = new File(['x'], 'demo.png', { type: 'image/png' })
+  const result = await uploadImage(file, 'token-1')
+
+  assert.equal(result.image_content, 'base64')
+  assert.equal(calls[0].url, '/api/chat/image/upload')
+  assert.equal(calls[0].options.method, 'POST')
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer token-1')
+  assert.ok(calls[0].options.body instanceof FormData)
 })
 
 test('listChatModels adapts backend grouped model response', async () => {

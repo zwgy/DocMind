@@ -79,13 +79,39 @@ export type ChatThread = {
 
 export type ChatMessageRole = 'user' | 'assistant' | 'system' | 'tool'
 
+export type ChatToolCall = {
+  id: string
+  name: string
+  args?: unknown
+  result?: unknown
+  status?: 'running' | 'done' | 'error'
+}
+
+export type ChatAttachmentPreview = {
+  file_id?: string
+  file_name?: string
+  name?: string
+  file_size?: number
+  file_type?: string
+  [key: string]: unknown
+}
+
 export type ChatMessage = {
   id: string
   role: ChatMessageRole
+  type?: string
   content: string
-  status?: 'sending' | 'streaming' | 'done' | 'error'
+  status?: 'sending' | 'streaming' | 'done' | 'error' | 'stopped'
   toolEvents?: string[]
+  toolCalls?: ChatToolCall[]
+  reasoningContent?: string
+  imageContent?: string
+  attachments?: ChatAttachmentPreview[]
+  errorType?: string
+  errorMessage?: string
+  modelName?: string
   createdAt?: string
+  raw?: Record<string, unknown>
 }
 
 export type ModelOption = {
@@ -94,3 +120,10 @@ export type ModelOption = {
   provider?: string
   model_id?: string
 }
+
+export type RunStreamChunk =
+  | { type: 'text'; messageId?: string; content: string; reasoningContent?: string }
+  | { type: 'tool_call'; messageId?: string; toolCallId?: string; name?: string; args?: unknown }
+  | { type: 'tool_result'; toolCallId?: string; content?: unknown; status?: 'done' | 'error' }
+  | { type: 'error'; message: string; errorType?: string }
+  | { type: 'done' }
