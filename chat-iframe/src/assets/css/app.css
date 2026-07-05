@@ -410,7 +410,7 @@
 .chat-messages {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   min-height: 0;
   padding: 14px 16px;
   overflow-y: auto;
@@ -434,6 +434,25 @@
   grid-template-columns: 34px minmax(0, 1fr);
   gap: 8px;
   align-items: start;
+}
+
+.chat-message.user,
+.chat-message.assistant {
+  display: block;
+}
+
+.chat-message.user {
+  align-self: flex-end;
+  max-width: 92%;
+}
+
+.chat-message.assistant {
+  width: 100%;
+  color: var(--gray-900);
+}
+
+.chat-message.assistant + .chat-message.assistant {
+  margin-top: -4px;
 }
 
 .chat-message.system {
@@ -570,7 +589,16 @@
 }
 
 .chat-message.user .message-content {
-  background: var(--gray-100);
+  border-color: transparent;
+  background: var(--main-50);
+  box-shadow: none;
+}
+
+.chat-message.assistant .message-content {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .chat-message.error .message-content {
@@ -682,45 +710,187 @@
 }
 
 .tool-calls-panel {
-  margin-top: 8px;
+  margin: 4px 0 8px;
 }
 
 .tool-summary,
 .message-refs button {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  max-width: 100%;
+  gap: 6px;
+  padding: 0;
   border: 0;
-  color: var(--gray-600);
+  color: var(--gray-700);
   background: transparent;
   cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+
+.tool-summary:hover {
+  color: var(--gray-900);
+}
+
+.tool-summary span,
+.tool-summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-summary small {
+  color: var(--gray-600);
+  font-size: 12px;
+}
+
+.tool-summary em {
+  padding: 0 4px;
+  color: var(--gray-500);
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
 }
 
 .tool-list {
   display: grid;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 8px;
+  margin: 6px 0 8px 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--gray-100);
 }
 
 .tool-card {
-  padding: 8px;
-  border: 1px solid var(--gray-200);
-  border-radius: 8px;
-  background: var(--gray-25);
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
-.tool-card strong,
-.tool-card span {
-  margin-right: 8px;
+.tool-card-header {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  color: var(--gray-600);
   font-size: 13px;
 }
 
-.tool-card pre {
-  max-height: 160px;
-  margin: 6px 0 0;
-  overflow: auto;
+.tool-card-header svg {
+  flex: 0 0 auto;
+  color: var(--gray-600);
+}
+
+.tool-card-header strong {
+  min-width: 0;
+  color: var(--gray-700);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-note {
+  color: var(--gray-600);
+}
+
+.tool-separator {
+  color: var(--gray-300);
+}
+
+.tool-card-header em {
+  margin-left: auto;
+  color: var(--gray-500);
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.tool-params {
+  color: var(--gray-600);
   font-size: 12px;
+  line-height: 1.5;
+  overflow: auto;
+}
+
+.tool-params strong {
+  margin-right: 4px;
+  color: var(--gray-700);
+}
+
+.tool-params span {
   white-space: pre-wrap;
+}
+
+.tool-kb-list {
+  display: grid;
+  gap: 8px;
+  color: var(--gray-600);
+  font-size: 12px;
+}
+
+.tool-kb-list p {
+  margin: 0;
+}
+
+.tool-kb-card {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--gray-100);
+  border-radius: 6px;
+  background: var(--gray-0);
+}
+
+.tool-kb-card strong {
+  color: var(--gray-800);
+  font-size: 13px;
+}
+
+.tool-kb-card span {
+  color: var(--gray-600);
+  line-height: 1.5;
+}
+
+.tool-result-viewer {
+  max-height: 300px;
+  padding: 10px 0;
+  border-radius: 4px;
+  color: var(--gray-700);
+  background: var(--gray-25);
+  font-family: Monaco, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: auto;
+}
+
+.tool-result-line {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 10px;
+  padding: 0 10px;
+}
+
+.tool-result-line span {
+  color: var(--gray-500);
+  text-align: right;
+  user-select: none;
+}
+
+.tool-result-line code {
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tool-result-viewer.has-embedded-line-numbers .tool-result-line {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tool-result-viewer.has-embedded-line-numbers .tool-result-line span {
+  display: none;
 }
 
 .message-refs {
@@ -739,10 +909,7 @@
 }
 
 .tool-events {
-  margin: 8px 0 0;
-  padding-left: 18px;
-  color: var(--gray-500);
-  font-size: 12px;
+  display: none;
 }
 
 .chat-input {

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import MessageRefs from '@/components/MessageRefs.vue'
 import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
 import type { ChatMessage } from '@/types'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     messages?: ChatMessage[]
     loading?: boolean
@@ -19,6 +19,13 @@ defineEmits<{
 }>()
 
 const openReasoning = ref<Record<string, boolean>>({})
+const lastAssistantMessageId = computed(() => {
+  for (let index = props.messages.length - 1; index >= 0; index -= 1) {
+    const message = props.messages[index]
+    if (message.role === 'assistant') return message.id
+  }
+  return ''
+})
 
 function imageSrc(content?: string) {
   if (!content) return ''
@@ -58,6 +65,18 @@ function summaryEmptyText(message: ChatMessage) {
   if (summary.result.extractionStatus === 'running') return '结构化抽取任务正在运行，完成后会展示分类和明细。'
   if (summary.result.extractionStatus === 'failed') return summary.result.reason || '结构化抽取失败，暂时没有可展示的摘要。'
   return '暂无结构化摘要明细。'
+}
+
+function hasToolCalls(message: ChatMessage) {
+  return Boolean(message.toolCalls?.length)
+}
+
+function showThinkingPlaceholder(message: ChatMessage) {
+  return !message.content && !message.reasoningContent && !hasToolCalls(message)
+}
+
+function showAssistantRefs(message: ChatMessage) {
+  return message.role === 'assistant' && message.status === 'done' && message.id === lastAssistantMessageId.value
 }
 </script>
 
@@ -104,7 +123,9 @@ function summaryEmptyText(message: ChatMessage) {
         </div>
       </template>
       <template v-else>
-        <div class="message-role">{{ message.role === 'user' ? '我' : message.role === 'tool' ? '工具' : '助手' }}</div>
+        <div v-if="message.role !== 'assistant' && message.role !== 'user'" class="message-role">
+          {{ message.role === 'tool' ? '工具' : '系统' }}
+        </div>
       <div class="message-content">
         <img v-if="message.imageContent" class="message-image" :src="imageSrc(message.imageContent)" alt="用户上传图片" />
         <div v-if="message.attachments?.length" class="message-attachments">
@@ -119,18 +140,15 @@ function summaryEmptyText(message: ChatMessage) {
           <p>{{ message.reasoningContent }}</p>
         </details>
         <MarkdownPreview v-if="message.content" :content="message.content" />
-        <p v-else class="muted">正在思考...</p>
+        <p v-else-if="showThinkingPlaceholder(message)" class="muted">正在思考...</p>
         <p v-if="message.errorMessage" class="error-hint">{{ message.errorMessage }}</p>
         <ToolCallsPanel :tool-calls="message.toolCalls || []" />
         <MessageRefs
-          v-if="message.role === 'assistant' && message.status === 'done'"
+          v-if="showAssistantRefs(message)"
           :message="message"
           @retry="$emit('retry')"
           @feedback="$emit('feedback', $event)"
         />
-        <ul v-if="message.toolEvents?.length" class="tool-events">
-          <li v-for="event in message.toolEvents" :key="event">{{ event }}</li>
-        </ul>
       </div>
       </template>
     </article>
