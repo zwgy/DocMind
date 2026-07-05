@@ -47,30 +47,7 @@ function attachmentElement() {
   return link
 }
 
-test('extracts production YZSoft attachment DOM', () => {
-  const DocMindChatIframe = loadScript()
-  const files = DocMindChatIframe.extractFilesFromDocument({
-    querySelectorAll(selector) {
-      return selector === '.items .item[attachment] a' ? [attachmentElement()] : []
-    }
-  })
-
-  assert.equal(files.length, 1)
-  assert.deepEqual(JSON.parse(JSON.stringify(files[0])), {
-    id: '202606100417',
-    name: 'incoming-2026-162.pdf',
-    sourceUrl: 'http://10.132.235.62:8082/YZSoft/Attachment/dafault.ashx?202606100417',
-    url: 'http://10.132.235.62:8082/YZSoft/Attachment/dafault.ashx?202606100417',
-    sourceKey: '202606100417',
-    sizeText: '200.16KB',
-    onclick:
-      "YZSoft.File.download('http://10.132.235.62:8082/YZSoft/Attachment/dafault.ashx?202606100417')",
-    type: 'document',
-    selected: true
-  })
-})
-
-test('accepts iframe messages by targetOrigin and keeps originAllowlist for iframe side', () => {
+function parentHarness() {
   const sentMessages = []
   const listeners = {}
   const container = {
@@ -115,6 +92,34 @@ test('accepts iframe messages by targetOrigin and keeps originAllowlist for ifra
     removeEventListener() {}
   }
   const DocMindChatIframe = loadScript({ window: win, document: doc })
+  return { container, DocMindChatIframe, listeners, sentMessages }
+}
+
+test('extracts production YZSoft attachment DOM', () => {
+  const DocMindChatIframe = loadScript()
+  const files = DocMindChatIframe.extractFilesFromDocument({
+    querySelectorAll(selector) {
+      return selector === '.items .item[attachment] a' ? [attachmentElement()] : []
+    }
+  })
+
+  assert.equal(files.length, 1)
+  assert.deepEqual(JSON.parse(JSON.stringify(files[0])), {
+    id: '202606100417',
+    name: 'incoming-2026-162.pdf',
+    sourceUrl: 'http://10.132.235.62:8082/YZSoft/Attachment/dafault.ashx?202606100417',
+    url: 'http://10.132.235.62:8082/YZSoft/Attachment/dafault.ashx?202606100417',
+    sourceKey: '202606100417',
+    sizeText: '200.16KB',
+    onclick:
+      "YZSoft.File.download('http://10.132.235.62:8082/YZSoft/Attachment/dafault.ashx?202606100417')",
+    type: 'document',
+    selected: true
+  })
+})
+
+test('accepts iframe messages by targetOrigin and keeps originAllowlist for iframe side', () => {
+  const { DocMindChatIframe, listeners, sentMessages } = parentHarness()
 
   const chat = new DocMindChatIframe({
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
@@ -127,5 +132,58 @@ test('accepts iframe messages by targetOrigin and keeps originAllowlist for ifra
   assert.equal(sentMessages[0].message.type, 'INIT_CONFIG')
   assert.deepEqual(sentMessages[0].message.payload.originAllowlist, ['https://production.example.com'])
   assert.equal(sentMessages[0].targetOrigin, 'https://docmind.example.com')
+  chat.destroy()
+})
+
+test('setFiles and explicit requests send compatible iframe messages', () => {
+  const { DocMindChatIframe, listeners, sentMessages } = parentHarness()
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    targetOrigin: 'https://docmind.example.com',
+    includeFiles: false
+  })
+
+  chat.setPageContent('page text')
+  chat.setFiles([{ id: 'source-1', name: 'incoming.docx', url: 'https://oa/files/source-1' }])
+  listeners.message({ origin: 'https://docmind.example.com', data: { type: 'REQUEST_PAGE_CONTENT' } })
+  listeners.message({ origin: 'https://docmind.example.com', data: { type: 'REQUEST_FILE_LIST' } })
+
+  assert.equal(sentMessages.at(-4).message.type, 'PAGE_CONTENT')
+  assert.deepEqual(JSON.parse(JSON.stringify(sentMessages.at(-4).message.payload)), { text: 'page text' })
+  assert.equal(sentMessages.at(-3).message.type, 'PAGE_FILES_UPDATED')
+  assert.equal(sentMessages.at(-3).message.payload[0].sourceUrl, 'https://oa/files/source-1')
+  assert.equal(sentMessages.at(-2).message.type, 'PAGE_CONTENT')
+  assert.equal(sentMessages.at(-1).message.type, 'FILE_LIST')
+  chat.destroy()
+})
+
+test('window control messages update state and emit optional chat callbacks', () => {
+  const { container, DocMindChatIframe, listeners } = parentHarness()
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    targetOrigin: 'https://docmind.example.com',
+    includeFiles: false
+  })
+  const events = []
+  chat.on('stateChange', (payload) => events.push(['state', payload.state]))
+  chat.on('conversationCreated', (payload) => events.push(['conversation', payload.conversationId]))
+  chat.on('messageSent', (payload) => events.push(['message', payload.messageId]))
+
+  listeners.message({ origin: 'https://docmind.example.com', data: { type: 'MAXIMIZE' } })
+  listeners.message({
+    origin: 'https://docmind.example.com',
+    data: { type: 'CONVERSATION_CREATED', payload: { conversationId: 'thread-1' } }
+  })
+  listeners.message({
+    origin: 'https://docmind.example.com',
+    data: { type: 'MESSAGE_SENT', payload: { messageId: 'message-1' } }
+  })
+
+  assert.match(container.className, /maximized/)
+  assert.deepEqual(events, [
+    ['state', 'maximized'],
+    ['conversation', 'thread-1'],
+    ['message', 'message-1']
+  ])
   chat.destroy()
 })

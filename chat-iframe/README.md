@@ -14,10 +14,10 @@
 2. **iframe 内部应用**：`src/`
    - Vue 3 + TypeScript + Vite 应用。
    - 接收父页面传入的页面内容和附件列表。
-   - 调用 docMind 后端 `/api/incoming-documents/extractions/query`。
-   - 展示来文匹配状态和结构化抽取结果。
+   - 调用 docMind 后端 `/api/incoming-documents/extractions/query`、`/api/chat/*`、`/api/agent/runs/*`。
+   - 展示来文匹配状态、结构化抽取结果，并提供第一版聊天体验。
 
-第一版只实现结构化结果展示。聊天会话、流式回答、模型选择、用户手动上传附件属于后续阶段。
+第一版已接入聊天会话、流式回答、模型选择、输入框附件、问网页和问文件开关。复杂能力如中断恢复、子智能体详情、artifact 面板和聊天记录富渲染仍复用主站后续能力，不在 iframe 第一版里重复实现。
 
 ## 2. 技术栈
 
@@ -112,13 +112,19 @@ chat-iframe/
     App.vue
     types.ts
     apis/
+      chat.ts
       incoming-documents.ts
+      models.ts
     components/
+      ChatInput.vue
+      ChatMessages.vue
+      ChatSidebar.vue
       IncomingDocumentPanel.vue
       PageFileSelector.vue
     composables/
       useIframeBridge.ts
     stores/
+      chat.ts
       iframe-context.ts
     assets/css/
   test/
@@ -141,10 +147,15 @@ chat-iframe
   -> 默认选中第一个附件
   -> incoming-documents.ts 调用 docMind 后端
   -> IncomingDocumentPanel 展示结果
+  -> chat.ts 创建/选择会话并创建 AgentRun
+  -> SSE 读取 /api/agent/runs/{runId}/events
+  -> ChatMessages 流式展示回答
 
 docMind backend
   -> /api/incoming-documents/extractions/query
-  -> 返回匹配状态和结构化抽取结果
+  -> /api/chat/thread(s)
+  -> /api/agent/runs/{runId}/events
+  -> 返回匹配状态、结构化抽取结果和聊天流式事件
 ```
 
 页面打开后的流程：
@@ -155,6 +166,8 @@ docMind backend
 4. 多附件默认选中第一个，因为第一版要求打开助手后无需点击即可展示匹配状态。
 5. iframe 调用 `/api/incoming-documents/extractions/query`。
 6. 页面展示 `matched/multiple/pending_sync/not_found` 和 `ready/running/not_found/failed`。
+7. 用户提问时，iframe 创建或复用 `/api/chat/thread` 会话，调用 `/api/agent/runs` 创建运行任务，再读取 `/api/agent/runs/{runId}/events` 流式事件。
+8. “问网页/问文件”开启时，iframe 会把页面摘要、选中文档、匹配结果和抽取摘要拼入 query，同时写入 `meta`。这样做是因为当前后端聊天链路一定消费 `query`，而 `meta` 更适合作为追踪和后续增强字段。
 
 ## 7. 父页面集成方式
 
@@ -167,6 +180,7 @@ docMind backend
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
     user: 'user-001',
     token: 'docmind-token',
+    agentId: 'default-chatbot',
     targetOrigin: 'https://docmind.example.com',
     originAllowlist: ['https://production.example.com'],
     initialState: 'minimized'
@@ -234,6 +248,7 @@ const chat = new DocMindChatIframe({
   iframeSrc: 'https://docmind.example.com/chat-iframe/',
   user: 'user-001',
   token: 'docmind-token',
+  agentId: 'default-chatbot',
   targetOrigin: 'https://docmind.example.com',
   originAllowlist: ['https://production.example.com'],
   position: 'bottom-right',
@@ -254,6 +269,7 @@ const chat = new DocMindChatIframe({
 | `iframeSrc` | `/` | iframe 页面地址 |
 | `user` | `null` | 生产系统当前用户标识 |
 | `token` | `null` | docMind 认证 token；iframe 调后端时作为 Bearer Token |
+| `agentId` | `null` | 可选，聊天使用的智能体 ID；为空时 iframe 使用 `default-chatbot` |
 | `targetOrigin` | `*` | 父页面发消息给 iframe 的目标 origin；生产环境建议写死 |
 | `originAllowlist` | `[]` | 下发给 iframe 的父页面来源白名单，用于 iframe 校验生产系统来源 |
 | `position` | `bottom-right` | 悬浮入口位置 |
@@ -288,7 +304,7 @@ const chat = new DocMindChatIframe({
 
 | 消息 | 载荷 | 用途 |
 | --- | --- | --- |
-| `INIT_CONFIG` | `{ user, token, includePageContent, includeFiles, selectedFileIds, originAllowlist }` | 初始化配置 |
+| `INIT_CONFIG` | `{ user, token, agentId, includePageContent, includeFiles, selectedFileIds, originAllowlist }` | 初始化配置 |
 | `PAGE_CONTENT` | `{ title?, url?, html?, text? }` | 页面内容 |
 | `PAGE_FILES_UPDATED` | `IncomingPageFile[]` | 页面附件列表 |
 | `FILE_LIST` | `IncomingPageFile[]` | 兼容旧消息名 |
@@ -302,8 +318,8 @@ iframe 发送给父页面：
 | `REQUEST_PAGE_CONTENT` | 请求父页面补发页面内容 |
 | `REQUEST_FILE_LIST` | 请求父页面补发附件列表 |
 | `MINIMIZE` / `MAXIMIZE` / `RESTORE` / `CLOSE` | 窗口控制 |
-| `CONVERSATION_CREATED` | 阶段八聊天接入后可选通知 |
-| `MESSAGE_SENT` | 阶段八聊天接入后可选通知 |
+| `CONVERSATION_CREATED` | iframe 创建新会话后的可选通知 |
+| `MESSAGE_SENT` | iframe 发送消息后的可选通知 |
 
 ## 11. 悬浮图标、SVG 和字体
 
@@ -362,7 +378,51 @@ location /api/ {
 }
 ```
 
-保留 `proxy_buffering off` 是为了阶段八接入流式聊天时不再改网关。
+保留 `proxy_buffering off` 是为了让 `/api/agent/runs/{runId}/events` 的 SSE 流式聊天不要被 Nginx 缓冲。
+
+#### 角色与拓扑
+
+Nginx 在 chat-iframe 里同时充当**静态服务器**（托管 Vue 应用）和**反向代理**（把 `/api/` 转发到 docMind 后端）。三者关系如下：
+
+```text
+┌─────────────────────┐       ┌──────────────────────┐       ┌──────────────────────┐
+│   生产系统（OA/办公） │       │      chat-iframe     │       │   docMind 后端 api   │
+│                     │       │                      │       │                      │
+│  浏览器：用户访问     │  ①    │  Nginx（容器内 80）    │  ③    │  FastAPI（5050）      │
+│  引入一行 <script>  │───────▶│   ├─ /chat-iframe/   │───────▶│  /api/incoming-docs/ │
+│  → 出现悬浮按钮      │       │   │   Vue SPA 静态   │       │      extractions/    │
+│                     │  ②    │   └─ /api/ 反向代理   │  HTTP │      query           │
+│  postMessage ───────┼───────▶│       到 docmind 后端 │       │                      │
+│                     │       │                      │       │                      │
+└─────────────────────┘       └──────────────────────┘       └──────────────────────┘
+```
+
+| 实体 | 角色 | 端口 |
+| --- | --- | --- |
+| 生产系统（OA） | 被嵌入方，提供用户上下文和附件 | — |
+| chat-iframe | 嵌入桥梁，自带 Nginx 静态 + 反代 | 80 |
+| docMind 后端 api | 真正处理来文抽取查询 | 5050 |
+
+#### 数据流
+
+从用户点开悬浮按钮到看到结果，完整链路：
+
+1. 父脚本从父页面 DOM 采集附件（`.items .item[attachment] a`），得到 `[{ id, name, sourceUrl, sourceKey, sizeText }]`。
+2. 父脚本通过 `postMessage` 把 `INIT_CONFIG` / `PAGE_CONTENT` / `PAGE_FILES_UPDATED` 推给 iframe。
+3. iframe 内的 `useIframeBridge` 接收消息，存入 Pinia store，默认选中第一个附件。
+4. iframe 调用后端（相对路径）：
+   ```js
+   fetch('/api/incoming-documents/extractions/query', {
+     method: 'POST',
+     headers: { Authorization: 'Bearer <token>' },
+     body: { files: [...] }
+   })
+   ```
+5. Nginx 匹配 `location /api/`，把请求 `proxy_pass` 到 docMind 后端，并补上 `X-Real-IP` / `X-Forwarded-For` 头。
+6. docMind 后端处理 `/api/incoming-documents/extractions/query`，查询数据库、匹配来文，返回 `{ status, extraction }`。
+7. 结果原路返回，iframe 渲染面板，展示匹配状态和结构化抽取结果。
+
+生产系统浏览器视角看到的请求域名始终是 chat-iframe 自己，跨域 / CORS 都被 Nginx 在同源内消化掉了。
 
 ### 12.3 手动静态部署
 
@@ -401,7 +461,9 @@ public/docmind-chat-iframe-parent.js
 corepack pnpm test
 ```
 
-当前覆盖父页面脚本最容易出错的生产系统附件 DOM 识别：
+当前覆盖两类最容易出错的边界：
+
+父页面脚本的生产系统附件 DOM 识别：
 
 - `.items .item[attachment] a`
 - `YZSoft.File.download('...')`
@@ -410,13 +472,19 @@ corepack pnpm test
 - 文件名外层引号清理
 - 多附件默认选中第一项
 
+聊天链路的最小契约：
+
+- 创建默认智能体会话时携带 Bearer Token
+- “问网页/问文件”开启时把上下文拼入 query
+- 解析 `/api/agent/runs/{runId}/events` 的 SSE 文本增量
+
 ## 15. 与参考项目的主要差异
 
 | 项目 | ai-chat-iframe | docMind chat-iframe |
 | --- | --- | --- |
 | iframe 内部语言 | TypeScript | TypeScript |
 | 父页面脚本 | 原生 JavaScript | 原生 JavaScript |
-| 第一版核心能力 | 聊天 | 来文结构化结果展示 |
-| 后端接口 | `/ai/chatFlow/*` | `/api/incoming-documents/extractions/query` |
+| 第一版核心能力 | 聊天 | 来文结构化结果展示 + iframe 聊天 |
+| 后端接口 | `/ai/chatFlow/*` | `/api/incoming-documents/extractions/query`、`/api/chat/*`、`/api/agent/runs/*` |
 | 部署 | Docker + Nginx | Docker + Nginx |
-| 附件处理 | URL 上传给聊天后端 | 匹配 docMind 来文并展示抽取结果 |
+| 附件处理 | URL 上传给聊天后端 | 匹配 docMind 来文并展示抽取结果；输入框附件复用 docMind 线程附件接口 |

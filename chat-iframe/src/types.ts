@@ -23,6 +23,7 @@ export type IncomingPageFile = {
 export type IframeConfig = {
   user?: string
   token?: string
+  agentId?: string
   includePageContent?: boolean
   includeFiles?: boolean
   selectedFileIds?: string[]
@@ -64,4 +65,32 @@ export type ExtractionResult = {
 
 export type ExtractionQueryResponse = {
   items?: ExtractionResult[]
+}
+
+export type ChatThread = {
+  id: string
+  agent_id?: string
+  title?: string | null
+  is_pinned?: boolean
+  created_at?: string
+  updated_at?: string
+  metadata?: Record<string, unknown>
+}
+
+export type ChatMessageRole = 'user' | 'assistant' | 'system' | 'tool'
+
+export type ChatMessage = {
+  id: string
+  role: ChatMessageRole
+  content: string
+  status?: 'sending' | 'streaming' | 'done' | 'error'
+  toolEvents?: string[]
+  createdAt?: string
+}
+
+export type ModelOption = {
+  label: string
+  value: string
+  provider?: string
+  model_id?: string
 }

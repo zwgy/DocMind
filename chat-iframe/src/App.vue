@@ -2,14 +2,26 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { Maximize2, Minimize2, RotateCcw, X } from 'lucide-vue-next'
 import { queryIncomingDocumentExtractions } from '@/apis/incoming-documents'
+import ChatInput from '@/components/ChatInput.vue'
+import ChatMessages from '@/components/ChatMessages.vue'
+import ChatSidebar from '@/components/ChatSidebar.vue'
 import IncomingDocumentPanel from '@/components/IncomingDocumentPanel.vue'
 import PageFileSelector from '@/components/PageFileSelector.vue'
 import { useIframeBridge } from '@/composables/useIframeBridge'
+import { useChatStore } from '@/stores/chat'
 import { useIframeContextStore } from '@/stores/iframe-context'
 import type { ExtractionResult } from '@/types'
 
 const context = useIframeContextStore()
-const { notifyClose, notifyMaximize, notifyMinimize, notifyRestore } = useIframeBridge()
+const {
+  notifyClose,
+  notifyConversationCreated,
+  notifyMaximize,
+  notifyMessageSent,
+  notifyMinimize,
+  notifyRestore
+} = useIframeBridge()
+const chat = useChatStore()
 const loading = ref(false)
 const error = ref('')
 const results = ref<Record<string, ExtractionResult>>({})
@@ -36,9 +48,35 @@ async function refreshExtraction() {
   }
 }
 
+async function createChat() {
+  const thread = await chat.newConversation(context.config.token, context.config.agentId)
+  notifyConversationCreated({ conversationId: thread.id })
+}
+
+async function sendChat(payload: { text: string; files: File[] }) {
+  const result = await chat.send(
+    {
+      text: payload.text,
+      files: payload.files,
+      pageContent: context.pageContent,
+      selectedFile: selectedFile.value,
+      extractionResult: selectedResult.value
+    },
+    context.config.token,
+    context.config.agentId
+  )
+  if (result) notifyMessageSent({ conversationId: result.threadId, messageId: result.messageId })
+}
+
 watch(
   () => selectedFile.value?.id,
   () => refreshExtraction(),
+  { immediate: true }
+)
+
+watch(
+  [() => context.config.token, () => context.config.agentId],
+  () => chat.bootstrap(context.config.token, context.config.agentId),
   { immediate: true }
 )
 
@@ -71,18 +109,42 @@ onMounted(() => {
     </header>
 
     <section class="chat-body">
-      <PageFileSelector
-        :files="context.files"
-        :selected-file-id="context.selectedFileId"
-        @select="context.selectFile"
-      />
-      <IncomingDocumentPanel
-        :file="selectedFile"
-        :result="selectedResult"
-        :loading="loading"
-        :error="error"
-        @refresh="refreshExtraction"
-      />
+      <aside class="side-rail">
+        <ChatSidebar
+          :threads="chat.threads"
+          :current-thread-id="chat.currentThreadId"
+          :loading="chat.isLoading"
+          @new="createChat"
+          @select="(threadId) => chat.selectThread(threadId, context.config.token)"
+        />
+        <PageFileSelector
+          :files="context.files"
+          :selected-file-id="context.selectedFileId"
+          @select="context.selectFile"
+        />
+      </aside>
+
+      <section class="workbench">
+        <IncomingDocumentPanel
+          :file="selectedFile"
+          :result="selectedResult"
+          :loading="loading"
+          :error="error"
+          @refresh="refreshExtraction"
+        />
+        <ChatMessages :messages="chat.messages" :loading="chat.isLoading" />
+        <ChatInput
+          :disabled="chat.isSending"
+          :ask-page="chat.askPage"
+          :ask-file="chat.askFile"
+          :models="chat.modelOptions"
+          :selected-model-spec="chat.selectedModelSpec"
+          @update:ask-page="chat.askPage = $event"
+          @update:ask-file="chat.askFile = $event"
+          @update:selected-model-spec="chat.selectedModelSpec = $event"
+          @submit="sendChat"
+        />
+      </section>
     </section>
   </main>
 </template>

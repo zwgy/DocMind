@@ -62,6 +62,8 @@ export function useIframeBridge() {
     notifyMinimize: () => send('MINIMIZE'),
     notifyMaximize: () => send('MAXIMIZE'),
     notifyRestore: () => send('RESTORE'),
-    notifyClose: () => send('CLOSE')
+    notifyClose: () => send('CLOSE'),
+    notifyConversationCreated: (payload: { conversationId: string }) => send('CONVERSATION_CREATED', payload),
+    notifyMessageSent: (payload: { conversationId: string; messageId?: string }) => send('MESSAGE_SENT', payload)
   }
 }
