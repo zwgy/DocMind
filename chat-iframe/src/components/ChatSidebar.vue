@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { MessageSquarePlus, Pin, PinOff, Pencil, Trash2 } from 'lucide-vue-next'
+import { MessageSquare, MessageSquarePlus, Pin, PinOff, Pencil, Trash2 } from 'lucide-vue-next'
 import type { ChatThread } from '@/types'
 
 withDefaults(
@@ -44,8 +44,11 @@ function deleteThread(threadId: string) {
       class="thread-option"
       :class="{ active: thread.id === currentThreadId }"
     >
+      <span class="thread-icon">
+        <MessageSquare :size="16" />
+      </span>
       <button type="button" class="thread-title" @click="$emit('select', thread.id)">
-        <Pin v-if="thread.is_pinned" :size="13" />
+        <Pin v-if="thread.is_pinned" :size="14" />
         {{ thread.title || '来文咨询' }}
       </button>
       <span class="thread-actions">
@@ -54,18 +57,18 @@ function deleteThread(threadId: string) {
           title="重命名"
           @click.stop="renameThread(thread)"
         >
-          <Pencil :size="13" />
+          <Pencil :size="15" />
         </button>
         <button type="button" :title="thread.is_pinned ? '取消置顶' : '置顶'" @click.stop="$emit('pin', thread.id)">
-          <PinOff v-if="thread.is_pinned" :size="13" />
-          <Pin v-else :size="13" />
+          <PinOff v-if="thread.is_pinned" :size="15" />
+          <Pin v-else :size="15" />
         </button>
         <button
           type="button"
           title="删除"
           @click.stop="deleteThread(thread.id)"
         >
-          <Trash2 :size="13" />
+          <Trash2 :size="15" />
         </button>
       </span>
     </div>

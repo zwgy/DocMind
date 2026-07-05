@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write src/ public/ test/",
-    "test": "node --test test/*.test.js"
+    "test": "node --experimental-strip-types --test test/*.test.js"
   },
   "dependencies": {
     "@vscode/markdown-it-katex": "^1.1.2",

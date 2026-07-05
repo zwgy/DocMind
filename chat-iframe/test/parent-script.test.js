@@ -50,22 +50,28 @@ function attachmentElement() {
 function parentHarness() {
   const sentMessages = []
   const listeners = {}
+  const iframe = {
+    src: '',
+    style: {},
+    contentWindow: {
+      postMessage(message, targetOrigin) {
+        sentMessages.push({ message, targetOrigin })
+      }
+    }
+  }
   const container = {
     className: '',
     innerHTML: '',
     offsetLeft: 10,
     offsetTop: 20,
+    style: {},
     parentNode: { removeChild() {} },
+    getBoundingClientRect() {
+      return { left: 100, top: 50, width: 460, height: 680 }
+    },
     querySelector(selector) {
       if (selector === 'iframe') {
-        return {
-          src: '',
-          contentWindow: {
-            postMessage(message, targetOrigin) {
-              sentMessages.push({ message, targetOrigin })
-            }
-          }
-        }
+        return iframe
       }
       return { addEventListener() {} }
     }
@@ -86,13 +92,15 @@ function parentHarness() {
   const win = {
     document: doc,
     location: { href: 'https://production.example.com/page' },
+    innerWidth: 900,
+    innerHeight: 700,
     addEventListener(type, callback) {
       listeners[type] = callback
     },
     removeEventListener() {}
   }
   const DocMindChatIframe = loadScript({ window: win, document: doc })
-  return { container, DocMindChatIframe, listeners, sentMessages }
+  return { container, iframe, DocMindChatIframe, listeners, sentMessages }
 }
 
 test('extracts production YZSoft attachment DOM', () => {
@@ -185,5 +193,82 @@ test('window control messages update state and emit optional chat callbacks', ()
     ['conversation', 'thread-1'],
     ['message', 'message-1']
   ])
+  chat.destroy()
+})
+
+test('closed state keeps restore entry and drag cleanup releases iframe pointer events', () => {
+  const { container, iframe, DocMindChatIframe } = parentHarness()
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    targetOrigin: 'https://docmind.example.com',
+    includeFiles: false
+  })
+
+  chat.close()
+  assert.match(container.className, /closed/)
+
+  chat._startDrag({
+    clientX: 10,
+    clientY: 20,
+    pointerId: 1,
+    currentTarget: {},
+    preventDefault() {}
+  })
+  chat._moveDrag({ clientX: 30, clientY: 45 })
+  assert.equal(container.style.left, '30px')
+  assert.equal(container.style.top, '45px')
+  assert.equal(iframe.style.pointerEvents, 'none')
+
+  chat._endDrag()
+  assert.equal(chat.drag, null)
+  assert.equal(iframe.style.pointerEvents, '')
+  chat.destroy()
+})
+
+test('iframe header drag messages move the parent window', () => {
+  const { container, iframe, DocMindChatIframe, listeners } = parentHarness()
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    targetOrigin: 'https://docmind.example.com',
+    includeFiles: false
+  })
+
+  listeners.message({
+    origin: 'https://docmind.example.com',
+    data: { type: 'WINDOW_DRAG_START', payload: { clientX: 12, clientY: 8, screenX: 500, screenY: 400, pointerId: 9 } }
+  })
+  assert.equal(iframe.style.pointerEvents, undefined)
+
+  listeners.message({
+    origin: 'https://docmind.example.com',
+    data: { type: 'WINDOW_DRAG_MOVE', payload: { clientX: 32, clientY: 38, screenX: 520, screenY: 430, pointerId: 9 } }
+  })
+  assert.equal(container.style.left, '30px')
+  assert.equal(container.style.top, '50px')
+
+  listeners.message({ origin: 'https://docmind.example.com', data: { type: 'WINDOW_DRAG_END' } })
+  assert.equal(chat.drag, null)
+  assert.equal(iframe.style.pointerEvents, undefined)
+  chat.destroy()
+})
+
+test('restore keeps normal window inside viewport after floating button drag', () => {
+  const { container, DocMindChatIframe } = parentHarness()
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    targetOrigin: 'https://docmind.example.com',
+    includeFiles: false,
+    width: 460,
+    height: 680
+  })
+
+  container.offsetLeft = 760
+  container.offsetTop = 620
+  chat.restore()
+
+  assert.equal(container.style.left, '416px')
+  assert.equal(container.style.top, '12px')
+  assert.equal(container.style.right, 'auto')
+  assert.equal(container.style.bottom, 'auto')
   chat.destroy()
 })

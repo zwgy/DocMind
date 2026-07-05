@@ -63,6 +63,11 @@ export function useIframeBridge() {
     notifyMaximize: () => send('MAXIMIZE'),
     notifyRestore: () => send('RESTORE'),
     notifyClose: () => send('CLOSE'),
+    notifyWindowDragStart: (payload: { clientX: number; clientY: number; screenX: number; screenY: number; pointerId?: number }) =>
+      send('WINDOW_DRAG_START', payload),
+    notifyWindowDragMove: (payload: { clientX: number; clientY: number; screenX: number; screenY: number; pointerId?: number }) =>
+      send('WINDOW_DRAG_MOVE', payload),
+    notifyWindowDragEnd: () => send('WINDOW_DRAG_END'),
     notifyConversationCreated: (payload: { conversationId: string }) => send('CONVERSATION_CREATED', payload),
     notifyMessageSent: (payload: { conversationId: string; messageId?: string }) => send('MESSAGE_SENT', payload)
   }

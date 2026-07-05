@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>docMind chat-iframe 本地嵌入调试页</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7f8;
+        --panel: #ffffff;
+        --line: #d8e0e3;
+        --text: #17252b;
+        --muted: #667780;
+        --accent: #046a82;
+        --accent-strong: #034d5f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 32px 24px 96px;
+      }
+
+      header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+        line-height: 1.25;
+        font-weight: 700;
+      }
+
+      h2 {
+        margin: 0 0 12px;
+        font-size: 18px;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+        gap: 20px;
+        margin-top: 24px;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 20px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .field {
+        display: grid;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .field label {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .token-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+      }
+
+      input {
+        width: 100%;
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 10px 12px;
+        color: var(--text);
+        background: #fff;
+      }
+
+      button {
+        border: 0;
+        border-radius: 6px;
+        padding: 10px 14px;
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      button:hover {
+        background: var(--accent-strong);
+      }
+
+      button.secondary {
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--text);
+      }
+
+      button.secondary:hover {
+        background: #eef4f6;
+      }
+
+      .status {
+        min-height: 22px;
+        margin-top: 12px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .items {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .item[attachment] a {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        min-height: 44px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        color: var(--accent);
+        text-decoration: none;
+        background: #fbfdfe;
+      }
+
+      .flag {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #1f9d7a;
+      }
+
+      .size {
+        margin-left: auto;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .doc {
+        margin-top: 16px;
+        padding: 16px;
+        border: 1px dashed var(--line);
+        border-radius: 8px;
+        background: #fbfdfe;
+      }
+
+      .doc h3 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+
+      .doc ol {
+        margin: 10px 0 0;
+        padding-left: 22px;
+        color: var(--text);
+        line-height: 1.8;
+      }
+
+      code,
+      pre {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      }
+
+      pre {
+        overflow: auto;
+        margin: 12px 0 0;
+        padding: 12px;
+        border-radius: 6px;
+        background: #10262d;
+        color: #e6f2f5;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      @media (max-width: 860px) {
+        header,
+        .grid {
+          display: block;
+        }
+
+        .panel + .panel {
+          margin-top: 20px;
+        }
+
+        .token-row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>docMind chat-iframe 本地嵌入调试页</h1>
+          <p>模拟外部生产系统页面：页面正文、附件 DOM、父子 postMessage 和 Bearer Token 都从这里进入 iframe。</p>
+        </div>
+        <button id="openChatButton" type="button">打开助手</button>
+      </header>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>生产系统附件区</h2>
+          <p>下面的 DOM 结构刻意贴近 5.5 章节里的线上附件样例，父页面脚本会自动扫描并选中第一个文档附件。</p>
+
+          <div class="items">
+            <div class="item" id="docmind-vibe-5-5_BOX" attachment="docmind-vibe-5-5">
+              <a
+                href="/chat-iframe/example-files/2026-07-02-AI文档智能助手第一版开发方案-5.5.md?docmind-vibe-5-5"
+                onclick="YZSoft.File.download('/chat-iframe/example-files/2026-07-02-AI文档智能助手第一版开发方案-5.5.md?docmind-vibe-5-5'); return false"
+              >
+                <span class="flag"></span>
+                "2026-07-02-AI文档智能助手第一版开发方案-5.5.md"
+                <span class="size">-1.78KB</span>
+              </a>
+            </div>
+            <div class="item" id="docmind-vibe-5-5-acceptance_BOX" attachment="docmind-vibe-5-5-acceptance">
+              <a
+                href="/chat-iframe/example-files/2026-07-02-AI文档智能助手第一版开发方案-5.5-验收补充.md?docmind-vibe-5-5-acceptance"
+                onclick="YZSoft.File.download('/chat-iframe/example-files/2026-07-02-AI文档智能助手第一版开发方案-5.5-验收补充.md?docmind-vibe-5-5-acceptance'); return false"
+              >
+                <span class="flag"></span>
+                "2026-07-02-AI文档智能助手第一版开发方案-5.5-验收补充.md"
+                <span class="size">-0.94KB</span>
+              </a>
+            </div>
+          </div>
+
+          <div class="doc" id="pageContent">
+            <h3>5.5 附件 DOM 识别</h3>
+            <p>生产系统附件示例包含 <code>.items .item[attachment] a</code>、<code>YZSoft.File.download(...)</code> 和附件大小文本。</p>
+            <ol>
+              <li>优先扫描 <code>.items .item[attachment] a</code>，再降级扫描页面中的 <code>a</code> 元素。</li>
+              <li>从 <code>textContent</code> 中移除 <code>.size</code> 文本，去掉外层引号，得到文件名。</li>
+              <li>从 <code>.size</code> 或完整文本中提取大小，支持 <code>-200.16KB</code> 这类无空格格式。</li>
+              <li>从 <code>onclick="YZSoft.File.download('...')"</code>、普通 <code>onclick</code> 和 <code>href</code> 中提取 URL。</li>
+              <li>按 <code>attachment</code> 属性、<code>id</code> 去掉 <code>_BOX</code> 后缀、URL query、路径片段的顺序提取 <code>sourceKey</code>。</li>
+              <li>文件名后缀命中文档扩展名时加入附件列表。</li>
+              <li>第一个附件标记为默认选中。</li>
+            </ol>
+          </div>
+        </article>
+
+        <aside class="panel">
+          <h2>调试登录态</h2>
+          <p>
+            iframe 和主站 <code>localhost:5173</code> 是不同 origin，浏览器不会共享 localStorage。请从主站复制
+            <code>localStorage.user_token</code>，粘贴到这里，父页面会把 token 注入 iframe。
+          </p>
+
+          <div class="field">
+            <label for="tokenInput">Bearer Token</label>
+            <div class="token-row">
+              <input id="tokenInput" type="password" autocomplete="off" placeholder="粘贴 localStorage.getItem('user_token')" />
+              <button id="saveTokenButton" type="button">保存并注入</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="loginIdInput">docMind 账号</label>
+            <input id="loginIdInput" type="text" autocomplete="username" placeholder="用户名、UID 或手机号" />
+          </div>
+
+          <div class="field">
+            <label for="passwordInput">docMind 密码</label>
+            <div class="token-row">
+              <input id="passwordInput" type="password" autocomplete="current-password" placeholder="输入密码换取本地调试 token" />
+              <button id="loginButton" type="button">登录并注入</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="agentInput">Agent ID</label>
+            <input id="agentInput" type="text" value="default-chatbot" />
+          </div>
+
+          <div class="toolbar">
+            <button id="refreshContextButton" class="secondary" type="button">重新发送上下文</button>
+            <button id="clearTokenButton" class="secondary" type="button">清除 Token</button>
+          </div>
+
+          <p class="status" id="statusText"></p>
+
+          <pre>主站控制台复制 token：
+copy(localStorage.getItem('user_token'))</pre>
+        </aside>
+      </section>
+    </main>
+
+    <script>
+      // 模拟线上系统的全局下载对象，让父脚本能从 onclick 中提取真实附件 URL。
+      window.YZSoft = {
+        File: {
+          download(url) {
+            window.open(url, '_blank', 'noopener')
+          }
+        }
+      }
+    </script>
+    <script src="/chat-iframe/docmind-chat-iframe-parent.js"></script>
+    <script>
+      const TOKEN_STORAGE_KEY = 'docmind_chat_iframe_debug_token'
+      const tokenInput = document.getElementById('tokenInput')
+      const loginIdInput = document.getElementById('loginIdInput')
+      const passwordInput = document.getElementById('passwordInput')
+      const agentInput = document.getElementById('agentInput')
+      const statusText = document.getElementById('statusText')
+
+      const params = new URLSearchParams(window.location.search)
+      const initialToken = params.get('token') || localStorage.getItem(TOKEN_STORAGE_KEY) || ''
+      const initialAgentId = params.get('agentId') || agentInput.value
+      tokenInput.value = initialToken
+      agentInput.value = initialAgentId
+
+      function setStatus(message) {
+        statusText.textContent = message
+      }
+
+      function pageContent() {
+        const section = document.getElementById('pageContent')
+        return {
+          title: document.title,
+          url: location.href,
+          text: section ? section.innerText : document.body.innerText,
+          html: section ? section.outerHTML : document.documentElement.outerHTML
+        }
+      }
+
+      function normalizeToken(token) {
+        return token.trim().replace(/^Bearer\s+/i, '').replace(/^["']|["']$/g, '')
+      }
+
+      function currentToken() {
+        return normalizeToken(tokenInput.value)
+      }
+
+      function saveToken() {
+        const token = currentToken()
+        tokenInput.value = token
+        if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token)
+        else localStorage.removeItem(TOKEN_STORAGE_KEY)
+        return token
+      }
+
+      async function validateToken(token) {
+        if (!token) return null
+        const response = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if (!response.ok) {
+          let message = `token 校验失败：${response.status}`
+          try {
+            const data = await response.json()
+            message = data.detail || data.message || message
+          } catch {
+            // 非 JSON 响应时保留 HTTP 状态，避免误导调试。
+          }
+          throw new Error(message)
+        }
+        return response.json()
+      }
+
+      async function loginAndInject() {
+        const loginId = loginIdInput.value.trim()
+        const password = passwordInput.value
+        if (!loginId || !password) {
+          setStatus('请输入 docMind 账号和密码。')
+          return
+        }
+        const form = new FormData()
+        form.append('username', loginId)
+        form.append('password', password)
+        setStatus('正在向本机 docMind 后端换取 token...')
+        const response = await fetch('/api/auth/token', {
+          method: 'POST',
+          body: form
+        })
+        if (!response.ok) {
+          let message = `登录失败：${response.status}`
+          try {
+            const data = await response.json()
+            message = data.detail || data.message || message
+          } catch {
+            // 登录失败偶发非 JSON 时直接展示状态码即可。
+          }
+          setStatus(message)
+          return
+        }
+        const data = await response.json()
+        tokenInput.value = data.access_token || ''
+        passwordInput.value = ''
+        await createChat()
+      }
+
+      async function createChat() {
+        const token = saveToken()
+        const agentId = agentInput.value.trim() || 'default-chatbot'
+        if (token) {
+          try {
+            const user = await validateToken(token)
+            setStatus(`token 已通过校验：${user.username || user.uid || '当前用户'}，正在注入 iframe...`)
+          } catch (error) {
+            setStatus(error instanceof Error ? error.message : 'token 校验失败')
+            return
+          }
+        }
+        if (window.chatIframe) window.chatIframe.destroy()
+        window.chatIframe = new DocMindChatIframe({
+          iframeSrc: `${location.origin}/chat-iframe/`,
+          token,
+          agentId,
+          targetOrigin: location.origin,
+          originAllowlist: [location.origin],
+          initialState: 'normal',
+          width: 520,
+          height: 720,
+          selectedFileIds: ['docmind-vibe-5-5', 'docmind-vibe-5-5-acceptance']
+        })
+        // 主动发送页面摘要，是为了让端到端调试不依赖父脚本对整页 HTML 的默认采集时机。
+        window.chatIframe.setPageContent(pageContent())
+        setStatus(token ? '已注入 token，可以选择模型并发起聊天。' : '未注入 token：后端会返回“请登录后再访问”。')
+      }
+
+      document.getElementById('openChatButton').addEventListener('click', () => {
+        window.chatIframe.restore()
+      })
+
+      document.getElementById('saveTokenButton').addEventListener('click', createChat)
+      document.getElementById('loginButton').addEventListener('click', loginAndInject)
+
+      document.getElementById('refreshContextButton').addEventListener('click', () => {
+        window.chatIframe.setPageContent(pageContent())
+        window.chatIframe.setFiles(DocMindChatIframe.extractFilesFromDocument(document))
+        setStatus('已重新发送页面上下文和附件列表。')
+      })
+
+      document.getElementById('clearTokenButton').addEventListener('click', () => {
+        tokenInput.value = ''
+        localStorage.removeItem(TOKEN_STORAGE_KEY)
+        void createChat()
+      })
+
+      void createChat()
+    </script>
+  </body>
+</html>

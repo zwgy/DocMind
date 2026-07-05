@@ -70,6 +70,20 @@ corepack pnpm dev
 ```
 
 启动 Vite 开发服务。开发时 `/api` 会按 `vite.config.ts` 代理到 `VITE_API_URL`，未设置时使用 `http://api:5050`。
+宿主机直连本机 docMind 后端时应显式指定：
+
+```bash
+VITE_API_URL=http://localhost:5050 corepack pnpm dev --host 0.0.0.0 --port 5174
+```
+
+本地模拟外部系统嵌入时访问：
+
+```text
+http://localhost:5174/chat-iframe/example.html
+```
+
+`example.html` 会加载 `docmind-chat-iframe-parent.js`，模拟生产系统附件 DOM，并挂载 `public/example-files/2026-07-02-AI文档智能助手第一版开发方案-5.5.md` 作为默认附件。由于浏览器按 origin 隔离 localStorage，`localhost:5174` 不能直接读取主站 `localhost:5173` 的 `user_token`；调试页提供 token 输入框，用来把主站登录 token 通过父页面配置注入 iframe。直接打开 `/chat-iframe/` 时没有父页面注入 token，调用受保护接口会返回“请登录后再访问”，模型列表也不会加载。
+调试页也提供账号密码登录入口，会通过 `/api/auth/token` 向本机 docMind 后端换取 token，再调用 `/api/auth/me` 校验后注入 iframe。
 
 ```bash
 corepack pnpm typecheck
@@ -229,6 +243,11 @@ docMind backend
   })
 </script>
 ```
+
+`token` 必须是 docMind 后端可识别的 Bearer Token。聊天、模型列表、附件抽取查询等接口都经过 `get_required_user`，因此父页面未传 token 或 token 过期时，iframe 会收到“请登录后再访问”，模型选择器也会因为模型列表接口 401 而为空。
+父脚本的窗口控制会在关闭和最小化时保留悬浮入口；普通窗口可通过顶部标题栏拖动，最小化/关闭后的悬浮入口也可直接拖动。从悬浮入口恢复普通窗口时，会先判断当前位置是否能完整显示小助手，若放不下则自动回到当前视口右下角。
+iframe 内部会话列表采用按需左侧抽屉展示，默认不占用聊天区域；点击顶部对话列表按钮后再展开历史会话和新建聊天入口。
+底部输入区的“问文件”会打开页面附件选择弹窗，显示当前页面识别到的附件名称，可多选/取消；未选择任何附件时会自动取消文件上下文，不再把附件摘要拼入提问。模型选择采用输入框右下角的模型按钮和搜索弹窗。左下角回形针按钮参考主站 `AttachmentOptionsComponent`，先弹出“添加附件 / 上传图片”小菜单；添加附件再打开拖拽上传弹窗，确认后进入当前消息的待发送附件列表。
 
 父脚本会优先扫描生产系统常见结构：
 

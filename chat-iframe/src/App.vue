@@ -1,16 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { Maximize2, Minimize2, RotateCcw, X } from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { Maximize2, Menu, Minimize2, Minus, X } from 'lucide-vue-next'
 import { queryIncomingDocumentExtractions } from '@/apis/incoming-documents'
 import ChatInput from '@/components/ChatInput.vue'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatSidebar from '@/components/ChatSidebar.vue'
 import IncomingDocumentPanel from '@/components/IncomingDocumentPanel.vue'
-import PageFileSelector from '@/components/PageFileSelector.vue'
 import { useIframeBridge } from '@/composables/useIframeBridge'
 import { useChatStore } from '@/stores/chat'
 import { useIframeContextStore } from '@/stores/iframe-context'
-import type { ExtractionResult } from '@/types'
+import type { ExtractionResult, IncomingPageFile } from '@/types'
 
 const context = useIframeContextStore()
 const {
@@ -19,12 +18,17 @@ const {
   notifyMaximize,
   notifyMessageSent,
   notifyMinimize,
-  notifyRestore
+  notifyRestore,
+  notifyWindowDragEnd,
+  notifyWindowDragMove,
+  notifyWindowDragStart
 } = useIframeBridge()
 const chat = useChatStore()
 const loading = ref(false)
 const error = ref('')
 const results = ref<Record<string, ExtractionResult>>({})
+const showSidebar = ref(false)
+const draggingWindow = ref(false)
 
 const selectedFile = computed(() => context.selectedFile)
 const selectedResult = computed(() =>
@@ -49,24 +53,80 @@ async function refreshExtraction() {
 }
 
 async function createChat() {
-  const thread = await chat.newConversation(context.config.token, context.config.agentId)
-  notifyConversationCreated({ conversationId: thread.id })
+  try {
+    const thread = await chat.newConversation(context.config.token, context.config.agentId)
+    showSidebar.value = false
+    notifyConversationCreated({ conversationId: thread.id })
+  } catch (err) {
+    // 嵌入页可能先于父页面 token 注入完成，显式落到聊天错误态比未处理异常更利于定位接入问题。
+    chat.error = err instanceof Error ? err.message : '创建会话失败'
+  }
 }
 
-async function sendChat(payload: { text: string; files: File[]; imageFile?: File | null }) {
+async function selectThread(threadId: string) {
+  await chat.selectThread(threadId, context.config.token)
+  showSidebar.value = false
+}
+
+async function sendChat(payload: {
+  text: string
+  files: File[]
+  imageFile?: File | null
+  selectedPageFiles?: IncomingPageFile[]
+}) {
+  const selectedContextFile = payload.selectedPageFiles?.[0] || null
+  const selectedContextResult = selectedContextFile ? results.value[selectedContextFile.id] || null : null
   const result = await chat.send(
     {
       text: payload.text,
       files: payload.files,
       imageFile: payload.imageFile,
       pageContent: context.pageContent,
-      selectedFile: selectedFile.value,
-      extractionResult: selectedResult.value
+      selectedFile: selectedContextFile,
+      extractionResult: selectedContextResult
     },
     context.config.token,
     context.config.agentId
   )
   if (result) notifyMessageSent({ conversationId: result.threadId, messageId: result.messageId })
+}
+
+function windowDragPayload(event: PointerEvent) {
+  return {
+    clientX: event.clientX,
+    clientY: event.clientY,
+    screenX: event.screenX,
+    screenY: event.screenY,
+    pointerId: event.pointerId
+  }
+}
+
+function moveWindowDrag(event: PointerEvent) {
+  if (!draggingWindow.value) return
+  notifyWindowDragMove(windowDragPayload(event))
+}
+
+function endWindowDrag() {
+  if (!draggingWindow.value) return
+  draggingWindow.value = false
+  notifyWindowDragEnd()
+  window.removeEventListener('pointermove', moveWindowDrag)
+  window.removeEventListener('pointerup', endWindowDrag)
+  window.removeEventListener('pointercancel', endWindowDrag)
+}
+
+function startWindowDrag(event: PointerEvent) {
+  if (context.windowState !== 'normal') return
+  const target = event.target as HTMLElement | null
+  // 顶栏承担拖动热区，但窗口按钮必须保持点击语义，避免拖动和控制操作互相抢事件。
+  if (target?.closest('button, a, input, textarea, select')) return
+  draggingWindow.value = true
+  notifyWindowDragStart(windowDragPayload(event))
+  ;(event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId)
+  window.addEventListener('pointermove', moveWindowDrag)
+  window.addEventListener('pointerup', endWindowDrag)
+  window.addEventListener('pointercancel', endWindowDrag)
+  event.preventDefault()
 }
 
 watch(
@@ -84,24 +144,27 @@ watch(
 onMounted(() => {
   if (!context.files.length) refreshExtraction()
 })
+
+onUnmounted(() => {
+  endWindowDrag()
+})
 </script>
 
 <template>
   <main class="chat-shell">
-    <header class="chat-header">
-      <div>
-        <strong>docMind 文档助手</strong>
-        <span>{{ context.pageContent.title || '来文结构化结果' }}</span>
-      </div>
+    <header class="chat-header" @pointerdown="startWindowDrag">
+      <button type="button" class="header-icon-button" title="对话列表" @click="showSidebar = true">
+        <Menu :size="17" />
+      </button>
       <nav class="window-actions" aria-label="窗口控制">
-        <button type="button" title="最小化" @click="notifyMinimize">
-          <Minimize2 :size="16" />
+        <button v-if="context.windowState === 'normal'" type="button" title="最小化到悬浮按钮" @click="notifyMinimize">
+          <Minus :size="16" />
         </button>
-        <button type="button" title="恢复" @click="notifyRestore">
-          <RotateCcw :size="16" />
+        <button v-if="context.windowState === 'normal'" type="button" title="最大化" @click="notifyMaximize">
+          <Maximize2 :size="15" />
         </button>
-        <button type="button" title="最大化" @click="notifyMaximize">
-          <Maximize2 :size="16" />
+        <button v-else type="button" title="还原窗口" @click="notifyRestore">
+          <Minimize2 :size="15" />
         </button>
         <button type="button" title="关闭" @click="notifyClose">
           <X :size="16" />
@@ -110,23 +173,26 @@ onMounted(() => {
     </header>
 
     <section class="chat-body">
-      <aside class="side-rail">
-        <ChatSidebar
-          :threads="chat.threads"
-          :current-thread-id="chat.currentThreadId"
-          :loading="chat.isLoading"
-          @new="createChat"
-          @select="(threadId) => chat.selectThread(threadId, context.config.token)"
-          @rename="(event) => event.title && chat.renameConversation(event.threadId, event.title, context.config.token)"
-          @delete="(threadId) => chat.removeConversation(threadId, context.config.token)"
-          @pin="(threadId) => chat.togglePinConversation(threadId, context.config.token)"
-        />
-        <PageFileSelector
-          :files="context.files"
-          :selected-file-id="context.selectedFileId"
-          @select="context.selectFile"
-        />
-      </aside>
+      <Transition name="sidebar-fade">
+        <button v-if="showSidebar" type="button" class="sidebar-overlay" aria-label="关闭对话列表" @click="showSidebar = false"></button>
+      </Transition>
+      <Transition name="sidebar-slide">
+        <aside v-if="showSidebar" class="conversation-drawer">
+          <button type="button" class="drawer-close" title="关闭对话列表" @click="showSidebar = false">
+            <X :size="16" />
+          </button>
+          <ChatSidebar
+            :threads="chat.threads"
+            :current-thread-id="chat.currentThreadId"
+            :loading="chat.isLoading"
+            @new="createChat"
+            @select="selectThread"
+            @rename="(event) => event.title && chat.renameConversation(event.threadId, event.title, context.config.token)"
+            @delete="(threadId) => chat.removeConversation(threadId, context.config.token)"
+            @pin="(threadId) => chat.togglePinConversation(threadId, context.config.token)"
+          />
+        </aside>
+      </Transition>
 
       <section class="workbench">
         <IncomingDocumentPanel
@@ -149,6 +215,8 @@ onMounted(() => {
           :ask-file="chat.askFile"
           :models="chat.modelOptions"
           :selected-model-spec="chat.selectedModelSpec"
+          :page-files="context.files"
+          :selected-page-file-id="context.selectedFileId"
           @update:ask-page="chat.askPage = $event"
           @update:ask-file="chat.askFile = $event"
           @update:selected-model-spec="chat.selectedModelSpec = $event"

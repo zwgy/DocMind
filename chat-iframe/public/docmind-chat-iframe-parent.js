@@ -156,7 +156,10 @@
     this.messageHandler = null
     this.pointerMoveHandler = null
     this.pointerUpHandler = null
+    this.pointerCancelHandler = null
+    this.windowBlurHandler = null
     this.drag = null
+    this.dragMoved = false
     if (this.options.autoInit) this.init()
   }
 
@@ -211,12 +214,17 @@
     if (this.messageHandler) window.removeEventListener('message', this.messageHandler)
     if (this.pointerMoveHandler) document.removeEventListener('pointermove', this.pointerMoveHandler)
     if (this.pointerUpHandler) document.removeEventListener('pointerup', this.pointerUpHandler)
+    if (this.pointerCancelHandler) document.removeEventListener('pointercancel', this.pointerCancelHandler)
+    if (this.windowBlurHandler) window.removeEventListener('blur', this.windowBlurHandler)
+    this._endDrag()
     if (this.container && this.container.parentNode) this.container.parentNode.removeChild(this.container)
     this.container = null
     this.iframe = null
     this.messageHandler = null
     this.pointerMoveHandler = null
     this.pointerUpHandler = null
+    this.pointerCancelHandler = null
+    this.windowBlurHandler = null
   }
 
   DocMindChatIframe.prototype.on = function (name, callback) {
@@ -244,54 +252,126 @@
       '.docmind-chat-iframe.top-left{left:' + this.options.offsetX + 'px;top:' + this.options.offsetY + 'px}' +
       '.docmind-chat-iframe.normal{width:' + width + 'px;height:' + height + 'px}' +
       '.docmind-chat-iframe.minimized{width:56px;height:56px}' +
+      '.docmind-chat-iframe.closed{width:56px;height:56px}' +
       '.docmind-chat-iframe.maximized{inset:0!important;width:100vw;height:100vh}' +
-      '.docmind-chat-iframe.closed{display:none}' +
       '.docmind-chat-shell{height:100%;background:#fff;border-radius:8px;box-shadow:0 18px 45px rgba(0,0,0,.24);overflow:hidden}' +
       '.docmind-chat-iframe.maximized .docmind-chat-shell{border-radius:0}' +
-      '.docmind-chat-framebar{height:28px;display:flex;align-items:center;padding:0 10px;background:#023944;color:#fff;font-size:12px;cursor:move;user-select:none}' +
-      '.docmind-chat-frame{width:100%;height:calc(100% - 28px);border:0;display:block}' +
+      '.docmind-chat-frame{width:100%;height:100%;border:0;display:block}' +
       '.docmind-chat-restore{width:56px;height:56px;border:0;border-radius:28px;background:#046a82;color:#fff;box-shadow:0 10px 28px rgba(0,0,0,.25);cursor:pointer;display:flex;align-items:center;justify-content:center}' +
       '.docmind-chat-restore svg{width:28px;height:28px;display:block}' +
-      '.docmind-chat-iframe.minimized .docmind-chat-shell{display:none}' +
-      '.docmind-chat-iframe:not(.minimized) .docmind-chat-restore{display:none}' +
+      '.docmind-chat-iframe.minimized .docmind-chat-shell,.docmind-chat-iframe.closed .docmind-chat-shell{display:none}' +
+      '.docmind-chat-iframe:not(.minimized):not(.closed) .docmind-chat-restore{display:none}' +
       '</style>' +
-      '<button class="docmind-chat-restore" title="打开 docMind 文档助手">' + restoreButtonHtml + '</button>' +
-      '<div class="docmind-chat-shell"><div class="docmind-chat-framebar">docMind 文档助手</div><iframe class="docmind-chat-frame" allow="clipboard-write"></iframe></div>'
+      '<button class="docmind-chat-restore" title="打开助手">' + restoreButtonHtml + '</button>' +
+      '<div class="docmind-chat-shell"><iframe class="docmind-chat-frame" allow="clipboard-write"></iframe></div>'
     )
   }
 
   DocMindChatIframe.prototype._bindEvents = function () {
     var self = this
-    this.container.querySelector('.docmind-chat-restore').addEventListener('click', function () {
+    var restoreButton = this.container.querySelector('.docmind-chat-restore')
+    restoreButton.addEventListener('pointerdown', function (event) {
+      self._startDrag(event)
+    })
+    restoreButton.addEventListener('click', function (event) {
+      if (self.dragMoved) {
+        event.preventDefault()
+        self.dragMoved = false
+        return
+      }
       self.restore()
     })
-    this.container.querySelector('.docmind-chat-framebar').addEventListener('pointerdown', function (event) {
-      if (self.windowState !== 'normal') return
-      // 只允许普通窗口拖动，最大化时拖动会和全屏布局互相打架。
-      self.drag = {
-        x: event.clientX,
-        y: event.clientY,
-        left: self.container.offsetLeft,
-        top: self.container.offsetTop
-      }
-      event.preventDefault()
-    })
     this.pointerMoveHandler = function (event) {
-      if (!self.drag) return
-      self.container.style.left = self.drag.left + event.clientX - self.drag.x + 'px'
-      self.container.style.top = self.drag.top + event.clientY - self.drag.y + 'px'
-      self.container.style.right = 'auto'
-      self.container.style.bottom = 'auto'
+      self._moveDrag(event)
     }
     document.addEventListener('pointermove', this.pointerMoveHandler)
-    this.pointerUpHandler = function () {
-      self.drag = null
+    this.pointerUpHandler = function (event) {
+      self._endDrag(event)
     }
     document.addEventListener('pointerup', this.pointerUpHandler)
+    this.pointerCancelHandler = function (event) {
+      self._endDrag(event)
+    }
+    document.addEventListener('pointercancel', this.pointerCancelHandler)
+    this.windowBlurHandler = function () {
+      self._endDrag()
+    }
+    window.addEventListener('blur', this.windowBlurHandler)
     this.messageHandler = function (event) {
       self._handleMessage(event)
     }
     window.addEventListener('message', this.messageHandler)
+  }
+
+  DocMindChatIframe.prototype._startDrag = function (event) {
+    this._startDragAt(event)
+    if (event.currentTarget && event.currentTarget.setPointerCapture && event.pointerId != null) {
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId)
+      } catch {
+        // 某些宿主页面会拦截 pointer capture；document 级事件仍会兜住大多数浏览器。
+      }
+    }
+    event.preventDefault()
+  }
+
+  DocMindChatIframe.prototype._startIframeDrag = function (payload) {
+    if (!this.container || !payload) return
+    this._startDragAt(this._pointFromIframePayload(payload), { disableIframe: false })
+  }
+
+  DocMindChatIframe.prototype._pointFromIframePayload = function (payload) {
+    if (typeof payload.screenX === 'number' && typeof payload.screenY === 'number') {
+      return { screenX: payload.screenX, screenY: payload.screenY, pointerId: payload.pointerId }
+    }
+    var rect = this.container.getBoundingClientRect()
+    return {
+      clientX: rect.left + (payload.clientX || 0),
+      clientY: rect.top + (payload.clientY || 0),
+      pointerId: payload.pointerId
+    }
+  }
+
+  DocMindChatIframe.prototype._startDragAt = function (point, options) {
+    if (!this.container || this.windowState === 'maximized') return
+    // iframe 会截获鼠标释放事件；拖动时临时禁用它，避免窗口一直粘着鼠标。
+    var disableIframe = !options || options.disableIframe !== false
+    if (disableIframe && this.iframe) this.iframe.style.pointerEvents = 'none'
+    this.dragMoved = false
+    this.drag = {
+      x: typeof point.screenX === 'number' ? point.screenX : point.clientX,
+      y: typeof point.screenY === 'number' ? point.screenY : point.clientY,
+      left: this.container.offsetLeft,
+      top: this.container.offsetTop,
+      pointerId: point.pointerId,
+      disableIframe: disableIframe
+    }
+  }
+
+  DocMindChatIframe.prototype._moveDrag = function (event) {
+    if (!this.drag || !this.container) return
+    var x = typeof event.screenX === 'number' ? event.screenX : event.clientX
+    var y = typeof event.screenY === 'number' ? event.screenY : event.clientY
+    var dx = x - this.drag.x
+    var dy = y - this.drag.y
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) this.dragMoved = true
+    this.container.style.left = this.drag.left + dx + 'px'
+    this.container.style.top = this.drag.top + dy + 'px'
+    this.container.style.right = 'auto'
+    this.container.style.bottom = 'auto'
+  }
+
+  DocMindChatIframe.prototype._endDrag = function (event) {
+    if (!this.drag) return
+    if (event && event.currentTarget && event.currentTarget.releasePointerCapture && this.drag.pointerId != null) {
+      try {
+        event.currentTarget.releasePointerCapture(this.drag.pointerId)
+      } catch {
+        // 释放失败说明 capture 已被浏览器回收，状态清理仍然必须继续。
+      }
+    }
+    if (this.drag.disableIframe && this.iframe) this.iframe.style.pointerEvents = ''
+    this.drag = null
   }
 
   DocMindChatIframe.prototype._handleMessage = function (event) {
@@ -304,6 +384,7 @@
     switch (message.type) {
       case 'IFRAME_READY':
         this._sendConfig()
+        this._sendToIframe('WINDOW_STATE', { state: this.windowState })
         this._sendToIframe('PAGE_CONTENT', this.pageContent || this._pageContentFromDocument())
         this._sendToIframe('PAGE_FILES_UPDATED', this.pageFiles)
         break
@@ -324,6 +405,15 @@
         break
       case 'CLOSE':
         this.close()
+        break
+      case 'WINDOW_DRAG_START':
+        this._startIframeDrag(message.payload)
+        break
+      case 'WINDOW_DRAG_MOVE':
+        this._moveDrag(this._pointFromIframePayload(message.payload || {}))
+        break
+      case 'WINDOW_DRAG_END':
+        this._endDrag()
         break
       case 'CONVERSATION_CREATED':
         this._emit('conversationCreated', message.payload)
@@ -361,10 +451,34 @@
 
   DocMindChatIframe.prototype._setWindowState = function (state, notify) {
     this.windowState = state
+    this._endDrag()
     this.container.className = 'docmind-chat-iframe ' + state + ' ' + this.options.position
+    if (state === 'normal') this._ensureNormalWindowVisible()
     if (notify !== false) this._sendToIframe('WINDOW_STATE', { state: state })
     this._emit('stateChange', { state: state })
     return this
+  }
+
+  DocMindChatIframe.prototype._ensureNormalWindowVisible = function () {
+    if (!this.container || typeof window === 'undefined') return
+    var margin = 12
+    var viewportWidth = window.innerWidth || document.documentElement.clientWidth || this.options.width
+    var viewportHeight = window.innerHeight || document.documentElement.clientHeight || this.options.height
+    var width = Math.min(this.options.width, viewportWidth - margin * 2)
+    var height = Math.min(this.options.height, viewportHeight - margin * 2)
+    var left = this.container.offsetLeft
+    var top = this.container.offsetTop
+    var fits =
+      left >= margin &&
+      top >= margin &&
+      left + width <= viewportWidth - margin &&
+      top + height <= viewportHeight - margin
+    if (fits) return
+    // 从拖动后的悬浮入口展开时，优先保证完整可见；放不下就回到当前视口右下角。
+    this.container.style.left = Math.max(margin, viewportWidth - width - this.options.offsetX) + 'px'
+    this.container.style.top = Math.max(margin, viewportHeight - height - this.options.offsetY) + 'px'
+    this.container.style.right = 'auto'
+    this.container.style.bottom = 'auto'
   }
 
   global.DocMindChatIframe = DocMindChatIframe

@@ -1,9 +1,21 @@
 <script setup lang="ts">
-import { Image, Paperclip, SendHorizontal, Square, X } from 'lucide-vue-next'
-import { ref } from 'vue'
-import type { ModelOption } from '@/types'
+import {
+  CheckSquare,
+  ChevronDown,
+  FileText,
+  Globe2,
+  Image,
+  Paperclip,
+  Search,
+  SendHorizontal,
+  Square,
+  Square as SquareIcon,
+  X
+} from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import type { IncomingPageFile, ModelOption } from '@/types'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     disabled?: boolean
     streaming?: boolean
@@ -11,6 +23,8 @@ withDefaults(
     askFile?: boolean
     models?: ModelOption[]
     selectedModelSpec?: string
+    pageFiles?: IncomingPageFile[]
+    selectedPageFileId?: string
   }>(),
   {
     disabled: false,
@@ -18,12 +32,14 @@ withDefaults(
     askPage: true,
     askFile: true,
     models: () => [],
-    selectedModelSpec: ''
+    selectedModelSpec: '',
+    pageFiles: () => [],
+    selectedPageFileId: ''
   }
 )
 
 const emit = defineEmits<{
-  submit: [payload: { text: string; files: File[]; imageFile?: File | null }]
+  submit: [payload: { text: string; files: File[]; imageFile?: File | null; selectedPageFiles: IncomingPageFile[] }]
   stop: []
   'update:askPage': [value: boolean]
   'update:askFile': [value: boolean]
@@ -33,19 +49,83 @@ const emit = defineEmits<{
 const text = ref('')
 const files = ref<File[]>([])
 const imageFile = ref<File | null>(null)
+const draftAttachmentFiles = ref<File[]>([])
+const selectedPageFileIds = ref<Set<string>>(new Set())
+const showFileMenu = ref(false)
+const showModelMenu = ref(false)
+const showAttachmentMenu = ref(false)
+const showAttachmentModal = ref(false)
+const dragActive = ref(false)
+const modelSearch = ref('')
+const fileMenuRef = ref<HTMLElement | null>(null)
+const modelMenuRef = ref<HTMLElement | null>(null)
+const attachmentMenuRef = ref<HTMLElement | null>(null)
+const imageInputRef = ref<HTMLInputElement | null>(null)
+const hasPageFiles = computed(() => props.pageFiles.length > 0)
+const selectedPageFiles = computed(() => props.pageFiles.filter((file) => selectedPageFileIds.value.has(file.id)))
+// 页面附件可能被多选，底部只展示摘要，完整列表留在选择弹窗和 hover 提示里。
+const selectedPageFileSummary = computed(() => {
+  if (!selectedPageFiles.value.length) return ''
+  if (selectedPageFiles.value.length === 1) return `问文件：${selectedPageFiles.value[0].name}`
+  return `问文件：已选 ${selectedPageFiles.value.length} 个附件`
+})
+const selectedPageFileTooltip = computed(() => selectedPageFiles.value.map((file) => file.name).join('\n'))
+const selectedModelLabel = computed(() => {
+  return props.models.find((model) => model.value === props.selectedModelSpec)?.label || props.selectedModelSpec || '默认模型'
+})
+const filteredModelGroups = computed(() => {
+  const keyword = modelSearch.value.trim().toLowerCase()
+  const groups = new Map<string, ModelOption[]>()
+  for (const model of props.models) {
+    const haystack = `${model.label} ${model.value} ${model.provider || ''}`.toLowerCase()
+    if (keyword && !haystack.includes(keyword)) continue
+    const provider = model.provider || '模型'
+    groups.set(provider, [...(groups.get(provider) || []), model])
+  }
+  return [...groups.entries()].map(([provider, models]) => ({ provider, models }))
+})
+const fileButtonText = computed(() => {
+  if (!hasPageFiles.value || !selectedPageFiles.value.length) return '问文件'
+  return `问文件(${selectedPageFiles.value.length})`
+})
+
+watch(
+  () => props.pageFiles.map((file) => `${file.id}:${file.selected ? '1' : '0'}`).join('|'),
+  () => {
+    const currentIds = new Set(props.pageFiles.map((file) => file.id))
+    const next = new Set([...selectedPageFileIds.value].filter((id) => currentIds.has(id)))
+    const selected = props.pageFiles.filter((file) => file.selected).map((file) => file.id)
+    if (!next.size && selected.length) selected.forEach((id) => next.add(id))
+    if (!next.size && props.selectedPageFileId) next.add(props.selectedPageFileId)
+    selectedPageFileIds.value = next
+    emit('update:askFile', next.size > 0)
+  },
+  { immediate: true }
+)
+
+function syncAskFile() {
+  emit('update:askFile', selectedPageFileIds.value.size > 0)
+}
 
 function submit() {
   const content = text.value.trim()
   if (!content) return
-  emit('submit', { text: content, files: files.value, imageFile: imageFile.value })
+  emit('submit', { text: content, files: files.value, imageFile: imageFile.value, selectedPageFiles: selectedPageFiles.value })
   text.value = ''
   files.value = []
   imageFile.value = null
 }
 
+function appendDraftFiles(fileList?: FileList | File[]) {
+  const incoming = Array.from(fileList || [])
+  const existing = new Set(draftAttachmentFiles.value.map((file) => `${file.name}:${file.size}:${file.lastModified}`))
+  const next = incoming.filter((file) => !existing.has(`${file.name}:${file.size}:${file.lastModified}`))
+  draftAttachmentFiles.value = [...draftAttachmentFiles.value, ...next]
+}
+
 function onFileChange(event: Event) {
   const input = event.target as HTMLInputElement
-  files.value = [...files.value, ...Array.from(input.files || [])]
+  appendDraftFiles(input.files || undefined)
   // 同一个文件二次选择也要触发 change，否则用户替换附件时会觉得按钮失灵。
   input.value = ''
 }
@@ -60,49 +140,134 @@ function removeFile(index: number) {
   files.value = files.value.filter((_, itemIndex) => itemIndex !== index)
 }
 
+function removeDraftFile(index: number) {
+  draftAttachmentFiles.value = draftAttachmentFiles.value.filter((_, itemIndex) => itemIndex !== index)
+}
+
+function formatFileSize(size: number) {
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
+  return `${(size / 1024).toFixed(1)} KB`
+}
+
 function emitAskPage(event: Event) {
   emit('update:askPage', (event.target as HTMLInputElement).checked)
 }
 
-function emitAskFile(event: Event) {
-  emit('update:askFile', (event.target as HTMLInputElement).checked)
+function selectModel(value: string) {
+  emit('update:selectedModelSpec', value)
+  showModelMenu.value = false
 }
 
-function emitModel(event: Event) {
-  emit('update:selectedModelSpec', (event.target as HTMLSelectElement).value)
+function toggleModelMenu() {
+  if (!props.models.length || props.disabled) return
+  showModelMenu.value = !showModelMenu.value
 }
+
+function togglePageFile(fileId: string) {
+  const next = new Set(selectedPageFileIds.value)
+  if (next.has(fileId)) next.delete(fileId)
+  else next.add(fileId)
+  selectedPageFileIds.value = next
+  syncAskFile()
+}
+
+function clearSelectedPageFiles() {
+  selectedPageFileIds.value = new Set()
+  syncAskFile()
+}
+
+function toggleFileMenu() {
+  if (!hasPageFiles.value || props.disabled) return
+  showFileMenu.value = !showFileMenu.value
+}
+
+function openAttachmentModal() {
+  showAttachmentMenu.value = false
+  draftAttachmentFiles.value = [...files.value]
+  showAttachmentModal.value = true
+}
+
+function confirmAttachmentModal() {
+  files.value = [...draftAttachmentFiles.value]
+  showAttachmentModal.value = false
+}
+
+function closeAttachmentModal() {
+  showAttachmentModal.value = false
+  draftAttachmentFiles.value = []
+}
+
+function triggerImageInput() {
+  showAttachmentMenu.value = false
+  imageInputRef.value?.click()
+}
+
+function onDropFiles(event: DragEvent) {
+  dragActive.value = false
+  appendDraftFiles(event.dataTransfer?.files || undefined)
+}
+
+function handleOutsideClick(event: MouseEvent) {
+  if (fileMenuRef.value && !fileMenuRef.value.contains(event.target as Node)) showFileMenu.value = false
+  if (modelMenuRef.value && !modelMenuRef.value.contains(event.target as Node)) showModelMenu.value = false
+  if (attachmentMenuRef.value && !attachmentMenuRef.value.contains(event.target as Node)) showAttachmentMenu.value = false
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleOutsideClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleOutsideClick)
+})
 </script>
 
 <template>
   <form class="chat-input" @submit.prevent="submit">
     <div class="input-toolbar">
-      <label>
+      <label class="context-chip" :class="{ active: askPage }" title="携带当前页面内容">
         <input type="checkbox" :checked="askPage" @change="emitAskPage" />
-        问网页
+        <Globe2 :size="15" />
+        <span>问网页</span>
       </label>
-      <label>
-        <input type="checkbox" :checked="askFile" @change="emitAskFile" />
-        问文件
-      </label>
-      <select
-        :value="selectedModelSpec"
-        :disabled="!models.length"
-        title="模型"
-        @change="emitModel"
-      >
-        <option value="">默认模型</option>
-        <option v-for="model in models" :key="model.value" :value="model.value">
-          {{ model.label }}
-        </option>
-      </select>
-      <label class="attach-button" title="添加附件">
-        <Paperclip :size="16" />
-        <input type="file" multiple @change="onFileChange" />
-      </label>
-      <label class="attach-button" title="添加图片">
-        <Image :size="16" />
-        <input type="file" accept="image/*" @change="onImageChange" />
-      </label>
+      <div ref="fileMenuRef" class="file-context-menu">
+        <button
+          type="button"
+          class="context-chip"
+          :class="{ active: selectedPageFiles.length > 0 }"
+          :disabled="!hasPageFiles || disabled"
+          title="选择要询问的页面附件"
+          @click="toggleFileMenu"
+        >
+          <FileText :size="15" />
+          <span>{{ fileButtonText }}</span>
+          <ChevronDown :size="14" :class="{ open: showFileMenu }" />
+        </button>
+        <div v-if="showFileMenu" class="page-file-popover">
+          <div class="popover-title">选择询问附件</div>
+          <button
+            v-for="file in pageFiles"
+            :key="file.id"
+            type="button"
+            class="page-file-row"
+            :class="{ active: selectedPageFileIds.has(file.id) }"
+            @click="togglePageFile(file.id)"
+          >
+            <CheckSquare v-if="selectedPageFileIds.has(file.id)" :size="16" />
+            <SquareIcon v-else :size="16" />
+            <span :title="file.name">{{ file.name }}</span>
+            <small>{{ file.sizeText || file.sourceKey || '文档' }}</small>
+          </button>
+          <p v-if="!pageFiles.length" class="popover-empty">当前页面没有可询问附件</p>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="selectedPageFiles.length" class="attached-files context-files">
+      <span :title="selectedPageFileTooltip">
+        {{ selectedPageFileSummary }}
+        <button type="button" title="取消询问附件" @click="clearSelectedPageFiles"><X :size="12" /></button>
+      </span>
     </div>
 
     <div v-if="files.length || imageFile" class="attached-files">
@@ -124,12 +289,126 @@ function emitModel(event: Event) {
         :disabled="disabled"
         @keydown.enter.exact.prevent="submit"
       />
-      <button v-if="streaming" type="button" title="停止" @click="$emit('stop')">
-        <Square :size="16" />
-      </button>
-      <button v-else type="submit" :disabled="disabled || !text.trim()" title="发送">
-        <SendHorizontal :size="18" />
-      </button>
+      <div class="input-footer">
+        <div class="input-tools">
+          <div ref="attachmentMenuRef" class="attachment-menu-wrapper">
+            <button
+              type="button"
+              class="tool-button"
+              :class="{ active: showAttachmentMenu }"
+              title="添加内容"
+              @click="showAttachmentMenu = !showAttachmentMenu"
+            >
+              <Paperclip :size="18" />
+            </button>
+            <div v-if="showAttachmentMenu" class="attachment-options-menu">
+              <button
+                type="button"
+                class="attachment-option"
+                data-tooltip="支持任意文件格式 ≤ 5 MB"
+                @click="openAttachmentModal"
+              >
+                <FileText :size="15" />
+                <span>添加附件</span>
+              </button>
+              <button
+                type="button"
+                class="attachment-option"
+                data-tooltip="支持 jpg、jpeg、png、gif，≤ 5 MB"
+                @click="triggerImageInput"
+              >
+                <Image :size="15" />
+                <span>上传图片</span>
+              </button>
+            </div>
+            <input class="hidden-file-input" type="file" multiple @change="onFileChange" />
+            <input ref="imageInputRef" class="hidden-file-input" type="file" accept="image/*" @change="onImageChange" />
+          </div>
+        </div>
+        <div class="send-tools">
+          <div ref="modelMenuRef" class="model-menu-wrapper">
+            <button
+              type="button"
+              class="model-trigger"
+              :disabled="!models.length || disabled"
+              title="选择模型"
+              @click="toggleModelMenu"
+            >
+              <span>{{ selectedModelLabel }}</span>
+              <ChevronDown :size="14" :class="{ open: showModelMenu }" />
+            </button>
+            <div v-if="showModelMenu" class="model-popover">
+              <label class="model-search">
+                <Search :size="14" />
+                <input v-model="modelSearch" type="text" placeholder="搜索模型" @keydown.stop />
+              </label>
+              <div v-for="group in filteredModelGroups" :key="group.provider" class="model-group">
+                <div class="model-provider">{{ group.provider }}</div>
+                <button
+                  v-for="model in group.models"
+                  :key="model.value"
+                  type="button"
+                  class="model-option"
+                  :class="{ active: model.value === selectedModelSpec }"
+                  @click="selectModel(model.value)"
+                >
+                  {{ model.label }}
+                </button>
+              </div>
+              <p v-if="!filteredModelGroups.length" class="popover-empty">没有匹配模型</p>
+            </div>
+          </div>
+          <button v-if="streaming" class="send-button" type="button" title="停止" @click="$emit('stop')">
+            <Square :size="16" />
+          </button>
+          <button v-else class="send-button" type="submit" :disabled="disabled || !text.trim()" title="发送">
+            <SendHorizontal :size="18" />
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showAttachmentModal" class="attachment-modal-mask" @click.self="closeAttachmentModal">
+      <section class="attachment-modal" role="dialog" aria-modal="true" aria-labelledby="attachmentModalTitle">
+        <header class="attachment-modal-header">
+          <h2 id="attachmentModalTitle">添加附件</h2>
+          <button type="button" title="关闭" @click="closeAttachmentModal">
+            <X :size="18" />
+          </button>
+        </header>
+        <label
+          class="attachment-dropzone"
+          :class="{ active: dragActive }"
+          @dragover.prevent="dragActive = true"
+          @dragleave.prevent="dragActive = false"
+          @drop.prevent="onDropFiles"
+        >
+          <input class="dropzone-file-input" type="file" multiple @change="onFileChange" />
+          <strong>点击或拖拽文件到此处上传</strong>
+          <span>支持任意文件格式 ≤ 5 MB；PDF 和图片可选解析为 Markdown。</span>
+        </label>
+        <div v-if="draftAttachmentFiles.length" class="attachment-draft-list">
+          <div v-for="(file, index) in draftAttachmentFiles" :key="`${file.name}-${file.size}-${index}`" class="attachment-draft-item">
+            <div class="attachment-draft-icon">
+              <FileText :size="17" />
+            </div>
+            <div class="attachment-draft-body">
+              <strong :title="file.name">{{ file.name }}</strong>
+              <div class="attachment-draft-meta">
+                <span>已上传</span>
+                <small>{{ formatFileSize(file.size) }}</small>
+              </div>
+            </div>
+            <button type="button" title="移除" @click="removeDraftFile(index)">
+              <X :size="14" />
+            </button>
+          </div>
+        </div>
+        <footer class="attachment-modal-footer">
+          <button type="button" class="secondary" @click="closeAttachmentModal">取消</button>
+          <button type="button" :disabled="!draftAttachmentFiles.length" @click="confirmAttachmentModal">添加附件</button>
+        </footer>
+      </section>
     </div>
   </form>
 </template>
