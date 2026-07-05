@@ -5,7 +5,6 @@ import { queryIncomingDocumentExtractions } from '@/apis/incoming-documents'
 import ChatInput from '@/components/ChatInput.vue'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatSidebar from '@/components/ChatSidebar.vue'
-import IncomingDocumentPanel from '@/components/IncomingDocumentPanel.vue'
 import { useIframeBridge } from '@/composables/useIframeBridge'
 import { useChatStore } from '@/stores/chat'
 import { useIframeContextStore } from '@/stores/iframe-context'
@@ -31,22 +30,36 @@ const showSidebar = ref(false)
 const draggingWindow = ref(false)
 
 const selectedFile = computed(() => context.selectedFile)
-const selectedResult = computed(() =>
-  selectedFile.value ? results.value[selectedFile.value.id] || null : null
-)
+function cacheExtractionResults(files: IncomingPageFile[], items: ExtractionResult[] = []) {
+  const next = { ...results.value }
+  for (const [index, file] of files.entries()) {
+    const item =
+      items.find((candidate) => {
+        const incomingId = candidate.incomingFileId || candidate.name
+        return incomingId === file.id || incomingId === file.sourceKey || incomingId === file.sourceUrl || incomingId === file.name
+      }) || items[index]
+    if (item) next[file.id] = item
+  }
+  results.value = next
+}
 
 async function refreshExtraction() {
-  if (!selectedFile.value) return
+  const file = selectedFile.value
+  if (!file) {
+    chat.setContextSummary({ file: null, result: null })
+    return
+  }
+  const queryFiles = context.files.length ? context.files : [file]
   loading.value = true
   error.value = ''
+  chat.setContextSummary({ file, result: results.value[file.id] || null, loading: true })
   try {
-    const response = await queryIncomingDocumentExtractions([selectedFile.value], context.config.token)
-    const item = response.items?.[0] || null
-    if (item) {
-      results.value = { ...results.value, [selectedFile.value.id]: item }
-    }
+    const response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
+    cacheExtractionResults(queryFiles, response.items || [])
+    if (selectedFile.value?.id === file.id) chat.setContextSummary({ file, result: results.value[file.id] || null, loading: false })
   } catch (err) {
     error.value = err instanceof Error ? err.message : '查询失败'
+    if (selectedFile.value?.id === file.id) chat.setContextSummary({ file, result: results.value[file.id] || null, error: error.value })
   } finally {
     loading.value = false
   }
@@ -131,7 +144,13 @@ function startWindowDrag(event: PointerEvent) {
 
 watch(
   () => selectedFile.value?.id,
-  () => refreshExtraction(),
+  () => {
+    chat.setContextSummary({
+      file: selectedFile.value,
+      result: selectedFile.value ? results.value[selectedFile.value.id] || null : null
+    })
+    void refreshExtraction()
+  },
   { immediate: true }
 )
 
@@ -195,15 +214,8 @@ onUnmounted(() => {
       </Transition>
 
       <section class="workbench">
-        <IncomingDocumentPanel
-          :file="selectedFile"
-          :result="selectedResult"
-          :loading="loading"
-          :error="error"
-          @refresh="refreshExtraction"
-        />
         <ChatMessages
-          :messages="chat.messages"
+          :messages="chat.displayMessages"
           :loading="chat.isLoading"
           @retry="chat.retry(context.config.token, context.config.agentId)"
           @feedback="(event) => chat.feedback(event, context.config.token)"
@@ -220,6 +232,7 @@ onUnmounted(() => {
           @update:ask-page="chat.askPage = $event"
           @update:ask-file="chat.askFile = $event"
           @update:selected-model-spec="chat.selectedModelSpec = $event"
+          @update:selected-page-file-id="context.selectFile($event)"
           @submit="sendChat"
           @stop="chat.stop(context.config.token)"
         />

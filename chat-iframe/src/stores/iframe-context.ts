@@ -41,7 +41,7 @@ export const useIframeContextStore = defineStore('iframe-context', {
   }),
   getters: {
     selectedFile(state) {
-      return state.files.find((file) => file.id === state.selectedFileId) || state.files[0] || null
+      return state.selectedFileId ? state.files.find((file) => file.id === state.selectedFileId) || null : null
     }
   },
   actions: {

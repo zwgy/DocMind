@@ -63,6 +63,16 @@ export type ExtractionResult = {
   items?: ExtractionItem[]
 }
 
+export type ContextSummaryPayload = {
+  file: IncomingPageFile
+  result: ExtractionResult | null
+  loading?: boolean
+  error?: string
+  statusText: string
+  matchedCategories: Array<{ name: string; evidence?: string | null }>
+  items: ExtractionItem[]
+}
+
 export type ExtractionQueryResponse = {
   items?: ExtractionResult[]
 }
@@ -110,6 +120,7 @@ export type ChatMessage = {
   errorType?: string
   errorMessage?: string
   modelName?: string
+  contextSummary?: ContextSummaryPayload
   createdAt?: string
   raw?: Record<string, unknown>
 }

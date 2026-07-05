@@ -22,6 +22,7 @@ test('queryIncomingDocumentExtractions posts files with bearer token', async () 
 })
 
 test('queryIncomingDocumentExtractions reports non-json http status', async () => {
+  delete globalThis.window
   globalThis.fetch = async () =>
     new Response('bad gateway', {
       status: 502,
@@ -32,4 +33,23 @@ test('queryIncomingDocumentExtractions reports non-json http status', async () =
     () => queryIncomingDocumentExtractions([{ id: 'f1', name: 'incoming.pdf' }]),
     /502/
   )
+})
+
+test('queryIncomingDocumentExtractions returns local mock data when enabled by url', async () => {
+  globalThis.window = { location: { search: '?mockExtraction=mixed' } }
+  globalThis.fetch = async () => {
+    throw new Error('mock should not call backend')
+  }
+
+  const response = await queryIncomingDocumentExtractions([
+    { id: 'f1', name: 'ready.md' },
+    { id: 'f2', name: 'missing.md' }
+  ])
+
+  assert.equal(response.items[0].matchStatus, 'matched')
+  assert.equal(response.items[0].extractionStatus, 'ready')
+  assert.equal(response.items[1].matchStatus, 'not_found')
+  assert.equal(response.items[1].extractionStatus, 'not_found')
+  assert.equal(response.items[1].reason, undefined)
+  delete globalThis.window
 })

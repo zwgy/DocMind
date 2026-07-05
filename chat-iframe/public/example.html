@@ -290,6 +290,10 @@
             iframe 和主站 <code>localhost:5173</code> 是不同 origin，浏览器不会共享 localStorage。请从主站复制
             <code>localStorage.user_token</code>，粘贴到这里，父页面会把 token 注入 iframe。
           </p>
+          <p>
+            本调试页默认启用结构化摘要 mock：<code>mockExtraction=mixed</code>。追加
+            <code>?mockExtraction=off</code> 可改走真实后端，追加 <code>?mockExtraction=not_found</code> 可查看未匹配状态。
+          </p>
 
           <div class="field">
             <label for="tokenInput">Bearer Token</label>
@@ -449,7 +453,7 @@ copy(localStorage.getItem('user_token'))</pre>
         }
         if (window.chatIframe) window.chatIframe.destroy()
         window.chatIframe = new DocMindChatIframe({
-          iframeSrc: `${location.origin}/chat-iframe/`,
+          iframeSrc: `${location.origin}/chat-iframe/?mockExtraction=${params.get('mockExtraction') || 'mixed'}`,
           token,
           agentId,
           targetOrigin: location.origin,

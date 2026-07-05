@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RefreshCw } from 'lucide-vue-next'
+import { extractionStatusText, matchedExtractionCategories } from '@/utils/context-summary'
 import type { ExtractionResult, IncomingPageFile } from '@/types'
 
 const props = withDefaults(
@@ -15,30 +16,8 @@ const props = withDefaults(
 
 defineEmits(['refresh'])
 
-const statusText = computed(() => {
-  if (props.loading) return '查询中'
-  if (props.error) return props.error
-  if (!props.file) return '未选择附件'
-  if (!props.result) return '等待查询'
-  if (props.result.matchStatus !== 'matched') {
-    return {
-      pending_sync: '待同步入库',
-      not_found: '未匹配到来文',
-      multiple: '匹配到多个文档'
-    }[props.result.matchStatus] || props.result.matchStatus
-  }
-  return {
-    ready: '已生成结构化结果',
-    running: '抽取中',
-    not_found: '暂无抽取结果',
-    failed: '抽取失败'
-  }[props.result.extractionStatus] || props.result.extractionStatus
-})
-
-const matchedCategories = computed(() => {
-  const categories = props.result?.categories || {}
-  return Object.entries(categories).filter(([, value]) => value?.matched)
-})
+const statusText = computed(() => extractionStatusText(props))
+const matchedCategories = computed(() => matchedExtractionCategories(props.result))
 
 const items = computed(() => props.result?.items || [])
 
@@ -67,8 +46,8 @@ function displayValue(value: unknown) {
       <section class="result-section">
         <h2>文档分类</h2>
         <p v-if="!matchedCategories.length" class="muted">未命中业务分类</p>
-        <article v-for="[name, category] in matchedCategories" :key="name" class="category-row">
-          <strong>{{ name }}</strong>
+        <article v-for="category in matchedCategories" :key="category.name" class="category-row">
+          <strong>{{ category.name }}</strong>
           <p v-if="category.evidence">{{ category.evidence }}</p>
         </article>
       </section>

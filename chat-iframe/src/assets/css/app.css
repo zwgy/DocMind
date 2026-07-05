@@ -313,7 +313,7 @@
 
 .workbench {
   display: grid;
-  grid-template-rows: minmax(120px, max-content) minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
 }
@@ -434,6 +434,115 @@
   grid-template-columns: 34px minmax(0, 1fr);
   gap: 8px;
   align-items: start;
+}
+
+.chat-message.system {
+  display: block;
+}
+
+.context-summary-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  color: var(--gray-800);
+  background: var(--gray-0);
+  box-shadow: var(--shadow-panel);
+}
+
+.context-summary-card.unavailable {
+  background: var(--gray-25);
+}
+
+.context-summary-header {
+  display: block;
+}
+
+.context-summary-header h2 {
+  margin: 0;
+  color: var(--main-900);
+  font-size: 14px;
+}
+
+.context-summary-file {
+  margin: 0;
+  color: var(--main-900);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-summary-card.unavailable .context-summary-file,
+.context-summary-card.unavailable .context-summary-empty strong {
+  color: var(--main-900);
+}
+
+.context-summary-card.loading .context-summary-file,
+.context-summary-card.loading .context-summary-empty strong {
+  color: var(--color-warning-700);
+}
+
+.context-summary-card.error .context-summary-file,
+.context-summary-card.error .context-summary-empty strong {
+  color: var(--color-error-700);
+}
+
+.context-summary-empty {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px dashed var(--gray-200);
+  border-radius: 8px;
+  color: var(--gray-600);
+  background: var(--gray-0);
+}
+
+.context-summary-empty strong {
+  color: var(--gray-800);
+  font-size: 13px;
+}
+
+.context-summary-empty p,
+.context-summary-empty small {
+  margin: 0;
+}
+
+.context-summary-empty small {
+  color: var(--gray-500);
+}
+
+.context-summary-section {
+  display: grid;
+  gap: 6px;
+}
+
+.context-summary-section h3 {
+  margin: 0;
+  color: var(--gray-700);
+  font-size: 12px;
+}
+
+.context-summary-section .item-row {
+  padding: 10px;
+}
+
+.context-summary-section .item-row > strong {
+  font-size: 13px;
+}
+
+.context-summary-section .item-row dl {
+  font-size: 12px;
+}
+
+.context-summary-section .item-row blockquote {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.context-summary-card.ready .item-row:first-child {
+  margin-top: 0;
 }
 
 .message-role {
@@ -764,10 +873,6 @@
   margin-bottom: 8px;
 }
 
-.context-files {
-  margin-top: -2px;
-}
-
 .attached-files span {
   max-width: 100%;
   padding: 3px 7px;
@@ -778,12 +883,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.context-files span {
-  max-width: min(100%, 360px);
-  color: var(--main-900);
-  background: var(--main-50);
 }
 
 .input-row {

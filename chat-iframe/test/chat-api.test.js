@@ -74,6 +74,45 @@ test('buildChatQuery carries enabled page and file context in the query text', (
   assert.match(query, /现场作业监护需加强/)
 })
 
+test('buildChatQuery omits file context when askFile is disabled', () => {
+  const query = buildChatQuery({
+    text: '只看页面',
+    includePage: false,
+    includeFile: false,
+    selectedFile: { id: 'f1', name: '来文.docx', sourceKey: 'S001' },
+    extractionResult: {
+      matchStatus: 'matched',
+      extractionStatus: 'ready',
+      categories: { risk: { matched: true, evidence: '风险依据' } },
+      items: [{ item_id: 'i1', item_type: 'risk', source_quote: '现场作业监护需加强' }]
+    }
+  })
+
+  assert.match(query, /用户问题：只看页面/)
+  assert.doesNotMatch(query, /文件上下文/)
+  assert.doesNotMatch(query, /现场作业监护需加强/)
+})
+
+test('buildChatQuery keeps file identity but omits unavailable extraction details', () => {
+  const query = buildChatQuery({
+    text: '这份文件有摘要吗？',
+    includePage: false,
+    includeFile: true,
+    selectedFile: { id: 'f1', name: '来文.docx', sourceKey: 'S001' },
+    extractionResult: {
+      matchStatus: 'not_found',
+      extractionStatus: 'not_found',
+      reason: 'not found',
+      categories: { risk: { matched: true, evidence: '不应出现' } },
+      items: [{ item_id: 'i1', item_type: 'risk', source_quote: '不应注入' }]
+    }
+  })
+
+  assert.match(query, /附件：来文.docx/)
+  assert.doesNotMatch(query, /不应出现/)
+  assert.doesNotMatch(query, /不应注入/)
+})
+
 test('readRunEventStream emits text deltas from compact run SSE events', async () => {
   const encoder = new TextEncoder()
   const stream = new ReadableStream({

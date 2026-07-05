@@ -14,6 +14,7 @@ import {
 } from '@/apis/chat'
 import { listChatModels } from '@/apis/models'
 import { appendRunChunk } from '@/utils/chat-message'
+import { buildContextSummaryMessage } from '@/utils/context-summary'
 import type { ChatMessage, ChatThread, ExtractionResult, IncomingPageFile, ModelOption, PageContent } from '@/types'
 
 type SendOptions = {
@@ -29,6 +30,7 @@ type ChatState = {
   threads: ChatThread[]
   currentThreadId: string
   messages: ChatMessage[]
+  contextSummaryMessage: ChatMessage | null
   modelOptions: ModelOption[]
   selectedModelSpec: string
   askPage: boolean
@@ -62,6 +64,7 @@ export const useChatStore = defineStore('chat', {
     threads: [],
     currentThreadId: '',
     messages: [],
+    contextSummaryMessage: null,
     modelOptions: [],
     selectedModelSpec: '',
     askPage: true,
@@ -77,9 +80,15 @@ export const useChatStore = defineStore('chat', {
   getters: {
     currentThread(state) {
       return state.threads.find((thread) => thread.id === state.currentThreadId) || null
+    },
+    displayMessages(state) {
+      return state.contextSummaryMessage ? [state.contextSummaryMessage, ...state.messages] : state.messages
     }
   },
   actions: {
+    setContextSummary(input: { file: IncomingPageFile | null; result: ExtractionResult | null; loading?: boolean; error?: string }) {
+      this.contextSummaryMessage = buildContextSummaryMessage(input)
+    },
     async bootstrap(token?: string, agentId?: string) {
       this.isLoading = true
       this.error = ''

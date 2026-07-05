@@ -74,6 +74,7 @@ function compactText(value?: string, limit = 1200) {
 
 function summarizeExtraction(result?: ExtractionResult | null) {
   if (!result) return ''
+  if (result.matchStatus !== 'matched' || result.extractionStatus !== 'ready') return ''
   const lines: string[] = [`匹配状态：${result.matchStatus}`, `抽取状态：${result.extractionStatus}`]
   const categories = Object.entries(result.categories || {})
     .filter(([, value]) => value?.matched)

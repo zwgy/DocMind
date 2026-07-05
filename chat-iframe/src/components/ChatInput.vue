@@ -44,6 +44,7 @@ const emit = defineEmits<{
   'update:askPage': [value: boolean]
   'update:askFile': [value: boolean]
   'update:selectedModelSpec': [value: string]
+  'update:selectedPageFileId': [value: string]
 }>()
 
 const text = ref('')
@@ -62,14 +63,12 @@ const modelMenuRef = ref<HTMLElement | null>(null)
 const attachmentMenuRef = ref<HTMLElement | null>(null)
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const hasPageFiles = computed(() => props.pageFiles.length > 0)
-const selectedPageFiles = computed(() => props.pageFiles.filter((file) => selectedPageFileIds.value.has(file.id)))
-// 页面附件可能被多选，底部只展示摘要，完整列表留在选择弹窗和 hover 提示里。
-const selectedPageFileSummary = computed(() => {
-  if (!selectedPageFiles.value.length) return ''
-  if (selectedPageFiles.value.length === 1) return `问文件：${selectedPageFiles.value[0].name}`
-  return `问文件：已选 ${selectedPageFiles.value.length} 个附件`
+const selectedPageFiles = computed(() => {
+  const selected = props.pageFiles.filter((file) => selectedPageFileIds.value.has(file.id))
+  if (!props.selectedPageFileId) return selected
+  // 当前上下文附件要排在第一位，保证顶部摘要和发送给模型的文件上下文一致。
+  return selected.sort((a, b) => Number(b.id === props.selectedPageFileId) - Number(a.id === props.selectedPageFileId))
 })
-const selectedPageFileTooltip = computed(() => selectedPageFiles.value.map((file) => file.name).join('\n'))
 const selectedModelLabel = computed(() => {
   return props.models.find((model) => model.value === props.selectedModelSpec)?.label || props.selectedModelSpec || '默认模型'
 })
@@ -165,15 +164,14 @@ function toggleModelMenu() {
 
 function togglePageFile(fileId: string) {
   const next = new Set(selectedPageFileIds.value)
-  if (next.has(fileId)) next.delete(fileId)
+  const isCurrent = props.selectedPageFileId === fileId
+  const isRemoving = next.has(fileId) && isCurrent
+  if (isRemoving) next.delete(fileId)
   else next.add(fileId)
   selectedPageFileIds.value = next
   syncAskFile()
-}
-
-function clearSelectedPageFiles() {
-  selectedPageFileIds.value = new Set()
-  syncAskFile()
+  // “问文件”选择决定当前文档上下文卡片；已选附件再次点击时先切换当前摘要，再点击当前项才取消。
+  emit('update:selectedPageFileId', isRemoving ? [...next][0] || '' : fileId)
 }
 
 function toggleFileMenu() {
@@ -261,13 +259,6 @@ onUnmounted(() => {
           <p v-if="!pageFiles.length" class="popover-empty">当前页面没有可询问附件</p>
         </div>
       </div>
-    </div>
-
-    <div v-if="selectedPageFiles.length" class="attached-files context-files">
-      <span :title="selectedPageFileTooltip">
-        {{ selectedPageFileSummary }}
-        <button type="button" title="取消询问附件" @click="clearSelectedPageFiles"><X :size="12" /></button>
-      </span>
     </div>
 
     <div v-if="files.length || imageFile" class="attached-files">
