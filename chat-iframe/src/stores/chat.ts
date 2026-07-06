@@ -107,6 +107,17 @@ export const useChatStore = defineStore('chat', {
         this.isLoading = false
       }
     },
+    async refreshThreads(token?: string, agentId?: string) {
+      // 打开侧边栏只刷新列表，避免把当前会话悄悄切到第一条。
+      this.isLoading = true
+      try {
+        this.threads = await listConversations(token, agentId)
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : '刷新对话列表失败'
+      } finally {
+        this.isLoading = false
+      }
+    },
     async newConversation(token?: string, agentId?: string) {
       const thread = await createConversation({ token, agentId })
       this.threads = [thread, ...this.threads.filter((item) => item.id !== thread.id)]

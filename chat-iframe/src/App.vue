@@ -30,6 +30,12 @@ const showSidebar = ref(false)
 const draggingWindow = ref(false)
 
 const selectedFile = computed(() => context.selectedFile)
+
+function openSidebar() {
+  showSidebar.value = true
+  void chat.refreshThreads(context.config.token, context.config.agentId)
+}
+
 function cacheExtractionResults(files: IncomingPageFile[], items: ExtractionResult[] = []) {
   const next = { ...results.value }
   for (const [index, file] of files.entries()) {
@@ -172,7 +178,7 @@ onUnmounted(() => {
 <template>
   <main class="chat-shell">
     <header class="chat-header" @pointerdown="startWindowDrag">
-      <button type="button" class="header-icon-button" title="对话列表" @click="showSidebar = true">
+      <button type="button" class="header-icon-button" title="对话列表" @click="openSidebar">
         <Menu :size="17" />
       </button>
       <nav class="window-actions" aria-label="窗口控制">
@@ -191,28 +197,27 @@ onUnmounted(() => {
       </nav>
     </header>
 
-    <section class="chat-body">
-      <Transition name="sidebar-fade">
-        <button v-if="showSidebar" type="button" class="sidebar-overlay" aria-label="关闭对话列表" @click="showSidebar = false"></button>
-      </Transition>
-      <Transition name="sidebar-slide">
-        <aside v-if="showSidebar" class="conversation-drawer">
-          <button type="button" class="drawer-close" title="关闭对话列表" @click="showSidebar = false">
-            <X :size="16" />
-          </button>
-          <ChatSidebar
-            :threads="chat.threads"
-            :current-thread-id="chat.currentThreadId"
-            :loading="chat.isLoading"
-            @new="createChat"
-            @select="selectThread"
-            @rename="(event) => event.title && chat.renameConversation(event.threadId, event.title, context.config.token)"
-            @delete="(threadId) => chat.removeConversation(threadId, context.config.token)"
-            @pin="(threadId) => chat.togglePinConversation(threadId, context.config.token)"
-          />
-        </aside>
-      </Transition>
+    <Transition name="sidebar-fade">
+      <button v-if="showSidebar" type="button" class="sidebar-overlay" aria-label="关闭对话列表" @click="showSidebar = false"></button>
+    </Transition>
+    <Transition name="sidebar-slide">
+      <aside v-if="showSidebar" class="conversation-drawer">
+        <ChatSidebar
+          :threads="chat.threads"
+          :current-thread-id="chat.currentThreadId"
+          :loading="chat.isLoading"
+          @new="createChat"
+          @close="showSidebar = false"
+          @refresh="chat.refreshThreads(context.config.token, context.config.agentId)"
+          @select="selectThread"
+          @rename="(event) => event.title && chat.renameConversation(event.threadId, event.title, context.config.token)"
+          @delete="(threadId) => chat.removeConversation(threadId, context.config.token)"
+          @pin="(threadId) => chat.togglePinConversation(threadId, context.config.token)"
+        />
+      </aside>
+    </Transition>
 
+    <section class="chat-body">
       <section class="workbench">
         <ChatMessages
           :messages="chat.displayMessages"
