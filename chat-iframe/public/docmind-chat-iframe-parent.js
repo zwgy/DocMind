@@ -130,6 +130,7 @@
         iframeSrc: '/',
         user: null,
         token: null,
+        apiBaseUrl: null,
         agentId: null,
         targetOrigin: '*',
         originAllowlist: [],
@@ -435,6 +436,7 @@
     this._sendToIframe('INIT_CONFIG', {
       user: this.options.user,
       token: this.options.token,
+      apiBaseUrl: this.options.apiBaseUrl,
       agentId: this.options.agentId,
       includePageContent: this.options.includePageContent,
       includeFiles: this.options.includeFiles,

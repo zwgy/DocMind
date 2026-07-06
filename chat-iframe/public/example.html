@@ -304,6 +304,11 @@
           </div>
 
           <div class="field">
+            <label for="apiBaseInput">API Base</label>
+            <input id="apiBaseInput" type="url" placeholder="例如 http://192.168.1.220:5173，留空则使用本地 /api 代理" />
+          </div>
+
+          <div class="field">
             <label for="loginIdInput">docMind 账号</label>
             <input id="loginIdInput" type="text" autocomplete="username" placeholder="用户名、UID 或手机号" />
           </div>
@@ -347,7 +352,9 @@ copy(localStorage.getItem('user_token'))</pre>
     <script src="/chat-iframe/docmind-chat-iframe-parent.js"></script>
     <script>
       const TOKEN_STORAGE_KEY = 'docmind_chat_iframe_debug_token'
+      const API_BASE_STORAGE_KEY = 'docmind_chat_iframe_debug_api_base'
       const tokenInput = document.getElementById('tokenInput')
+      const apiBaseInput = document.getElementById('apiBaseInput')
       const loginIdInput = document.getElementById('loginIdInput')
       const passwordInput = document.getElementById('passwordInput')
       const agentInput = document.getElementById('agentInput')
@@ -355,8 +362,10 @@ copy(localStorage.getItem('user_token'))</pre>
 
       const params = new URLSearchParams(window.location.search)
       const initialToken = params.get('token') || localStorage.getItem(TOKEN_STORAGE_KEY) || ''
+      const initialApiBaseUrl = params.get('apiBaseUrl') || localStorage.getItem(API_BASE_STORAGE_KEY) || ''
       const initialAgentId = params.get('agentId') || agentInput.value
       tokenInput.value = initialToken
+      apiBaseInput.value = initialApiBaseUrl
       agentInput.value = initialAgentId
 
       function setStatus(message) {
@@ -381,6 +390,24 @@ copy(localStorage.getItem('user_token'))</pre>
         return normalizeToken(tokenInput.value)
       }
 
+      function currentApiBaseUrl() {
+        return apiBaseInput.value.trim().replace(/\/+$/, '')
+      }
+
+      function saveApiBaseUrl() {
+        const apiBaseUrl = currentApiBaseUrl()
+        apiBaseInput.value = apiBaseUrl
+        if (apiBaseUrl) localStorage.setItem(API_BASE_STORAGE_KEY, apiBaseUrl)
+        else localStorage.removeItem(API_BASE_STORAGE_KEY)
+        return apiBaseUrl
+      }
+
+      function apiUrl(path) {
+        const apiBaseUrl = currentApiBaseUrl()
+        if (/^https?:\/\//i.test(path) || !apiBaseUrl) return path
+        return `${apiBaseUrl}${path.startsWith('/') ? '' : '/'}${path}`
+      }
+
       function saveToken() {
         const token = currentToken()
         tokenInput.value = token
@@ -391,7 +418,7 @@ copy(localStorage.getItem('user_token'))</pre>
 
       async function validateToken(token) {
         if (!token) return null
-        const response = await fetch('/api/auth/me', {
+        const response = await fetch(apiUrl('/api/auth/me'), {
           headers: { Authorization: `Bearer ${token}` }
         })
         if (!response.ok) {
@@ -417,11 +444,17 @@ copy(localStorage.getItem('user_token'))</pre>
         const form = new FormData()
         form.append('username', loginId)
         form.append('password', password)
-        setStatus('正在向本机 docMind 后端换取 token...')
-        const response = await fetch('/api/auth/token', {
-          method: 'POST',
-          body: form
-        })
+        setStatus('正在向 docMind 后端换取 token...')
+        let response
+        try {
+          response = await fetch(apiUrl('/api/auth/token'), {
+            method: 'POST',
+            body: form
+          })
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : '登录请求失败')
+          return
+        }
         if (!response.ok) {
           let message = `登录失败：${response.status}`
           try {
@@ -441,6 +474,7 @@ copy(localStorage.getItem('user_token'))</pre>
 
       async function createChat() {
         const token = saveToken()
+        const apiBaseUrl = saveApiBaseUrl()
         const agentId = agentInput.value.trim() || 'default-chatbot'
         if (token) {
           try {
@@ -455,6 +489,7 @@ copy(localStorage.getItem('user_token'))</pre>
         window.chatIframe = new DocMindChatIframe({
           iframeSrc: `${location.origin}/chat-iframe/?mockExtraction=${params.get('mockExtraction') || 'mixed'}`,
           token,
+          apiBaseUrl,
           agentId,
           targetOrigin: location.origin,
           originAllowlist: [location.origin],

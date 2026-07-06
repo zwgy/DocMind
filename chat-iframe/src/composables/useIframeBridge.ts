@@ -1,4 +1,5 @@
 import { onMounted, onUnmounted } from 'vue'
+import { setApiBaseUrl } from '@/apis/api-url'
 import { useIframeContextStore } from '@/stores/iframe-context'
 import type { IframeConfig, IncomingPageFile, PageContent, ParentMessage, WindowState } from '@/types'
 
@@ -27,6 +28,7 @@ export function useIframeBridge() {
     switch (message.type) {
       case 'INIT_CONFIG':
         context.setConfig(message.payload as IframeConfig | undefined)
+        setApiBaseUrl((message.payload as IframeConfig | undefined)?.apiBaseUrl)
         break
       case 'PAGE_CONTENT':
         context.setPageContent(message.payload as PageContent | undefined)

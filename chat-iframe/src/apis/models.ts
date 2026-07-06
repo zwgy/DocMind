@@ -1,4 +1,5 @@
 import type { ModelOption } from '../types'
+import { apiUrl } from './api-url.ts'
 
 type ProviderModel = {
   spec?: string
@@ -17,7 +18,7 @@ type ProviderGroup = {
 export async function listChatModels(token?: string): Promise<ModelOption[]> {
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
-  const response = await fetch('/api/system/model-providers/models/v2?model_type=chat', { headers })
+  const response = await fetch(apiUrl('/api/system/model-providers/models/v2?model_type=chat'), { headers })
   if (!response.ok) throw new Error(`获取模型列表失败：${response.status}`)
   const data = await response.json()
   const groups: ProviderGroup[] = Array.isArray(data?.providers)

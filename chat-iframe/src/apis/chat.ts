@@ -1,4 +1,5 @@
 import { normalizeChatMessage } from '../utils/chat-message.ts'
+import { apiUrl } from './api-url.ts'
 import type {
   ChatMessage,
   ChatThread,
@@ -262,14 +263,14 @@ export async function readRunEventStream(response: Response, handlers: RunEventH
 export async function listConversations(token?: string, agentId?: string): Promise<ChatThread[]> {
   const params = new URLSearchParams({ limit: '50', offset: '0' })
   if (agentId) params.set('agent_id', agentId)
-  const response = await fetch(`/api/chat/threads?${params.toString()}`, {
+  const response = await fetch(apiUrl(`/api/chat/threads?${params.toString()}`), {
     headers: authHeaders(token, false)
   })
   return parseResponse<ChatThread[]>(response, '获取对话列表失败')
 }
 
 export async function createConversation(options: CreateConversationOptions = {}): Promise<ChatThread> {
-  const response = await fetch('/api/chat/thread', {
+  const response = await fetch(apiUrl('/api/chat/thread'), {
     method: 'POST',
     headers: authHeaders(options.token),
     body: JSON.stringify({
@@ -282,7 +283,7 @@ export async function createConversation(options: CreateConversationOptions = {}
 }
 
 export async function listMessages(threadId: string, token?: string): Promise<ChatMessage[]> {
-  const response = await fetch(`/api/chat/thread/${encodeURIComponent(threadId)}/history`, {
+  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/history`), {
     headers: authHeaders(token, false)
   })
   const data = await parseResponse<{ history?: Record<string, unknown>[] }>(response, '获取聊天记录失败')
@@ -292,7 +293,7 @@ export async function listMessages(threadId: string, token?: string): Promise<Ch
 export async function sendMessageStream(payload: SendMessagePayload, handlers: RunEventHandlers = {}) {
   const requestId = crypto.randomUUID()
   const query = buildChatQuery(payload)
-  const response = await fetch('/api/agent/runs', {
+  const response = await fetch(apiUrl('/api/agent/runs'), {
     method: 'POST',
     headers: authHeaders(payload.token),
     signal: payload.signal,
@@ -317,7 +318,7 @@ export async function sendMessageStream(payload: SendMessagePayload, handlers: R
   const runId = run.id || run.run_id
   if (!runId) throw new Error('发送消息失败：缺少运行任务 ID')
   handlers.onRunStart?.(runId, requestId)
-  const streamResponse = await fetch(`/api/agent/runs/${encodeURIComponent(runId)}/events?verbose=false`, {
+  const streamResponse = await fetch(apiUrl(`/api/agent/runs/${encodeURIComponent(runId)}/events?verbose=false`), {
     headers: authHeaders(payload.token, false),
     signal: payload.signal
   })
@@ -326,7 +327,7 @@ export async function sendMessageStream(payload: SendMessagePayload, handlers: R
 }
 
 export async function cancelRun(runId: string, token?: string) {
-  const response = await fetch(`/api/agent/runs/${encodeURIComponent(runId)}/cancel`, {
+  const response = await fetch(apiUrl(`/api/agent/runs/${encodeURIComponent(runId)}/cancel`), {
     method: 'POST',
     headers: authHeaders(token),
     body: JSON.stringify({})
@@ -339,7 +340,7 @@ export async function updateConversation(
   payload: { title?: string; isPinned?: boolean },
   token?: string
 ) {
-  const response = await fetch(`/api/chat/thread/${encodeURIComponent(threadId)}`, {
+  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}`), {
     method: 'PUT',
     headers: authHeaders(token),
     body: JSON.stringify({ title: payload.title, is_pinned: payload.isPinned })
@@ -348,7 +349,7 @@ export async function updateConversation(
 }
 
 export async function deleteConversation(threadId: string, token?: string) {
-  const response = await fetch(`/api/chat/thread/${encodeURIComponent(threadId)}`, {
+  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}`), {
     method: 'DELETE',
     headers: authHeaders(token, false)
   })
@@ -361,7 +362,7 @@ export async function submitMessageFeedback(
   reason: string | null,
   token?: string
 ) {
-  const response = await fetch(`/api/chat/message/${encodeURIComponent(messageId)}/feedback`, {
+  const response = await fetch(apiUrl(`/api/chat/message/${encodeURIComponent(messageId)}/feedback`), {
     method: 'POST',
     headers: authHeaders(token),
     body: JSON.stringify({ rating, reason })
@@ -372,7 +373,7 @@ export async function submitMessageFeedback(
 export async function uploadImage(file: File, token?: string) {
   const body = new FormData()
   body.append('file', file)
-  const response = await fetch('/api/chat/image/upload', {
+  const response = await fetch(apiUrl('/api/chat/image/upload'), {
     method: 'POST',
     headers: authHeaders(token, false),
     body
@@ -381,7 +382,7 @@ export async function uploadImage(file: File, token?: string) {
 }
 
 export async function getThreadAttachments(threadId: string, token?: string) {
-  const response = await fetch(`/api/chat/thread/${encodeURIComponent(threadId)}/attachments`, {
+  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/attachments`), {
     headers: authHeaders(token, false)
   })
   return parseResponse<Record<string, unknown>>(response, '获取附件失败')
@@ -390,7 +391,7 @@ export async function getThreadAttachments(threadId: string, token?: string) {
 export async function uploadAttachment(file: File, token?: string) {
   const body = new FormData()
   body.append('file', file)
-  const response = await fetch('/api/chat/attachments/tmp', {
+  const response = await fetch(apiUrl('/api/chat/attachments/tmp'), {
     method: 'POST',
     headers: authHeaders(token, false),
     body
@@ -403,7 +404,7 @@ export async function confirmThreadAttachments(
   attachments: Record<string, unknown>[],
   token?: string
 ) {
-  const response = await fetch(`/api/chat/thread/${encodeURIComponent(threadId)}/attachments/confirm`, {
+  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/attachments/confirm`), {
     method: 'POST',
     headers: authHeaders(token),
     body: JSON.stringify({ attachments })

@@ -1,4 +1,5 @@
 import type { ExtractionQueryResponse, IncomingPageFile } from '@/types'
+import { apiUrl } from './api-url.ts'
 
 function mockExtractionItem(file: IncomingPageFile, mode: string, index: number) {
   const incomingFileId = file.id || file.sourceKey || file.sourceUrl || file.name
@@ -68,7 +69,7 @@ export async function queryIncomingDocumentExtractions(
   if (mock) return mock
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
-  const response = await fetch('/api/incoming-documents/extractions/query', {
+  const response = await fetch(apiUrl('/api/incoming-documents/extractions/query'), {
     method: 'POST',
     headers,
     body: JSON.stringify({ files })

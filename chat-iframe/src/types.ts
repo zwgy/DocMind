@@ -23,6 +23,7 @@ export type IncomingPageFile = {
 export type IframeConfig = {
   user?: string
   token?: string
+  apiBaseUrl?: string
   agentId?: string
   includePageContent?: boolean
   includeFiles?: boolean
