@@ -317,8 +317,8 @@
 }
 
 .sidebar-confirm {
-  width: min(260px, 100%);
-  padding: 16px;
+  width: min(280px, 100%);
+  padding: 18px;
   border: 1px solid var(--gray-200);
   border-radius: 8px;
   background: var(--gray-0);
@@ -329,24 +329,44 @@
   margin: 0;
   color: var(--gray-1000);
   font-size: 15px;
+  text-align: center;
 }
 
 .sidebar-confirm p {
-  margin: 8px 0 14px;
+  margin: 10px 0 16px;
   color: var(--gray-600);
   font-size: 13px;
   line-height: 1.5;
+  text-align: center;
+}
+
+.sidebar-confirm-input {
+  width: 100%;
+  height: 34px;
+  margin: 14px 0 16px;
+  padding: 0 10px;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  outline: none;
+  color: var(--gray-900);
+  background: var(--gray-0);
+  font: inherit;
+}
+
+.sidebar-confirm-input:focus {
+  border-color: var(--main-700);
+  box-shadow: 0 0 0 2px var(--main-50);
 }
 
 .sidebar-confirm footer {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
 .sidebar-confirm button {
   height: 30px;
-  min-width: 64px;
+  width: 100%;
   border: 1px solid var(--gray-200);
   border-radius: 7px;
   background: var(--gray-0);
@@ -354,10 +374,23 @@
   cursor: pointer;
 }
 
+.sidebar-confirm button.primary {
+  border-color: var(--main-700);
+  background: var(--main-700);
+  color: var(--gray-0);
+}
+
 .sidebar-confirm button.danger {
   border-color: var(--color-error-700);
   background: var(--color-error-700);
   color: var(--gray-0);
+}
+
+.sidebar-confirm button:disabled {
+  border-color: var(--gray-200);
+  background: var(--gray-100);
+  color: var(--gray-500);
+  cursor: not-allowed;
 }
 
 .file-selector {

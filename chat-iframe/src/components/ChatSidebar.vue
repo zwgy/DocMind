@@ -34,6 +34,8 @@ const emit = defineEmits<{
 
 const openActionsThreadId = ref('')
 const pendingDeleteThreadId = ref('')
+const pendingRenameThreadId = ref('')
+const renameDraft = ref('')
 
 function selectThread(threadId: string) {
   openActionsThreadId.value = ''
@@ -44,10 +46,18 @@ function toggleThreadActions(threadId: string) {
   openActionsThreadId.value = openActionsThreadId.value === threadId ? '' : threadId
 }
 
-function renameThread(thread: ChatThread) {
+function requestRenameThread(thread: ChatThread) {
   openActionsThreadId.value = ''
-  const title = window.prompt('对话标题', thread.title || '来文咨询')?.trim()
-  if (title) emit('rename', { threadId: thread.id, title })
+  pendingRenameThreadId.value = thread.id
+  renameDraft.value = thread.title || '来文咨询'
+}
+
+function confirmRenameThread() {
+  const threadId = pendingRenameThreadId.value
+  const title = renameDraft.value.trim()
+  pendingRenameThreadId.value = ''
+  renameDraft.value = ''
+  if (threadId && title) emit('rename', { threadId, title })
 }
 
 function togglePinThread(thread: ChatThread) {
@@ -64,6 +74,12 @@ function confirmDeleteThread() {
   const threadId = pendingDeleteThreadId.value
   pendingDeleteThreadId.value = ''
   if (threadId) emit('delete', threadId)
+}
+
+function closeDialog() {
+  pendingDeleteThreadId.value = ''
+  pendingRenameThreadId.value = ''
+  renameDraft.value = ''
 }
 </script>
 
@@ -109,7 +125,7 @@ function confirmDeleteThread() {
           </button>
           <span class="thread-actions">
             <template v-if="openActionsThreadId === thread.id">
-              <button type="button" title="重命名" @click.stop="renameThread(thread)">
+              <button type="button" title="重命名" @click.stop="requestRenameThread(thread)">
                 <Pencil :size="15" />
               </button>
               <button
@@ -132,12 +148,35 @@ function confirmDeleteThread() {
       </template>
     </div>
 
-    <div v-if="pendingDeleteThreadId" class="sidebar-confirm-mask" @click.self="pendingDeleteThreadId = ''">
-      <article class="sidebar-confirm">
+    <div
+      v-if="pendingDeleteThreadId || pendingRenameThreadId"
+      class="sidebar-confirm-mask"
+      @click.self="closeDialog"
+    >
+      <article v-if="pendingRenameThreadId" class="sidebar-confirm">
+        <h3>重命名对话</h3>
+        <input
+          v-model="renameDraft"
+          class="sidebar-confirm-input"
+          type="text"
+          autocomplete="off"
+          autofocus
+          @keydown.enter="confirmRenameThread"
+          @keydown.esc="closeDialog"
+        />
+        <footer>
+          <button type="button" class="secondary" @click="closeDialog">取消</button>
+          <button type="button" class="primary" :disabled="!renameDraft.trim()" @click="confirmRenameThread">
+            保存
+          </button>
+        </footer>
+      </article>
+
+      <article v-else class="sidebar-confirm">
         <h3>删除对话？</h3>
         <p>删除后无法恢复，请确认是否继续。</p>
         <footer>
-          <button type="button" class="secondary" @click="pendingDeleteThreadId = ''">取消</button>
+          <button type="button" class="secondary" @click="closeDialog">取消</button>
           <button type="button" class="danger" @click="confirmDeleteThread">删除</button>
         </footer>
       </article>
