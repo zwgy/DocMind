@@ -13,9 +13,10 @@ import {
   uploadAttachment
 } from '@/apis/chat'
 import { listChatModels } from '@/apis/models'
-import { appendRunChunk } from '@/utils/chat-message'
+import { appendRunChunkSegment } from '@/utils/chat-message'
 import { buildContextSummaryMessage } from '@/utils/context-summary'
-import type { ChatMessage, ChatThread, ExtractionResult, IncomingPageFile, ModelOption, PageContent } from '@/types'
+import { splitStreamingText } from '@/utils/streaming-text'
+import type { ChatMessage, ChatThread, ExtractionResult, IncomingPageFile, ModelOption, PageContent, RunStreamChunk } from '@/types'
 
 type SendOptions = {
   text: string
@@ -202,13 +203,54 @@ export const useChatStore = defineStore('chat', {
         attachments: (options.files || []).map((file) => ({ file_name: file.name, file_size: file.size, file_type: file.type })),
         createdAt: new Date().toISOString()
       }
-      const assistantMessage: ChatMessage = {
+      let assistantMessage: ChatMessage = {
         id: messageId('assistant'),
         role: 'assistant',
         content: '',
         status: 'streaming',
         toolEvents: [],
         createdAt: new Date().toISOString()
+      }
+      const assistantMessages = [assistantMessage]
+      const createAssistantSegment = () => {
+        const segment: ChatMessage = {
+          id: messageId('assistant'),
+          role: 'assistant',
+          content: '',
+          status: 'streaming',
+          toolEvents: [],
+          createdAt: new Date().toISOString()
+        }
+        assistantMessages.push(segment)
+        return segment
+      }
+      let textQueue: RunStreamChunk[] = []
+      let textTimer: ReturnType<typeof setInterval> | null = null
+      const clearTextTimer = () => {
+        if (textTimer) clearInterval(textTimer)
+        textTimer = null
+      }
+      const appendVisibleChunk = (chunk: RunStreamChunk) => {
+        assistantMessage = appendRunChunkSegment(this.messages, assistantMessage, chunk, createAssistantSegment)
+        this.messages = [...this.messages]
+      }
+      const drainTextQueue = () => {
+        const chunk = textQueue.shift()
+        if (chunk) appendVisibleChunk(chunk)
+        if (!textQueue.length) clearTextTimer()
+      }
+      const flushTextQueue = () => {
+        clearTextTimer()
+        while (textQueue.length) appendVisibleChunk(textQueue.shift()!)
+      }
+      const enqueueTextChunk = (chunk: RunStreamChunk) => {
+        if (chunk.type !== 'text' || !chunk.content || chunk.reasoningContent) {
+          appendVisibleChunk(chunk)
+          return
+        }
+        // 主站有完整 smoother；iframe 只做正文小步输出，避免维护另一套复杂状态机。
+        textQueue.push(...splitStreamingText(chunk.content, 5).map((content) => ({ ...chunk, content })))
+        if (!textTimer) textTimer = setInterval(drainTextQueue, 28)
       }
       this.messages = [...this.messages, userMessage, assistantMessage]
       try {
@@ -238,14 +280,21 @@ export const useChatStore = defineStore('chat', {
             },
             onChunk: (chunk) => {
               if (chunk.type === 'done') {
-                assistantMessage.status = 'done'
+                flushTextQueue()
+                assistantMessages.forEach((message) => {
+                  if (message.status === 'streaming') message.status = 'done'
+                })
               } else if (chunk.type === 'error') {
+                flushTextQueue()
                 assistantMessage.status = 'error'
                 assistantMessage.errorType = chunk.errorType
                 assistantMessage.errorMessage = chunk.message
                 if (!assistantMessage.content) assistantMessage.content = chunk.message
+              } else if (chunk.type === 'text') {
+                enqueueTextChunk(chunk)
               } else {
-                appendRunChunk(assistantMessage, chunk)
+                flushTextQueue()
+                appendVisibleChunk(chunk)
               }
               this.messages = [...this.messages]
             },
@@ -254,16 +303,24 @@ export const useChatStore = defineStore('chat', {
               this.messages = [...this.messages]
             },
             onError: (message) => {
+              flushTextQueue()
               assistantMessage.status = 'error'
               this.error = message
             },
             onDone: () => {
-              assistantMessage.status = 'done'
+              flushTextQueue()
+              assistantMessages.forEach((message) => {
+                if (message.status === 'streaming') message.status = 'done'
+              })
             }
           }
         )
         this.activeRunId = result.runId
-        if (!assistantMessage.content && assistantMessage.status !== 'error') {
+        flushTextQueue()
+        assistantMessages.forEach((message) => {
+          if (message.status === 'streaming') message.status = 'done'
+        })
+        if (!assistantMessages.some((message) => message.content) && assistantMessage.status !== 'error') {
           assistantMessage.content = '已完成。'
         }
         assistantMessage.status = assistantMessage.status === 'error' ? 'error' : 'done'
@@ -271,12 +328,17 @@ export const useChatStore = defineStore('chat', {
         return { threadId, messageId: userMessage.id }
       } catch (error) {
         if (controller.signal.aborted) {
-          assistantMessage.status = 'stopped'
+          clearTextTimer()
+          textQueue = []
+          assistantMessages.forEach((message) => {
+            if (message.status === 'streaming') message.status = 'stopped'
+          })
           assistantMessage.errorType = 'interrupted'
           assistantMessage.errorMessage = '回答生成已中断'
           this.messages = [...this.messages]
           return null
         }
+        flushTextQueue()
         const message = error instanceof Error ? error.message : '发送失败'
         assistantMessage.status = 'error'
         assistantMessage.content = message

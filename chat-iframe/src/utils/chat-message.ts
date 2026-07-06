@@ -92,9 +92,44 @@ export function appendRunChunk(message: ChatMessage, chunk: RunStreamChunk) {
     if (existing) {
       existing.result = chunk.content
       existing.status = chunk.status || 'done'
-    } else {
-      calls.push({ id, name: 'tool', result: chunk.content, status: chunk.status || 'done' })
     }
     message.toolCalls = calls
   }
+}
+
+function hasAssistantBody(message: ChatMessage) {
+  return Boolean(message.content || message.reasoningContent || message.errorMessage)
+}
+
+function findToolSegment(messages: ChatMessage[], toolCallId?: string) {
+  if (!toolCallId) return null
+  return (
+    messages.find((message) => message.role === 'assistant' && message.toolCalls?.some((tool) => tool.id === toolCallId)) || null
+  )
+}
+
+export function appendRunChunkSegment(
+  messages: ChatMessage[],
+  current: ChatMessage,
+  chunk: RunStreamChunk,
+  createSegment: () => ChatMessage
+) {
+  // 流式事件本身有顺序，按段落落消息才能避免工具调用被最终正文挤到末尾。
+  if (chunk.type === 'tool_result') {
+    const target = findToolSegment(messages, chunk.toolCallId)
+    if (target) {
+      appendRunChunk(target, chunk)
+      return current
+    }
+  }
+
+  const needsNewTextSegment = chunk.type === 'text' && current.toolCalls?.length && !hasAssistantBody(current)
+  const needsNewToolSegment = chunk.type === 'tool_call' && hasAssistantBody(current)
+  if (needsNewTextSegment || needsNewToolSegment) {
+    current = createSegment()
+    messages.push(current)
+  }
+
+  appendRunChunk(current, chunk)
+  return current
 }

@@ -164,7 +164,7 @@ function toolResultChunk(payload: Record<string, unknown>): RunStreamChunk | nul
   const output = data.output as Record<string, unknown> | undefined
   return {
     type: 'tool_result',
-    toolCallId: String(output?.id || output?.tool_call_id || data.tool_call_id || ''),
+    toolCallId: String(output?.tool_call_id || data.tool_call_id || output?.id || ''),
     content: output?.content ?? output
   }
 }

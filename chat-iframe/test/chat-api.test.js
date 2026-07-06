@@ -211,6 +211,35 @@ test('readRunEventStream emits structured reasoning and tool call chunks', async
   ])
 })
 
+test('readRunEventStream matches tool results by tool_call_id before output id', async () => {
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          [
+            'event: messages',
+            'data: {"payload":{"items":[{"status":"loading","stream_event":{"type":"tool_call","message_id":"m1","tool_call_id":"call-1","name":"search_file","args":{"kb_id":"kb1"}}},{"status":"stream_event","event":{"method":"tools","data":{"event":"tool-finished","tool_call_id":"call-1","output":{"id":"tool-message-1","tool_call_id":"call-1","content":"done"}}}}]}}',
+            '',
+            ''
+          ].join('\n')
+        )
+      )
+      controller.close()
+    }
+  })
+  const chunks = []
+
+  await readRunEventStream(new Response(stream), {
+    onChunk: (chunk) => chunks.push(chunk)
+  })
+
+  assert.deepEqual(chunks, [
+    { type: 'tool_call', messageId: 'm1', toolCallId: 'call-1', name: 'search_file', args: { kb_id: 'kb1' } },
+    { type: 'tool_result', toolCallId: 'call-1', content: 'done' }
+  ])
+})
+
 test('sendMessageStream posts image content and attachment metadata', async () => {
   const calls = []
   globalThis.fetch = async (url, options = {}) => {

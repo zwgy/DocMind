@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Atom, BookOpen, ChevronDown, ChevronRight, FileText, Search } from 'lucide-vue-next'
+import { Atom, BookOpen, ChevronDown, ChevronRight, FileText, Loader, Search } from 'lucide-vue-next'
 import KbResultGroupedList from '@/components/KbResultGroupedList.vue'
 import type { ChatToolCall } from '@/types'
 import {
@@ -8,8 +8,10 @@ import {
   formatJson,
   getToolArgs,
   getToolCallLabel,
+  getToolKbDescription,
   getToolResult,
   getToolStatusLabel,
+  isToolRunning,
   listKbsItems,
   normalizeToolCalls,
   parseQueryKbResult,
@@ -68,6 +70,14 @@ function headerMeta(tool: ChatToolCall) {
       icon: Search,
       note: 'query_kb 搜索',
       description: [resource ? `知识库: ${resource}` : '', query].filter(Boolean).join(' | ')
+    }
+  }
+
+  if (['get_mindmap', 'search_file', 'find_kb_document', 'open_kb_document'].includes(tool.name)) {
+    return {
+      icon: tool.name === 'get_mindmap' ? FileText : Search,
+      note: displayToolName(tool.name),
+      description: getToolKbDescription(tool, normalizedToolCalls.value)
     }
   }
 
@@ -142,7 +152,11 @@ const title = computed(() => {
     <div v-if="expanded" class="tool-list">
       <article v-for="(tool, index) in normalizedToolCalls" :key="toolKey(tool, index)" class="tool-card">
         <button type="button" class="tool-card-summary" @click="toggleTool(tool, index)">
-          <component :is="headerMeta(tool).icon" :size="15" />
+          <component
+            :is="isToolRunning(tool) ? Loader : headerMeta(tool).icon"
+            :size="15"
+            :class="{ 'tool-card-spinner': isToolRunning(tool) }"
+          />
           <span class="tool-note">{{ headerMeta(tool).note }}</span>
           <span v-if="headerMeta(tool).description" class="tool-separator">|</span>
           <strong v-if="headerMeta(tool).description">{{ headerMeta(tool).description }}</strong>

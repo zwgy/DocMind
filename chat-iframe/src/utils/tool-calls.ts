@@ -79,6 +79,10 @@ export function getToolStatusLabel(tool: ChatToolCall): string {
   return '进行中'
 }
 
+export function isToolRunning(tool: Pick<ChatToolCall, 'status'>): boolean {
+  return tool.status === 'running'
+}
+
 export function formatJson(value: unknown): string {
   const parsed = parseMaybeJson(value)
   if (parsed && typeof parsed === 'object') return JSON.stringify(parsed, null, 2)
@@ -112,6 +116,14 @@ export function resolveKbDisplayName(tool: ChatToolCall, toolCalls: ChatToolCall
   }
 
   return kbId
+}
+
+export function getToolKbDescription(tool: ChatToolCall, toolCalls: ChatToolCall[] = []): string {
+  const args = getToolArgs(tool)
+  const kbName = resolveKbDisplayName(tool, toolCalls)
+  const fallback = String(args.kb_name || args.knowledge_base || '')
+  const value = kbName || fallback
+  return value ? `知识库: ${value}` : ''
 }
 
 export type QueryKbResult = {

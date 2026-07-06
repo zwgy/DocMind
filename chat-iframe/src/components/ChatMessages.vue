@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import MessageRefs from '@/components/MessageRefs.vue'
 import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
@@ -10,8 +10,9 @@ const props = withDefaults(
   defineProps<{
     messages?: ChatMessage[]
     loading?: boolean
+    streaming?: boolean
   }>(),
-  { messages: () => [], loading: false }
+  { messages: () => [], loading: false, streaming: false }
 )
 
 defineEmits<{
@@ -20,7 +21,9 @@ defineEmits<{
 }>()
 
 const openReasoning = ref<Record<string, boolean>>({})
+const messagesEl = ref<HTMLElement | null>(null)
 const displayItems = computed(() => groupMessageDisplayItems(props.messages))
+const showGeneratingStatus = computed(() => props.streaming && props.messages.some((message) => message.role === 'user'))
 const lastAssistantMessageId = computed(() => {
   for (let index = props.messages.length - 1; index >= 0; index -= 1) {
     const message = props.messages[index]
@@ -78,16 +81,27 @@ function hasRunningToolCalls(toolCalls: Array<{ status?: string }> = []) {
 }
 
 function showThinkingPlaceholder(message: ChatMessage) {
-  return !message.content && !message.reasoningContent && !hasToolCalls(message)
+  return !props.streaming && !message.content && !message.reasoningContent && !hasToolCalls(message)
 }
 
 function showAssistantRefs(message: ChatMessage) {
   return message.role === 'assistant' && message.status === 'done' && message.id === lastAssistantMessageId.value
 }
+
+async function scrollToBottom() {
+  if (!props.streaming) return
+  await nextTick()
+  requestAnimationFrame(() => {
+    const el = messagesEl.value
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  })
+}
+
+watch([displayItems, showGeneratingStatus], scrollToBottom, { flush: 'post', deep: true })
 </script>
 
 <template>
-  <section class="chat-messages">
+  <section ref="messagesEl" class="chat-messages">
     <p v-if="loading" class="empty">正在加载聊天记录...</p>
     <div v-else-if="!messages.length" class="chat-welcome">
       <strong>可以直接提问</strong>
@@ -165,6 +179,16 @@ function showAssistantRefs(message: ChatMessage) {
         </div>
       </template>
     </article>
+    <div v-if="showGeneratingStatus" class="generating-status" aria-live="polite">
+      <div class="generating-indicator">
+        <div class="loading-dots" aria-hidden="true">
+          <div></div>
+          <div></div>
+          <div></div>
+        </div>
+        <span class="generating-text">正在生成回复...</span>
+      </div>
+    </div>
     </template>
   </section>
 </template>

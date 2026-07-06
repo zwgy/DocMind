@@ -223,6 +223,7 @@ onUnmounted(() => {
         <ChatMessages
           :messages="chat.displayMessages"
           :loading="chat.isLoading"
+          :streaming="chat.isStreaming"
           @retry="chat.retry(context.config.token, context.config.agentId)"
           @feedback="(event) => chat.feedback(event, context.config.token)"
         />

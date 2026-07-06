@@ -3,7 +3,9 @@ import test from 'node:test'
 
 import {
   getToolCallLabel,
+  getToolKbDescription,
   groupKbChunksByFile,
+  isToolRunning,
   listKbsItems,
   normalizeToolCalls,
   parseQueryKbResult,
@@ -85,4 +87,33 @@ test('resolveKbDisplayName prefers list_kbs names over raw kb ids', () => {
 
   assert.equal(resolveKbDisplayName(tools[1], tools), 'test1')
   assert.equal(resolveKbDisplayName(tools[1], [tools[1]]), 'kb_r7gbu3094n')
+})
+
+test('getToolKbDescription resolves kb names for kb tools', () => {
+  const tools = [
+    {
+      id: 'list',
+      name: 'list_kbs',
+      result: { content: '[{"kb_id":"kb1","name":"test1"}]' }
+    },
+    {
+      id: 'mindmap',
+      name: 'get_mindmap',
+      args: { kb_id: 'kb1' }
+    },
+    {
+      id: 'search',
+      name: 'search_file',
+      args: { kb_id: 'kb1' }
+    }
+  ]
+
+  assert.equal(getToolKbDescription(tools[1], tools), '知识库: test1')
+  assert.equal(getToolKbDescription(tools[2], tools), '知识库: test1')
+})
+
+test('isToolRunning only treats active tool calls as loading', () => {
+  assert.equal(isToolRunning({ id: 'running', name: 'query_kb', status: 'running' }), true)
+  assert.equal(isToolRunning({ id: 'done', name: 'query_kb', status: 'done' }), false)
+  assert.equal(isToolRunning({ id: 'error', name: 'query_kb', status: 'error' }), false)
 })
