@@ -181,6 +181,7 @@ onUnmounted(() => {
       <button type="button" class="header-icon-button" title="对话列表" @click="openSidebar">
         <Menu :size="17" />
       </button>
+      <h1 class="chat-title">AI智能助手</h1>
       <nav class="window-actions" aria-label="窗口控制">
         <button v-if="context.windowState === 'normal'" type="button" title="最小化到悬浮按钮" @click="notifyMinimize">
           <Minus :size="16" />

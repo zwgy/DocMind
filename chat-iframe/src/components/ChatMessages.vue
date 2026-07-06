@@ -4,6 +4,7 @@ import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import MessageRefs from '@/components/MessageRefs.vue'
 import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
 import type { ChatMessage } from '@/types'
+import { groupMessageDisplayItems } from '@/utils/message-display'
 
 const props = withDefaults(
   defineProps<{
@@ -19,6 +20,7 @@ defineEmits<{
 }>()
 
 const openReasoning = ref<Record<string, boolean>>({})
+const displayItems = computed(() => groupMessageDisplayItems(props.messages))
 const lastAssistantMessageId = computed(() => {
   for (let index = props.messages.length - 1; index >= 0; index -= 1) {
     const message = props.messages[index]
@@ -71,6 +73,10 @@ function hasToolCalls(message: ChatMessage) {
   return Boolean(message.toolCalls?.length)
 }
 
+function hasRunningToolCalls(toolCalls: Array<{ status?: string }> = []) {
+  return toolCalls.some((tool) => tool.status === 'running')
+}
+
 function showThinkingPlaceholder(message: ChatMessage) {
   return !message.content && !message.reasoningContent && !hasToolCalls(message)
 }
@@ -87,70 +93,78 @@ function showAssistantRefs(message: ChatMessage) {
       <strong>可以直接提问</strong>
       <span>默认会带上当前页面和选中文档的结构化结果。</span>
     </div>
+    <template v-else>
     <article
-      v-for="message in messages"
-      :key="message.id"
+      v-for="item in displayItems"
+      :key="item.key"
       class="chat-message"
-      :class="[message.role, message.status]"
+      :class="item.type === 'tool-group' ? ['assistant', 'tool-group-message'] : [item.message.role, item.message.status]"
     >
-      <template v-if="message.type === 'context_summary' && message.contextSummary">
-        <div class="context-summary-card" :class="[contextSummaryTone(message), { unavailable: !hasSummaryDetails(message) }]">
+      <template v-if="item.type === 'tool-group'">
+        <div class="message-content">
+          <ToolCallsPanel :tool-calls="item.toolCalls" :is-active="hasRunningToolCalls(item.toolCalls)" />
+        </div>
+      </template>
+
+      <template v-else-if="item.message.type === 'context_summary' && item.message.contextSummary">
+        <div class="context-summary-card" :class="[contextSummaryTone(item.message), { unavailable: !hasSummaryDetails(item.message) }]">
           <div class="context-summary-header">
             <div>
               <h2>文档摘要</h2>
             </div>
           </div>
-          <p class="context-summary-file" :title="message.contextSummary.file.name">
-            {{ message.contextSummary.file.name }}
+          <p class="context-summary-file" :title="item.message.contextSummary.file.name">
+            {{ item.message.contextSummary.file.name }}
           </p>
-          <div v-if="!hasSummaryDetails(message)" class="context-summary-empty">
-            <strong>{{ message.contextSummary.statusText }}</strong>
-            <p>{{ summaryEmptyText(message) }}</p>
+          <div v-if="!hasSummaryDetails(item.message)" class="context-summary-empty">
+            <strong>{{ item.message.contextSummary.statusText }}</strong>
+            <p>{{ summaryEmptyText(item.message) }}</p>
           </div>
-          <section v-if="hasSummaryDetails(message)" class="context-summary-section">
-            <p v-if="!message.contextSummary.items.length" class="muted">暂无结构化明细</p>
-            <article v-for="item in message.contextSummary.items.slice(0, 3)" :key="item.item_id" class="item-row">
-              <strong>{{ item.item_type }}</strong>
-              <dl v-if="item.data && Object.keys(item.data).length">
-                <template v-for="[key, value] in Object.entries(item.data)" :key="key">
+          <section v-if="hasSummaryDetails(item.message)" class="context-summary-section">
+            <p v-if="!item.message.contextSummary.items.length" class="muted">暂无结构化明细</p>
+            <article v-for="summaryItem in item.message.contextSummary.items.slice(0, 3)" :key="summaryItem.item_id" class="item-row">
+              <strong>{{ summaryItem.item_type }}</strong>
+              <dl v-if="summaryItem.data && Object.keys(summaryItem.data).length">
+                <template v-for="[key, value] in Object.entries(summaryItem.data)" :key="key">
                   <dt>{{ key }}</dt>
                   <dd>{{ displayValue(value) }}</dd>
                 </template>
               </dl>
-              <blockquote v-if="item.source_quote">{{ item.source_quote }}</blockquote>
+              <blockquote v-if="summaryItem.source_quote">{{ summaryItem.source_quote }}</blockquote>
             </article>
           </section>
         </div>
       </template>
+
       <template v-else>
-        <div v-if="message.role !== 'assistant' && message.role !== 'user'" class="message-role">
-          {{ message.role === 'tool' ? '工具' : '系统' }}
+        <div v-if="item.message.role !== 'assistant' && item.message.role !== 'user'" class="message-role">
+          {{ item.message.role === 'tool' ? '工具' : '系统' }}
         </div>
-      <div class="message-content">
-        <img v-if="message.imageContent" class="message-image" :src="imageSrc(message.imageContent)" alt="用户上传图片" />
-        <div v-if="message.attachments?.length" class="message-attachments">
-          <span v-for="attachment in message.attachments" :key="String(attachment.file_id || attachment.file_name || attachment.name)">
-            {{ attachment.file_name || attachment.name }}
-          </span>
+        <div class="message-content">
+          <img v-if="item.message.imageContent" class="message-image" :src="imageSrc(item.message.imageContent)" alt="用户上传图片" />
+          <div v-if="item.message.attachments?.length" class="message-attachments">
+            <span v-for="attachment in item.message.attachments" :key="String(attachment.file_id || attachment.file_name || attachment.name)">
+              {{ attachment.file_name || attachment.name }}
+            </span>
+          </div>
+          <details v-if="item.message.reasoningContent" class="reasoning-box" :open="openReasoning[item.message.id]">
+            <summary @click.prevent="openReasoning[item.message.id] = !openReasoning[item.message.id]">
+              {{ item.message.status === 'streaming' ? '正在思考...' : '推理过程' }}
+            </summary>
+            <p>{{ item.message.reasoningContent }}</p>
+          </details>
+          <MarkdownPreview v-if="item.message.content" :content="item.message.content" />
+          <p v-else-if="showThinkingPlaceholder(item.message)" class="muted">正在思考...</p>
+          <p v-if="item.message.errorMessage" class="error-hint">{{ item.message.errorMessage }}</p>
+          <MessageRefs
+            v-if="showAssistantRefs(item.message)"
+            :message="item.message"
+            @retry="$emit('retry')"
+            @feedback="$emit('feedback', $event)"
+          />
         </div>
-        <details v-if="message.reasoningContent" class="reasoning-box" :open="openReasoning[message.id]">
-          <summary @click.prevent="openReasoning[message.id] = !openReasoning[message.id]">
-            {{ message.status === 'streaming' ? '正在思考...' : '推理过程' }}
-          </summary>
-          <p>{{ message.reasoningContent }}</p>
-        </details>
-        <MarkdownPreview v-if="message.content" :content="message.content" />
-        <p v-else-if="showThinkingPlaceholder(message)" class="muted">正在思考...</p>
-        <p v-if="message.errorMessage" class="error-hint">{{ message.errorMessage }}</p>
-        <ToolCallsPanel :tool-calls="message.toolCalls || []" />
-        <MessageRefs
-          v-if="showAssistantRefs(message)"
-          :message="message"
-          @retry="$emit('retry')"
-          @feedback="$emit('feedback', $event)"
-        />
-      </div>
       </template>
     </article>
+    </template>
   </section>
 </template>

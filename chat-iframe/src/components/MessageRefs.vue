@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, Copy, RotateCcw, ThumbsDown, ThumbsUp } from 'lucide-vue-next'
+import { Check, Copy, ThumbsDown, ThumbsUp } from 'lucide-vue-next'
 import { ref } from 'vue'
 import type { ChatMessage } from '@/types'
 
@@ -22,19 +22,15 @@ async function copyText(text: string) {
 
 <template>
   <footer class="message-refs">
-    <span v-if="message.modelName" class="ref-chip">{{ message.modelName }}</span>
-    <button type="button" title="复制" @click="copyText(message.content)">
-      <Check v-if="copied" :size="13" />
-      <Copy v-else :size="13" />
-    </button>
-    <button type="button" title="重新生成" @click="emit('retry')">
-      <RotateCcw :size="13" />
-    </button>
     <button type="button" title="点赞" @click="emit('feedback', { messageId: message.id, rating: 'like', reason: null })">
       <ThumbsUp :size="13" />
     </button>
     <button type="button" title="点踩" @click="emit('feedback', { messageId: message.id, rating: 'dislike', reason: null })">
       <ThumbsDown :size="13" />
+    </button>
+    <button type="button" title="复制" @click="copyText(message.content)">
+      <Check v-if="copied" :size="13" />
+      <Copy v-else :size="13" />
     </button>
   </footer>
 </template>

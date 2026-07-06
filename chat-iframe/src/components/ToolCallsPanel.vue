@@ -1,53 +1,52 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Atom, BookOpen, ChevronDown, ChevronRight, FileText } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { Atom, BookOpen, ChevronDown, ChevronRight, FileText, Search } from 'lucide-vue-next'
+import KbResultGroupedList from '@/components/KbResultGroupedList.vue'
 import type { ChatToolCall } from '@/types'
+import {
+  displayToolName,
+  formatJson,
+  getToolArgs,
+  getToolCallLabel,
+  getToolResult,
+  getToolStatusLabel,
+  listKbsItems,
+  normalizeToolCalls,
+  parseQueryKbResult,
+  resolveKbDisplayName,
+  skillName
+} from '@/utils/tool-calls'
 
-const props = withDefaults(defineProps<{ toolCalls?: ChatToolCall[] }>(), { toolCalls: () => [] })
+const props = withDefaults(defineProps<{ toolCalls?: ChatToolCall[]; isActive?: boolean }>(), {
+  toolCalls: () => [],
+  isActive: false
+})
+
 const expanded = ref(false)
+const expandedTools = ref<Record<string, boolean>>({})
+const normalizedToolCalls = computed(() => normalizeToolCalls(props.toolCalls))
+const hasRunningTool = computed(() => normalizedToolCalls.value.some((tool) => tool.status === 'running'))
 
-function parseMaybeJson(value: unknown) {
-  if (typeof value !== 'string') return value
-  const trimmed = value.trim()
-  if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) return value
-  try {
-    return JSON.parse(trimmed)
-  } catch {
-    return value
-  }
+watch(
+  [() => props.isActive, hasRunningTool],
+  ([isActive, running]) => {
+    if (isActive || running) expanded.value = true
+  },
+  { immediate: true }
+)
+
+function toolKey(tool: ChatToolCall, index: number) {
+  return tool.id || `${tool.name}-${index}`
 }
 
-function formatJson(value: unknown) {
-  const parsed = parseMaybeJson(value)
-  if (parsed && typeof parsed === 'object') return JSON.stringify(parsed, null, 2)
-  return String(parsed ?? '')
+function toggleTool(tool: ChatToolCall, index: number) {
+  const key = toolKey(tool, index)
+  expandedTools.value[key] = !expandedTools.value[key]
 }
 
-function resultData(tool: ChatToolCall) {
-  const parsed = parseMaybeJson(tool.result)
-  if (parsed && typeof parsed === 'object') {
-    const content = (parsed as Record<string, unknown>).content
-    return content === undefined ? parsed : parseMaybeJson(content)
-  }
-  return parsed
-}
-
-function argsObject(tool: ChatToolCall) {
-  const parsed = parseMaybeJson(tool.args)
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {}
-}
-
-function displayLabel(name = 'tool') {
-  return name
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase())
-}
-
-function skillName(tool: ChatToolCall) {
-  const path = String(argsObject(tool).file_path || '')
-  if (!path.endsWith('SKILL.md')) return ''
-  const parts = path.replace(/\\/g, '/').split('/')
-  return parts.length >= 2 ? parts[parts.length - 2] : ''
+function basename(path: unknown) {
+  const value = String(path || '')
+  return value.replace(/\\/g, '/').split('/').filter(Boolean).pop() || ''
 }
 
 function headerMeta(tool: ChatToolCall) {
@@ -55,40 +54,38 @@ function headerMeta(tool: ChatToolCall) {
     const items = listKbsItems(tool)
     const names = items.map((item) => item.name).filter(Boolean)
     return {
+      icon: BookOpen,
       note: 'list_kbs 列表',
-      description: items.length ? `${items.length}个知识库：${names.slice(0, 2).join('、')}` : ''
+      description: items.length ? `${items.length} 个知识库：${names.slice(0, 2).join('、')}` : ''
     }
   }
+
+  if (tool.name === 'query_kb') {
+    const args = getToolArgs(tool)
+    const resource = resolveKbDisplayName(tool, normalizedToolCalls.value)
+    const query = String(args.query_text || args.query || '')
+    return {
+      icon: Search,
+      note: 'query_kb 搜索',
+      description: [resource ? `知识库: ${resource}` : '', query].filter(Boolean).join(' | ')
+    }
+  }
+
   const skill = skillName(tool)
-  if (skill) return { note: 'Skill', description: skill }
-  return { note: displayLabel(tool.name), description: '' }
+  if (skill) return { icon: FileText, note: 'Skill', description: skill }
+
+  const args = getToolArgs(tool)
+  return {
+    icon: FileText,
+    note: tool.name === 'read_file' ? 'Read file' : displayToolName(tool.name),
+    description: basename(args.file_path)
+  }
 }
 
 function resultText(tool: ChatToolCall) {
-  const parsed = resultData(tool)
-  if (parsed && typeof parsed === 'object') return JSON.stringify(parsed, null, 2)
-  return String(parsed ?? '')
-}
-
-function hasToolParams(tool: ChatToolCall) {
-  if (!tool.args) return false
-  const parsed = parseMaybeJson(tool.args)
-  if (parsed && typeof parsed === 'object') return Object.keys(parsed).length > 0
-  return String(parsed ?? '').trim().length > 0
-}
-
-function listKbsItems(tool: ChatToolCall) {
-  if (tool.name !== 'list_kbs') return []
-  const data = resultData(tool)
-  if (!Array.isArray(data)) return []
-  return data
-    .map((item) => (item && typeof item === 'object' ? (item as Record<string, unknown>) : null))
-    .filter(Boolean)
-    .map((item) => ({
-      id: String(item?.kb_id || item?.id || item?.name || ''),
-      name: String(item?.name || '未命名知识库'),
-      description: String(item?.description || '暂无描述')
-    }))
+  const result = getToolResult(tool)
+  if (result && typeof result === 'object') return JSON.stringify(result, null, 2)
+  return String(result ?? '')
 }
 
 function resultLines(tool: ChatToolCall) {
@@ -96,72 +93,93 @@ function resultLines(tool: ChatToolCall) {
   return text ? text.split('\n') : []
 }
 
-function hasEmbeddedLineNumbers(tool: ChatToolCall) {
-  const lines = resultLines(tool).filter((line) => line.trim())
-  if (lines.length < 2) return false
-  // read_file 结果常由后端带行号，前端再加一列会重复；只在多数行匹配时关闭额外行号。
-  const numbered = lines.filter((line) => /^\s*\d+\s+/.test(line)).length
-  return numbered / lines.length >= 0.6
+function hasParams(tool: ChatToolCall) {
+  return Object.keys(getToolArgs(tool)).length > 0
+}
+
+function queryResult(tool: ChatToolCall) {
+  return parseQueryKbResult(getToolResult(tool))
+}
+
+function hasGraphData(tool: ChatToolCall) {
+  const result = queryResult(tool)
+  return Boolean(result.entities.length || result.relationships.length || result.references.length)
 }
 
 const toolNames = computed(() => {
-  const names = props.toolCalls.map((tool) => displayLabel(tool.name)).filter(Boolean)
-  return [...new Set(names)].slice(0, 3).join(' · ')
+  const names = normalizedToolCalls.value.map(getToolCallLabel).filter(Boolean)
+  const uniqueNames = [...new Set(names)]
+  return `${uniqueNames.slice(0, 3).join(' · ')}${uniqueNames.length > 3 ? ` +${uniqueNames.length - 3}` : ''}`
 })
+
 const statusText = computed(() => {
-  const done = props.toolCalls.filter((tool) => tool.status === 'done').length
-  const failed = props.toolCalls.filter((tool) => tool.status === 'error').length
-  const running = props.toolCalls.length - done - failed
-  if (props.toolCalls.length && done === props.toolCalls.length) return '已完成'
-  const parts = []
-  if (failed) parts.push(`${failed} 失败`)
-  if (running) parts.push(`${running} 进行中`)
-  return parts.join(' · ')
+  const done = normalizedToolCalls.value.filter((tool) => tool.status === 'done').length
+  const failed = normalizedToolCalls.value.filter((tool) => tool.status === 'error').length
+  const running = normalizedToolCalls.value.length - done - failed
+  if (done && done === normalizedToolCalls.value.length) return '已完成'
+  return [
+    failed ? `${failed} 失败` : '',
+    running ? `${running} 进行中` : ''
+  ].filter(Boolean).join(' · ')
 })
+
 const title = computed(() => {
-  if (props.toolCalls.length === 1) return `调用: ${displayLabel(props.toolCalls[0].name)}`
-  return `已调用 ${props.toolCalls.length} 个工具`
+  if (normalizedToolCalls.value.length === 1) return `调用: ${getToolCallLabel(normalizedToolCalls.value[0])}`
+  return `已调用 ${normalizedToolCalls.value.length} 个工具`
 })
 </script>
 
 <template>
-  <section v-if="toolCalls.length" class="tool-calls-panel">
-    <button type="button" class="tool-summary" @click="expanded = !expanded">
+  <section v-if="normalizedToolCalls.length" class="tool-calls-panel">
+    <button type="button" class="tool-summary" :class="{ 'is-expanded': expanded }" @click="expanded = !expanded">
       <Atom :size="14" />
       <span>{{ title }}</span>
-      <small v-if="toolCalls.length > 1 && toolNames">{{ toolNames }}</small>
+      <small v-if="normalizedToolCalls.length > 1 && toolNames">{{ toolNames }}</small>
       <em v-if="statusText">{{ statusText }}</em>
       <component :is="expanded ? ChevronDown : ChevronRight" :size="14" />
     </button>
+
     <div v-if="expanded" class="tool-list">
-      <article v-for="tool in toolCalls" :key="tool.id" class="tool-card">
-        <header class="tool-card-header">
-          <BookOpen v-if="tool.name === 'list_kbs'" :size="15" />
-          <FileText v-else :size="15" />
+      <article v-for="(tool, index) in normalizedToolCalls" :key="toolKey(tool, index)" class="tool-card">
+        <button type="button" class="tool-card-summary" @click="toggleTool(tool, index)">
+          <component :is="headerMeta(tool).icon" :size="15" />
           <span class="tool-note">{{ headerMeta(tool).note }}</span>
           <span v-if="headerMeta(tool).description" class="tool-separator">|</span>
           <strong v-if="headerMeta(tool).description">{{ headerMeta(tool).description }}</strong>
-          <em>{{ tool.status === 'done' ? '已完成' : tool.status === 'error' ? '失败' : '进行中' }}</em>
-        </header>
-        <div v-if="hasToolParams(tool)" class="tool-params">
-          <strong>参数:</strong>
-          <span>{{ formatJson(tool.args) }}</span>
-        </div>
-        <div v-if="listKbsItems(tool).length" class="tool-kb-list">
-          <p>共 {{ listKbsItems(tool).length }} 个知识库</p>
-          <article v-for="kb in listKbsItems(tool)" :key="kb.id || kb.name" class="tool-kb-card">
-            <strong>{{ kb.name }}</strong>
-            <span>{{ kb.description }}</span>
-          </article>
-        </div>
-        <div
-          v-else-if="tool.result"
-          class="tool-result-viewer"
-          :class="{ 'has-embedded-line-numbers': hasEmbeddedLineNumbers(tool) }"
-        >
-          <div v-for="(line, index) in resultLines(tool)" :key="`${tool.id}-${index}`" class="tool-result-line">
-            <span>{{ index + 1 }}</span>
-            <code>{{ line || ' ' }}</code>
+          <em>{{ getToolStatusLabel(tool) }}</em>
+          <component :is="expandedTools[toolKey(tool, index)] ? ChevronDown : ChevronRight" :size="14" />
+        </button>
+
+        <div v-if="expandedTools[toolKey(tool, index)]" class="tool-card-body">
+          <div v-if="hasParams(tool)" class="tool-params">
+            <strong>参数:</strong>
+            <span>{{ formatJson(tool.args) }}</span>
+          </div>
+
+          <div v-if="tool.name === 'list_kbs' && listKbsItems(tool).length" class="tool-kb-list">
+            <p>共 {{ listKbsItems(tool).length }} 个知识库</p>
+            <article v-for="kb in listKbsItems(tool)" :key="kb.id || kb.name" class="tool-kb-card">
+              <strong>{{ kb.name }}</strong>
+              <span>{{ kb.description }}</span>
+            </article>
+          </div>
+
+          <div v-else-if="tool.name === 'query_kb'" class="query-kb-result">
+            <KbResultGroupedList v-if="queryResult(tool).chunks.length" :chunks="queryResult(tool).chunks" />
+            <div v-if="hasGraphData(tool)" class="graph-result-card">
+              图谱检索：实体 {{ queryResult(tool).entities.length }} 个，关系
+              {{ queryResult(tool).relationships.length }} 条，引用 {{ queryResult(tool).references.length }} 条
+            </div>
+            <p v-if="!queryResult(tool).chunks.length && !hasGraphData(tool)" class="tool-empty-result">
+              未找到相关知识库内容
+            </p>
+          </div>
+
+          <div v-else-if="tool.result" class="tool-result-viewer">
+            <div v-for="(line, lineIndex) in resultLines(tool)" :key="`${toolKey(tool, index)}-${lineIndex}`" class="tool-result-line">
+              <span>{{ lineIndex + 1 }}</span>
+              <code>{{ line || ' ' }}</code>
+            </div>
           </div>
         </div>
       </article>

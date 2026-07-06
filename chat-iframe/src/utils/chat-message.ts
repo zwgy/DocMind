@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatMessageRole, ChatToolCall, RunStreamChunk } from '../types'
+import { normalizeToolCalls } from './tool-calls.ts'
 
 function roleFromType(type: string): ChatMessageRole {
   if (type === 'human') return 'user'
@@ -25,21 +26,6 @@ function parseReasoning(content: string, explicit?: unknown) {
     content: content.replace(match[0], '').trim(),
     reasoningContent: (match[1] || match[2] || '').trim()
   }
-}
-
-function normalizeToolCalls(value: unknown): ChatToolCall[] {
-  if (!Array.isArray(value)) return []
-  return value.map((tool, index) => {
-    const item = tool && typeof tool === 'object' ? (tool as Record<string, unknown>) : {}
-    const fn = item.function && typeof item.function === 'object' ? (item.function as Record<string, unknown>) : {}
-    return {
-      id: String(item.id || item.tool_call_id || index),
-      name: String(item.name || fn.name || 'tool'),
-      args: item.args || fn.arguments,
-      result: item.tool_call_result,
-      status: item.tool_call_result ? 'done' : 'running'
-    }
-  })
 }
 
 export function normalizeChatMessage(item: Record<string, unknown>): ChatMessage {

@@ -1,5 +1,16 @@
 <script setup lang="ts">
-import { ArrowLeft, MessageSquare, MessageSquarePlus, Pin, PinOff, Pencil, RefreshCcw, Trash2 } from 'lucide-vue-next'
+import { ref } from 'vue'
+import {
+  ArrowLeft,
+  MessageSquare,
+  MessageSquarePlus,
+  MoreVertical,
+  Pin,
+  PinOff,
+  Pencil,
+  RefreshCcw,
+  Trash2
+} from 'lucide-vue-next'
 import type { ChatThread } from '@/types'
 
 withDefaults(
@@ -21,13 +32,38 @@ const emit = defineEmits<{
   pin: [threadId: string]
 }>()
 
+const openActionsThreadId = ref('')
+const pendingDeleteThreadId = ref('')
+
+function selectThread(threadId: string) {
+  openActionsThreadId.value = ''
+  emit('select', threadId)
+}
+
+function toggleThreadActions(threadId: string) {
+  openActionsThreadId.value = openActionsThreadId.value === threadId ? '' : threadId
+}
+
 function renameThread(thread: ChatThread) {
+  openActionsThreadId.value = ''
   const title = window.prompt('对话标题', thread.title || '来文咨询')?.trim()
   if (title) emit('rename', { threadId: thread.id, title })
 }
 
-function deleteThread(threadId: string) {
-  if (window.confirm('确认删除这个对话？')) emit('delete', threadId)
+function togglePinThread(thread: ChatThread) {
+  openActionsThreadId.value = ''
+  emit('pin', thread.id)
+}
+
+function requestDeleteThread(threadId: string) {
+  openActionsThreadId.value = ''
+  pendingDeleteThreadId.value = threadId
+}
+
+function confirmDeleteThread() {
+  const threadId = pendingDeleteThreadId.value
+  pendingDeleteThreadId.value = ''
+  if (threadId) emit('delete', threadId)
 }
 </script>
 
@@ -62,29 +98,49 @@ function deleteThread(threadId: string) {
           v-for="thread in threads"
           :key="thread.id"
           class="thread-option"
-          :class="{ active: thread.id === currentThreadId }"
+          :class="{ active: thread.id === currentThreadId, 'actions-open': openActionsThreadId === thread.id }"
         >
           <span class="thread-icon">
             <MessageSquare :size="16" />
           </span>
-          <button type="button" class="thread-title" @click="$emit('select', thread.id)">
-            <Pin v-if="thread.is_pinned" :size="14" />
-            {{ thread.title || '来文咨询' }}
+          <button type="button" class="thread-title" @click="selectThread(thread.id)">
+            <Pin v-if="thread.is_pinned" :size="13" />
+            <span>{{ thread.title || '来文咨询' }}</span>
           </button>
           <span class="thread-actions">
-            <button type="button" title="重命名" @click.stop="renameThread(thread)">
-              <Pencil :size="15" />
-            </button>
-            <button type="button" :title="thread.is_pinned ? '取消置顶' : '置顶'" @click.stop="$emit('pin', thread.id)">
-              <PinOff v-if="thread.is_pinned" :size="15" />
-              <Pin v-else :size="15" />
-            </button>
-            <button type="button" title="删除" @click.stop="deleteThread(thread.id)">
-              <Trash2 :size="15" />
+            <template v-if="openActionsThreadId === thread.id">
+              <button type="button" title="重命名" @click.stop="renameThread(thread)">
+                <Pencil :size="15" />
+              </button>
+              <button
+                type="button"
+                :title="thread.is_pinned ? '取消置顶' : '置顶'"
+                @click.stop="togglePinThread(thread)"
+              >
+                <PinOff v-if="thread.is_pinned" :size="15" />
+                <Pin v-else :size="15" />
+              </button>
+              <button type="button" title="删除" @click.stop="requestDeleteThread(thread.id)">
+                <Trash2 :size="15" />
+              </button>
+            </template>
+            <button v-else type="button" title="更多操作" @click.stop="toggleThreadActions(thread.id)">
+              <MoreVertical :size="16" />
             </button>
           </span>
         </div>
       </template>
+    </div>
+
+    <div v-if="pendingDeleteThreadId" class="sidebar-confirm-mask" @click.self="pendingDeleteThreadId = ''">
+      <article class="sidebar-confirm">
+        <h3>删除对话？</h3>
+        <p>删除后无法恢复，请确认是否继续。</p>
+        <footer>
+          <button type="button" class="secondary" @click="pendingDeleteThreadId = ''">取消</button>
+          <button type="button" class="danger" @click="confirmDeleteThread">删除</button>
+        </footer>
+      </article>
     </div>
   </section>
 </template>
