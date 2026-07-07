@@ -15,6 +15,7 @@ from yuxi.repositories.agent_repository import AgentRepository
 from yuxi.repositories.agent_run_repository import AgentRunRepository
 from yuxi.repositories.conversation_repository import ConversationRepository
 from yuxi.services.conversation_service import serialize_attachment
+from yuxi.services.iframe_context_service import render_iframe_context_prompt
 from yuxi.services.langfuse_service import (
     LangfuseRunContext,
     build_run_context,
@@ -199,6 +200,20 @@ def _apply_model_override(input_context: dict, meta: dict | None) -> None:
     model_spec = model_spec.strip() if isinstance(model_spec, str) else model_spec
     if model_spec:
         input_context["model"] = model_spec
+
+
+async def _apply_iframe_context(input_context: dict, meta: dict | None) -> None:
+    iframe_context = (meta or {}).get("iframe_context")
+    thread_id = (meta or {}).get("thread_id")
+    uid = (meta or {}).get("uid")
+    if not isinstance(iframe_context, dict) or not thread_id or not uid:
+        return
+
+    prompt = await render_iframe_context_prompt(str(thread_id), str(uid), iframe_context)
+    if not prompt:
+        return
+    base_prompt = str(input_context.get("system_prompt") or "").rstrip()
+    input_context["system_prompt"] = f"{base_prompt}\n\n{prompt}" if base_prompt else prompt
 
 
 def _stream_message_key(metadata: dict | None, namespace: list[str], thread_id: str | None) -> tuple[str, str]:
@@ -816,6 +831,7 @@ async def agent_chat(
         request_id=meta.get("request_id"),
     )
     _apply_model_override(input_context, meta)
+    await _apply_iframe_context(input_context, meta)
     langfuse_run = _build_langfuse_run_context(
         current_user=current_user,
         thread_id=thread_id,
@@ -1028,6 +1044,7 @@ async def stream_agent_chat(
         request_id=meta.get("request_id"),
     )
     _apply_model_override(input_context, meta)
+    await _apply_iframe_context(input_context, meta)
     langfuse_run = _build_langfuse_run_context(
         current_user=current_user,
         thread_id=thread_id,

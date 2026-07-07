@@ -471,7 +471,7 @@ async def test_create_agent_run_persists_input_before_enqueue(monkeypatch: pytes
         query="hello",
         agent_id="default",
         thread_id="thread-1",
-        meta={"request_id": "req-1"},
+        meta={"request_id": "req-1", "iframe_context": {"page": {"title": "Detail"}, "files": []}},
         image_content=None,
         current_uid="user-1",
         db=db,
@@ -483,7 +483,9 @@ async def test_create_agent_run_persists_input_before_enqueue(monkeypatch: pytes
     assert db.added[0].run_id == created_run.id
     assert db.added[0].request_id == "req-1"
     assert captured["input_payload"]["model_spec"] == "agent-default-model"
+    assert captured["input_payload"]["iframe_context"] == {"page": {"title": "Detail"}, "files": []}
     assert db.added[0].extra_metadata["model_spec"] == "agent-default-model"
+    assert db.added[0].extra_metadata["iframe_context"] == {"enabled": True}
 
 
 @pytest.mark.asyncio

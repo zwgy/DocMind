@@ -25,6 +25,8 @@ type SendOptions = {
   pageContent?: PageContent
   selectedFile?: IncomingPageFile | null
   extractionResult?: ExtractionResult | null
+  selectedPageFiles?: IncomingPageFile[]
+  extractionResults?: Record<string, ExtractionResult>
 }
 
 type ChatState = {
@@ -269,6 +271,8 @@ export const useChatStore = defineStore('chat', {
             pageContent: options.pageContent,
             selectedFile: options.selectedFile,
             extractionResult: options.extractionResult,
+            selectedPageFiles: options.selectedPageFiles,
+            extractionResults: options.extractionResults,
             attachmentNames: uploadedAttachments.map((item) => String(item.file_name || '')).filter(Boolean),
             attachments: uploadedAttachments,
             imageContent,

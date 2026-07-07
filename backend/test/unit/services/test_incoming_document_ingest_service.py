@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from yuxi.services.incoming_document_ingest_service import IncomingDocumentIngestService
 
 
@@ -73,3 +75,42 @@ async def test_ingest_direct_file_adds_record_and_queues_parse(monkeypatch):
 
     assert result == {"fileId": "file_new", "kbId": "kb_1", "taskId": "task_1", "status": "accepted"}
     assert tasker.enqueued[0]["task_type"] == "knowledge_parse"
+
+
+@pytest.mark.asyncio
+async def test_ingest_source_url_downloads_document_with_document_limits(monkeypatch):
+    captured = {}
+
+    async def fake_fetch_url_content(url, **kwargs):
+        captured["fetch"] = {"url": url, **kwargs}
+        return b"demo", url
+
+    async def fake_upload(*, kb_id, filename, content):
+        return {"minio_url": "minio://knowledgebases/kb_1/upload/1.pdf", "content_hash": "hash", "size": len(content)}
+
+    class Context:
+        async def set_progress(self, *_args):
+            return None
+
+    monkeypatch.setattr("yuxi.knowledge.utils.url_fetcher.fetch_url_content", fake_fetch_url_content)
+    tasker = FakeTasker()
+    service = IncomingDocumentIngestService(
+        file_repo=FakeFileRepo(),
+        knowledge=FakeKnowledgeBase(),
+        tasker=tasker,
+        default_kb_id="kb_1",
+        upload_file=fake_upload,
+    )
+
+    result = await service.ingest_source_url(
+        source_url="https://oa.example.test/incoming.pdf",
+        filename="incoming.pdf",
+        source_key="S001",
+        operator_id="u1",
+    )
+
+    assert result == {"fileId": None, "kbId": "kb_1", "taskId": "task_1", "status": "accepted"}
+    await tasker.enqueued[0]["coroutine"](Context())
+    assert captured["fetch"]["url"] == "https://oa.example.test/incoming.pdf"
+    assert "application/pdf" in captured["fetch"]["allowed_content_types"]
+    assert captured["fetch"]["max_size"] >= len(b"demo")

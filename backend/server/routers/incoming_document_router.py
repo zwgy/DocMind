@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
 
-from server.utils.auth_middleware import get_admin_user, get_required_user
+from server.utils.auth_middleware import get_required_user
 from yuxi.services.incoming_document_ingest_service import IncomingDocumentIngestService
 from yuxi.services.incoming_document_service import IncomingDocumentService, IncomingPageFile
 from yuxi.storage.postgres.models_business import User
@@ -37,7 +37,7 @@ async def query_incoming_document_extractions(
 
 
 @incoming_documents.post("/ingest")
-async def ingest_incoming_document(request: Request, current_user: User = Depends(get_admin_user)):
+async def ingest_incoming_document(request: Request, current_user: User = Depends(get_required_user)):
     try:
         if request.headers.get("content-type", "").startswith("application/json"):
             body = IncomingIngestJsonRequest.model_validate(await request.json())

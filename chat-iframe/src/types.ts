@@ -68,8 +68,28 @@ export type ExtractionResult = {
   runId?: string | null
   kbId?: string
   fileId?: string
+  fileStatus?: string
+  hasParsedMarkdown?: boolean
+  taskId?: string | null
   categories?: Record<string, ExtractionCategory>
   items?: ExtractionItem[]
+}
+
+export type IframeContextFile = IncomingPageFile & {
+  matchStatus?: string
+  extractionStatus?: string
+  fileStatus?: string
+  hasParsedMarkdown?: boolean
+  kbId?: string
+  fileId?: string
+  runId?: string | null
+  summary?: string
+  summaryTruncated?: boolean
+}
+
+export type IframeContextPayload = {
+  page?: PageContent
+  files: IframeContextFile[]
 }
 
 export type ContextSummaryPayload = {

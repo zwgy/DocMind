@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { queryIncomingDocumentExtractions } from '../src/apis/incoming-documents.ts'
+import { ingestIncomingDocument, queryIncomingDocumentExtractions } from '../src/apis/incoming-documents.ts'
 
 test('queryIncomingDocumentExtractions posts files with bearer token', async () => {
   const calls = []
@@ -33,6 +33,29 @@ test('queryIncomingDocumentExtractions reports non-json http status', async () =
     () => queryIncomingDocumentExtractions([{ id: 'f1', name: 'incoming.pdf' }]),
     /502/
   )
+})
+
+test('ingestIncomingDocument posts source url with bearer token', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    return Response.json({ status: 'accepted', taskId: 'task-1' })
+  }
+
+  const response = await ingestIncomingDocument(
+    { id: 'f1', name: 'incoming.pdf', sourceUrl: 'https://oa.example.test/incoming.pdf', sourceKey: 'S001' },
+    'token-1'
+  )
+
+  assert.equal(calls[0].url, '/api/incoming-documents/ingest')
+  assert.equal(calls[0].options.method, 'POST')
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer token-1')
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    sourceUrl: 'https://oa.example.test/incoming.pdf',
+    sourceKey: 'S001',
+    filename: 'incoming.pdf'
+  })
+  assert.equal(response.status, 'accepted')
 })
 
 test('queryIncomingDocumentExtractions returns local mock data when enabled by url', async () => {

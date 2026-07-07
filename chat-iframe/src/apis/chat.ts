@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   ChatThread,
   ExtractionResult,
+  IframeContextPayload,
   IncomingPageFile,
   PageContent,
   RunStreamChunk
@@ -37,6 +38,8 @@ type ChatContextInput = {
   pageContent?: PageContent
   selectedFile?: IncomingPageFile | null
   extractionResult?: ExtractionResult | null
+  selectedPageFiles?: IncomingPageFile[]
+  extractionResults?: Record<string, ExtractionResult>
 }
 
 type SendMessagePayload = ChatContextInput &
@@ -69,11 +72,6 @@ async function parseResponse<T>(response: Response, fallbackMessage: string): Pr
   throw new Error(message)
 }
 
-function compactText(value?: string, limit = 1200) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim()
-  return text.length > limit ? `${text.slice(0, limit)}...` : text
-}
-
 function summarizeExtraction(result?: ExtractionResult | null) {
   if (!result) return ''
   if (result.matchStatus !== 'matched' || result.extractionStatus !== 'ready') return ''
@@ -91,6 +89,8 @@ function summarizeExtraction(result?: ExtractionResult | null) {
 }
 
 export function buildChatQuery(input: ChatContextInput) {
+  return input.text.trim()
+  /*
   const parts = [`用户问题：${input.text.trim()}`]
   if (input.includePage && input.pageContent) {
     // 当前后端只保证消费 query；把页面摘要拼进去，才能让“问网页”在第一版真实可用。
@@ -109,6 +109,36 @@ export function buildChatQuery(input: ChatContextInput) {
     parts.push(`文件上下文：\n${fileLines.join('\n')}`)
   }
   return parts.join('\n\n')
+  */
+}
+
+export function buildIframeContext(input: ChatContextInput): IframeContextPayload {
+  const context: IframeContextPayload = { files: [] }
+  if (input.includePage && input.pageContent) context.page = input.pageContent
+  if (!input.includeFile) return context
+
+  const files = input.selectedPageFiles?.length
+    ? input.selectedPageFiles
+    : input.selectedFile
+      ? [input.selectedFile]
+      : []
+  for (const file of files) {
+    const result = input.extractionResults?.[file.id] || (file.id === input.selectedFile?.id ? input.extractionResult : null)
+    const summary = summarizeExtraction(result)
+    context.files.push({
+      ...file,
+      matchStatus: result?.matchStatus,
+      extractionStatus: result?.extractionStatus,
+      fileStatus: result?.fileStatus,
+      hasParsedMarkdown: result?.hasParsedMarkdown,
+      kbId: result?.kbId,
+      fileId: result?.fileId,
+      runId: result?.runId,
+      summary: summary || undefined,
+      summaryTruncated: Boolean(summary && summary.length >= 1200)
+    })
+  }
+  return context
 }
 
 function extractTextDelta(payload: Record<string, unknown>) {
@@ -297,6 +327,7 @@ export async function listMessages(threadId: string, token?: string): Promise<Ch
 export async function sendMessageStream(payload: SendMessagePayload, handlers: RunEventHandlers = {}) {
   const requestId = crypto.randomUUID()
   const query = buildChatQuery(payload)
+  const iframeContext = buildIframeContext(payload)
   const response = await fetch(apiUrl('/api/agent/runs'), {
     method: 'POST',
     headers: authHeaders(payload.token),
@@ -312,6 +343,7 @@ export async function sendMessageStream(payload: SendMessagePayload, handlers: R
         source: 'chat-iframe',
         attachment_names: payload.attachmentNames || [],
         attachments: payload.attachments || [],
+        iframe_context: iframeContext,
         page_content: payload.includePage ? payload.pageContent || null : null,
         selected_file: payload.includeFile ? payload.selectedFile || null : null,
         extraction_result: payload.includeFile ? payload.extractionResult || null : null

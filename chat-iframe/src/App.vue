@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Maximize2, Menu, Minimize2, Minus, X } from 'lucide-vue-next'
-import { queryIncomingDocumentExtractions } from '@/apis/incoming-documents'
+import { ingestIncomingDocument, queryIncomingDocumentExtractions } from '@/apis/incoming-documents'
 import ChatInput from '@/components/ChatInput.vue'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatSidebar from '@/components/ChatSidebar.vue'
@@ -28,6 +28,7 @@ const error = ref('')
 const results = ref<Record<string, ExtractionResult>>({})
 const showSidebar = ref(false)
 const draggingWindow = ref(false)
+const ingestingFileIds = new Set<string>()
 
 const selectedFile = computed(() => context.selectedFile)
 
@@ -60,8 +61,18 @@ async function refreshExtraction() {
   error.value = ''
   chat.setContextSummary({ file, result: results.value[file.id] || null, loading: true })
   try {
-    const response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
+    let response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
     cacheExtractionResults(queryFiles, response.items || [])
+    const pendingFiles = queryFiles.filter((file) => {
+      const result = results.value[file.id]
+      return result?.matchStatus === 'pending_sync' && (file.sourceUrl || file.url) && !ingestingFileIds.has(file.id)
+    })
+    if (pendingFiles.length) {
+      pendingFiles.forEach((file) => ingestingFileIds.add(file.id))
+      await Promise.all(pendingFiles.map((file) => ingestIncomingDocument(file, context.config.token).catch(() => null)))
+      response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
+      cacheExtractionResults(queryFiles, response.items || [])
+    }
     if (selectedFile.value?.id === file.id) chat.setContextSummary({ file, result: results.value[file.id] || null, loading: false })
   } catch (err) {
     error.value = err instanceof Error ? err.message : '查询失败'
@@ -102,7 +113,9 @@ async function sendChat(payload: {
       imageFile: payload.imageFile,
       pageContent: context.pageContent,
       selectedFile: selectedContextFile,
-      extractionResult: selectedContextResult
+      extractionResult: selectedContextResult,
+      selectedPageFiles: payload.selectedPageFiles || [],
+      extractionResults: results.value
     },
     context.config.token,
     context.config.agentId,

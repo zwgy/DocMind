@@ -51,6 +51,8 @@ class IncomingDocumentService:
         base = {
             "incomingFileId": incoming.id or incoming.source_key or incoming.source_url or incoming.name,
             "name": incoming.name,
+            "sourceUrl": incoming.source_url or incoming.url,
+            "sourceKey": incoming.source_key,
             "matchStatus": "not_found",
             "extractionStatus": "not_found",
             "reason": reason,
@@ -63,10 +65,14 @@ class IncomingDocumentService:
 
         record = candidates[0]
         extraction = await self._extraction_payload(record)
+        markdown_file = getattr(record, "markdown_file", None)
+        file_status = getattr(record, "status", None) or ("parsed" if markdown_file else "uploaded")
         return base | {
             "matchStatus": "matched",
             "kbId": record.kb_id,
             "fileId": record.file_id,
+            "fileStatus": file_status,
+            "hasParsedMarkdown": bool(markdown_file),
             "reason": reason,
             **extraction,
         }

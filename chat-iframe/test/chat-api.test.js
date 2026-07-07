@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildIframeContext,
   buildChatQuery,
   cancelRun,
   createConversation,
@@ -63,7 +64,7 @@ test('createConversation stores iframe conversation scope in metadata', async ()
   })
 })
 
-test('buildChatQuery carries enabled page and file context in the query text', () => {
+test.skip('buildChatQuery carries enabled page and file context in the query text', () => {
   const query = buildChatQuery({
     text: '这份文件有什么风险？',
     includePage: true,
@@ -89,7 +90,7 @@ test('buildChatQuery carries enabled page and file context in the query text', (
   assert.match(query, /现场作业监护需加强/)
 })
 
-test('buildChatQuery omits file context when askFile is disabled', () => {
+test.skip('buildChatQuery omits file context when askFile is disabled', () => {
   const query = buildChatQuery({
     text: '只看页面',
     includePage: false,
@@ -108,7 +109,7 @@ test('buildChatQuery omits file context when askFile is disabled', () => {
   assert.doesNotMatch(query, /现场作业监护需加强/)
 })
 
-test('buildChatQuery keeps file identity but omits unavailable extraction details', () => {
+test.skip('buildChatQuery keeps file identity but omits unavailable extraction details', () => {
   const query = buildChatQuery({
     text: '这份文件有摘要吗？',
     includePage: false,
@@ -126,6 +127,74 @@ test('buildChatQuery keeps file identity but omits unavailable extraction detail
   assert.match(query, /附件：来文.docx/)
   assert.doesNotMatch(query, /不应出现/)
   assert.doesNotMatch(query, /不应注入/)
+})
+
+test('buildChatQuery keeps the user query clean', () => {
+  const query = buildChatQuery({
+    text: 'Summarize this contract',
+    includePage: true,
+    includeFile: true,
+    pageContent: { title: 'Detail page', text: 'Page body' },
+    selectedFile: { id: 'f1', name: 'contract.docx', sourceKey: 'S001' },
+    extractionResult: {
+      matchStatus: 'matched',
+      extractionStatus: 'ready',
+      categories: { risk: { matched: true, evidence: 'Risk evidence' } },
+      items: [{ item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' }]
+    }
+  })
+
+  assert.equal(query, 'Summarize this contract')
+})
+
+test('buildIframeContext carries enabled page and all selected files', () => {
+  const context = buildIframeContext({
+    text: 'Summarize',
+    includePage: true,
+    includeFile: true,
+    pageContent: { title: 'Detail page', url: 'https://oa.example.test/doc/1', text: 'Page body' },
+    selectedPageFiles: [
+      { id: 'f1', name: 'a.docx', sourceKey: 'S001', sourceUrl: 'https://oa.example.test/a.docx' },
+      { id: 'f2', name: 'b.pdf', sourceKey: 'S002', sourceUrl: 'https://oa.example.test/b.pdf' }
+    ],
+    extractionResults: {
+      f1: {
+        incomingFileId: 'f1',
+        matchStatus: 'matched',
+        extractionStatus: 'ready',
+        fileStatus: 'parsed',
+        hasParsedMarkdown: true,
+        kbId: 'kb1',
+        fileId: 'file1',
+        categories: { risk: { matched: true, evidence: 'Risk evidence' } },
+        items: [{ item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' }]
+      },
+      f2: {
+        incomingFileId: 'f2',
+        matchStatus: 'pending_sync',
+        extractionStatus: 'not_found'
+      }
+    }
+  })
+
+  assert.equal(context.page.title, 'Detail page')
+  assert.equal(context.files.length, 2)
+  assert.equal(context.files[0].kbId, 'kb1')
+  assert.equal(context.files[0].summary.includes('risk'), true)
+  assert.equal(context.files[1].matchStatus, 'pending_sync')
+})
+
+test('buildIframeContext omits disabled page and files', () => {
+  const context = buildIframeContext({
+    text: 'Summarize',
+    includePage: false,
+    includeFile: false,
+    pageContent: { title: 'Detail page', text: 'Page body' },
+    selectedPageFiles: [{ id: 'f1', name: 'a.docx', sourceKey: 'S001' }]
+  })
+
+  assert.equal(context.page, undefined)
+  assert.deepEqual(context.files, [])
 })
 
 test('readRunEventStream emits text deltas from compact run SSE events', async () => {
@@ -276,6 +345,38 @@ test('sendMessageStream posts image content and attachment metadata', async () =
   const body = JSON.parse(calls[0].options.body)
   assert.equal(body.image_content, 'base64-image')
   assert.deepEqual(body.meta.attachments, [{ file_id: 'file-1', file_name: 'demo.pdf' }])
+})
+
+test('sendMessageStream posts iframe context separately from the query', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, options })
+    if (url === '/api/agent/runs') return Response.json({ run_id: 'run-1' })
+    return new Response('event: end\ndata: {"payload":{"status":"completed"}}\n\n')
+  }
+
+  await sendMessageStream({
+    text: 'Summarize',
+    threadId: 'thread-1',
+    includePage: true,
+    includeFile: true,
+    pageContent: { title: 'Page', text: 'Page body' },
+    selectedPageFiles: [{ id: 'f1', name: 'a.docx', sourceKey: 'S001' }],
+    extractionResults: {
+      f1: {
+        matchStatus: 'matched',
+        extractionStatus: 'not_found',
+        hasParsedMarkdown: true,
+        kbId: 'kb1',
+        fileId: 'file1'
+      }
+    }
+  })
+
+  const body = JSON.parse(calls[0].options.body)
+  assert.equal(body.query, 'Summarize')
+  assert.equal(body.meta.iframe_context.page.title, 'Page')
+  assert.equal(body.meta.iframe_context.files[0].fileId, 'file1')
 })
 
 test('chat management APIs use web-compatible endpoints', async () => {

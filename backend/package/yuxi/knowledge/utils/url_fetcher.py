@@ -34,7 +34,11 @@ async def is_private_ip(hostname: str) -> bool:
         return False
 
 
-async def fetch_url_content(url: str, max_size: int = MAX_DOWNLOAD_SIZE) -> tuple[bytes, str]:
+async def fetch_url_content(
+    url: str,
+    max_size: int = MAX_DOWNLOAD_SIZE,
+    allowed_content_types: list[str] | tuple[str, ...] | None = None,
+) -> tuple[bytes, str]:
     """
     Fetch URL content with security checks (size limit, content type, private IP blocking).
 
@@ -110,8 +114,9 @@ async def fetch_url_content(url: str, max_size: int = MAX_DOWNLOAD_SIZE) -> tupl
 
                     # Check Content-Type
                     content_type = response.headers.get("Content-Type", "").lower()
-                    if not any(allowed in content_type for allowed in ALLOWED_CONTENT_TYPES):
-                        raise ValueError(f"Unsupported Content-Type: {content_type}. Only HTML is supported.")
+                    allowed_types = allowed_content_types or ALLOWED_CONTENT_TYPES
+                    if not any(allowed in content_type for allowed in allowed_types):
+                        raise ValueError(f"Unsupported Content-Type: {content_type}. Only configured content types are supported.")
 
                     # Download content with size limit
                     content = bytearray()

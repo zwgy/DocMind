@@ -82,8 +82,37 @@ async def test_query_returns_ready_for_source_key_match_and_draft_result():
     item = result["items"][0]
     assert item["matchStatus"] == "matched"
     assert item["extractionStatus"] == "ready"
+    assert item["fileStatus"] == "parsed"
+    assert item["hasParsedMarkdown"] is True
     assert item["runId"] == "ber_1"
     assert item["items"][0]["chunk_id"] is None
+
+
+async def test_query_returns_readable_kb_pointer_when_summary_missing():
+    service = IncomingDocumentService(
+        file_repo=FakeFileRepo({("source_key", "202606100417"): [file_record()]}),
+        extraction_repo=FakeExtractionRepo(),
+        tasker=FakeTasker(),
+        model_spec="model-a",
+    )
+
+    result = await service.query_extractions(
+        [
+            {
+                "id": "202606100417",
+                "name": "incoming.docx",
+                "sourceKey": "202606100417",
+            }
+        ]
+    )
+
+    item = result["items"][0]
+    assert item["matchStatus"] == "matched"
+    assert item["extractionStatus"] == "not_found"
+    assert item["fileStatus"] == "parsed"
+    assert item["hasParsedMarkdown"] is True
+    assert item["kbId"] == "kb_1"
+    assert item["fileId"] == "file_1"
 
 
 async def test_query_translates_match_miss_states():

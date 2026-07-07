@@ -86,3 +86,4 @@ docker/volumes
 .understand-anything
 .svnignore
 studyYuxi
+.pnpm-store/

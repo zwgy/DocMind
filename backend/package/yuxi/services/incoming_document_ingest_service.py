@@ -16,6 +16,22 @@ from yuxi.utils.upload_utils import MAX_UPLOAD_SIZE_BYTES
 
 UploadFileFn = Callable[..., Awaitable[dict[str, Any]]]
 INCOMING_DOCUMENT_INGEST_TASK_TYPE = "incoming_document_ingest"
+INCOMING_ALLOWED_CONTENT_TYPES = (
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+    "text/html",
+    "application/xhtml+xml",
+    "application/octet-stream",
+)
 
 
 class IncomingDocumentIngestService:
@@ -106,7 +122,12 @@ class IncomingDocumentIngestService:
             from yuxi.knowledge.utils.url_fetcher import fetch_url_content
 
             await context.set_progress(5.0, "准备下载来文")
-            content, _ = await fetch_url_content(source_url)
+            # 来文下载与网页解析共用 URL 拉取器，这里显式放开文档 MIME，避免影响网页解析默认白名单。
+            content, _ = await fetch_url_content(
+                source_url,
+                max_size=MAX_UPLOAD_SIZE_BYTES,
+                allowed_content_types=INCOMING_ALLOWED_CONTENT_TYPES,
+            )
             return await self.ingest_file(
                 content=content,
                 filename=filename,

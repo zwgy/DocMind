@@ -191,7 +191,7 @@ docMind backend
 5. iframe 调用 `/api/incoming-documents/extractions/query`。
 6. 页面展示 `matched/multiple/pending_sync/not_found` 和 `ready/running/not_found/failed`。
 7. 用户提问时，iframe 创建或复用 `/api/chat/thread` 会话，调用 `/api/agent/runs` 创建运行任务，再读取 `/api/agent/runs/{runId}/events` 流式事件。
-8. “问网页/问文件”开启时，iframe 会把页面摘要、选中文档、匹配结果和抽取摘要拼入 query，同时写入 `meta`。这样做是因为当前后端聊天链路一定消费 `query`，而 `meta` 更适合作为追踪和后续增强字段。
+8. “问网页/问文件”开启时，iframe 会把页面内容、选中附件、匹配结果和抽取摘要写入 `meta.iframe_context`，`query` 只保留用户原始问题；后端在运行任务时把该上下文渲染进系统提示。
 
 ## 7. 父页面集成方式
 
@@ -519,7 +519,7 @@ corepack pnpm test
 聊天链路的最小契约：
 
 - 创建默认智能体会话时携带自动换票得到的 Bearer Token
-- “问网页/问文件”开启时把上下文拼入 query
+- “问网页/问文件”开启时通过 `meta.iframe_context` 传递页面和附件上下文，`query` 只保留用户原始问题
 - 解析 `/api/agent/runs/{runId}/events` 的 SSE 文本增量、推理内容、工具调用和工具结果
 - 发送消息时携带模型、附件元数据和图片内容
 - 停止生成、会话重命名/删除/置顶、消息反馈使用主站兼容接口
@@ -567,3 +567,12 @@ CHAT_IFRAME_TOKEN_RATE_LIMIT_PER_MINUTE=60
 ```
 
 `CHAT_IFRAME_ALLOWED_SOURCES` 和 `CHAT_IFRAME_ALLOWED_ORIGINS` 留空时不校验对应维度。自动创建的外部账号 uid 为 `ext_{source_system}_{external_user_id}`，默认普通用户、默认部门 `id=1`，后续由超级管理员在 DocMind 后台调整角色或部门。
+
+## 17. iframe_context 上下文策略
+
+`chat-iframe` 发送聊天消息时，`query` 只保留用户原始问题，不再把“页面上下文”或“文件上下文”拼入问题正文。页面和附件上下文统一放入 `/api/agent/runs` 的 `meta.iframe_context`，由后端在每轮运行时渲染成当前线程的系统提示片段。
+
+- “问网页”开启时，iframe 会把父页面传入的 `title/url/text/html` 放入 `iframe_context.page`。后端优先使用已解析文本；只有 HTML 时会先解析为 Markdown。短页面直接进入系统提示，长页面会写入当前线程沙箱文件，并在提示中给出 `read_file` 可读取路径。
+- “问文件”开启时，iframe 会把本轮选中的全部页面附件放入 `iframe_context.files`，而不是只传第一个附件。已匹配知识库且有摘要的附件会携带摘要、`kbId/fileId`；摘要不足时，模型可按提示使用 `open_kb_document` 读取全文。
+- 如果附件没有摘要但父页面提供了 `sourceUrl/url`，iframe 会触发 `POST /api/incoming-documents/ingest`，让后端直接从 URL 拉取并入库。解析尚未完成时，本轮提示只说明文件正在准备，不要求模型猜测内容。
+- 兼容过渡期仍保留 `meta.page_content`、`meta.selected_file`、`meta.extraction_result` 字段，但新的问答上下文应以 `iframe_context` 为准。

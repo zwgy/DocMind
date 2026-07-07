@@ -325,6 +325,7 @@ async def create_agent_run(
         "request_id": request_id,
         "attachment_file_ids": (meta or {}).get("attachment_file_ids") or [],
         "source": (meta or {}).get("source"),
+        "iframe_context": (meta or {}).get("iframe_context") or None,
         "evaluation": (meta or {}).get("evaluation") or None,
         "created_at": utc_now_naive().isoformat(),
     }
@@ -358,6 +359,8 @@ async def create_agent_run(
                 input_metadata["parent_agent_run_id"] = parent_agent_run_id
             if (meta or {}).get("source"):
                 input_metadata["source"] = (meta or {}).get("source")
+            if (meta or {}).get("iframe_context"):
+                input_metadata["iframe_context"] = {"enabled": True}
             if (meta or {}).get("evaluation"):
                 input_metadata["evaluation"] = (meta or {}).get("evaluation")
             if resolved_run_type == "resume":
