@@ -42,10 +42,25 @@ test('listConversations filters by configured agent id', async () => {
     return Response.json([])
   }
 
-  await listConversations('token-1', 'agent-iframe')
+  await listConversations('token-1', 'agent-iframe', 'oa:contract:001')
 
-  assert.equal(calls[0].url, '/api/chat/threads?limit=50&offset=0&agent_id=agent-iframe')
+  assert.equal(calls[0].url, '/api/chat/threads?limit=50&offset=0&agent_id=agent-iframe&conversation_scope_key=oa%3Acontract%3A001')
   assert.equal(calls[0].options.headers.Authorization, 'Bearer token-1')
+})
+
+test('createConversation stores iframe conversation scope in metadata', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    return Response.json({ id: 'thread-1', title: 'scope thread' })
+  }
+
+  await createConversation({ token: 'token-1', agentId: 'agent-iframe', conversationScopeKey: 'oa:contract:001' })
+
+  assert.deepEqual(JSON.parse(calls[0].options.body).metadata, {
+    source: 'chat-iframe',
+    conversation_scope_key: 'oa:contract:001'
+  })
 })
 
 test('buildChatQuery carries enabled page and file context in the query text', () => {

@@ -213,6 +213,7 @@
 - 补充 Langfuse 集成方案文档：明确采用“云端优先、先 tracing 后 feedback”的接入路径，并约定 Yuxi 的 `user/thread` 到 Langfuse `user_id/session_id` 的映射关系
 - 新增面向用户的 Langfuse 集成文档：在“高级配置”分组中说明 Langfuse 的定位、能力、配置方式与查看路径，并与当前 `LANGFUSE_BASE_URL` 配置保持一致
 
+- 新增 chat-iframe 外部用户换票与业务会话隔离：支持可信后端 `/api/external-users/token` 与低信任 iframe `/api/chat-iframe/token` 两种模式，自动创建默认普通用户，并通过 `conversation_scope_key` 隔离同一外部用户在不同业务界面的会话列表。
 <!-- 添加到这里 -->
 
 ### 修复

@@ -90,12 +90,12 @@ export const useChatStore = defineStore('chat', {
     setContextSummary(input: { file: IncomingPageFile | null; result: ExtractionResult | null; loading?: boolean; error?: string }) {
       this.contextSummaryMessage = buildContextSummaryMessage(input)
     },
-    async bootstrap(token?: string, agentId?: string) {
+    async bootstrap(token?: string, agentId?: string, conversationScopeKey?: string) {
       this.isLoading = true
       this.error = ''
       try {
         const [threads, models] = await Promise.all([
-          listConversations(token, agentId),
+          listConversations(token, agentId, conversationScopeKey),
           listChatModels(token).catch(() => [])
         ])
         this.threads = threads
@@ -108,19 +108,19 @@ export const useChatStore = defineStore('chat', {
         this.isLoading = false
       }
     },
-    async refreshThreads(token?: string, agentId?: string) {
+    async refreshThreads(token?: string, agentId?: string, conversationScopeKey?: string) {
       // 打开侧边栏只刷新列表，避免把当前会话悄悄切到第一条。
       this.isLoading = true
       try {
-        this.threads = await listConversations(token, agentId)
+        this.threads = await listConversations(token, agentId, conversationScopeKey)
       } catch (error) {
         this.error = error instanceof Error ? error.message : '刷新对话列表失败'
       } finally {
         this.isLoading = false
       }
     },
-    async newConversation(token?: string, agentId?: string) {
-      const thread = await createConversation({ token, agentId })
+    async newConversation(token?: string, agentId?: string, conversationScopeKey?: string) {
+      const thread = await createConversation({ token, agentId, conversationScopeKey })
       this.threads = [thread, ...this.threads.filter((item) => item.id !== thread.id)]
       this.currentThreadId = thread.id
       this.messages = []
@@ -151,9 +151,9 @@ export const useChatStore = defineStore('chat', {
       this.currentThreadId = threadId
       this.messages = await listMessages(threadId, token)
     },
-    async ensureThread(token?: string, agentId?: string) {
+    async ensureThread(token?: string, agentId?: string, conversationScopeKey?: string) {
       if (this.currentThreadId) return this.currentThreadId
-      const thread = await this.newConversation(token, agentId)
+      const thread = await this.newConversation(token, agentId, conversationScopeKey)
       return thread.id
     },
     async attachFiles(threadId: string, files: File[] = [], token?: string) {
@@ -178,14 +178,14 @@ export const useChatStore = defineStore('chat', {
       this.abortController = null
       this.messages = [...this.messages]
     },
-    async retry(token?: string, agentId?: string) {
+    async retry(token?: string, agentId?: string, conversationScopeKey?: string) {
       if (!this.lastUserMessageForRetry) return null
-      return this.send(this.lastUserMessageForRetry, token, agentId)
+      return this.send(this.lastUserMessageForRetry, token, agentId, conversationScopeKey)
     },
     async feedback(payload: { messageId: string; rating: 'like' | 'dislike'; reason: string | null }, token?: string) {
       await submitMessageFeedback(payload.messageId, payload.rating, payload.reason, token)
     },
-    async send(options: SendOptions, token?: string, agentId?: string) {
+    async send(options: SendOptions, token?: string, agentId?: string, conversationScopeKey?: string) {
       const text = options.text.trim()
       if (!text || this.isSending) return null
       this.error = ''
@@ -254,7 +254,7 @@ export const useChatStore = defineStore('chat', {
       }
       this.messages = [...this.messages, userMessage, assistantMessage]
       try {
-        const threadId = await this.ensureThread(token, agentId)
+        const threadId = await this.ensureThread(token, agentId, conversationScopeKey)
         const uploadedAttachments = await this.attachFiles(threadId, options.files || [], token)
         const imageContent = options.imageFile ? (await uploadImage(options.imageFile, token)).image_content || null : null
         const result = await sendMessageStream(

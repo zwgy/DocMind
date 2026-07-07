@@ -223,6 +223,7 @@ class ConversationRepository:
         self,
         uid: str | None = None,
         agent_id: str | None = None,
+        conversation_scope_key: str | None = None,
         status: str = "active",
         limit: int | None = None,
         offset: int = 0,
@@ -238,6 +239,11 @@ class ConversationRepository:
             base_conditions.append(Conversation.uid == str(uid))
         if agent_id:
             base_conditions.append(Conversation.agent_id == agent_id)
+        if conversation_scope_key:
+            # scope 存在 metadata 内，统一放入 base_conditions，保证置顶和非置顶列表都按同一业务界面隔离。
+            base_conditions.append(
+                Conversation.extra_metadata["conversation_scope_key"].as_string() == conversation_scope_key
+            )
 
         # First, get all pinned conversations (no limit)
         pinned_query = (

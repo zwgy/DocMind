@@ -18,6 +18,7 @@ type RequestOptions = {
 type CreateConversationOptions = RequestOptions & {
   agentId?: string
   title?: string
+  conversationScopeKey?: string
 }
 
 type RunEventHandlers = {
@@ -260,9 +261,10 @@ export async function readRunEventStream(response: Response, handlers: RunEventH
   }
 }
 
-export async function listConversations(token?: string, agentId?: string): Promise<ChatThread[]> {
+export async function listConversations(token?: string, agentId?: string, conversationScopeKey?: string): Promise<ChatThread[]> {
   const params = new URLSearchParams({ limit: '50', offset: '0' })
   if (agentId) params.set('agent_id', agentId)
+  if (conversationScopeKey) params.set('conversation_scope_key', conversationScopeKey)
   const response = await fetch(apiUrl(`/api/chat/threads?${params.toString()}`), {
     headers: authHeaders(token, false)
   })
@@ -270,13 +272,15 @@ export async function listConversations(token?: string, agentId?: string): Promi
 }
 
 export async function createConversation(options: CreateConversationOptions = {}): Promise<ChatThread> {
+  const metadata: Record<string, unknown> = { source: 'chat-iframe' }
+  if (options.conversationScopeKey) metadata.conversation_scope_key = options.conversationScopeKey
   const response = await fetch(apiUrl('/api/chat/thread'), {
     method: 'POST',
     headers: authHeaders(options.token),
     body: JSON.stringify({
       agent_id: options.agentId || DEFAULT_AGENT_ID,
       title: options.title || '来文咨询',
-      metadata: { source: 'chat-iframe' }
+      metadata
     })
   })
   return parseResponse<ChatThread>(response, '创建对话失败')

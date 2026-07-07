@@ -361,6 +361,7 @@ async def create_thread(
 @chat.get("/threads", response_model=list[ThreadResponse])
 async def list_threads(
     agent_id: str | None = Query(None),
+    conversation_scope_key: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -368,7 +369,12 @@ async def list_threads(
 ):
     """获取用户的所有对话线程 (使用新存储系统)"""
     return await list_threads_view(
-        agent_id=agent_id, db=db, current_uid=str(current_user.uid), limit=limit, offset=offset
+        agent_id=agent_id,
+        conversation_scope_key=conversation_scope_key,
+        db=db,
+        current_uid=str(current_user.uid),
+        limit=limit,
+        offset=offset,
     )
 
 

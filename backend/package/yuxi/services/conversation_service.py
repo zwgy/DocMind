@@ -450,6 +450,7 @@ async def list_threads_view(
     agent_id: str | None,
     db: AsyncSession,
     current_uid: str,
+    conversation_scope_key: str | None = None,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[dict]:
@@ -457,6 +458,7 @@ async def list_threads_view(
     conversations = await conv_repo.list_conversations(
         uid=str(current_uid),
         agent_id=agent_id,
+        conversation_scope_key=conversation_scope_key,
         status="active",
         limit=limit,
         offset=offset,

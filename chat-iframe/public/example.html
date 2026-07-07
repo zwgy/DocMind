@@ -99,12 +99,6 @@
         color: var(--muted);
       }
 
-      .token-row {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 10px;
-      }
-
       input {
         width: 100%;
         min-width: 0;
@@ -225,9 +219,6 @@
           margin-top: 20px;
         }
 
-        .token-row {
-          grid-template-columns: 1fr;
-        }
       }
     </style>
   </head>
@@ -236,7 +227,7 @@
       <header>
         <div>
           <h1>docMind chat-iframe 本地嵌入调试页</h1>
-          <p>模拟外部生产系统页面：页面正文、附件 DOM、父子 postMessage 和 Bearer Token 都从这里进入 iframe。</p>
+          <p>模拟外部生产系统页面：页面正文、附件 DOM 和外部业务用户信息都从这里进入 iframe。</p>
         </div>
         <button id="openChatButton" type="button">打开助手</button>
       </header>
@@ -285,22 +276,35 @@
         </article>
 
         <aside class="panel">
-          <h2>调试登录态</h2>
-          <p>
-            iframe 和主站 <code>localhost:5173</code> 是不同 origin，浏览器不会共享 localStorage。请从主站复制
-            <code>localStorage.user_token</code>，粘贴到这里，父页面会把 token 注入 iframe。
-          </p>
+          <h2>嵌入参数</h2>
           <p>
             本调试页默认启用结构化摘要 mock：<code>mockExtraction=mixed</code>。追加
             <code>?mockExtraction=off</code> 可改走真实后端，追加 <code>?mockExtraction=not_found</code> 可查看未匹配状态。
           </p>
 
           <div class="field">
-            <label for="tokenInput">Bearer Token</label>
-            <div class="token-row">
-              <input id="tokenInput" type="password" autocomplete="off" placeholder="粘贴 localStorage.getItem('user_token')" />
-              <button id="saveTokenButton" type="button">保存并注入</button>
-            </div>
+            <label for="sourceSystemInput">source_system</label>
+            <input id="sourceSystemInput" type="text" />
+          </div>
+
+          <div class="field">
+            <label for="functionIdInput">function_id</label>
+            <input id="functionIdInput" type="text" />
+          </div>
+
+          <div class="field">
+            <label for="businessIdInput">business_id</label>
+            <input id="businessIdInput" type="text" />
+          </div>
+
+          <div class="field">
+            <label for="externalUserIdInput">external_user_id</label>
+            <input id="externalUserIdInput" type="text" />
+          </div>
+
+          <div class="field">
+            <label for="externalUserNameInput">external_user_name</label>
+            <input id="externalUserNameInput" type="text" />
           </div>
 
           <div class="field">
@@ -309,16 +313,8 @@
           </div>
 
           <div class="field">
-            <label for="loginIdInput">docMind 账号</label>
-            <input id="loginIdInput" type="text" autocomplete="username" placeholder="用户名、UID 或手机号" />
-          </div>
-
-          <div class="field">
-            <label for="passwordInput">docMind 密码</label>
-            <div class="token-row">
-              <input id="passwordInput" type="password" autocomplete="current-password" placeholder="输入密码换取本地调试 token" />
-              <button id="loginButton" type="button">登录并注入</button>
-            </div>
+            <label for="tokenExchangeUrlInput">tokenExchangeUrl</label>
+            <input id="tokenExchangeUrlInput" type="url" placeholder="留空则调用 /api/chat-iframe/token" />
           </div>
 
           <div class="field">
@@ -327,14 +323,19 @@
           </div>
 
           <div class="toolbar">
+            <button id="createChatButton" type="button">确认初始化</button>
             <button id="refreshContextButton" class="secondary" type="button">重新发送上下文</button>
-            <button id="clearTokenButton" class="secondary" type="button">清除 Token</button>
           </div>
 
           <p class="status" id="statusText"></p>
 
-          <pre>主站控制台复制 token：
-copy(localStorage.getItem('user_token'))</pre>
+          <pre>new DocMindChatIframe({
+  source_system,
+  function_id,
+  business_id,
+  external_user_id,
+  external_user_name
+})</pre>
         </aside>
       </section>
     </main>
@@ -351,22 +352,27 @@ copy(localStorage.getItem('user_token'))</pre>
     </script>
     <script src="/chat-iframe/docmind-chat-iframe-parent.js"></script>
     <script>
-      const TOKEN_STORAGE_KEY = 'docmind_chat_iframe_debug_token'
       const API_BASE_STORAGE_KEY = 'docmind_chat_iframe_debug_api_base'
-      const tokenInput = document.getElementById('tokenInput')
       const apiBaseInput = document.getElementById('apiBaseInput')
-      const loginIdInput = document.getElementById('loginIdInput')
-      const passwordInput = document.getElementById('passwordInput')
+      const sourceSystemInput = document.getElementById('sourceSystemInput')
+      const functionIdInput = document.getElementById('functionIdInput')
+      const businessIdInput = document.getElementById('businessIdInput')
+      const externalUserIdInput = document.getElementById('externalUserIdInput')
+      const externalUserNameInput = document.getElementById('externalUserNameInput')
+      const tokenExchangeUrlInput = document.getElementById('tokenExchangeUrlInput')
       const agentInput = document.getElementById('agentInput')
       const statusText = document.getElementById('statusText')
 
       const params = new URLSearchParams(window.location.search)
-      const initialToken = params.get('token') || localStorage.getItem(TOKEN_STORAGE_KEY) || ''
       const initialApiBaseUrl = params.get('apiBaseUrl') || localStorage.getItem(API_BASE_STORAGE_KEY) || ''
-      const initialAgentId = params.get('agentId') || agentInput.value
-      tokenInput.value = initialToken
+      sourceSystemInput.value = params.get('source_system') || 'oa'
+      functionIdInput.value = params.get('function_id') || 'contractApproval'
+      businessIdInput.value = params.get('business_id') || 'contract-20260706-001'
+      externalUserIdInput.value = params.get('external_user_id') || '1001'
+      externalUserNameInput.value = params.get('external_user_name') || '张三'
+      tokenExchangeUrlInput.value = params.get('tokenExchangeUrl') || ''
       apiBaseInput.value = initialApiBaseUrl
-      agentInput.value = initialAgentId
+      agentInput.value = params.get('agentId') || agentInput.value
 
       function setStatus(message) {
         statusText.textContent = message
@@ -382,14 +388,6 @@ copy(localStorage.getItem('user_token'))</pre>
         }
       }
 
-      function normalizeToken(token) {
-        return token.trim().replace(/^Bearer\s+/i, '').replace(/^["']|["']$/g, '')
-      }
-
-      function currentToken() {
-        return normalizeToken(tokenInput.value)
-      }
-
       function currentApiBaseUrl() {
         return apiBaseInput.value.trim().replace(/\/+$/, '')
       }
@@ -402,95 +400,43 @@ copy(localStorage.getItem('user_token'))</pre>
         return apiBaseUrl
       }
 
-      function apiUrl(path) {
-        const apiBaseUrl = currentApiBaseUrl()
-        if (/^https?:\/\//i.test(path) || !apiBaseUrl) return path
-        return `${apiBaseUrl}${path.startsWith('/') ? '' : '/'}${path}`
+      function requiredValue(input, label) {
+        const value = input.value.trim()
+        if (!value) throw new Error(`请输入 ${label}`)
+        return value
       }
 
-      function saveToken() {
-        const token = currentToken()
-        tokenInput.value = token
-        if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token)
-        else localStorage.removeItem(TOKEN_STORAGE_KEY)
-        return token
-      }
-
-      async function validateToken(token) {
-        if (!token) return null
-        const response = await fetch(apiUrl('/api/auth/me'), {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-        if (!response.ok) {
-          let message = `token 校验失败：${response.status}`
-          try {
-            const data = await response.json()
-            message = data.detail || data.message || message
-          } catch {
-            // 非 JSON 响应时保留 HTTP 状态，避免误导调试。
-          }
-          throw new Error(message)
-        }
-        return response.json()
-      }
-
-      async function loginAndInject() {
-        const loginId = loginIdInput.value.trim()
-        const password = passwordInput.value
-        if (!loginId || !password) {
-          setStatus('请输入 docMind 账号和密码。')
-          return
-        }
-        const form = new FormData()
-        form.append('username', loginId)
-        form.append('password', password)
-        setStatus('正在向 docMind 后端换取 token...')
-        let response
+      function createChat() {
+        let sourceSystem
+        let functionId
+        let businessId
+        let externalUserId
+        let externalUserName
         try {
-          response = await fetch(apiUrl('/api/auth/token'), {
-            method: 'POST',
-            body: form
-          })
+          sourceSystem = requiredValue(sourceSystemInput, 'source_system')
+          functionId = requiredValue(functionIdInput, 'function_id')
+          businessId = requiredValue(businessIdInput, 'business_id')
+          externalUserId = requiredValue(externalUserIdInput, 'external_user_id')
+          externalUserName = requiredValue(externalUserNameInput, 'external_user_name')
         } catch (error) {
-          setStatus(error instanceof Error ? error.message : '登录请求失败')
+          setStatus(error instanceof Error ? error.message : '嵌入参数不完整')
           return
         }
-        if (!response.ok) {
-          let message = `登录失败：${response.status}`
-          try {
-            const data = await response.json()
-            message = data.detail || data.message || message
-          } catch {
-            // 登录失败偶发非 JSON 时直接展示状态码即可。
-          }
-          setStatus(message)
-          return
-        }
-        const data = await response.json()
-        tokenInput.value = data.access_token || ''
-        passwordInput.value = ''
-        await createChat()
-      }
 
-      async function createChat() {
-        const token = saveToken()
         const apiBaseUrl = saveApiBaseUrl()
         const agentId = agentInput.value.trim() || 'default-chatbot'
-        if (token) {
-          try {
-            const user = await validateToken(token)
-            setStatus(`token 已通过校验：${user.username || user.uid || '当前用户'}，正在注入 iframe...`)
-          } catch (error) {
-            setStatus(error instanceof Error ? error.message : 'token 校验失败')
-            return
-          }
-        }
+        const tokenExchangeUrl = tokenExchangeUrlInput.value.trim()
         if (window.chatIframe) window.chatIframe.destroy()
         window.chatIframe = new DocMindChatIframe({
           iframeSrc: `${location.origin}/chat-iframe/?mockExtraction=${params.get('mockExtraction') || 'mixed'}`,
-          token,
           apiBaseUrl,
           agentId,
+          tokenExchangeUrl,
+          source_system: sourceSystem,
+          function_id: functionId,
+          business_id: businessId,
+          external_user_id: externalUserId,
+          external_user_name: externalUserName,
           targetOrigin: location.origin,
           originAllowlist: [location.origin],
           initialState: 'minimized',
@@ -500,29 +446,23 @@ copy(localStorage.getItem('user_token'))</pre>
         })
         // 主动发送页面摘要，是为了让端到端调试不依赖父脚本对整页 HTML 的默认采集时机。
         window.chatIframe.setPageContent(pageContent())
-        setStatus(token ? '已注入 token，可以选择模型并发起聊天。' : '未注入 token：后端会返回“请登录后再访问”。')
+        setStatus(`已初始化 iframe：${sourceSystem}:${functionId}:${businessId} / ${externalUserId}`)
       }
 
       document.getElementById('openChatButton').addEventListener('click', () => {
-        window.chatIframe.restore()
+        if (window.chatIframe) window.chatIframe.restore()
       })
 
-      document.getElementById('saveTokenButton').addEventListener('click', createChat)
-      document.getElementById('loginButton').addEventListener('click', loginAndInject)
+      document.getElementById('createChatButton').addEventListener('click', createChat)
 
       document.getElementById('refreshContextButton').addEventListener('click', () => {
+        if (!window.chatIframe) return
         window.chatIframe.setPageContent(pageContent())
         window.chatIframe.setFiles(DocMindChatIframe.extractFilesFromDocument(document))
         setStatus('已重新发送页面上下文和附件列表。')
       })
 
-      document.getElementById('clearTokenButton').addEventListener('click', () => {
-        tokenInput.value = ''
-        localStorage.removeItem(TOKEN_STORAGE_KEY)
-        void createChat()
-      })
-
-      void createChat()
+      createChat()
     </script>
   </body>
 </html>

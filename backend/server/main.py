@@ -30,7 +30,6 @@ setup_logging()
 
 RATE_LIMIT_MAX_ATTEMPTS = 10
 RATE_LIMIT_WINDOW_SECONDS = 60
-RATE_LIMIT_ENDPOINTS = {("/api/auth/token", "POST")}
 DEFAULT_DEVELOPMENT_CORS_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 EXPLICIT_CORS_METHODS = ("DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT")
 EXPLICIT_CORS_HEADERS = ("Accept", "Authorization", "Content-Type", "Last-Event-ID", "X-Requested-With")
@@ -38,6 +37,24 @@ EXPLICIT_CORS_HEADERS = ("Accept", "Authorization", "Content-Type", "Last-Event-
 # In-memory login attempt tracker to reduce brute-force exposure per worker
 _login_attempts: defaultdict[str, deque[float]] = defaultdict(deque)
 _attempt_lock = asyncio.Lock()
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _build_rate_limit_endpoints() -> dict[tuple[str, str], int]:
+    endpoints = {("/api/auth/token", "POST"): RATE_LIMIT_MAX_ATTEMPTS}
+    iframe_token_limit = _int_env("CHAT_IFRAME_TOKEN_RATE_LIMIT_PER_MINUTE", 60)
+    if iframe_token_limit > 0:
+        endpoints[("/api/chat-iframe/token", "POST")] = iframe_token_limit
+    return endpoints
+
+
+RATE_LIMIT_ENDPOINTS = _build_rate_limit_endpoints()
 
 
 def _parse_cors_origins() -> list[str]:
@@ -97,17 +114,19 @@ class LoginRateLimitMiddleware(BaseHTTPMiddleware):
         normalized_path = request.url.path.rstrip("/") or "/"
         request_signature = (normalized_path, request.method.upper())
 
-        if request_signature in RATE_LIMIT_ENDPOINTS:
+        max_attempts = RATE_LIMIT_ENDPOINTS.get(request_signature)
+        if max_attempts:
             client_ip = _extract_client_ip(request)
+            attempt_key = f"{client_ip}:{normalized_path}:{request.method.upper()}"
             now = time.monotonic()
 
             async with _attempt_lock:
-                attempt_history = _login_attempts[client_ip]
+                attempt_history = _login_attempts[attempt_key]
 
                 while attempt_history and now - attempt_history[0] > RATE_LIMIT_WINDOW_SECONDS:
                     attempt_history.popleft()
 
-                if len(attempt_history) >= RATE_LIMIT_MAX_ATTEMPTS:
+                if len(attempt_history) >= max_attempts:
                     retry_after = int(max(1, RATE_LIMIT_WINDOW_SECONDS - (now - attempt_history[0])))
                     return JSONResponse(
                         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -121,7 +140,7 @@ class LoginRateLimitMiddleware(BaseHTTPMiddleware):
 
             if response.status_code < 400:
                 async with _attempt_lock:
-                    _login_attempts.pop(client_ip, None)
+                    _login_attempts.pop(attempt_key, None)
 
             return response
 

@@ -82,8 +82,7 @@ VITE_API_URL=http://localhost:5050 corepack pnpm dev --host 0.0.0.0 --port 5174
 http://localhost:5174/chat-iframe/example.html
 ```
 
-`example.html` 会加载 `docmind-chat-iframe-parent.js`，模拟生产系统附件 DOM，并挂载 `public/example-files/2026-07-02-AI文档智能助手第一版开发方案-5.5.md` 作为默认附件。由于浏览器按 origin 隔离 localStorage，`localhost:5174` 不能直接读取主站 `localhost:5173` 的 `user_token`；调试页提供 token 输入框，用来把主站登录 token 通过父页面配置注入 iframe。直接打开 `/chat-iframe/` 时没有父页面注入 token，调用受保护接口会返回“请登录后再访问”，模型列表也不会加载。
-调试页也提供账号密码登录入口，会通过 `/api/auth/token` 向本机 docMind 后端换取 token，再调用 `/api/auth/me` 校验后注入 iframe。
+`example.html` 会加载 `docmind-chat-iframe-parent.js`，模拟生产系统附件 DOM，并挂载 `public/example-files/2026-07-02-AI文档智能助手第一版开发方案-5.5.md` 作为默认附件。调试页填写 `source_system/function_id/business_id/external_user_id/external_user_name` 后实例化 `DocMindChatIframe`，父脚本会按 `tokenExchangeUrl` 或 `/api/chat-iframe/token` 自动换取 DocMind token。直接打开 `/chat-iframe/` 时没有父页面配置和业务上下文，调用受保护接口会返回“请登录后再访问”，模型列表也不会加载。
 
 ```bash
 corepack pnpm typecheck
@@ -203,8 +202,12 @@ docMind backend
 <script>
   const chat = new DocMindChatIframe({
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    user: 'user-001',
-    token: 'docmind-token',
+    apiBaseUrl: 'https://docmind.example.com',
+    source_system: 'oa',
+    function_id: 'contractApproval',
+    business_id: 'contract-20260706-001',
+    external_user_id: '1001',
+    external_user_name: '张三',
     agentId: 'default-chatbot',
     targetOrigin: 'https://docmind.example.com',
     originAllowlist: ['https://production.example.com'],
@@ -237,14 +240,18 @@ docMind backend
 <script>
   new DocMindChatIframe({
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    user: 'user-001',
-    token: 'docmind-token',
+    apiBaseUrl: 'https://docmind.example.com',
+    source_system: 'oa',
+    function_id: 'contractApproval',
+    business_id: 'contract-20260706-001',
+    external_user_id: '1001',
+    external_user_name: '张三',
     targetOrigin: 'https://docmind.example.com'
   })
 </script>
 ```
 
-`token` 必须是 docMind 后端可识别的 Bearer Token。聊天、模型列表、附件抽取查询等接口都经过 `get_required_user`，因此父页面未传 token 或 token 过期时，iframe 会收到“请登录后再访问”，模型选择器也会因为模型列表接口 401 而为空。
+父脚本会用外部业务身份自动换取 docMind token。聊天、模型列表、附件抽取查询等接口都经过 `get_required_user`，因此换票失败时，iframe 会显示认证错误，模型选择器也会因为模型列表接口 401 而为空。
 父脚本的窗口控制会在关闭和最小化时保留悬浮入口；普通窗口可通过顶部标题栏拖动，最小化/关闭后的悬浮入口也可直接拖动。从悬浮入口恢复普通窗口时，会先判断当前位置是否能完整显示小助手，若放不下则自动回到当前视口右下角。
 iframe 内部会话列表采用按需左侧抽屉展示，默认不占用聊天区域；点击顶部对话列表按钮后再展开历史会话和新建聊天入口。
 底部输入区的“问文件”会打开页面附件选择弹窗，显示当前页面识别到的附件名称，可多选/取消；未选择任何附件时会自动取消文件上下文，不再把附件摘要拼入提问。模型选择采用输入框右下角的模型按钮和搜索弹窗。左下角回形针按钮参考主站 `AttachmentOptionsComponent`，先弹出“添加附件 / 上传图片”小菜单；添加附件再打开拖拽上传弹窗，确认后进入当前消息的待发送附件列表。
@@ -276,8 +283,13 @@ iframe 内部会话列表采用按需左侧抽屉展示，默认不占用聊天�
 ```js
 const chat = new DocMindChatIframe({
   iframeSrc: 'https://docmind.example.com/chat-iframe/',
-  user: 'user-001',
-  token: 'docmind-token',
+  apiBaseUrl: 'https://docmind.example.com',
+  tokenExchangeUrl: null,
+  source_system: 'oa',
+  function_id: 'contractApproval',
+  business_id: 'contract-20260706-001',
+  external_user_id: '1001',
+  external_user_name: '张三',
   agentId: 'default-chatbot',
   targetOrigin: 'https://docmind.example.com',
   originAllowlist: ['https://production.example.com'],
@@ -297,8 +309,13 @@ const chat = new DocMindChatIframe({
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `iframeSrc` | `/` | iframe 页面地址 |
-| `user` | `null` | 生产系统当前用户标识 |
-| `token` | `null` | docMind 认证 token；iframe 调后端时作为 Bearer Token |
+| `apiBaseUrl` | `null` | docMind API 基础地址；为空时使用当前 iframe 服务的 `/api` 代理 |
+| `tokenExchangeUrl` | `null` | 外部系统后端换票地址；为空时父脚本直接调用 `/api/chat-iframe/token` |
+| `source_system` | `''` | 外部系统 ID，只允许字母和数字 |
+| `function_id` | `''` | 外部系统功能 ID，用于生成业务会话 scope |
+| `business_id` | `''` | 当前业务页面 ID，用于生成业务会话 scope |
+| `external_user_id` | `''` | 外部系统用户 ID，只允许字母和数字 |
+| `external_user_name` | `''` | 外部系统用户显示名，用于 docMind 后台识别 |
 | `agentId` | `null` | 可选，聊天使用的智能体 ID；为空时 iframe 使用 `default-chatbot` |
 | `targetOrigin` | `*` | 父页面发消息给 iframe 的目标 origin；生产环境建议写死 |
 | `originAllowlist` | `[]` | 下发给 iframe 的父页面来源白名单，用于 iframe 校验生产系统来源 |
@@ -334,7 +351,7 @@ const chat = new DocMindChatIframe({
 
 | 消息 | 载荷 | 用途 |
 | --- | --- | --- |
-| `INIT_CONFIG` | `{ user, token, agentId, includePageContent, includeFiles, selectedFileIds, originAllowlist }` | 初始化配置 |
+| `INIT_CONFIG` | `{ user, token, apiBaseUrl, agentId, conversationScopeKey, includePageContent, includeFiles, selectedFileIds, originAllowlist }` | 初始化配置；`token` 由父脚本自动换票后下发 |
 | `PAGE_CONTENT` | `{ title?, url?, html?, text? }` | 页面内容 |
 | `PAGE_FILES_UPDATED` | `IncomingPageFile[]` | 页面附件列表 |
 | `FILE_LIST` | `IncomingPageFile[]` | 兼容旧消息名 |
@@ -478,7 +495,7 @@ public/docmind-chat-iframe-parent.js
 
 - 生产环境必须设置 `targetOrigin`，不要长期使用默认 `*`。
 - 生产环境建议设置 `originAllowlist`，限制 iframe 接收的父页面消息来源。
-- `token` 会进入 iframe 并用于后端请求，应使用短期有效 token 或 docMind 登录 token。
+- 父脚本换取的 docMind token 会进入 iframe 并用于后端请求；生产环境优先使用 `tokenExchangeUrl`，避免把高权限凭据暴露到浏览器。
 - 默认页面内容是 `document.documentElement.outerHTML`，如页面含敏感信息，应使用 `setPageContent()` 传脱敏文本，或关闭 `includePageContent`。
 - 前端只负责携带上下文和展示结果，后端仍是最终权限边界。
 
@@ -501,7 +518,7 @@ corepack pnpm test
 
 聊天链路的最小契约：
 
-- 创建默认智能体会话时携带 Bearer Token
+- 创建默认智能体会话时携带自动换票得到的 Bearer Token
 - “问网页/问文件”开启时把上下文拼入 query
 - 解析 `/api/agent/runs/{runId}/events` 的 SSE 文本增量、推理内容、工具调用和工具结果
 - 发送消息时携带模型、附件元数据和图片内容
@@ -518,3 +535,35 @@ corepack pnpm test
 | 后端接口 | `/ai/chatFlow/*` | `/api/incoming-documents/extractions/query`、`/api/chat/*`、`/api/agent/runs/*` |
 | 部署 | Docker + Nginx | Docker + Nginx |
 | 附件处理 | URL 上传给聊天后端 | 匹配 docMind 来文并展示抽取结果；输入框附件复用 docMind 线程附件接口 |
+
+## 16. 新版外部用户换票与业务会话隔离
+
+新接入方式不再从父页面显式传入 `token`。父页面实例化 `DocMindChatIframe` 时必须传入外部业务身份，父脚本会在 iframe ready 后自动获取 DocMind token，并生成 `conversationScopeKey = {source_system}:{function_id}:{business_id}`。iframe 创建会话时把该 scope 写入会话 metadata，拉取会话列表时用同一个 scope 过滤，从而隔离同一外部用户在不同业务页面下的历史对话。
+
+```js
+new DocMindChatIframe({
+  iframeSrc: 'https://docmind.example.com/chat-iframe/',
+  apiBaseUrl: 'https://docmind.example.com',
+  targetOrigin: 'https://docmind.example.com',
+  originAllowlist: ['https://oa.example.com'],
+  source_system: 'oa',
+  function_id: 'contractApproval',
+  business_id: 'contract-20260706-001',
+  external_user_id: '1001',
+  external_user_name: '张三',
+  agentId: 'default-chatbot'
+})
+```
+
+如果传入 `tokenExchangeUrl`，父脚本会向该外部系统后端地址 POST `{ source_system, external_user_id, external_user_name }`，由外部后端再调用 DocMind `/api/external-users/token` 换票。该模式适合生产环境和更强审计要求。
+
+如果不传 `tokenExchangeUrl`，父脚本会直接 POST `${apiBaseUrl || ''}/api/chat-iframe/token`。该模式需要 DocMind 后端设置：
+
+```env
+CHAT_IFRAME_AUTO_LOGIN_ENABLED=true
+CHAT_IFRAME_ALLOWED_SOURCES=oa
+CHAT_IFRAME_ALLOWED_ORIGINS=https://oa.example.com
+CHAT_IFRAME_TOKEN_RATE_LIMIT_PER_MINUTE=60
+```
+
+`CHAT_IFRAME_ALLOWED_SOURCES` 和 `CHAT_IFRAME_ALLOWED_ORIGINS` 留空时不校验对应维度。自动创建的外部账号 uid 为 `ext_{source_system}_{external_user_id}`，默认普通用户、默认部门 `id=1`，后续由超级管理员在 DocMind 后台调整角色或部门。

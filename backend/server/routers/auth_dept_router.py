@@ -17,6 +17,7 @@ from server.utils.auth_middleware import get_superadmin_user, get_admin_user, ge
 from yuxi.utils.auth_utils import AuthUtils
 from yuxi.services.operation_log_service import log_operation
 from yuxi.services.user_identity_service import is_valid_phone_number
+from yuxi.domain_constants import DEFAULT_DEPARTMENT_ID
 
 # 创建路由器
 department = APIRouter(prefix="/departments", tags=["department"])
@@ -219,7 +220,7 @@ async def delete_department(
     if not department:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="部门不存在")
 
-    if department.id == 1:  # 默认部门的ID为1
+    if department.id == DEFAULT_DEPARTMENT_ID:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="默认部门不允许删除")
 
     department_name = department.name
@@ -228,7 +229,8 @@ async def delete_department(
 
     if department_users:
         for user in department_users:
-            user.department_id = 1  # 将被删除部门的用户移至默认部门
+            # 删除部门时用户必须迁移到系统默认部门，避免留下无部门账号。
+            user.department_id = DEFAULT_DEPARTMENT_ID
 
     await db.execute(sqlalchemy_delete(APIKey).where(APIKey.department_id == department_id))
     await db.delete(department)

@@ -25,6 +25,14 @@ export type IframeConfig = {
   token?: string
   apiBaseUrl?: string
   agentId?: string
+  tokenExchangeUrl?: string
+  source_system?: string
+  function_id?: string
+  business_id?: string
+  external_user_id?: string
+  external_user_name?: string
+  conversationScopeKey?: string
+  authError?: string
   includePageContent?: boolean
   includeFiles?: boolean
   selectedFileIds?: string[]

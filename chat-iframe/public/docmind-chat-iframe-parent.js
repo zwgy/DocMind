@@ -8,6 +8,11 @@
     return String(value || '').trim()
   }
 
+  function joinApiUrl(baseUrl, path) {
+    var base = stripText(baseUrl).replace(/\/+$/, '')
+    return base ? base + path : path
+  }
+
   function isDocumentFile(name) {
     var ext = stripText(name).split('.').pop().toLowerCase()
     return DOCUMENT_EXTENSIONS.indexOf(ext) !== -1
@@ -125,9 +130,14 @@
       {
         iframeSrc: '/',
         user: null,
-        token: null,
         apiBaseUrl: null,
         agentId: null,
+        tokenExchangeUrl: null,
+        source_system: '',
+        function_id: '',
+        business_id: '',
+        external_user_id: '',
+        external_user_name: '',
         targetOrigin: '*',
         originAllowlist: [],
         position: 'bottom-right',
@@ -151,6 +161,8 @@
     this.container = null
     this.iframe = null
     this.messageHandler = null
+    this.tokenPromise = null
+    this.resolvedToken = null
     this.pointerMoveHandler = null
     this.pointerUpHandler = null
     this.pointerCancelHandler = null
@@ -387,10 +399,7 @@
     }
     switch (message.type) {
       case 'IFRAME_READY':
-        this._sendConfig()
-        this._sendToIframe('WINDOW_STATE', { state: this.windowState })
-        this._sendToIframe('PAGE_CONTENT', this.pageContent || this._pageContentFromDocument())
-        this._sendToIframe('PAGE_FILES_UPDATED', this.pageFiles)
+        this._sendInitialPayload()
         break
       case 'REQUEST_PAGE_CONTENT':
         this._sendToIframe('PAGE_CONTENT', this.pageContent || this._pageContentFromDocument())
@@ -435,16 +444,98 @@
     return { title: document.title, url: location.href, html: document.documentElement.outerHTML }
   }
 
-  DocMindChatIframe.prototype._sendConfig = function () {
-    this._sendToIframe('INIT_CONFIG', {
+  DocMindChatIframe.prototype._requiredExternalPayload = function () {
+    var payload = {
+      source_system: stripText(this.options.source_system),
+      external_user_id: stripText(this.options.external_user_id),
+      external_user_name: stripText(this.options.external_user_name)
+    }
+    var missing = []
+    ;['source_system', 'function_id', 'business_id', 'external_user_id', 'external_user_name'].forEach(function (key) {
+      if (!stripText(this.options[key])) missing.push(key)
+    }, this)
+    if (missing.length) throw new Error('缺少 chat-iframe 初始化参数：' + missing.join(', '))
+    return payload
+  }
+
+  DocMindChatIframe.prototype._conversationScopeKey = function () {
+    return [this.options.source_system, this.options.function_id, this.options.business_id].map(stripText).join(':')
+  }
+
+  DocMindChatIframe.prototype._fetchTokenJson = function (url, payload, trustedBackendMode) {
+    var fetchImpl = global.fetch || (typeof fetch !== 'undefined' ? fetch : null)
+    if (!fetchImpl) return Promise.reject(new Error('当前浏览器不支持 fetch，无法获取 DocMind token'))
+    return fetchImpl(url, {
+      method: 'POST',
+      credentials: trustedBackendMode ? 'include' : 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (response) {
+      return response.json().catch(function () {
+        return {}
+      }).then(function (data) {
+        if (!response.ok) throw new Error(data.detail || data.message || '获取 DocMind token 失败')
+        if (!data.access_token) throw new Error('获取 DocMind token 失败：响应缺少 access_token')
+        return data.access_token
+      })
+    })
+  }
+
+  DocMindChatIframe.prototype._resolveToken = function () {
+    if (this.resolvedToken) return Promise.resolve(this.resolvedToken)
+    if (this.tokenPromise) return this.tokenPromise
+    var self = this
+    this.tokenPromise = Promise.resolve()
+      .then(function () {
+        var payload = self._requiredExternalPayload()
+        var trustedUrl = stripText(self.options.tokenExchangeUrl)
+        var url = trustedUrl || joinApiUrl(self.options.apiBaseUrl, '/api/chat-iframe/token')
+        return self._fetchTokenJson(url, payload, Boolean(trustedUrl))
+      })
+      .then(function (token) {
+        self.resolvedToken = token
+        return token
+      })
+      .catch(function (error) {
+        self.tokenPromise = null
+        throw error
+      })
+    return this.tokenPromise
+  }
+
+  DocMindChatIframe.prototype._configPayload = function (token, authError) {
+    var payload = {
       user: this.options.user,
-      token: this.options.token,
+      token: token || null,
       apiBaseUrl: this.options.apiBaseUrl,
       agentId: this.options.agentId,
+      conversationScopeKey: this._conversationScopeKey(),
       includePageContent: this.options.includePageContent,
       includeFiles: this.options.includeFiles,
       selectedFileIds: this.options.selectedFileIds,
       originAllowlist: this.options.originAllowlist
+    }
+    if (authError) payload.authError = authError
+    return payload
+  }
+
+  DocMindChatIframe.prototype._sendConfig = function () {
+    var self = this
+    return this._resolveToken()
+      .then(function (token) {
+        self._sendToIframe('INIT_CONFIG', self._configPayload(token))
+      })
+      .catch(function (error) {
+        self._sendToIframe('INIT_CONFIG', self._configPayload(null, error && error.message ? error.message : '获取 DocMind token 失败'))
+      })
+  }
+
+  DocMindChatIframe.prototype._sendInitialPayload = function () {
+    var self = this
+    return this._sendConfig().then(function () {
+      self._sendToIframe('WINDOW_STATE', { state: self.windowState })
+      self._sendToIframe('PAGE_CONTENT', self.pageContent || self._pageContentFromDocument())
+      self._sendToIframe('PAGE_FILES_UPDATED', self.pageFiles)
     })
   }
 

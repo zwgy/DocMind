@@ -7,6 +7,8 @@ from server.routers.agent_router import agent_router
 from server.routers.chat_router import chat
 from server.routers.dashboard_router import dashboard
 from server.routers.auth_dept_router import department
+from server.routers.external_user_backend_token_router import external_user_backend_tokens
+from server.routers.external_user_iframe_token_router import external_user_iframe_tokens
 from server.routers.mcp_router import mcp
 from server.routers.model_provider_router import model_providers
 from server.routers.skill_router import skills, user_skills
@@ -27,6 +29,8 @@ router.include_router(system)  # /api/system/* 系统状态与全局配置
 router.include_router(auth)  # /api/auth/* 登录、用户信息与 CLI 浏览器登录授权
 router.include_router(agent_router)  # /api/agent/* 智能体管理与运行态
 router.include_router(chat)  # /api/chat/* 对话线程、消息历史与附件
+router.include_router(external_user_backend_tokens)  # /api/external-users/* 外部系统后端换票
+router.include_router(external_user_iframe_tokens)  # /api/chat-iframe/* iframe 自助换票
 
 # 管理与工作台接口：后台任务、权限域以及工具体系配置。
 router.include_router(dashboard)  # /api/dashboard/* 仪表盘聚合数据

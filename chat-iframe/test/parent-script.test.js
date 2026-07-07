@@ -47,7 +47,7 @@ function attachmentElement() {
   return link
 }
 
-function parentHarness() {
+function parentHarness(options = {}) {
   const sentMessages = []
   const listeners = {}
   const iframe = {
@@ -99,8 +99,13 @@ function parentHarness() {
     },
     removeEventListener() {}
   }
+  if (options.fetch) win.fetch = options.fetch
   const DocMindChatIframe = loadScript({ window: win, document: doc })
   return { container, iframe, DocMindChatIframe, listeners, sentMessages }
+}
+
+function tick() {
+  return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 test('extracts production YZSoft attachment DOM', () => {
@@ -127,19 +132,91 @@ test('extracts production YZSoft attachment DOM', () => {
 })
 
 test('accepts iframe messages by targetOrigin and keeps originAllowlist for iframe side', () => {
-  const { DocMindChatIframe, listeners, sentMessages } = parentHarness()
+  const { DocMindChatIframe, listeners, sentMessages } = parentHarness({
+    fetch: async () => ({ ok: true, json: async () => ({ access_token: 'test-token' }) })
+  })
 
   const chat = new DocMindChatIframe({
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
     targetOrigin: 'https://docmind.example.com',
     originAllowlist: ['https://production.example.com'],
-    includeFiles: false
+    includeFiles: false,
+    source_system: 'oa',
+    function_id: 'contract',
+    business_id: '001',
+    external_user_id: '1001',
+    external_user_name: '张三'
   })
   listeners.message({ origin: 'https://docmind.example.com', data: { type: 'IFRAME_READY' } })
 
-  assert.equal(sentMessages[0].message.type, 'INIT_CONFIG')
-  assert.deepEqual(sentMessages[0].message.payload.originAllowlist, ['https://production.example.com'])
-  assert.equal(sentMessages[0].targetOrigin, 'https://docmind.example.com')
+  return tick().then(() => {
+    assert.equal(sentMessages[0].message.type, 'INIT_CONFIG')
+    assert.deepEqual(sentMessages[0].message.payload.originAllowlist, ['https://production.example.com'])
+    assert.equal(sentMessages[0].targetOrigin, 'https://docmind.example.com')
+    chat.destroy()
+  })
+})
+
+test('fetches docMind iframe token and sends conversation scope to iframe', async () => {
+  const requests = []
+  const { DocMindChatIframe, listeners, sentMessages } = parentHarness({
+    fetch: async (url, options) => {
+      requests.push({ url, options })
+      return { ok: true, json: async () => ({ access_token: 'iframe-token' }) }
+    }
+  })
+
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    targetOrigin: 'https://docmind.example.com',
+    apiBaseUrl: 'https://docmind.example.com',
+    includeFiles: false,
+    source_system: 'oa',
+    function_id: 'contractApproval',
+    business_id: 'contract-20260706-001',
+    external_user_id: '1001',
+    external_user_name: '张三'
+  })
+  listeners.message({ origin: 'https://docmind.example.com', data: { type: 'IFRAME_READY' } })
+  await tick()
+
+  assert.equal(requests[0].url, 'https://docmind.example.com/api/chat-iframe/token')
+  assert.deepEqual(JSON.parse(requests[0].options.body), {
+    source_system: 'oa',
+    external_user_id: '1001',
+    external_user_name: '张三'
+  })
+  assert.equal(sentMessages[0].message.payload.token, 'iframe-token')
+  assert.equal(sentMessages[0].message.payload.conversationScopeKey, 'oa:contractApproval:contract-20260706-001')
+  chat.destroy()
+})
+
+test('uses trusted tokenExchangeUrl mode when configured', async () => {
+  const requests = []
+  const { DocMindChatIframe, listeners, sentMessages } = parentHarness({
+    fetch: async (url, options) => {
+      requests.push({ url, options })
+      return { ok: true, json: async () => ({ access_token: 'backend-token' }) }
+    }
+  })
+
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    targetOrigin: 'https://docmind.example.com',
+    tokenExchangeUrl: 'https://oa.example.com/docmind/token',
+    includeFiles: false,
+    source_system: 'oa',
+    function_id: 'contract',
+    business_id: '001',
+    external_user_id: '1001',
+    external_user_name: '张三'
+  })
+  listeners.message({ origin: 'https://docmind.example.com', data: { type: 'IFRAME_READY' } })
+  await tick()
+
+  assert.equal(requests[0].url, 'https://oa.example.com/docmind/token')
+  assert.equal(requests[0].options.credentials, 'include')
+  assert.equal(sentMessages[0].message.payload.token, 'backend-token')
   chat.destroy()
 })
 

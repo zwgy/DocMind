@@ -33,7 +33,7 @@ const selectedFile = computed(() => context.selectedFile)
 
 function openSidebar() {
   showSidebar.value = true
-  void chat.refreshThreads(context.config.token, context.config.agentId)
+  void chat.refreshThreads(context.config.token, context.config.agentId, context.config.conversationScopeKey)
 }
 
 function cacheExtractionResults(files: IncomingPageFile[], items: ExtractionResult[] = []) {
@@ -73,7 +73,7 @@ async function refreshExtraction() {
 
 async function createChat() {
   try {
-    const thread = await chat.newConversation(context.config.token, context.config.agentId)
+    const thread = await chat.newConversation(context.config.token, context.config.agentId, context.config.conversationScopeKey)
     showSidebar.value = false
     notifyConversationCreated({ conversationId: thread.id })
   } catch (err) {
@@ -105,7 +105,8 @@ async function sendChat(payload: {
       extractionResult: selectedContextResult
     },
     context.config.token,
-    context.config.agentId
+    context.config.agentId,
+    context.config.conversationScopeKey
   )
   if (result) notifyMessageSent({ conversationId: result.threadId, messageId: result.messageId })
 }
@@ -161,8 +162,15 @@ watch(
 )
 
 watch(
-  [() => context.config.token, () => context.config.agentId],
-  () => chat.bootstrap(context.config.token, context.config.agentId),
+  [() => context.config.token, () => context.config.agentId, () => context.config.conversationScopeKey, () => context.config.authError],
+  () => {
+    if (context.config.authError) {
+      chat.error = context.config.authError
+      return
+    }
+    if (!context.config.token) return
+    void chat.bootstrap(context.config.token, context.config.agentId, context.config.conversationScopeKey)
+  },
   { immediate: true }
 )
 
@@ -209,7 +217,7 @@ onUnmounted(() => {
           :loading="chat.isLoading"
           @new="createChat"
           @close="showSidebar = false"
-          @refresh="chat.refreshThreads(context.config.token, context.config.agentId)"
+          @refresh="chat.refreshThreads(context.config.token, context.config.agentId, context.config.conversationScopeKey)"
           @select="selectThread"
           @rename="(event) => event.title && chat.renameConversation(event.threadId, event.title, context.config.token)"
           @delete="(threadId) => chat.removeConversation(threadId, context.config.token)"
@@ -224,11 +232,11 @@ onUnmounted(() => {
           :messages="chat.displayMessages"
           :loading="chat.isLoading"
           :streaming="chat.isStreaming"
-          @retry="chat.retry(context.config.token, context.config.agentId)"
+          @retry="chat.retry(context.config.token, context.config.agentId, context.config.conversationScopeKey)"
           @feedback="(event) => chat.feedback(event, context.config.token)"
         />
         <ChatInput
-          :disabled="chat.isSending"
+          :disabled="chat.isSending || Boolean(context.config.authError) || !context.config.token"
           :streaming="chat.isStreaming"
           :ask-page="chat.askPage"
           :ask-file="chat.askFile"
