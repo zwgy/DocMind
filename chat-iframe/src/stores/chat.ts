@@ -122,10 +122,16 @@ export const useChatStore = defineStore('chat', {
       }
     },
     async newConversation(token?: string, agentId?: string, conversationScopeKey?: string) {
+      const thread = await this.createThread(token, agentId, conversationScopeKey)
+      // 仅在用户主动"新建会话"时清空消息；send() 走 ensureThread 复用同一创建路径，
+      // 那里的乐观消息不能在这里被抹掉，否则首条提问与回复都会在主区消失。
+      this.messages = []
+      return thread
+    },
+    async createThread(token?: string, agentId?: string, conversationScopeKey?: string) {
       const thread = await createConversation({ token, agentId, conversationScopeKey })
       this.threads = [thread, ...this.threads.filter((item) => item.id !== thread.id)]
       this.currentThreadId = thread.id
-      this.messages = []
       return thread
     },
     async renameConversation(threadId: string, title: string, token?: string) {
@@ -155,7 +161,7 @@ export const useChatStore = defineStore('chat', {
     },
     async ensureThread(token?: string, agentId?: string, conversationScopeKey?: string) {
       if (this.currentThreadId) return this.currentThreadId
-      const thread = await this.newConversation(token, agentId, conversationScopeKey)
+      const thread = await this.createThread(token, agentId, conversationScopeKey)
       return thread.id
     },
     async attachFiles(threadId: string, files: File[] = [], token?: string) {
