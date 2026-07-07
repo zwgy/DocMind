@@ -2,11 +2,7 @@
   'use strict'
 
   var DOCUMENT_EXTENSIONS = ['doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'csv']
-  var CHAT_ICON_SVG =
-    '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>' +
-    '<path d="M8 9h8M8 13h5"/>' +
-    '</svg>'
+  var CHAT_ICON_HTML = '<span class="docmind-chat-mark" aria-hidden="true">AI</span>'
 
   function stripText(value) {
     return String(value || '').trim()
@@ -242,8 +238,10 @@
   DocMindChatIframe.prototype._html = function () {
     var width = this.options.width
     var height = this.options.height
-    // 悬浮脚本经常跨系统静态部署，内联 SVG 比额外图片路径更不容易被部署目录或跨域策略破坏。
-    var restoreButtonHtml = this.options.buttonHtml || CHAT_ICON_SVG
+    var availableWidth = this.options.offsetX * 2
+    var availableHeight = this.options.offsetY * 2
+    // 悬浮脚本经常跨系统静态部署，内联 HTML 比额外图片路径更不容易被部署目录或跨域策略破坏。
+    var restoreButtonHtml = this.options.buttonHtml || CHAT_ICON_HTML
     return (
       '<style>' +
       '.docmind-chat-iframe{position:fixed;z-index:999999;font-family:Arial,sans-serif}' +
@@ -251,15 +249,20 @@
       '.docmind-chat-iframe.bottom-left{left:' + this.options.offsetX + 'px;bottom:' + this.options.offsetY + 'px}' +
       '.docmind-chat-iframe.top-right{right:' + this.options.offsetX + 'px;top:' + this.options.offsetY + 'px}' +
       '.docmind-chat-iframe.top-left{left:' + this.options.offsetX + 'px;top:' + this.options.offsetY + 'px}' +
-      '.docmind-chat-iframe.normal{width:' + width + 'px;height:' + height + 'px}' +
-      '.docmind-chat-iframe.minimized{width:56px;height:56px}' +
-      '.docmind-chat-iframe.closed{width:56px;height:56px}' +
+      '.docmind-chat-iframe.normal{width:min(' + width + 'px,calc(100vw - ' + availableWidth + 'px));height:min(' + height + 'px,calc(100vh - ' + availableHeight + 'px))}' +
+      '.docmind-chat-iframe.minimized{width:60px;height:60px}' +
+      '.docmind-chat-iframe.closed{width:60px;height:60px}' +
       '.docmind-chat-iframe.maximized{inset:0!important;width:100vw;height:100vh}' +
       '.docmind-chat-shell{height:100%;background:#fff;border-radius:8px;box-shadow:0 18px 45px rgba(0,0,0,.24);overflow:hidden}' +
       '.docmind-chat-iframe.maximized .docmind-chat-shell{border-radius:0}' +
       '.docmind-chat-frame{width:100%;height:100%;border:0;display:block}' +
-      '.docmind-chat-restore{width:56px;height:56px;border:0;border-radius:28px;background:#046a82;color:#fff;box-shadow:0 10px 28px rgba(0,0,0,.25);cursor:pointer;display:flex;align-items:center;justify-content:center}' +
-      '.docmind-chat-restore svg{width:28px;height:28px;display:block}' +
+      '.docmind-chat-restore{position:relative;width:60px;height:60px;border:0;border-radius:50%;background:radial-gradient(circle at 30% 20%,#fff 0%,#f1fbff 38%,#dcf7ff 72%,#c9eef8 100%);color:#0ea5e9;box-shadow:0 14px 28px rgba(15,23,42,.1),inset 0 0 0 1px rgba(148,163,184,.1),inset 0 1px 0 rgba(255,255,255,.82);cursor:pointer;display:flex;align-items:center;justify-content:center;outline:none;overflow:hidden;appearance:none;-webkit-appearance:none;-webkit-tap-highlight-color:transparent;transition:transform .18s ease,box-shadow .18s ease}' +
+      '.docmind-chat-restore:hover,.docmind-chat-restore:active,.docmind-chat-restore:focus{background:radial-gradient(circle at 30% 20%,#fff 0%,#f1fbff 38%,#dcf7ff 72%,#c9eef8 100%);box-shadow:0 14px 28px rgba(15,23,42,.1),inset 0 0 0 1px rgba(148,163,184,.1),inset 0 1px 0 rgba(255,255,255,.86)}' +
+      '.docmind-chat-restore:hover{transform:translateY(-2px) scale(1.12)}' +
+      '.docmind-chat-restore:active{transform:translateY(0) scale(.96)}' +
+      '.docmind-chat-restore:focus-visible{box-shadow:0 14px 28px rgba(15,23,42,.1),inset 0 0 0 1px rgba(148,163,184,.14),inset 0 1px 0 rgba(255,255,255,.88)}' +
+      '.docmind-chat-restore:before{content:"";position:absolute;inset:0;border-radius:50%;background:rgba(255,255,255,.12);pointer-events:none}' +
+      '.docmind-chat-mark{position:relative;font:900 25px/1 Arial,sans-serif;letter-spacing:0;background:linear-gradient(135deg,#2563eb 0%,#06b6d4 56%,#14b8a6 100%);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 8px 18px rgba(37,99,235,.18)}' +
       '.docmind-chat-iframe.minimized .docmind-chat-shell,.docmind-chat-iframe.closed .docmind-chat-shell{display:none}' +
       '.docmind-chat-iframe:not(.minimized):not(.closed) .docmind-chat-restore{display:none}' +
       '</style>' +
@@ -456,9 +459,19 @@
     this._endDrag()
     this.container.className = 'docmind-chat-iframe ' + state + ' ' + this.options.position
     if (state === 'normal') this._ensureNormalWindowVisible()
+    if (state === 'minimized' || state === 'closed') this._resetFloatingPosition()
     if (notify !== false) this._sendToIframe('WINDOW_STATE', { state: state })
     this._emit('stateChange', { state: state })
     return this
+  }
+
+  DocMindChatIframe.prototype._resetFloatingPosition = function () {
+    if (!this.container) return
+    // 从 normal 回到悬浮态时清掉 normal 写入的 left/top，否则定位类会被 inline 样式覆盖，图标会跑到窗口左上。
+    this.container.style.left = ''
+    this.container.style.top = ''
+    this.container.style.right = ''
+    this.container.style.bottom = ''
   }
 
   DocMindChatIframe.prototype._ensureNormalWindowVisible = function () {

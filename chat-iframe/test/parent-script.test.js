@@ -225,6 +225,34 @@ test('closed state keeps restore entry and drag cleanup releases iframe pointer 
   chat.destroy()
 })
 
+test('parent shell uses viewport-bounded normal size and default AI restore button', () => {
+  const { container, DocMindChatIframe } = parentHarness()
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    targetOrigin: 'https://docmind.example.com',
+    includeFiles: false,
+    width: 460,
+    height: 680,
+    offsetX: 24,
+    offsetY: 24
+  })
+
+  assert.match(container.innerHTML, /width:min\(460px,calc\(100vw - 48px\)\)/)
+  assert.match(container.innerHTML, /height:min\(680px,calc\(100vh - 48px\)\)/)
+  assert.match(container.innerHTML, /border-radius:50%/)
+  assert.match(container.innerHTML, /docmind-chat-mark/)
+  assert.match(container.innerHTML, /font:900 25px\/1 Arial/)
+  assert.match(container.innerHTML, /linear-gradient\(135deg,#2563eb 0%,#06b6d4 56%,#14b8a6 100%\)/)
+  assert.match(container.innerHTML, />AI</)
+  chat.destroy()
+})
+
+test('local example starts minimized so users open the assistant explicitly', () => {
+  const example = readFileSync(join(import.meta.dirname, '../public/example.html'), 'utf8')
+
+  assert.match(example, /initialState:\s*'minimized'/)
+})
+
 test('iframe header drag messages move the parent window', () => {
   const { container, iframe, DocMindChatIframe, listeners } = parentHarness()
   const chat = new DocMindChatIframe({
@@ -270,5 +298,28 @@ test('restore keeps normal window inside viewport after floating button drag', (
   assert.equal(container.style.top, '12px')
   assert.equal(container.style.right, 'auto')
   assert.equal(container.style.bottom, 'auto')
+  chat.destroy()
+})
+
+test('closing from normal clears inline placement for floating icon corner', () => {
+  const { container, DocMindChatIframe } = parentHarness()
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    targetOrigin: 'https://docmind.example.com',
+    includeFiles: false,
+    width: 460,
+    height: 680
+  })
+
+  chat.restore()
+  assert.equal(container.style.left, '416px')
+  assert.equal(container.style.top, '12px')
+
+  chat.close()
+  assert.equal(container.style.left, '')
+  assert.equal(container.style.top, '')
+  assert.equal(container.style.right, '')
+  assert.equal(container.style.bottom, '')
+  assert.match(container.className, /closed/)
   chat.destroy()
 })

@@ -303,13 +303,13 @@ const chat = new DocMindChatIframe({
 | `targetOrigin` | `*` | 父页面发消息给 iframe 的目标 origin；生产环境建议写死 |
 | `originAllowlist` | `[]` | 下发给 iframe 的父页面来源白名单，用于 iframe 校验生产系统来源 |
 | `position` | `bottom-right` | 悬浮入口位置 |
-| `width` / `height` | `460` / `680` | 普通窗口尺寸 |
+| `width` / `height` | `460` / `680` | 普通窗口期望尺寸；实际显示会受当前视口约束，避免嵌入页面中显示不全 |
 | `offsetX` / `offsetY` | `24` / `24` | 距离视口边缘的偏移 |
 | `initialState` | `minimized` | `minimized`、`normal`、`maximized`、`closed` |
 | `includePageContent` | `true` | 是否自动发送页面内容 |
 | `includeFiles` | `true` | 是否自动扫描页面附件 |
 | `selectedFileIds` | `[]` | 默认选中的附件 ID |
-| `buttonHtml` | `null` | 自定义悬浮按钮 HTML；为空时使用内联 SVG |
+| `buttonHtml` | `null` | 自定义悬浮按钮 HTML；为空时使用内联 SVG AI 标识 |
 
 ## 9. 父页面函数
 
@@ -351,18 +351,15 @@ iframe 发送给父页面：
 | `CONVERSATION_CREATED` | iframe 创建新会话后的可选通知 |
 | `MESSAGE_SENT` | iframe 发送消息后的可选通知 |
 
-## 11. 悬浮图标、SVG 和字体
+## 11. 悬浮图标和字体
 
 悬浮入口默认使用内联 SVG：
 
 ```html
-<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor">
-  <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>
-  <path d="M8 9h8M8 13h5"/>
-</svg>
+<svg viewBox="0 0 1024 1024" aria-hidden="true" fill="currentColor">...</svg>
 ```
 
-它显示为圆形按钮里的对话气泡。选择内联 SVG，是为了让生产系统只部署一个父页面脚本即可，不再额外处理图片路径、静态目录映射和跨域缓存。
+它显示为单层渐变按钮里的 AI 标识。选择内联 SVG，是为了让生产系统只部署一个父页面脚本即可，不再额外处理图片路径、静态目录映射和跨域缓存。
 
 当前不引入 font 文件。系统字体已经满足第一版工具界面，单独字体会增加部署文件和缓存策略。后续如果有明确品牌视觉要求，再补字体资源。
 

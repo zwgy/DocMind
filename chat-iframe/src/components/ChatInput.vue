@@ -12,8 +12,9 @@ import {
   Square as SquareIcon,
   X
 } from 'lucide-vue-next'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { IncomingPageFile, ModelOption } from '@/types'
+import { autosizeTextarea } from '@/utils/textarea-autosize'
 
 const props = withDefaults(
   defineProps<{
@@ -62,6 +63,7 @@ const fileMenuRef = ref<HTMLElement | null>(null)
 const modelMenuRef = ref<HTMLElement | null>(null)
 const attachmentMenuRef = ref<HTMLElement | null>(null)
 const imageInputRef = ref<HTMLInputElement | null>(null)
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const hasPageFiles = computed(() => props.pageFiles.length > 0)
 const selectedPageFiles = computed(() => {
   const selected = props.pageFiles.filter((file) => selectedPageFileIds.value.has(file.id))
@@ -106,6 +108,11 @@ function syncAskFile() {
   emit('update:askFile', selectedPageFileIds.value.size > 0)
 }
 
+function resizeTextarea() {
+  // 输入区要让历史消息区尽量可见，所以只随内容增长到上限，超过后交给 textarea 自己滚动。
+  nextTick(() => autosizeTextarea(textareaRef.value))
+}
+
 function submit() {
   const content = text.value.trim()
   if (!content) return
@@ -113,6 +120,7 @@ function submit() {
   text.value = ''
   files.value = []
   imageFile.value = null
+  resizeTextarea()
 }
 
 function appendDraftFiles(fileList?: FileList | File[]) {
@@ -213,11 +221,14 @@ function handleOutsideClick(event: MouseEvent) {
 
 onMounted(() => {
   document.addEventListener('click', handleOutsideClick)
+  resizeTextarea()
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick)
 })
+
+watch(text, resizeTextarea)
 </script>
 
 <template>
@@ -274,8 +285,9 @@ onUnmounted(() => {
 
     <div class="input-row">
       <textarea
+        ref="textareaRef"
         v-model="text"
-        rows="2"
+        rows="1"
         placeholder="输入问题..."
         :disabled="disabled"
         @keydown.enter.exact.prevent="submit"

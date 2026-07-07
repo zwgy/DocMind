@@ -1454,6 +1454,8 @@
 .input-row textarea {
   width: 100%;
   min-width: 0;
+  min-height: 30px;
+  max-height: 180px;
   resize: none;
   border: 0;
   outline: 0;
@@ -1461,6 +1463,7 @@
   color: var(--gray-1000);
   font: inherit;
   line-height: 1.5;
+  overflow-y: hidden;
 }
 
 .input-footer,
