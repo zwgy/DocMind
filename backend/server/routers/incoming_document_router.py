@@ -48,6 +48,7 @@ async def query_incoming_document_extractions(
     current_user: User = Depends(get_required_user),
 ):
     del current_user
+    # iframe 只能按当前页面附件线索查询摘要，不提供全局来文列表。
     return await IncomingDocumentService().query_extractions([item.model_dump(by_alias=True) for item in payload.files])
 
 
@@ -63,6 +64,7 @@ async def list_incoming_documents(
     current_user: User = Depends(get_admin_user),
 ):
     del current_user
+    # 管理页列表只暴露来文处理状态和入库状态，知识库内容仍走知识库文件接口。
     items, total = await IncomingDocumentRepository().list_for_management(
         page=page,
         page_size=page_size,
@@ -82,6 +84,7 @@ async def get_incoming_document_detail(incoming_id: str, current_user: User = De
     if record is None:
         raise HTTPException(status_code=404, detail=f"Incoming document not found: {incoming_id}")
     payload = _incoming_document_payload(record, detail=True)
+    # 未入库来文没有知识库 file_id，只能在详情里提供解析 Markdown 的轻量预览。
     payload["markdownPreview"] = await _read_incoming_markdown_preview(record)
     return payload
 
@@ -90,6 +93,7 @@ async def get_incoming_document_detail(incoming_id: str, current_user: User = De
 async def ingest_incoming_document(request: Request, current_user: User = Depends(get_required_user)):
     try:
         if request.headers.get("content-type", "").startswith("application/json"):
+            # JSON 模式用于 iframe 传 sourceUrl，让后端自行下载并进入来文处理队列。
             body = IncomingIngestJsonRequest.model_validate(await request.json())
             return await IncomingDocumentIngestService().ingest_source_url(
                 source_url=body.source_url,
@@ -102,6 +106,7 @@ async def ingest_incoming_document(request: Request, current_user: User = Depend
             )
 
         form = await request.form()
+        # multipart 模式用于外部系统直接上传二进制附件，同样不自动写入知识库。
         file = form.get("file")
         if not isinstance(file, UploadFile):
             raise ValueError("file is required")
@@ -139,6 +144,7 @@ async def import_incoming_document_to_knowledge(
     current_user: User = Depends(get_admin_user),
 ):
     try:
+        # 人工确认后才把来文导入知识库，并复用知识库文件解析/索引链路。
         return await IncomingDocumentIngestService().import_to_knowledge(
             incoming_id,
             kb_id=payload.kb_id,
@@ -155,6 +161,7 @@ async def import_incoming_document_to_knowledge(
 @incoming_documents.post("/{incoming_id}/retry")
 async def retry_incoming_document_processing(incoming_id: str, current_user: User = Depends(get_admin_user)):
     try:
+        # 重试只重跑来文解析摘要，不改变已经存在的知识库入库记录。
         return await IncomingDocumentIngestService().retry_processing(incoming_id, operator_id=current_user.uid)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

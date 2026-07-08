@@ -14,6 +14,8 @@ from yuxi.utils.datetime_utils import utc_now_naive
 
 
 class KnowledgeBusinessExtractionRepository:
+    """知识库文件业务抽取仓储，绑定 kb_id/file_id；不要用于未入库来文。"""
+
     async def create_run(self, data: dict[str, Any]) -> KnowledgeBusinessExtractionRun:
         async with pg_manager.get_async_session_context() as session:
             record = KnowledgeBusinessExtractionRun(**data)
@@ -36,6 +38,7 @@ class KnowledgeBusinessExtractionRepository:
         items: list[dict[str, Any]],
     ) -> KnowledgeBusinessExtractionResult:
         async with pg_manager.get_async_session_context() as session:
+            # 同一个 run_id 重算时先删旧条目，避免 UI 同时看到两版草稿。
             old = await session.execute(
                 select(KnowledgeBusinessExtractionResult).where(KnowledgeBusinessExtractionResult.run_id == run_id)
             )
@@ -93,6 +96,7 @@ class KnowledgeBusinessExtractionRepository:
         markdown_file: str,
         model_spec: str,
     ) -> dict[str, Any] | None:
+        # 解析后的 markdown 路径和模型相同则复用结果，避免重复消耗本地抽取模型。
         return await self.get_latest_success_view_by_file_id(
             file_id=file_id,
             markdown_file=markdown_file,

@@ -44,10 +44,14 @@ INCOMING_ALLOWED_CONTENT_TYPES = (
 
 
 class IncomingKnowledgeImportConflict(ValueError):
+    """来文入库任务已经在执行时抛出，路由层会映射为 409。"""
+
     pass
 
 
 class IncomingDocumentSummary(BaseModel):
+    """来文处理阶段写回 chat-iframe 的摘要载体，和知识库业务抽取结果分开保存。"""
+
     classification: str = Field(default="其他")
     classification_confidence: float | None = Field(default=None, ge=0, le=1)
     summary: str = Field(default="")
@@ -55,6 +59,8 @@ class IncomingDocumentSummary(BaseModel):
 
 
 class IncomingDocumentIngestService:
+    """来文接入编排：先独立保存和摘要，需要人工确认时再导入知识库。"""
+
     def __init__(
         self,
         *,
@@ -93,6 +99,7 @@ class IncomingDocumentIngestService:
         operator_id: str | None = None,
     ) -> dict[str, Any]:
         del source_size_text
+        # 外部系统上传的文件先进入来文表，不能因为未选择知识库而失败。
         if not filename or not is_supported_file_extension(filename):
             raise ValueError("Unsupported file type")
         if len(content) > MAX_UPLOAD_SIZE_BYTES:
@@ -107,6 +114,7 @@ class IncomingDocumentIngestService:
         incoming_id = self._incoming_id(normalized_source_system, source_document_id)
         existing = await self.incoming_repo.get_by_source_identity(normalized_source_system, source_document_id)
         if existing is not None and content_hash and getattr(existing, "content_hash", None) == content_hash:
+            # 同来源同 hash 直接返回已有来文，避免重复下载/解析。
             return self._existing_payload(existing)
 
         upload = await self.upload_file(
@@ -117,6 +125,7 @@ class IncomingDocumentIngestService:
         )
         resolved_hash = content_hash or upload["content_hash"]
         if existing is not None and getattr(existing, "content_hash", None) == resolved_hash:
+            # 调用方没传 hash 时，以上传后计算出的 hash 再做一次幂等判断。
             return self._existing_payload(existing)
 
         # 重新上传同一外部单号时清空派生结果，避免旧摘要误导 chat-iframe。
@@ -233,6 +242,7 @@ class IncomingDocumentIngestService:
         if not source:
             raise ValueError("Incoming document original file is missing")
 
+        # 来文本身可能已解析成功，但知识库入库是人工动作；重复点击要按入库状态单独保护。
         current_status = getattr(record, "knowledge_import_status", None) or "none"
         if current_status == "importing":
             raise IncomingKnowledgeImportConflict("Incoming document is already importing to knowledge base")
@@ -376,6 +386,7 @@ class IncomingDocumentIngestService:
             raise ValueError(f"Incoming document not found: {incoming_id}")
 
         try:
+            # 解析和摘要都写回来文记录，chat-iframe 读取摘要时不依赖知识库索引状态。
             await _set_progress(context, 10.0, "开始解析来文")
             await self.incoming_repo.update_fields(
                 incoming_id,
@@ -460,6 +471,7 @@ async def _upload_incoming_markdown(*, incoming_id: str, markdown: str) -> str:
 async def _summarize_incoming_document(*, filename: str, markdown: str) -> dict[str, Any]:
     from yuxi.config.app import config
 
+    # 摘要面向 chat-iframe 首轮问答，优先给足事实；精确全文仍由 read_file/预览负责。
     prompt = f"""请阅读来文解析内容，输出严格 JSON，不要输出解释。
 JSON 字段：
 - classification: 单一来文分类名称；无法判断时填“其他”

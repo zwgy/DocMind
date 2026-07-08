@@ -17,7 +17,7 @@ TaskFailureCallback = Callable[[Exception], Awaitable[Any] | Any]
 
 
 class KnowledgeDocumentIngestService:
-    """复用知识库文档入库主流程，避免来文入口复制解析、索引细节。"""
+    """知识库文档入库编排；来文只有在人工“存入知识库”后才复用这里。"""
 
     def __init__(
         self,
@@ -36,6 +36,7 @@ class KnowledgeDocumentIngestService:
             raise ValueError(f"知识库 {kb_id} 不存在")
         kb_type = (database.get("kb_type") or "").lower()
         if kb_type:
+            # 只读连接器不能接收来文/上传文件，入口处直接拒绝比任务中失败更清楚。
             kb_class = KnowledgeBaseFactory.get_kb_class(kb_type)
             if not kb_class.supports_documents:
                 raise ValueError(f"{database.get('name') or kb_type} 只支持检索，不支持{operation}")
@@ -56,6 +57,7 @@ class KnowledgeDocumentIngestService:
 
         async def run_ingest(context: TaskContext):
             try:
+                # 任务里串行完成添加记录、解析、可选索引，保持知识库文件状态流转一致。
                 result = await self.run_ingest(
                     kb_id=kb_id,
                     items=items,
@@ -146,6 +148,7 @@ class KnowledgeDocumentIngestService:
                 file_id = record["file_id"]
                 try:
                     file_meta = await self.knowledge.parse_file(kb_id, file_id, operator_id=operator_id)
+                    # 业务结构化抽取仍属于知识库文件能力，不写入 incoming_documents。
                     await self._submit_business_extraction_after_parse(
                         kb_id=kb_id,
                         file_meta=file_meta,
@@ -270,6 +273,7 @@ def _params_for_item(item: str, params: dict[str, Any]) -> dict[str, Any]:
     item_params = dict(params)
     item_params.pop("source_paths", None)
     if isinstance(source_paths, dict) and source_paths.get(item):
+        # source_paths 是批量参数，进入单文件 add_file_record 时要转换成当前文件的 source_path。
         item_params["source_path"] = source_paths[item]
     return item_params
 

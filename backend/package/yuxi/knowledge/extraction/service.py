@@ -56,6 +56,8 @@ class BusinessExtractionDraft:
 
 
 class BusinessExtractionService:
+    """知识库文件的业务结构化抽取服务，不承担来文摘要生成。"""
+
     def __init__(
         self,
         *,
@@ -204,6 +206,7 @@ class BusinessExtractionService:
         if reusable:
             return {**reusable, "reused": True}
 
+        # 知识库解析阶段可能尚未生成 KnowledgeChunk；这里允许直接按 Markdown 分段抽取。
         markdown = await self._read_markdown(markdown_file, markdown_reader)
         segments = self._markdown_segments(
             markdown=markdown,

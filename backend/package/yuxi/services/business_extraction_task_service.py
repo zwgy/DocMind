@@ -7,6 +7,7 @@ from yuxi.knowledge.extraction.service import BusinessExtractionService
 from yuxi.repositories.knowledge_file_repository import KnowledgeFileRepository
 from yuxi.services.task_service import TaskContext, tasker
 
+# 任务类型保留 knowledge 前缀，因为它消费 knowledge_files 的 kb_id/file_id，不处理独立来文。
 BUSINESS_EXTRACTION_TASK_TYPE = "knowledge_business_extraction"
 ACTIVE_BUSINESS_EXTRACTION_STATUSES = {"pending", "running"}
 
@@ -27,6 +28,7 @@ async def submit_business_extraction_task(
         record = await KnowledgeFileRepository().get_by_file_id(file_id)
         if record is None or record.kb_id != kb_id:
             raise ValueError(f"File {file_id} not found")
+        # 只从知识库文件记录读取 markdown_file，避免和 incoming_documents 的解析产物混用。
         result = await BusinessExtractionService().run_markdown_extraction(
             kb_id=kb_id,
             file_id=file_id,

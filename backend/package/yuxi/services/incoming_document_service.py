@@ -8,6 +8,8 @@ from yuxi.repositories.incoming_document_repository import IncomingDocumentRepos
 
 
 class IncomingPageFile(BaseModel):
+    """chat-iframe 从宿主页面收集到的附件线索。"""
+
     id: str | None = None
     name: str
     size_text: str | None = Field(default=None, alias="sizeText")
@@ -23,6 +25,8 @@ class IncomingPageFile(BaseModel):
 
 
 class IncomingDocumentService:
+    """面向 chat-iframe 的来文摘要查询服务，不负责上传、解析或知识库入库。"""
+
     def __init__(
         self,
         *,
@@ -41,6 +45,7 @@ class IncomingDocumentService:
 
     async def _query_one(self, incoming: IncomingPageFile) -> dict[str, Any]:
         candidates, reason = await self._match(incoming)
+        # 返回字段兼容 iframe 旧语义，但数据源已经切到 incoming_documents。
         base = {
             "incomingFileId": incoming.id or incoming.source_key or incoming.source_url or incoming.name,
             "name": incoming.name,
@@ -53,6 +58,7 @@ class IncomingDocumentService:
         }
         if not candidates:
             has_source_hint = bool(incoming.source_key or incoming.source_url or incoming.source_doc_id or incoming.url)
+            # 有来源线索时让 iframe 去触发同步；没有任何线索则明确 not_found，避免无效上传。
             return base | {"matchStatus": "pending_sync" if has_source_hint else "not_found"}
         if len(candidates) > 1:
             return base | {"matchStatus": "multiple", "reason": reason}
@@ -80,6 +86,7 @@ class IncomingDocumentService:
     async def _match(self, incoming: IncomingPageFile):
         source_url = incoming.source_url or incoming.url
         source_system = incoming.source_system or "production"
+        # 匹配顺序从强到弱：外部系统主键优先，最后才退到文件名，降低误匹配概率。
         if incoming.source_key:
             candidates = await self.incoming_repo.list_by_source_key(incoming.source_key, source_system)
             if candidates:

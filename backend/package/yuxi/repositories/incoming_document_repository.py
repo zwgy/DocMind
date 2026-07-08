@@ -10,6 +10,9 @@ from yuxi.utils.datetime_utils import utc_now_naive
 
 
 class IncomingDocumentRepository:
+    """来文独立表的仓储，只管理 incoming_documents，不读写 knowledge_files。"""
+
+    # 只允许服务层明确声明的字段落库，避免外部 metadata 或表单字段误写业务列。
     _writable_fields = {
         "source_system",
         "source_document_id",
@@ -41,6 +44,7 @@ class IncomingDocumentRepository:
     def _sanitize_data(cls, data: dict[str, Any]) -> dict[str, Any]:
         sanitized = {key: value for key, value in data.items() if key in cls._writable_fields}
         if sanitized:
+            # Repository 统一刷新 updated_at，保证 upsert/update_fields 的审计时间一致。
             sanitized["updated_at"] = utc_now_naive()
         return sanitized
 
@@ -72,6 +76,7 @@ class IncomingDocumentRepository:
         source_system: str | None = None,
         classification: str | None = None,
     ) -> tuple[list[IncomingDocument], int]:
+        # 管理端列表只做轻量筛选；复杂全文检索应走后续专门搜索接口，避免把管理页拖成检索服务。
         filters = []
         if status:
             filters.append(IncomingDocument.status == status)
@@ -117,6 +122,7 @@ class IncomingDocumentRepository:
                 record = IncomingDocument(incoming_id=incoming_id, **sanitized_data)
                 session.add(record)
                 return record
+            # 相同外部单号重新上传时覆盖当前态，不保留版本历史，这是来文 v1 的明确取舍。
             for key, value in sanitized_data.items():
                 setattr(existing, key, value)
             return existing

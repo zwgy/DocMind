@@ -174,7 +174,7 @@ class KnowledgeChunk(Base):
 
 
 class KnowledgeBusinessExtractionRun(Base):
-    """知识库业务抽取运行记录"""
+    """知识库业务抽取运行记录；未入库来文使用 IncomingDocumentExtractionRun。"""
 
     __tablename__ = "knowledge_business_extraction_runs"
     __table_args__ = (
@@ -197,7 +197,7 @@ class KnowledgeBusinessExtractionRun(Base):
 
 
 class KnowledgeBusinessExtractionResult(Base):
-    """知识库文件级业务分类结果"""
+    """知识库文件级业务分类结果，按 kb_id/file_id 归属知识库文件。"""
 
     __tablename__ = "knowledge_business_extraction_results"
     __table_args__ = (
@@ -227,7 +227,7 @@ class KnowledgeBusinessExtractionResult(Base):
 
 
 class KnowledgeBusinessExtractionItem(Base):
-    """知识库业务抽取结构化条目"""
+    """知识库业务抽取结构化条目，来源可关联 KnowledgeChunk。"""
 
     __tablename__ = "knowledge_business_extraction_items"
     __table_args__ = (
