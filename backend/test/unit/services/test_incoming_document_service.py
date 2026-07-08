@@ -3,20 +3,25 @@ from types import SimpleNamespace
 from yuxi.services.incoming_document_service import IncomingDocumentService
 
 
-def file_record(**overrides):
+def incoming_record(**overrides):
     data = {
-        "kb_id": "kb_1",
-        "file_id": "file_1",
+        "incoming_id": "inc_1",
         "filename": "来文.docx",
         "file_size": 125952,
-        "markdown_file": "minio://knowledgebases/kb_1/parsed/file_1.md",
-        "processing_params": {"source_key": "202606100417", "source_url": "http://example/a?202606100417"},
+        "markdown_file_url": "minio://knowledgebases/incoming/inc_1.md",
+        "status": "ready",
+        "classification": "客户审查",
+        "summary": "这是一份客户审查来文摘要。",
+        "structured_result": {"risks": ["资质待核验"]},
+        "knowledge_import_status": "none",
+        "linked_kb_id": None,
+        "linked_file_id": None,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
 
 
-class FakeFileRepo:
+class FakeIncomingRepo:
     def __init__(self, responses):
         self.responses = responses
 
@@ -36,36 +41,9 @@ class FakeFileRepo:
         return self.responses.get(("filename", filename), [])
 
 
-class FakeExtractionRepo:
-    def __init__(self, latest=None, run=None):
-        self.latest = latest
-        self.run = run
-
-    async def get_latest_success_view_by_file_id(self, file_id, markdown_file=None):
-        return self.latest
-
-    async def get_latest_run_by_file_id(self, file_id, markdown_file=None):
-        return self.run
-
-
-class FakeTasker:
-    async def find_task_by_payload(self, **kwargs):
-        return None
-
-
-async def test_query_returns_ready_for_source_key_match_and_draft_result():
+async def test_query_returns_ready_incoming_summary_for_source_key_match():
     service = IncomingDocumentService(
-        file_repo=FakeFileRepo({("source_key", "202606100417"): [file_record()]}),
-        extraction_repo=FakeExtractionRepo(
-            latest={
-                "run_id": "ber_1",
-                "categories": {"risk_management": {"matched": True}},
-                "items": [{"item_id": "bei_1", "chunk_id": None, "item_type": "risk_item"}],
-                "status": "draft",
-            }
-        ),
-        tasker=FakeTasker(),
-        model_spec="model-a",
+        incoming_repo=FakeIncomingRepo({("source_key", "202606100417"): [incoming_record()]})
     )
 
     result = await service.query_extractions(
@@ -81,19 +59,21 @@ async def test_query_returns_ready_for_source_key_match_and_draft_result():
 
     item = result["items"][0]
     assert item["matchStatus"] == "matched"
+    assert item["processingStatus"] == "ready"
     assert item["extractionStatus"] == "ready"
-    assert item["fileStatus"] == "parsed"
-    assert item["hasParsedMarkdown"] is True
-    assert item["runId"] == "ber_1"
-    assert item["items"][0]["chunk_id"] is None
+    assert item["incomingId"] == "inc_1"
+    assert item["classification"] == "客户审查"
+    assert item["summary"] == "这是一份客户审查来文摘要。"
+    assert item["structuredResult"] == {"risks": ["资质待核验"]}
+    assert item["hasMarkdown"] is True
+    assert item["knowledgeImportStatus"] == "none"
 
 
-async def test_query_returns_readable_kb_pointer_when_summary_missing():
+async def test_query_returns_markdown_hint_when_summary_missing():
     service = IncomingDocumentService(
-        file_repo=FakeFileRepo({("source_key", "202606100417"): [file_record()]}),
-        extraction_repo=FakeExtractionRepo(),
-        tasker=FakeTasker(),
-        model_spec="model-a",
+        incoming_repo=FakeIncomingRepo(
+            {("source_key", "202606100417"): [incoming_record(summary=None, structured_result=None)]}
+        )
     )
 
     result = await service.query_extractions(
@@ -108,19 +88,19 @@ async def test_query_returns_readable_kb_pointer_when_summary_missing():
 
     item = result["items"][0]
     assert item["matchStatus"] == "matched"
-    assert item["extractionStatus"] == "not_found"
-    assert item["fileStatus"] == "parsed"
-    assert item["hasParsedMarkdown"] is True
-    assert item["kbId"] == "kb_1"
-    assert item["fileId"] == "file_1"
+    assert item["processingStatus"] == "ready"
+    assert item["extractionStatus"] == "ready"
+    assert item["hasMarkdown"] is True
+    assert item["incomingId"] == "inc_1"
+    assert "kbId" not in item
+    assert "fileId" not in item
 
 
 async def test_query_translates_match_miss_states():
     service = IncomingDocumentService(
-        file_repo=FakeFileRepo({("filename", "来文.docx"): [file_record(), file_record(file_id="file_2")]}),
-        extraction_repo=FakeExtractionRepo(),
-        tasker=FakeTasker(),
-        model_spec="model-a",
+        incoming_repo=FakeIncomingRepo(
+            {("filename", "来文.docx"): [incoming_record(), incoming_record(incoming_id="inc_2")]}
+        )
     )
 
     result = await service.query_extractions(

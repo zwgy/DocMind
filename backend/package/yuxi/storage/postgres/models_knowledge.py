@@ -77,6 +77,73 @@ class KnowledgeFile(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
 
 
+class IncomingDocument(Base):
+    """外部系统来文记录，和知识库文件解耦保存。"""
+
+    __tablename__ = "incoming_documents"
+    __table_args__ = (
+        UniqueConstraint("incoming_id", name="uq_incoming_documents_incoming_id"),
+        UniqueConstraint("source_system", "source_document_id", name="uq_incoming_documents_source_identity"),
+        Index("ix_incoming_documents_source_key", "source_key"),
+        Index("ix_incoming_documents_status", "status"),
+        Index("ix_incoming_documents_knowledge_import_status", "knowledge_import_status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    incoming_id = Column(String(64), unique=True, nullable=False, index=True)
+    source_system = Column(String(64), nullable=False, index=True)
+    source_document_id = Column(String(256), nullable=False)
+    source_key = Column(String(512), index=True)
+    source_url = Column(String(2048))
+    filename = Column(String(512), nullable=False)
+    content_hash = Column(String(128), index=True)
+    file_size = Column(BigInteger)
+    mime_type = Column(String(255))
+    original_file_url = Column(String(1024), nullable=False)
+    markdown_file_url = Column(String(1024))
+    status = Column(String(32), default="uploaded", index=True)
+    classification = Column(String(128))
+    classification_confidence = Column(Float)
+    summary = Column(Text)
+    structured_result = Column(JSON_VALUE)
+    processing_error = Column(Text)
+    linked_kb_id = Column(String(80))
+    linked_file_id = Column(String(64))
+    knowledge_import_status = Column(String(32), default="none", index=True)
+    knowledge_import_task_id = Column(String(64))
+    knowledge_import_error = Column(Text)
+    metadata_json = Column("metadata", JSON_VALUE)
+    created_by = Column(String(64))
+    updated_by = Column(String(64))
+    created_at = Column(DateTime(timezone=True), default=utc_now_naive)
+    updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class IncomingDocumentExtractionRun(Base):
+    """来文分类、摘要、结构化抽取运行记录。"""
+
+    __tablename__ = "incoming_document_extraction_runs"
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uq_incoming_document_extraction_runs_run_id"),
+        Index("ix_incoming_document_extraction_runs_incoming_id", "incoming_id"),
+        Index("ix_incoming_document_extraction_runs_status", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(64), unique=True, nullable=False, index=True)
+    incoming_id = Column(String(64), nullable=False, index=True)
+    status = Column(String(32), default="running", index=True)
+    llm_model_spec = Column(String(512))
+    prompt_version = Column(String(64))
+    summary = Column(Text)
+    classification = Column(String(128))
+    structured_result = Column(JSON_VALUE)
+    error_message = Column(Text)
+    started_at = Column(DateTime(timezone=True), default=utc_now_naive)
+    finished_at = Column(DateTime(timezone=True))
+    created_by = Column(String(64))
+
+
 class KnowledgeChunk(Base):
     """知识库 Chunk 模型"""
 

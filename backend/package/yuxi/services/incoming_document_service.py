@@ -4,14 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from yuxi import config
-from yuxi.repositories.knowledge_business_extraction_repository import KnowledgeBusinessExtractionRepository
-from yuxi.repositories.knowledge_file_repository import KnowledgeFileRepository
-from yuxi.services.business_extraction_task_service import (
-    ACTIVE_BUSINESS_EXTRACTION_STATUSES,
-    BUSINESS_EXTRACTION_TASK_TYPE,
-)
-from yuxi.services.task_service import tasker
+from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
 
 
 class IncomingPageFile(BaseModel):
@@ -33,15 +26,15 @@ class IncomingDocumentService:
     def __init__(
         self,
         *,
-        file_repo: KnowledgeFileRepository | None = None,
-        extraction_repo: KnowledgeBusinessExtractionRepository | None = None,
-        tasker=tasker,
+        incoming_repo: IncomingDocumentRepository | None = None,
+        file_repo=None,
+        extraction_repo=None,
+        tasker=None,
         model_spec: str | None = None,
     ):
-        self.file_repo = file_repo or KnowledgeFileRepository()
-        self.extraction_repo = extraction_repo or KnowledgeBusinessExtractionRepository()
-        self.tasker = tasker
-        self.model_spec = model_spec or config.business_extraction_model or config.default_model
+        # 旧依赖已不再参与匹配；保留构造参数，避免调用方一次性大改。
+        del file_repo, extraction_repo, tasker, model_spec
+        self.incoming_repo = incoming_repo or IncomingDocumentRepository()
 
     async def query_extractions(self, files: list[dict[str, Any]]) -> dict[str, Any]:
         return {"items": [await self._query_one(IncomingPageFile.model_validate(item)) for item in files]}
@@ -54,6 +47,7 @@ class IncomingDocumentService:
             "sourceUrl": incoming.source_url or incoming.url,
             "sourceKey": incoming.source_key,
             "matchStatus": "not_found",
+            "processingStatus": "not_found",
             "extractionStatus": "not_found",
             "reason": reason,
         }
@@ -64,84 +58,50 @@ class IncomingDocumentService:
             return base | {"matchStatus": "multiple", "reason": reason}
 
         record = candidates[0]
-        extraction = await self._extraction_payload(record)
-        markdown_file = getattr(record, "markdown_file", None)
-        file_status = getattr(record, "status", None) or ("parsed" if markdown_file else "uploaded")
+        processing_status = getattr(record, "status", None) or "uploaded"
+        has_markdown = bool(getattr(record, "markdown_file_url", None))
+        summary = getattr(record, "summary", None)
+        extraction_status = "ready" if processing_status == "ready" and summary else processing_status
         return base | {
+            "incomingId": record.incoming_id,
             "matchStatus": "matched",
-            "kbId": record.kb_id,
-            "fileId": record.file_id,
-            "fileStatus": file_status,
-            "hasParsedMarkdown": bool(markdown_file),
+            "processingStatus": processing_status,
+            "extractionStatus": extraction_status,
+            "classification": getattr(record, "classification", None),
+            "summary": summary,
+            "structuredResult": getattr(record, "structured_result", None) or {},
+            "hasMarkdown": has_markdown,
+            "knowledgeImportStatus": getattr(record, "knowledge_import_status", None) or "none",
+            "linkedKbId": getattr(record, "linked_kb_id", None),
+            "linkedFileId": getattr(record, "linked_file_id", None),
             "reason": reason,
-            **extraction,
         }
 
     async def _match(self, incoming: IncomingPageFile):
         source_url = incoming.source_url or incoming.url
         source_system = incoming.source_system or "production"
         if incoming.source_key:
-            candidates = await self.file_repo.list_by_source_key(incoming.source_key, source_system)
+            candidates = await self.incoming_repo.list_by_source_key(incoming.source_key, source_system)
             if candidates:
                 return candidates, "source_key matched"
         if source_url:
-            candidates = await self.file_repo.list_by_source_url(source_url, source_system)
+            candidates = await self.incoming_repo.list_by_source_url(source_url, source_system)
             if candidates:
                 return candidates, "source_url matched"
         if incoming.source_doc_id and incoming.name:
-            candidates = await self.file_repo.list_by_source_doc_id_and_filename(
+            candidates = await self.incoming_repo.list_by_source_doc_id_and_filename(
                 incoming.source_doc_id,
                 incoming.name,
                 source_system,
             )
             if candidates:
-                return candidates, "source_doc_id + filename matched"
+                return candidates, "source_document_id + filename matched"
         if incoming.name and incoming.size_bytes:
-            candidates = await self.file_repo.list_by_filename_and_size(incoming.name, incoming.size_bytes)
+            candidates = await self.incoming_repo.list_by_filename_and_size(incoming.name, incoming.size_bytes)
             if candidates:
                 return candidates, "filename + file_size matched"
         if incoming.name:
-            candidates = await self.file_repo.list_by_filename(incoming.name)
+            candidates = await self.incoming_repo.list_by_filename(incoming.name)
             if candidates:
                 return candidates, "filename matched"
         return [], "not found"
-
-    async def _extraction_payload(self, record) -> dict[str, Any]:
-        markdown_file = record.markdown_file
-        latest = await self.extraction_repo.get_latest_success_view_by_file_id(
-            record.file_id,
-            markdown_file=markdown_file,
-        )
-        if latest:
-            return {
-                "extractionStatus": "ready",
-                "runId": latest["run_id"],
-                "categories": latest.get("categories") or {},
-                "items": latest.get("items") or [],
-            }
-
-        task = None
-        if markdown_file:
-            task = await self.tasker.find_task_by_payload(
-                task_type=BUSINESS_EXTRACTION_TASK_TYPE,
-                payload_match={
-                    "kb_id": record.kb_id,
-                    "file_id": record.file_id,
-                    "markdown_file": markdown_file,
-                    "model_spec": self.model_spec,
-                },
-                statuses=ACTIVE_BUSINESS_EXTRACTION_STATUSES,
-            )
-        if task:
-            return {"extractionStatus": "running", "runId": None, "categories": {}, "items": []}
-
-        run = await self.extraction_repo.get_latest_run_by_file_id(record.file_id, markdown_file=markdown_file)
-        if run and run.get("status") == "failed":
-            return {
-                "extractionStatus": "failed",
-                "runId": run.get("run_id"),
-                "categories": {},
-                "items": [],
-                "reason": run.get("error") or "extraction failed",
-            }
-        return {"extractionStatus": "not_found", "runId": None, "categories": {}, "items": []}

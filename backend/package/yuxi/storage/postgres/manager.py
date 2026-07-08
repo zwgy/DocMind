@@ -306,6 +306,70 @@ class PostgresManager(metaclass=SingletonMeta):
                 confirmed_at TIMESTAMPTZ
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS incoming_documents (
+                id SERIAL PRIMARY KEY,
+                incoming_id VARCHAR(64) NOT NULL UNIQUE,
+                source_system VARCHAR(64) NOT NULL,
+                source_document_id VARCHAR(256) NOT NULL,
+                source_key VARCHAR(512),
+                source_url VARCHAR(2048),
+                filename VARCHAR(512) NOT NULL,
+                content_hash VARCHAR(128),
+                file_size BIGINT,
+                mime_type VARCHAR(255),
+                original_file_url VARCHAR(1024) NOT NULL,
+                markdown_file_url VARCHAR(1024),
+                status VARCHAR(32) DEFAULT 'uploaded',
+                classification VARCHAR(128),
+                classification_confidence DOUBLE PRECISION,
+                summary TEXT,
+                structured_result JSONB,
+                processing_error TEXT,
+                linked_kb_id VARCHAR(80),
+                linked_file_id VARCHAR(64),
+                knowledge_import_status VARCHAR(32) DEFAULT 'none',
+                knowledge_import_task_id VARCHAR(64),
+                knowledge_import_error TEXT,
+                metadata JSONB,
+                created_by VARCHAR(64),
+                updated_by VARCHAR(64),
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                CONSTRAINT uq_incoming_documents_source_identity UNIQUE (source_system, source_document_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS incoming_document_extraction_runs (
+                id SERIAL PRIMARY KEY,
+                run_id VARCHAR(64) NOT NULL UNIQUE,
+                incoming_id VARCHAR(64) NOT NULL,
+                status VARCHAR(32) DEFAULT 'running',
+                llm_model_spec VARCHAR(512),
+                prompt_version VARCHAR(64),
+                summary TEXT,
+                classification VARCHAR(128),
+                structured_result JSONB,
+                error_message TEXT,
+                started_at TIMESTAMPTZ DEFAULT NOW(),
+                finished_at TIMESTAMPTZ,
+                created_by VARCHAR(64)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_incoming_documents_source_key ON incoming_documents(source_key)",
+            "CREATE INDEX IF NOT EXISTS ix_incoming_documents_status ON incoming_documents(status)",
+            (
+                "CREATE INDEX IF NOT EXISTS ix_incoming_documents_knowledge_import_status "
+                "ON incoming_documents(knowledge_import_status)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_incoming_document_extraction_runs_incoming_id "
+                "ON incoming_document_extraction_runs(incoming_id)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_incoming_document_extraction_runs_status "
+                "ON incoming_document_extraction_runs(status)"
+            ),
             "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_runs_file_id ON knowledge_business_extraction_runs(file_id)",
             "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_runs_kb_id ON knowledge_business_extraction_runs(kb_id)",
             (

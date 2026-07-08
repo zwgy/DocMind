@@ -23,6 +23,9 @@ class IncomingIngestJsonRequest(BaseModel):
     source_url: str = Field(alias="sourceUrl")
     source_key: str = Field(alias="sourceKey")
     filename: str
+    source_doc_id: str | None = Field(default=None, alias="sourceDocId")
+    source_system: str = Field(default="production", alias="sourceSystem")
+    metadata: dict | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -45,7 +48,10 @@ async def ingest_incoming_document(request: Request, current_user: User = Depend
                 source_url=body.source_url,
                 filename=body.filename,
                 source_key=body.source_key,
+                source_system=body.source_system,
+                source_doc_id=body.source_doc_id,
                 operator_id=current_user.uid,
+                **(body.metadata or {}),
             )
 
         form = await request.form()
