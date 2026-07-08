@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,9 @@ from typing import Any
 from yuxi.agents.backends.sandbox import ensure_thread_dirs, sandbox_uploads_dir, virtual_path_for_thread_file
 from yuxi.config import config as app_config
 from yuxi.knowledge.parser import Parser
+from yuxi.knowledge.utils.kb_utils import parse_minio_url
+from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
+from yuxi.storage.minio import get_minio_client
 
 IFRAME_PAGE_INLINE_CHARS = 8000
 IFRAME_PAGE_PREVIEW_CHARS = 2000
@@ -49,6 +53,15 @@ def _context_file_path(thread_id: str, uid: str) -> tuple[Path, str]:
     host_dir = sandbox_uploads_dir(thread_id) / "iframe-context"
     host_dir.mkdir(parents=True, exist_ok=True)
     host_path = host_dir / "page.md"
+    return host_path, virtual_path_for_thread_file(thread_id, host_path, uid=uid)
+
+
+def _incoming_context_file_path(thread_id: str, uid: str, incoming_id: str) -> tuple[Path, str]:
+    ensure_thread_dirs(thread_id, uid)
+    host_dir = sandbox_uploads_dir(thread_id) / "iframe-context" / "incoming"
+    host_dir.mkdir(parents=True, exist_ok=True)
+    safe_id = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in incoming_id) or "incoming"
+    host_path = host_dir / f"{safe_id}.md"
     return host_path, virtual_path_for_thread_file(thread_id, host_path, uid=uid)
 
 
@@ -104,36 +117,67 @@ def _summary_from_file(file_info: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def _render_file(file_info: dict[str, Any]) -> str:
+def _structured_result_text(file_info: dict[str, Any]) -> str:
+    structured = file_info.get("structuredResult")
+    if not isinstance(structured, dict) or not structured:
+        return ""
+    return json.dumps(structured, ensure_ascii=False)
+
+
+async def _read_incoming_markdown(incoming_id: str) -> str:
+    record = await IncomingDocumentRepository().get_by_incoming_id(incoming_id)
+    markdown_url = getattr(record, "markdown_file_url", None) if record is not None else None
+    if not markdown_url:
+        return ""
+    bucket_name, object_name = parse_minio_url(markdown_url)
+    return (await get_minio_client().adownload_file(bucket_name, object_name)).decode("utf-8")
+
+
+async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> str:
     name = _clean_text(file_info.get("name")) or "未命名附件"
     match_status = _clean_text(file_info.get("matchStatus"))
     extraction_status = _clean_text(file_info.get("extractionStatus"))
-    kb_id = _clean_text(file_info.get("kbId"))
-    file_id = _clean_text(file_info.get("fileId"))
-    has_parsed = bool(file_info.get("hasParsedMarkdown"))
+    kb_id = _clean_text(file_info.get("kbId") or file_info.get("linkedKbId"))
+    file_id = _clean_text(file_info.get("fileId") or file_info.get("linkedFileId"))
+    incoming_id = _clean_text(file_info.get("incomingId"))
+    has_parsed = bool(file_info.get("hasParsedMarkdown") or file_info.get("hasMarkdown"))
     lines = [f"- {name}"]
 
     summary = _summary_from_file(file_info)
     if summary:
         summary, _ = _truncate(summary, IFRAME_FILE_SUMMARY_CHARS)
         lines.extend(["  状态：已有摘要", f"  摘要：{summary}"])
-    elif match_status == "multiple":
-        lines.append("  状态：匹配到多个候选文件，需要先明确具体附件。")
-    elif match_status == "matched" and has_parsed:
-        lines.append("  状态：已解析，暂无结构化摘要。")
-    elif match_status in {"pending_sync", "ingesting", "parsing"} or not (kb_id and file_id):
-        lines.append("  状态：正在入库或解析，当前不能读取全文。不要猜测该附件内容；如果问题依赖它，请说明需要等待解析完成。")
-    else:
-        lines.append(f"  状态：{extraction_status or match_status or '未知'}")
 
-    # 只有 KB 中已有可读 markdown 时才暴露工具指针，避免模型拿不存在的路径硬读。
+    structured = _structured_result_text(file_info)
+    if structured:
+        lines.append(f"  结构化结果：{structured}")
+
+    if not summary:
+        if match_status == "multiple":
+            lines.append("  状态：匹配到多个候选文件，需要先明确具体附件。")
+        elif match_status == "matched" and has_parsed:
+            lines.append("  状态：已解析，暂无结构化摘要。")
+        elif match_status in {"pending_sync", "ingesting", "parsing"} or not (kb_id or incoming_id):
+            lines.append(
+                "  状态：正在同步或解析，当前不能读取全文。不要猜测该附件内容；如果问题依赖它，请说明需要等待解析完成。"
+            )
+        else:
+            lines.append(f"  状态：{extraction_status or match_status or '未知'}")
+
+    # KB 文件走现有知识库工具；未入库来文只暴露当前 thread sandbox 内的临时 markdown 路径。
     if kb_id and file_id and (summary or has_parsed):
         lines.append(f'  全文读取：open_kb_document(kb_id="{kb_id}", file_id="{file_id}")')
+    elif incoming_id and has_parsed:
+        markdown = await _read_incoming_markdown(incoming_id)
+        if markdown:
+            host_path, virtual_path = _incoming_context_file_path(thread_id, uid, incoming_id)
+            host_path.write_text(markdown, encoding="utf-8")
+            lines.append(f"  全文读取：请使用 read_file 读取 {virtual_path}")
     return "\n".join(lines)
 
 
-def _render_files(files: list[Any]) -> str:
-    file_prompts = [_render_file(item) for item in files if isinstance(item, dict)]
+async def _render_files(thread_id: str, uid: str, files: list[Any]) -> str:
+    file_prompts = [await _render_file(thread_id, uid, item) for item in files if isinstance(item, dict)]
     if not file_prompts:
         return ""
     return "【选中附件】\n" + "\n".join(file_prompts)
@@ -155,7 +199,7 @@ async def render_iframe_context_prompt(thread_id: str, uid: str, iframe_context:
 
     files = iframe_context.get("files")
     if isinstance(files, list):
-        files_prompt = _render_files(files)
+        files_prompt = await _render_files(thread_id, uid, files)
         if files_prompt:
             sections.append(files_prompt)
 
