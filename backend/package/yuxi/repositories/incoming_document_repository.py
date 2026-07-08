@@ -54,6 +54,13 @@ class IncomingDocumentRepository:
             )
             return result.scalar_one_or_none()
 
+    async def get_by_incoming_id(self, incoming_id: str) -> IncomingDocument | None:
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
+                select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id)
+            )
+            return result.scalar_one_or_none()
+
     async def upsert(self, incoming_id: str, data: dict[str, Any]) -> IncomingDocument:
         sanitized_data = self._sanitize_data(data)
         async with pg_manager.get_async_session_context() as session:
@@ -68,6 +75,19 @@ class IncomingDocumentRepository:
             for key, value in sanitized_data.items():
                 setattr(existing, key, value)
             return existing
+
+    async def update_fields(self, incoming_id: str, data: dict[str, Any]) -> IncomingDocument:
+        sanitized_data = self._sanitize_data(data)
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
+                select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id)
+            )
+            record = result.scalar_one_or_none()
+            if record is None:
+                raise ValueError(f"Incoming document not found: {incoming_id}")
+            for key, value in sanitized_data.items():
+                setattr(record, key, value)
+            return record
 
     async def list_by_source_key(self, source_key: str, source_system: str | None = None) -> list[IncomingDocument]:
         if not source_key:

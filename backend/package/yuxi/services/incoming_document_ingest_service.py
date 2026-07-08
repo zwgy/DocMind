@@ -5,6 +5,10 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
+from yuxi.knowledge.extraction.llm import ModelJsonLLM
+from yuxi.knowledge.parser import Parser
 from yuxi.knowledge.parser import is_supported_file_extension
 from yuxi.knowledge.utils import calculate_content_hash
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
@@ -14,8 +18,12 @@ from yuxi.utils import hashstr
 from yuxi.utils.upload_utils import MAX_UPLOAD_SIZE_BYTES
 
 UploadFileFn = Callable[..., Awaitable[dict[str, Any]]]
+ParseDocumentFn = Callable[[str, dict[str, Any]], Awaitable[str]]
+UploadMarkdownFn = Callable[..., Awaitable[str]]
+SummarizeDocumentFn = Callable[..., Awaitable[dict[str, Any]]]
 INCOMING_DOCUMENT_INGEST_TASK_TYPE = "incoming_document_ingest"
 INCOMING_DOCUMENT_PROCESS_TASK_TYPE = "incoming_document_process"
+INCOMING_SUMMARY_MARKDOWN_LIMIT = 20_000
 INCOMING_ALLOWED_CONTENT_TYPES = (
     "application/pdf",
     "application/msword",
@@ -34,6 +42,13 @@ INCOMING_ALLOWED_CONTENT_TYPES = (
 )
 
 
+class IncomingDocumentSummary(BaseModel):
+    classification: str = Field(default="其他")
+    classification_confidence: float | None = Field(default=None, ge=0, le=1)
+    summary: str = Field(default="")
+    structured_result: dict[str, Any] = Field(default_factory=dict)
+
+
 class IncomingDocumentIngestService:
     def __init__(
         self,
@@ -44,12 +59,18 @@ class IncomingDocumentIngestService:
         tasker=tasker,
         default_kb_id: str | None = None,
         upload_file: UploadFileFn | None = None,
+        parse_document: ParseDocumentFn | None = None,
+        upload_markdown: UploadMarkdownFn | None = None,
+        summarize_document: SummarizeDocumentFn | None = None,
     ):
         # file_repo/knowledge/default_kb_id 仅保留构造兼容，阶段一开始不再写 KnowledgeFile。
         del file_repo, knowledge, default_kb_id
         self.incoming_repo = incoming_repo or IncomingDocumentRepository()
         self.tasker = tasker
         self.upload_file = upload_file or _upload_incoming_file
+        self.parse_document = parse_document or _parse_incoming_document
+        self.upload_markdown = upload_markdown or _upload_incoming_markdown
+        self.summarize_document = summarize_document or _summarize_incoming_document
 
     async def ingest_file(
         self,
@@ -192,10 +213,7 @@ class IncomingDocumentIngestService:
 
     async def _submit_process_task(self, *, incoming_id: str, operator_id: str | None):
         async def run_process(context: TaskContext):
-            del operator_id
-            # 阶段一只负责解耦和落库；解析、摘要、分类在阶段二接入。
-            await context.set_progress(100.0, "来文已保存，等待解析摘要")
-            return {"incoming_id": incoming_id, "status": "uploaded"}
+            return await self.process_incoming_document(incoming_id, operator_id=operator_id, context=context)
 
         task, _ = await self.tasker.enqueue_unique_by_payload(
             name=f"来文处理 ({incoming_id})",
@@ -206,6 +224,61 @@ class IncomingDocumentIngestService:
             coroutine=run_process,
         )
         return task
+
+    async def process_incoming_document(
+        self,
+        incoming_id: str,
+        *,
+        operator_id: str | None = None,
+        context: TaskContext | None = None,
+    ) -> dict[str, Any]:
+        record = await self.incoming_repo.get_by_incoming_id(incoming_id)
+        if record is None:
+            raise ValueError(f"Incoming document not found: {incoming_id}")
+
+        try:
+            await _set_progress(context, 10.0, "开始解析来文")
+            await self.incoming_repo.update_fields(
+                incoming_id,
+                {"status": "parsing", "processing_error": None, "updated_by": operator_id},
+            )
+            markdown = await self.parse_document(
+                record.original_file_url,
+                {
+                    # 来文解析图片和知识库图片分目录保存，避免人工入库前就污染知识库对象命名空间。
+                    "image_bucket": "public",
+                    "image_prefix": f"incoming/{incoming_id}/images",
+                },
+            )
+            markdown_url = await self.upload_markdown(incoming_id=incoming_id, markdown=markdown)
+
+            await _set_progress(context, 70.0, "开始生成来文摘要")
+            await self.incoming_repo.update_fields(
+                incoming_id,
+                {"status": "summarizing", "markdown_file_url": markdown_url, "updated_by": operator_id},
+            )
+            raw_summary = await self.summarize_document(filename=record.filename, markdown=markdown)
+            summary = IncomingDocumentSummary.model_validate(raw_summary)
+            await self.incoming_repo.update_fields(
+                incoming_id,
+                {
+                    "status": "ready",
+                    "classification": summary.classification,
+                    "classification_confidence": summary.classification_confidence,
+                    "summary": summary.summary,
+                    "structured_result": summary.structured_result,
+                    "processing_error": None,
+                    "updated_by": operator_id,
+                },
+            )
+            await _set_progress(context, 100.0, "来文解析摘要完成")
+            return {"incoming_id": incoming_id, "status": "ready"}
+        except Exception as exc:
+            await self.incoming_repo.update_fields(
+                incoming_id,
+                {"status": "failed", "processing_error": str(exc), "updated_by": operator_id},
+            )
+            raise
 
     @staticmethod
     def _incoming_id(source_system: str, source_document_id: str) -> str:
@@ -234,6 +307,41 @@ async def _upload_incoming_file(*, source_system: str, incoming_id: str, filenam
     object_name = f"incoming/{safe_source_system}/{incoming_id}/{stem}_{int(time.time() * 1000)}{suffix}"
     minio_url = await aupload_file_to_minio(MinIOClient.KB_BUCKETS["documents"], object_name, content)
     return {"minio_url": minio_url, "content_hash": content_hash, "size": len(content)}
+
+
+async def _parse_incoming_document(source: str, params: dict[str, Any]) -> str:
+    return await Parser.aparse(source=source, params=params)
+
+
+async def _upload_incoming_markdown(*, incoming_id: str, markdown: str) -> str:
+    object_name = f"incoming/{incoming_id}/parsed.md"
+    return await aupload_file_to_minio(MinIOClient.KB_BUCKETS["parsed"], object_name, markdown.encode("utf-8"))
+
+
+async def _summarize_incoming_document(*, filename: str, markdown: str) -> dict[str, Any]:
+    from yuxi.config.app import config
+
+    prompt = f"""请阅读来文解析内容，输出严格 JSON，不要输出解释。
+JSON 字段：
+- classification: 单一来文分类名称；无法判断时填“其他”
+- classification_confidence: 0 到 1 的置信度
+- summary: 面向 chat-iframe 的完整附件摘要，既包含结论，也包含足以回答常见追问的关键事实
+- structured_result: 可机器读取的关键字段对象；没有明确字段时返回 {{}}
+
+文件名：{filename}
+来文内容：
+{markdown[:INCOMING_SUMMARY_MARKDOWN_LIMIT]}
+"""
+    data = await ModelJsonLLM(config.business_extraction_model or config.default_model).complete_json(
+        prompt,
+        IncomingDocumentSummary,
+    )
+    return IncomingDocumentSummary.model_validate(data).model_dump()
+
+
+async def _set_progress(context: TaskContext | None, percent: float, message: str) -> None:
+    if context is not None:
+        await context.set_progress(percent, message)
 
 
 def _safe_object_segment(value: str) -> str:
