@@ -14,30 +14,11 @@
       </div>
     </div>
 
-    <!-- 顶部导航：品牌名称 & 操作按钮 -->
-    <nav class="login-navbar">
-      <div class="navbar-content">
-        <div class="brand-container" @click="goHome" style="cursor: pointer">
-          <img v-if="brandLogo" :src="brandLogo" alt="logo" class="brand-logo" />
-          <h1 class="brand-text">
-            <span v-if="brandOrgName" class="brand-org">{{ brandOrgName }}</span>
-            <span v-if="brandOrgName && brandName !== brandOrgName" class="brand-separator"></span>
-            <span class="brand-main">{{ brandName }}</span>
-          </h1>
-        </div>
-      </div>
-    </nav>
-
     <!-- 主要内容区：居中卡片 -->
     <main class="login-main">
       <div class="login-card">
-        <!-- 左侧图片 -->
-        <div class="card-side is-image">
-          <img :src="loginBgImage" alt="登录背景" class="login-bg-image" />
-        </div>
-
-        <!-- 右侧表单 -->
-        <div class="card-side is-form">
+        <!-- 表单 -->
+        <div class="card-form">
           <div class="form-wrapper">
             <header class="form-header">
               <!-- 如果是在初始化，显示特定标题 -->
@@ -118,30 +99,6 @@
                     />
                   </a-form-item>
 
-                  <a-form-item v-if="showAgreementConsent" class="agreement-form-item">
-                    <div class="agreement-row">
-                      <a-checkbox v-model:checked="agreementAccepted">
-                        登录即代表同意
-                        <a
-                          class="agreement-link"
-                          :href="userAgreementUrl"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          @click.stop
-                          >《用户协议》</a
-                        >
-                        <a
-                          class="agreement-link"
-                          :href="privacyPolicyUrl"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          @click.stop
-                          >《隐私协议》</a
-                        >
-                      </a-checkbox>
-                    </div>
-                  </a-form-item>
-
                   <a-form-item>
                     <a-button type="primary" html-type="submit" :loading="loading" block
                       >创建管理员账户</a-button
@@ -175,30 +132,6 @@
                         <lock-icon size="18" />
                       </template>
                     </a-input-password>
-                  </a-form-item>
-
-                  <a-form-item v-if="showAgreementConsent" class="agreement-form-item">
-                    <div class="agreement-row">
-                      <a-checkbox v-model:checked="agreementAccepted">
-                        登录即代表同意
-                        <a
-                          class="agreement-link"
-                          :href="userAgreementUrl"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          @click.stop
-                          >《用户协议》</a
-                        >
-                        <a
-                          class="agreement-link"
-                          :href="privacyPolicyUrl"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          @click.stop
-                          >《隐私协议》</a
-                        >
-                      </a-checkbox>
-                    </div>
                   </a-form-item>
 
                   <a-form-item>
@@ -253,26 +186,13 @@
         </div>
       </div>
     </main>
-
-    <!-- 页面底部：版权信息等 -->
-    <footer class="page-footer">
-      <div class="footer-links">
-        <a href="https://github.com/xerrors" target="_blank">联系我们</a>
-        <span class="divider">|</span>
-        <a href="https://github.com/xerrors/Yuxi" target="_blank">使用帮助</a>
-      </div>
-      <div class="copyright">
-        &copy; {{ new Date().getFullYear() }} {{ brandName }}. All Rights Reserved.
-      </div>
-    </footer>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { useInfoStore } from '@/stores/info'
 import { useAgentStore } from '@/stores/agent'
 import { message } from 'ant-design-vue'
 import { healthApi } from '@/apis/system_api'
@@ -288,44 +208,12 @@ import { tryAutoStartOIDC, sanitizeRedirect } from '@/utils/oidcAutoStart'
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
-const infoStore = useInfoStore()
 const agentStore = useAgentStore()
-
-// 品牌展示数据
-const loginBgImage = computed(() => {
-  return infoStore.organization?.login_bg || '/login-bg.jpg'
-})
-const brandLogo = computed(() => {
-  return infoStore.organization?.logo || ''
-})
-const brandOrgName = computed(() => {
-  return infoStore.organization?.name?.trim() || ''
-})
-const brandName = computed(() => {
-  const orgName = brandOrgName.value
-  const brandNameRaw = infoStore.branding?.name?.trim() || 'Yuxi'
-
-  if (orgName && brandNameRaw && orgName !== brandNameRaw) {
-    return brandNameRaw
-  }
-
-  return orgName || brandNameRaw
-})
-const userAgreementUrl = computed(() => {
-  return infoStore.footer?.user_agreement_url?.trim() || ''
-})
-const privacyPolicyUrl = computed(() => {
-  return infoStore.footer?.privacy_policy_url?.trim() || ''
-})
-const showAgreementConsent = computed(() => {
-  return Boolean(userAgreementUrl.value && privacyPolicyUrl.value)
-})
 
 // 状态
 const isFirstRun = ref(false)
 const loading = ref(false)
 const errorMessage = ref('')
-const agreementAccepted = ref(false)
 const serverStatus = ref('loading')
 const serverError = ref('')
 const healthChecking = ref(false)
@@ -354,10 +242,6 @@ const adminForm = reactive({
   confirmPassword: '',
   phone_number: '' // 手机号字段（可选）
 })
-
-const goHome = () => {
-  router.push('/')
-}
 
 // 清理倒计时器
 const clearLockCountdown = () => {
@@ -412,25 +296,11 @@ const validateConfirmPassword = async (rule, value) => {
   }
 }
 
-const ensureAgreementAccepted = () => {
-  if (!showAgreementConsent.value || agreementAccepted.value) {
-    return true
-  }
-
-  const warningMessage = '请先阅读并同意《用户协议》《隐私协议》'
-  message.warning(warningMessage)
-  return false
-}
-
 // 处理登录
 const handleLogin = async () => {
   // 如果当前被锁定，不允许登录
   if (isLocked.value) {
     message.warning(`账户被锁定，请等待 ${formatTime(lockRemainingTime.value)}`)
-    return
-  }
-
-  if (!ensureAgreementAccepted()) {
     return
   }
 
@@ -502,10 +372,6 @@ const handleLogin = async () => {
 
 // 处理 OIDC 登录
 const handleOIDCLogin = async () => {
-  if (!ensureAgreementAccepted()) {
-    return
-  }
-
   try {
     oidcLoading.value = true
     errorMessage.value = ''
@@ -552,10 +418,6 @@ const checkOIDCConfig = async () => {
 
 // 处理初始化管理员
 const handleInitialize = async () => {
-  if (!ensureAgreementAccepted()) {
-    return
-  }
-
   try {
     loading.value = true
     errorMessage.value = ''
@@ -572,7 +434,7 @@ const handleInitialize = async () => {
     })
 
     message.success('管理员账户创建成功')
-    router.push('/')
+    router.push('/agent')
   } catch (error) {
     console.error('初始化失败:', error)
     errorMessage.value = error.message || '初始化失败，请重试'
@@ -670,130 +532,30 @@ onUnmounted(() => {
   }
 }
 
-/* Unified Navbar */
-.login-navbar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  padding: 32px 0;
-  z-index: 10;
-
-  .navbar-content {
-    max-width: 1500px; /* Constraint the width */
-    margin: 0 auto;
-    padding: 0 40px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    .brand-container {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-  }
-}
-
-.brand-text {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-
-  .brand-org {
-    color: var(--gray-700);
-    font-weight: 600;
-  }
-
-  .brand-separator {
-    width: 4px;
-    height: 4px;
-    background-color: var(--gray-400);
-    border-radius: 50%;
-    font-weight: 600;
-  }
-
-  .brand-main {
-    color: var(--main-color);
-    font-weight: 600;
-  }
-}
-
-.brand-logo {
-  height: 32px;
-  width: auto;
-  object-fit: contain;
-}
-
-.top-logo {
-  height: 32px;
-  width: auto;
-  object-fit: contain;
-}
-
-.back-home-btn {
-  color: var(--gray-600);
-  font-size: 14px;
-  &:hover {
-    color: var(--main-color);
-    background-color: transparent;
-  }
-}
-
-/* Main Content: Card Layout */
+/* Main Content: Centered Card */
 .login-main {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
-  padding-top: 80px; /* Add space for navbar */
 }
 
 .login-card {
-  width: 900px;
+  width: 420px;
   max-width: 95vw;
-  height: 560px;
   background: var(--gray-0);
   border-radius: 16px;
   box-shadow: 0 0px 40px var(--shadow-1);
-  display: flex;
-  overflow: hidden;
-}
-
-.card-side {
-  position: relative;
-}
-
-/* Image Side */
-.card-side.is-image {
-  flex: 1.4;
-  background-color: var(--main-10);
-  overflow: hidden;
-
-  .login-bg-image {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    object-position: center;
-  }
-}
-
-/* Form Side */
-.card-side.is-form {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 40px;
+}
+
+.card-form {
+  width: 100%;
 }
 
 .form-wrapper {
   width: 100%;
-  max-width: 320px;
   display: flex;
   flex-direction: column;
   gap: 32px;
@@ -900,33 +662,6 @@ onUnmounted(() => {
   }
 }
 
-.agreement-form-item {
-  margin-bottom: 12px;
-}
-
-.agreement-row {
-  font-size: 13px;
-  color: var(--gray-600);
-  line-height: 1.6;
-
-  :deep(.ant-checkbox-wrapper) {
-    display: inline-flex;
-    align-items: flex-start;
-  }
-
-  :deep(.ant-checkbox + span) {
-    padding-inline-start: 8px;
-  }
-}
-
-.agreement-link {
-  color: var(--main-color);
-
-  &:hover {
-    text-decoration: underline;
-  }
-}
-
 .error-message {
   margin-top: 16px;
   padding: 10px 12px;
@@ -936,38 +671,6 @@ onUnmounted(() => {
   color: var(--color-error-700);
   font-size: 13px;
   text-align: center;
-}
-
-/* Page Footer */
-.page-footer {
-  padding: 24px;
-  text-align: center;
-}
-
-.footer-links {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 8px;
-
-  a {
-    color: var(--gray-500);
-    font-size: 13px;
-    &:hover {
-      color: var(--main-color);
-    }
-  }
-
-  .divider {
-    color: var(--gray-300);
-    font-size: 12px;
-  }
-}
-
-.copyright {
-  font-size: 12px;
-  color: var(--gray-400);
 }
 
 /* Server Status Alert */
@@ -1021,35 +724,10 @@ onUnmounted(() => {
 }
 
 /* Responsive */
-@media (max-width: 1280px) {
-  .login-navbar .navbar-content {
-    padding: 0 40px;
-  }
-}
-
 @media (max-width: 768px) {
-  .login-navbar .navbar-content {
-    padding: 0 20px;
-  }
-
-  .brand-text {
-    font-size: 20px;
-  }
-
   .login-card {
-    flex-direction: column;
-    height: auto;
-    max-height: none;
+    padding: 30px 20px;
     width: 100%;
-    margin-top: 20px;
-  }
-
-  .card-side.is-image {
-    display: none;
-  }
-
-  .card-side.is-form {
-    padding: 40px 20px;
   }
 }
 </style>

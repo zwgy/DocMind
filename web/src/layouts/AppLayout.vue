@@ -242,7 +242,7 @@ provide('settingsModal', {
   <div class="app-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <div class="header">
       <div class="sidebar-brand" @click.stop>
-        <router-link v-if="!sidebarCollapsed" to="/" class="brand-link">
+        <router-link v-if="!sidebarCollapsed" to="/agent" class="brand-link">
           <img :src="infoStore.organization.avatar" class="brand-avatar" />
           <span class="brand-name">{{ organizationName }}</span>
         </router-link>

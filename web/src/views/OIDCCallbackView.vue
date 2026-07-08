@@ -118,9 +118,9 @@ const handleCallback = async () => {
 
 // 组件挂载时处理回调
 onMounted(async () => {
-  // 如果已登录，跳转到首页
+  // 如果已登录，跳转到聊天页
   if (userStore.isLoggedIn) {
-    router.push('/')
+    router.push('/agent')
     return
   }
 
