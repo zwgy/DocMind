@@ -7,6 +7,7 @@
 ## v0.7.1 (current)
 
 ### 开发记录
+- ??????????????????????????????? `document_extraction` ????????? `document_business_extraction_runs/results/items`??????? `incoming_document_extraction_runs` ? `knowledge_business_extraction_*` ????????? Markdown ?????????????????????????????????????????????????????????????? `kb_id/file_id`?
 
 - 解耦来文接入与知识库默认入库：`/api/incoming-documents/ingest` 不再依赖 `INCOMING_DEFAULT_KB_ID`，来文上传后先保存为独立 `incoming_documents` 记录并提交 `incoming_document_process` 任务；新增来文与来文抽取运行 PostgreSQL 表，查询接口改为返回 `incomingId/processingStatus/summary/hasMarkdown/knowledgeImportStatus` 等来文字段，为后续 Web「来文管理」人工存入知识库打基础。
 - 接入来文解析摘要处理任务：`incoming_document_process` 现在会读取已保存原文，复用现有 Parser 解析为 Markdown 并保存到 MinIO，随后通过默认业务抽取模型生成单一分类、置信度、完整摘要与结构化字段，状态按 `parsing/summarizing/ready/failed` 落回 `incoming_documents`，仍不触发向量化或知识库入库。
@@ -61,6 +62,7 @@
 - 修复子智能体流式事件兼容：Yuxi task middleware 的 DeepAgents 子智能体 transformer 改用专用 `yuxi_subagents` projection，避免与 LangChain `create_agent` 默认注册的 `subagents` projection 冲突导致运行流式消息时报错；子线程路由收集优先读取 Yuxi projection，并保留原 `subagents` fallback。
 - 宿主机端口集中可配置：把所有宿主机端口（redis 6379、minio 9000/9001、milvus 19530/9091）和浏览器打开 MinIO / Milvus 控制台的链接统一收敛到 `.env`，通过 `REDIS_HOST_PORT` / `MINIO_API_HOST_PORT` / `MINIO_CONSOLE_HOST_PORT` / `MILVUS_GRPC_HOST_PORT` / `MILVUS_HEALTH_HOST_PORT` / `VITE_MINIO_CONSOLE_URL` / `VITE_MILVUS_WEBUI_URL` 一处调整即可同步 docker-compose 端口映射、API 预签 URL 和前端跳转链接，便于与同机其他项目共享端口时快速避让；`init.sh` / `init.ps1` 中 `ensure_port_env` 改为幂等追加并在 main 末尾统一调用一次（移除两个分支中的重复调用点），`docker-compose.prod.yml` 中移除 prod 未暴露的内网端口透传避免误导。
 - 收敛 `.env` 配置来源：`init.sh` / `init.ps1` 改为以 `.env.template` 为单一蓝本生成 `.env`（`.env` 不存在时直接 `cp` 蓝本），新增 `ensure_env_var` / `Update-EnvVar` 原地更新 helper（区分"已填真值 / 模板占位 / 不存在"三种情况幂等处理），删除 `ensure_jwt_env` / `ensure_port_env` 等散落写入函数。后续新增环境变量只需改 `.env.template` 并在 init 脚本里加声明，避免多处默认值脱节；`init.sh` 生成 `.env` 后会把 CRLF 归一化为 LF，避免 Linux 下 vim 显示 `^M` 或部分解析器读入行尾 `\r`；清理空模板占位时保留 `JWT_SECRET_KEY` / `YUXI_INSTANCE_ID` 的自动生成槽位，并在交互输入前直接生成随机值，避免从蓝本生成 `.env` 后因可选项或后续流程中断留下空密钥；`init.ps1` 保留 UTF-8 BOM 以兼容 Windows PowerShell 5.1 直接执行。
+- 移除主界面侧边栏左下角的 GitHub 点赞数展示：`AppLayout.vue` 不再调用 `https://api.github.com/repos/xerrors/Yuxi` 拉取 stargazers count，也不再渲染「欢迎 Star」链接块和相关样式；同步精简冗余的 `.foo` 包装层并去掉 user-info 的多余底部 margin，让聊天列表可以多占用 GitHub 释放出的高度。
 
 ## v0.7.0 (2026-06-13)
 
