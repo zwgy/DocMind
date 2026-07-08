@@ -22,5 +22,9 @@ export const incomingDocumentApi = {
 
   importToKnowledge: async (incomingId, payload) => {
     return apiAdminPost(`/api/incoming-documents/${incomingId}/knowledge-import`, payload)
+  },
+
+  retry: async (incomingId) => {
+    return apiAdminPost(`/api/incoming-documents/${incomingId}/retry`, {})
   }
 }

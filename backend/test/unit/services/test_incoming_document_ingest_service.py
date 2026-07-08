@@ -288,6 +288,27 @@ async def test_process_task_marks_document_failed_when_parse_fails():
     assert repo.updates[-1][1]["processing_error"] == "parser crashed"
 
 
+async def test_retry_processing_resets_failed_document_and_queues_process_task():
+    record = SimpleNamespace(
+        incoming_id="inc_1",
+        filename="incoming.pdf",
+        original_file_url="minio://docs/inc_1/incoming.pdf",
+        status="failed",
+        processing_error="parser crashed",
+    )
+    repo = FakeIncomingRepo(record)
+    tasker = FakeTasker()
+    service = IncomingDocumentIngestService(incoming_repo=repo, tasker=tasker)
+
+    result = await service.retry_processing("inc_1", operator_id="admin")
+
+    assert result == {"incomingId": "inc_1", "taskId": "task_1", "status": "accepted"}
+    assert repo.updates[0][1]["status"] == "uploaded"
+    assert repo.updates[0][1]["processing_error"] is None
+    assert repo.updates[0][1]["updated_by"] == "admin"
+    assert tasker.enqueued[0]["task_type"] == "incoming_document_process"
+
+
 @pytest.mark.asyncio
 async def test_import_to_knowledge_queues_auto_index_and_updates_import_status():
     record = SimpleNamespace(

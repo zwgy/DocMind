@@ -7,13 +7,16 @@ from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
 
 from server.utils.auth_middleware import get_admin_user, get_required_user
+from yuxi.knowledge.utils import parse_minio_url
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
 from yuxi.services.incoming_document_ingest_service import IncomingDocumentIngestService, IncomingKnowledgeImportConflict
 from yuxi.services.incoming_document_service import IncomingDocumentService, IncomingPageFile
+from yuxi.storage.minio import get_minio_client
 from yuxi.storage.postgres.models_business import User
 from yuxi.utils.upload_utils import read_upload_with_limit
 
 incoming_documents = APIRouter(prefix="/incoming-documents", tags=["incoming-documents"])
+INCOMING_MARKDOWN_PREVIEW_CHARS = 40_000
 
 
 class IncomingExtractionQueryRequest(BaseModel):
@@ -78,7 +81,9 @@ async def get_incoming_document_detail(incoming_id: str, current_user: User = De
     record = await IncomingDocumentRepository().get_by_incoming_id(incoming_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Incoming document not found: {incoming_id}")
-    return _incoming_document_payload(record, detail=True)
+    payload = _incoming_document_payload(record, detail=True)
+    payload["markdownPreview"] = await _read_incoming_markdown_preview(record)
+    return payload
 
 
 @incoming_documents.post("/ingest")
@@ -147,6 +152,14 @@ async def import_incoming_document_to_knowledge(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@incoming_documents.post("/{incoming_id}/retry")
+async def retry_incoming_document_processing(incoming_id: str, current_user: User = Depends(get_admin_user)):
+    try:
+        return await IncomingDocumentIngestService().retry_processing(incoming_id, operator_id=current_user.uid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _iso(value):
     return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
 
@@ -184,3 +197,12 @@ def _incoming_document_payload(record, *, detail: bool) -> dict:
             }
         )
     return payload
+
+
+async def _read_incoming_markdown_preview(record) -> str:
+    markdown_url = getattr(record, "markdown_file_url", None)
+    if not markdown_url:
+        return ""
+    bucket_name, object_name = parse_minio_url(markdown_url)
+    content = (await get_minio_client().adownload_file(bucket_name, object_name)).decode("utf-8", errors="replace")
+    return content[:INCOMING_MARKDOWN_PREVIEW_CHARS]

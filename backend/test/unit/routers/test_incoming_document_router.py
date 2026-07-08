@@ -100,7 +100,11 @@ async def test_get_incoming_document_detail_returns_summary(monkeypatch):
         updated_at=datetime(2026, 7, 8, 1, 3, 3),
     )
     repo = FakeIncomingRepo(record)
+    async def fake_preview(record):
+        return "## Markdown\n\n正文"
+
     monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", lambda: repo)
+    monkeypatch.setattr(incoming_document_router, "_read_incoming_markdown_preview", fake_preview)
 
     result = await incoming_document_router.get_incoming_document_detail(
         "inc_1",
@@ -111,3 +115,19 @@ async def test_get_incoming_document_detail_returns_summary(monkeypatch):
     assert result["summary"] == "summary"
     assert result["structuredResult"] == {"subject": "Global Finance"}
     assert result["metadata"] == {"title": "demo"}
+    assert result["markdownPreview"] == "## Markdown\n\n正文"
+
+
+async def test_retry_incoming_document_delegates_to_ingest_service(monkeypatch):
+    class FakeIngestService:
+        async def retry_processing(self, incoming_id, *, operator_id=None):
+            return {"incomingId": incoming_id, "taskId": "task_1", "status": "accepted", "operatorId": operator_id}
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentIngestService", FakeIngestService)
+
+    result = await incoming_document_router.retry_incoming_document_processing(
+        "inc_1",
+        current_user=SimpleNamespace(uid="admin"),
+    )
+
+    assert result == {"incomingId": "inc_1", "taskId": "task_1", "status": "accepted", "operatorId": "admin"}

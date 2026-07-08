@@ -321,6 +321,35 @@ class IncomingDocumentIngestService:
             "linkedKbId": kb_id,
         }
 
+    async def retry_processing(
+        self,
+        incoming_id: str,
+        *,
+        operator_id: str | None = None,
+    ) -> dict[str, Any]:
+        record = await self.incoming_repo.get_by_incoming_id(incoming_id)
+        if record is None:
+            raise ValueError(f"Incoming document not found: {incoming_id}")
+        if not getattr(record, "original_file_url", None):
+            raise ValueError("Incoming document original file is missing")
+
+        # 只重置来文解析派生字段，不触碰知识库入库状态，避免误清人工入库记录。
+        await self.incoming_repo.update_fields(
+            incoming_id,
+            {
+                "status": "uploaded",
+                "markdown_file_url": None,
+                "classification": None,
+                "classification_confidence": None,
+                "summary": None,
+                "structured_result": None,
+                "processing_error": None,
+                "updated_by": operator_id,
+            },
+        )
+        task = await self._submit_process_task(incoming_id=incoming_id, operator_id=operator_id)
+        return {"incomingId": incoming_id, "taskId": task.id, "status": "accepted"}
+
     async def _submit_process_task(self, *, incoming_id: str, operator_id: str | None):
         async def run_process(context: TaskContext):
             return await self.process_incoming_document(incoming_id, operator_id=operator_id, context=context)

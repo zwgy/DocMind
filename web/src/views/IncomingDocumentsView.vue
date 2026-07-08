@@ -81,6 +81,15 @@
             <div class="row-actions">
               <a-button type="link" size="small" @click="openDetail(record)">查看</a-button>
               <a-button
+                v-if="canRetry(record)"
+                type="link"
+                size="small"
+                :loading="retryingId === record.incomingId"
+                @click="retryProcessing(record)"
+              >
+                重试处理
+              </a-button>
+              <a-button
                 type="link"
                 size="small"
                 :disabled="!canImport(record)"
@@ -147,6 +156,11 @@
           </section>
 
           <section class="detail-section">
+            <h2>原文预览</h2>
+            <pre class="markdown-box">{{ detail.markdownPreview || '暂无可预览内容' }}</pre>
+          </section>
+
+          <section class="detail-section">
             <h2>知识库信息</h2>
             <div class="knowledge-row">
               <a-tag :color="importStatusMeta(detail.knowledgeImportStatus).color">
@@ -164,10 +178,25 @@
             <a-button
               v-if="canImport(detail)"
               type="primary"
-              class="detail-import-button"
+              class="detail-action-button"
               @click="openImport(detail)"
             >
               存入知识库
+            </a-button>
+            <a-button
+              v-if="canOpenKnowledgePreview(detail)"
+              class="detail-action-button"
+              @click="openKnowledgePreview(detail)"
+            >
+              预览文件
+            </a-button>
+            <a-button
+              v-if="canRetry(detail)"
+              class="detail-action-button"
+              :loading="retryingId === detail.incomingId"
+              @click="retryProcessing(detail)"
+            >
+              重试处理
             </a-button>
           </section>
         </div>
@@ -192,8 +221,17 @@
             :options="databaseOptions"
           />
         </a-form-item>
-        <a-form-item label="目标文件夹 ID">
-          <a-input v-model:value="importForm.parentId" allow-clear placeholder="默认根目录" />
+        <a-form-item label="目标文件夹">
+          <a-tree-select
+            v-model:value="importForm.parentId"
+            :tree-data="folderTreeData"
+            :loading="folderLoading"
+            allow-clear
+            show-search
+            tree-default-expand-all
+            tree-node-filter-prop="title"
+            placeholder="默认根目录"
+          />
         </a-form-item>
         <a-form-item label="OCR 引擎">
           <a-select v-model:value="importForm.ocrEngine" :options="ocrOptions" />
@@ -205,18 +243,25 @@
         />
       </a-form>
     </a-modal>
+
+    <FileDetailModal
+      v-model:open="knowledgePreviewOpen"
+      :kb-id="knowledgePreview.kbId"
+      :file-id="knowledgePreview.fileId"
+    />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import { message } from 'ant-design-vue'
 import { FileText, RefreshCw } from 'lucide-vue-next'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import ChunkParamsConfig from '@/components/ChunkParamsConfig.vue'
+import FileDetailModal from '@/components/FileDetailModal.vue'
 import { incomingDocumentApi } from '@/apis/incoming_document_api'
-import { databaseApi } from '@/apis/knowledge_api'
+import { databaseApi, documentApi } from '@/apis/knowledge_api'
 import { buildChunkParamsPayload } from '@/utils/chunk_presets'
 
 const documents = ref([])
@@ -229,6 +274,11 @@ const databases = ref([])
 const importOpen = ref(false)
 const importing = ref(false)
 const importTarget = ref(null)
+const retryingId = ref('')
+const folderLoading = ref(false)
+const folderTreeData = ref([])
+const knowledgePreviewOpen = ref(false)
+const knowledgePreview = reactive({ kbId: '', fileId: '' })
 
 const filters = reactive({
   keyword: '',
@@ -240,7 +290,7 @@ const pager = reactive({ page: 1, pageSize: 20 })
 
 const importForm = reactive({
   kbId: undefined,
-  parentId: '',
+  parentId: null,
   ocrEngine: 'disable',
   chunkParams: {
     chunk_preset_id: '',
@@ -257,7 +307,7 @@ const columns = [
   { title: '知识库状态', key: 'knowledgeImportStatus', dataIndex: 'knowledgeImportStatus', width: 120 },
   { title: '目标知识库', key: 'linkedKbId', dataIndex: 'linkedKbId', width: 160 },
   { title: '上传时间', key: 'createdAt', dataIndex: 'createdAt', width: 170 },
-  { title: '操作', key: 'actions', width: 150, fixed: 'right' }
+  { title: '操作', key: 'actions', width: 200, fixed: 'right' }
 ]
 
 const processingStatusOptions = [
@@ -354,6 +404,42 @@ function canImport(record) {
   return record?.status === 'ready' && !['importing', 'indexed'].includes(record?.knowledgeImportStatus)
 }
 
+function canRetry(record) {
+  return record?.status === 'failed'
+}
+
+function canOpenKnowledgePreview(record) {
+  return Boolean(record?.linkedKbId && record?.linkedFileId)
+}
+
+function buildFolderTree(items) {
+  const folders = (items || []).filter((item) => item.is_folder || item.isFolder)
+  const fileId = (item) => item.file_id || item.fileId
+  const parentId = (item) => item.parent_id || item.parentId
+  const nodeMap = new Map(
+    folders.map((item) => [
+      fileId(item),
+      {
+        title: item.filename || item.name,
+        value: fileId(item),
+        key: fileId(item),
+        children: []
+      }
+    ])
+  )
+  const roots = []
+  folders.forEach((item) => {
+    const node = nodeMap.get(fileId(item))
+    const parent = nodeMap.get(parentId(item))
+    if (parent) {
+      parent.children.push(node)
+    } else {
+      roots.push(node)
+    }
+  })
+  return roots
+}
+
 async function loadDocuments() {
   loading.value = true
   try {
@@ -377,6 +463,28 @@ async function loadDatabases() {
     databases.value = result.databases || []
   } catch (error) {
     message.error(error.message || '加载知识库失败')
+  }
+}
+
+async function loadFolderTree(kbId) {
+  if (!kbId) {
+    folderTreeData.value = []
+    return
+  }
+  folderLoading.value = true
+  try {
+    const result = await documentApi.listDocuments(kbId, {
+      page: 1,
+      page_size: 500,
+      status: 'all',
+      recursive: true
+    })
+    folderTreeData.value = buildFolderTree(result.items || [])
+  } catch (error) {
+    folderTreeData.value = []
+    message.error(error.message || '加载知识库目录失败')
+  } finally {
+    folderLoading.value = false
   }
 }
 
@@ -406,11 +514,35 @@ async function openDetail(record) {
 function openImport(record) {
   importTarget.value = record
   importForm.kbId = record.linkedKbId || databaseOptions.value[0]?.value
-  importForm.parentId = ''
+  importForm.parentId = null
   importForm.ocrEngine = 'disable'
   importForm.chunkParams.chunk_preset_id = ''
   importForm.chunkParams.chunk_parser_config = {}
+  loadFolderTree(importForm.kbId)
   importOpen.value = true
+}
+
+async function retryProcessing(record) {
+  if (!record?.incomingId) return
+  retryingId.value = record.incomingId
+  try {
+    await incomingDocumentApi.retry(record.incomingId)
+    message.success('已提交重试任务')
+    await loadDocuments()
+    if (detailOpen.value && detail.value?.incomingId === record.incomingId) {
+      detail.value = await incomingDocumentApi.detail(record.incomingId)
+    }
+  } catch (error) {
+    message.error(error.message || '提交重试失败')
+  } finally {
+    retryingId.value = ''
+  }
+}
+
+function openKnowledgePreview(record) {
+  knowledgePreview.kbId = record.linkedKbId
+  knowledgePreview.fileId = record.linkedFileId
+  knowledgePreviewOpen.value = true
 }
 
 async function submitImport() {
@@ -447,6 +579,16 @@ async function submitImport() {
 onMounted(async () => {
   await Promise.all([loadDatabases(), loadDocuments()])
 })
+
+watch(
+  () => importForm.kbId,
+  (kbId) => {
+    if (importOpen.value) {
+      importForm.parentId = null
+      loadFolderTree(kbId)
+    }
+  }
+)
 </script>
 
 <style scoped lang="less">
@@ -509,7 +651,8 @@ onMounted(async () => {
   white-space: pre-wrap;
 }
 
-.json-box {
+.json-box,
+.markdown-box {
   max-height: 300px;
   margin: 0;
   padding: 12px;
@@ -520,6 +663,11 @@ onMounted(async () => {
   color: var(--gray-900);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.markdown-box {
+  max-height: 420px;
+  white-space: pre-wrap;
 }
 
 .muted {
@@ -533,8 +681,9 @@ onMounted(async () => {
   font-size: 12px;
 }
 
-.detail-import-button {
+.detail-action-button {
   margin-top: 12px;
+  margin-right: 8px;
 }
 
 @media (max-width: 760px) {
