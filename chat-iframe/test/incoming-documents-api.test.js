@@ -58,6 +58,22 @@ test('ingestIncomingDocument posts source url with bearer token', async () => {
   assert.equal(response.status, 'accepted')
 })
 
+test('ingestIncomingDocument falls back to source url as source key', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    return Response.json({ status: 'accepted' })
+  }
+
+  await ingestIncomingDocument({ name: 'incoming.pdf', sourceUrl: 'https://oa.example.test/incoming.pdf' })
+
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    sourceUrl: 'https://oa.example.test/incoming.pdf',
+    sourceKey: 'https://oa.example.test/incoming.pdf',
+    filename: 'incoming.pdf'
+  })
+})
+
 test('queryIncomingDocumentExtractions returns local mock data when enabled by url', async () => {
   globalThis.window = { location: { search: '?mockExtraction=mixed' } }
   globalThis.fetch = async () => {

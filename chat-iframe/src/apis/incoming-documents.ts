@@ -78,12 +78,14 @@ export async function queryIncomingDocumentExtractions(
 export async function ingestIncomingDocument(file: IncomingPageFile, token?: string): Promise<Record<string, unknown>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
+  const sourceUrl = file.sourceUrl || file.url
   const response = await fetch(apiUrl('/api/incoming-documents/ingest'), {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      sourceUrl: file.sourceUrl || file.url,
-      sourceKey: file.sourceKey || file.id,
+      sourceUrl,
+      // 后端用 sourceKey 生成来文幂等主键；宿主页面只有 URL 时也要能自动同步。
+      sourceKey: file.sourceKey || file.id || sourceUrl || file.name,
       filename: file.name
     })
   })
