@@ -379,6 +379,42 @@ test('sendMessageStream posts iframe context separately from the query', async (
   assert.equal(body.meta.iframe_context.files[0].fileId, 'file1')
 })
 
+test('buildIframeContext keeps all selected files without changing the query', () => {
+  const input = {
+    text: '只看附件风险',
+    includeFile: true,
+    selectedPageFiles: [
+      { id: 'f1', name: '合同.docx', sourceKey: 'S001' },
+      { id: 'f2', name: '报价.pdf', sourceKey: 'S002' }
+    ],
+    extractionResults: {
+      f1: {
+        matchStatus: 'matched',
+        extractionStatus: 'ready',
+        fileStatus: 'parsed',
+        hasParsedMarkdown: true,
+        kbId: 'kb1',
+        fileId: 'file1',
+        categories: { risk: { matched: true, evidence: '超期' } },
+        items: [{ source_quote: '付款超期' }]
+      },
+      f2: {
+        matchStatus: 'not_found',
+        extractionStatus: 'not_found'
+      }
+    }
+  }
+
+  const context = buildIframeContext(input)
+
+  assert.equal(buildChatQuery(input), '只看附件风险')
+  assert.equal(context.files.length, 2)
+  assert.equal(context.files[0].fileId, 'file1')
+  assert.match(context.files[0].summary, /付款超期/)
+  assert.equal(context.files[1].name, '报价.pdf')
+  assert.equal(context.files[1].summary, undefined)
+})
+
 test('chat management APIs use web-compatible endpoints', async () => {
   const calls = []
   globalThis.fetch = async (url, options = {}) => {
