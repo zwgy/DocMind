@@ -1,4 +1,4 @@
-from yuxi.knowledge.extraction.schemas import (
+from yuxi.document_extraction.schemas import (
     DocumentCategoryResult,
     extraction_schema_ids_for_categories,
     field_description_lines,

@@ -7,28 +7,24 @@ from typing import Any
 
 from yuxi import knowledge_base
 from yuxi.knowledge.factory import KnowledgeBaseFactory
-from yuxi.services.business_extraction_task_service import submit_business_extraction_task
 from yuxi.services.task_service import TaskContext, tasker
 from yuxi.utils import logger
 
-BusinessExtractionSubmitter = Callable[..., Awaitable[Any] | Any]
 TaskCallback = Callable[[dict[str, Any]], Awaitable[Any] | Any]
 TaskFailureCallback = Callable[[Exception], Awaitable[Any] | Any]
 
 
 class KnowledgeDocumentIngestService:
-    """知识库文档入库编排；来文只有在人工“存入知识库”后才复用这里。"""
+    """知识库文档入库编排；只处理知识库文件记录、解析和索引。"""
 
     def __init__(
         self,
         *,
         knowledge=knowledge_base,
         tasker=tasker,
-        business_extraction_submitter: BusinessExtractionSubmitter = submit_business_extraction_task,
     ):
         self.knowledge = knowledge
         self.tasker = tasker
-        self.business_extraction_submitter = business_extraction_submitter
 
     async def ensure_database_supports_documents(self, kb_id: str, operation: str) -> dict[str, Any]:
         database = await self._get_database_info(kb_id)
@@ -36,7 +32,7 @@ class KnowledgeDocumentIngestService:
             raise ValueError(f"知识库 {kb_id} 不存在")
         kb_type = (database.get("kb_type") or "").lower()
         if kb_type:
-            # 只读连接器不能接收来文/上传文件，入口处直接拒绝比任务中失败更清楚。
+            # 只读连接器不能接收上传文件，入口处直接拒绝比任务中失败更清楚。
             kb_class = KnowledgeBaseFactory.get_kb_class(kb_type)
             if not kb_class.supports_documents:
                 raise ValueError(f"{database.get('name') or kb_type} 只支持检索，不支持{operation}")
@@ -148,12 +144,6 @@ class KnowledgeDocumentIngestService:
                 file_id = record["file_id"]
                 try:
                     file_meta = await self.knowledge.parse_file(kb_id, file_id, operator_id=operator_id)
-                    # 业务结构化抽取仍属于知识库文件能力，不写入 incoming_documents。
-                    await self._submit_business_extraction_after_parse(
-                        kb_id=kb_id,
-                        file_meta=file_meta,
-                        operator_id=operator_id,
-                    )
                     record["file_meta"] = file_meta
                     if not auto_index or file_meta.get("status") != "parsed":
                         processed_items[record["index"]] = file_meta
@@ -234,26 +224,6 @@ class KnowledgeDocumentIngestService:
         if hasattr(self.knowledge, "get_database_info"):
             return await self.knowledge.get_database_info(kb_id)
         return {"name": kb_id}
-
-    async def _submit_business_extraction_after_parse(
-        self,
-        *,
-        kb_id: str,
-        file_meta: dict[str, Any],
-        operator_id: str | None,
-    ) -> None:
-        markdown_file = file_meta.get("markdown_file")
-        file_id = file_meta.get("file_id")
-        if file_meta.get("status") != "parsed" or not file_id or not markdown_file:
-            return
-        await _maybe_await(
-            self.business_extraction_submitter(
-                kb_id=kb_id,
-                file_id=file_id,
-                markdown_file=markdown_file,
-                operator_id=operator_id,
-            )
-        )
 
 
 def _indexing_params(params: dict[str, Any]) -> dict[str, Any]:

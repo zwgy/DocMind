@@ -4,7 +4,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
-from yuxi.knowledge.extraction.json_utils import parse_json_object
+from yuxi.document_extraction.json_utils import parse_json_object
 
 
 class JsonLLM(Protocol):

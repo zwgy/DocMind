@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from yuxi.knowledge.extraction.schemas import DocumentCategoryResult, field_description_lines
+from yuxi.document_extraction.schemas import DocumentCategoryResult, field_description_lines
 
 
 def build_category_prompt(chunk_text: str) -> str:

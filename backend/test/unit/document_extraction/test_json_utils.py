@@ -1,6 +1,6 @@
 import pytest
 
-from yuxi.knowledge.extraction.json_utils import parse_json_object
+from yuxi.document_extraction.json_utils import parse_json_object
 
 
 def test_parse_json_object_accepts_plain_json():

@@ -1,4 +1,4 @@
-from yuxi.knowledge.extraction.service import BusinessExtractionService
+from yuxi.document_extraction.service import BusinessExtractionService
 
 
 class FakeLLM:
@@ -37,6 +37,8 @@ async def test_extract_file_runs_category_first_then_matching_schemas():
     service = BusinessExtractionService(llm=FakeLLM())
 
     result = await service.extract_chunks(
+        document_scope="incoming",
+        incoming_id="inc_1",
         kb_id="kb_1",
         file_id="file_1",
         chunks=[
@@ -62,7 +64,7 @@ class FakeExtractionRepo:
         self.results = []
         self.updated = []
 
-    async def get_success_by_file_markdown_model(self, *, file_id, markdown_file, model_spec):
+    async def get_success_by_document_markdown_model(self, *, document_scope, incoming_id, file_id, markdown_file, model_spec):
         return self.reusable
 
     async def create_run(self, data):
@@ -80,6 +82,8 @@ async def test_run_markdown_extraction_writes_items_without_chunk_id():
     service = BusinessExtractionService(llm=FakeLLM(), extraction_repo=repo)
 
     result = await service.run_markdown_extraction(
+        document_scope="incoming",
+        incoming_id="inc_1",
         kb_id="kb_1",
         file_id="file_1",
         markdown_file="minio://knowledgebases/kb_1/parsed/file_1.md",
@@ -90,6 +94,8 @@ async def test_run_markdown_extraction_writes_items_without_chunk_id():
     )
 
     assert result["item_count"] > 0
+    assert repo.runs[0]["document_scope"] == "incoming"
+    assert repo.runs[0]["incoming_id"] == "inc_1"
     assert repo.runs[0]["run_metadata"]["markdown_file"] == "minio://knowledgebases/kb_1/parsed/file_1.md"
     assert {item["chunk_id"] for item in repo.results[0]["items"]} == {None}
 
@@ -99,6 +105,8 @@ async def test_run_markdown_extraction_reuses_same_markdown_and_model():
     service = BusinessExtractionService(llm=FakeLLM(), extraction_repo=repo)
 
     result = await service.run_markdown_extraction(
+        document_scope="incoming",
+        incoming_id="inc_1",
         kb_id="kb_1",
         file_id="file_1",
         markdown_file="minio://knowledgebases/kb_1/parsed/file_1.md",

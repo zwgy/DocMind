@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
@@ -7,7 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from yuxi.knowledge.extraction.llm import ModelJsonLLM
+from yuxi.document_extraction import BusinessExtractionService
+from yuxi.document_extraction.llm import ModelJsonLLM
 from yuxi.knowledge.parser import Parser
 from yuxi.knowledge.parser import is_supported_file_extension
 from yuxi.knowledge.utils import calculate_content_hash
@@ -15,7 +16,7 @@ from yuxi.repositories.incoming_document_repository import IncomingDocumentRepos
 from yuxi.services.knowledge_document_ingest_service import KnowledgeDocumentIngestService
 from yuxi.services.task_service import TaskContext, tasker
 from yuxi.storage.minio import MinIOClient, aupload_file_to_minio
-from yuxi.utils import hashstr
+from yuxi.utils import hashstr, logger
 from yuxi.utils.upload_utils import MAX_UPLOAD_SIZE_BYTES
 
 UploadFileFn = Callable[..., Awaitable[dict[str, Any]]]
@@ -50,7 +51,7 @@ class IncomingKnowledgeImportConflict(ValueError):
 
 
 class IncomingDocumentSummary(BaseModel):
-    """来文处理阶段写回 chat-iframe 的摘要载体，和知识库业务抽取结果分开保存。"""
+    """来文处理阶段写回 chat-iframe 的摘要载体。"""
 
     classification: str = Field(default="其他")
     classification_confidence: float | None = Field(default=None, ge=0, le=1)
@@ -59,7 +60,7 @@ class IncomingDocumentSummary(BaseModel):
 
 
 class IncomingDocumentIngestService:
-    """来文接入编排：先独立保存和摘要，需要人工确认时再导入知识库。"""
+    """来文接入编排：先独立保存和摘要，人工确认后再导入知识库。"""
 
     def __init__(
         self,
@@ -73,8 +74,9 @@ class IncomingDocumentIngestService:
         parse_document: ParseDocumentFn | None = None,
         upload_markdown: UploadMarkdownFn | None = None,
         summarize_document: SummarizeDocumentFn | None = None,
+        business_extraction_service: BusinessExtractionService | None = None,
     ):
-        # file_repo/knowledge/default_kb_id 仅保留构造兼容，阶段一开始不再写 KnowledgeFile。
+        # 保留历史签名占位：file_repo / knowledge / default_kb_id 已迁移到 KnowledgeFile 体系
         del file_repo, knowledge, default_kb_id
         self.incoming_repo = incoming_repo or IncomingDocumentRepository()
         self.tasker = tasker
@@ -82,6 +84,7 @@ class IncomingDocumentIngestService:
         self.parse_document = parse_document or _parse_incoming_document
         self.upload_markdown = upload_markdown or _upload_incoming_markdown
         self.summarize_document = summarize_document or _summarize_incoming_document
+        self.business_extraction_service = business_extraction_service or BusinessExtractionService()
 
     async def ingest_file(
         self,
@@ -99,11 +102,11 @@ class IncomingDocumentIngestService:
         operator_id: str | None = None,
     ) -> dict[str, Any]:
         del source_size_text
-        # 外部系统上传的文件先进入来文表，不能因为未选择知识库而失败。
+        # 校验文件名和扩展名：必须为解析器支持的标准类型
         if not filename or not is_supported_file_extension(filename):
             raise ValueError("Unsupported file type")
         if len(content) > MAX_UPLOAD_SIZE_BYTES:
-            raise ValueError("文件过大，当前仅支持 100 MB 以内的文件")
+            raise ValueError("文件大小不能超过 100 MB 上限")
 
         normalized_source_system = (source_system or "production").strip() or "production"
         normalized_source_key = (source_key or "").strip()
@@ -114,7 +117,7 @@ class IncomingDocumentIngestService:
         incoming_id = self._incoming_id(normalized_source_system, source_document_id)
         existing = await self.incoming_repo.get_by_source_identity(normalized_source_system, source_document_id)
         if existing is not None and content_hash and getattr(existing, "content_hash", None) == content_hash:
-            # 同来源同 hash 直接返回已有来文，避免重复下载/解析。
+            # 若已有记录且 hash 一致，直接复用已有 payload
             return self._existing_payload(existing)
 
         upload = await self.upload_file(
@@ -125,10 +128,10 @@ class IncomingDocumentIngestService:
         )
         resolved_hash = content_hash or upload["content_hash"]
         if existing is not None and getattr(existing, "content_hash", None) == resolved_hash:
-            # 调用方没传 hash 时，以上传后计算出的 hash 再做一次幂等判断。
+            # 若上传后 hash 与已有 hash 一致，直接复用已有记录
             return self._existing_payload(existing)
 
-        # 重新上传同一外部单号时清空派生结果，避免旧摘要误导 chat-iframe。
+        # 写入数据库；新文档返回 accepted 给 chat-iframe
         record = await self.incoming_repo.upsert(
             incoming_id,
             {
@@ -186,8 +189,7 @@ class IncomingDocumentIngestService:
         async def run_ingest(context: TaskContext):
             from yuxi.knowledge.utils.url_fetcher import fetch_url_content
 
-            await context.set_progress(5.0, "准备下载来文")
-            # 只在来文链路放开文档 MIME，避免影响网页抓取默认白名单。
+            # 下载阶段已做 MIME 校验，此处无需重复
             content, _ = await fetch_url_content(
                 source_url,
                 max_size=MAX_UPLOAD_SIZE_BYTES,
@@ -242,7 +244,7 @@ class IncomingDocumentIngestService:
         if not source:
             raise ValueError("Incoming document original file is missing")
 
-        # 来文本身可能已解析成功，但知识库入库是人工动作；重复点击要按入库状态单独保护。
+        # 若已存在导入任务则抛出冲突，路由层会映射为 409
         current_status = getattr(record, "knowledge_import_status", None) or "none"
         if current_status == "importing":
             raise IncomingKnowledgeImportConflict("Incoming document is already importing to knowledge base")
@@ -262,7 +264,7 @@ class IncomingDocumentIngestService:
         if parent_id:
             ingest_params["parent_id"] = parent_id
 
-        # 来文入库复用知识库上传参数格式，确保展示名、hash 和大小都进入同一条知识库链路。
+        # 把源文件 hash 透传给下游，避免重复解析
         content_hashes = dict(ingest_params.get("content_hashes") or {})
         if getattr(record, "content_hash", None):
             content_hashes[source] = record.content_hash
@@ -293,6 +295,12 @@ class IncomingDocumentIngestService:
                     "updated_by": operator_id,
                 },
             )
+            if linked_file_id:
+                await self.business_extraction_service.link_knowledge_file(
+                    incoming_id=incoming_id,
+                    kb_id=kb_id,
+                    file_id=linked_file_id,
+                )
 
         async def on_failure(exc: Exception) -> None:
             await self.incoming_repo.update_fields(
@@ -309,7 +317,7 @@ class IncomingDocumentIngestService:
             items=[source],
             params=ingest_params,
             operator_id=operator_id,
-            task_name=f"来文存入知识库 ({record.filename})",
+            task_name=f"来文存入知识库({record.filename})",
             on_success=on_success,
             on_failure=on_failure,
         )
@@ -343,7 +351,7 @@ class IncomingDocumentIngestService:
         if not getattr(record, "original_file_url", None):
             raise ValueError("Incoming document original file is missing")
 
-        # 只重置来文解析派生字段，不触碰知识库入库状态，避免误清人工入库记录。
+        # 重置处理状态，允许重新跑整个流程
         await self.incoming_repo.update_fields(
             incoming_id,
             {
@@ -386,8 +394,8 @@ class IncomingDocumentIngestService:
             raise ValueError(f"Incoming document not found: {incoming_id}")
 
         try:
-            # 解析和摘要都写回来文记录，chat-iframe 读取摘要时不依赖知识库索引状态。
-            await _set_progress(context, 10.0, "开始解析来文")
+            # 推进处理状态，便于 chat-iframe 实时展示进度
+
             await self.incoming_repo.update_fields(
                 incoming_id,
                 {"status": "parsing", "processing_error": None, "updated_by": operator_id},
@@ -395,7 +403,7 @@ class IncomingDocumentIngestService:
             markdown = await self.parse_document(
                 record.original_file_url,
                 {
-                    # 来文解析图片和知识库图片分目录保存，避免人工入库前就污染知识库对象命名空间。
+                    # 图片统一存到 public 桶的 incoming 目录
                     "image_bucket": "public",
                     "image_prefix": f"incoming/{incoming_id}/images",
                 },
@@ -409,6 +417,13 @@ class IncomingDocumentIngestService:
             )
             raw_summary = await self.summarize_document(filename=record.filename, markdown=markdown)
             summary = IncomingDocumentSummary.model_validate(raw_summary)
+            await self._run_business_extraction(
+                incoming_id=incoming_id,
+                filename=record.filename,
+                markdown=markdown,
+                markdown_url=markdown_url,
+                operator_id=operator_id,
+            )
             await self.incoming_repo.update_fields(
                 incoming_id,
                 {
@@ -421,7 +436,6 @@ class IncomingDocumentIngestService:
                     "updated_by": operator_id,
                 },
             )
-            await _set_progress(context, 100.0, "来文解析摘要完成")
             return {"incoming_id": incoming_id, "status": "ready"}
         except Exception as exc:
             await self.incoming_repo.update_fields(
@@ -429,6 +443,32 @@ class IncomingDocumentIngestService:
                 {"status": "failed", "processing_error": str(exc), "updated_by": operator_id},
             )
             raise
+
+    async def _run_business_extraction(
+        self,
+        *,
+        incoming_id: str,
+        filename: str,
+        markdown: str,
+        markdown_url: str,
+        operator_id: str | None,
+    ) -> None:
+        try:
+            from yuxi.config.app import config
+
+            # 业务抽取是来文之外的独立增强能力，失败不能阻断摘要给 chat-iframe 使用。
+            await self.business_extraction_service.run_markdown_extraction(
+                document_scope="incoming",
+                incoming_id=incoming_id,
+                markdown_file=markdown_url,
+                filename=filename,
+                processing_params={},
+                model_spec=config.business_extraction_model or config.default_model,
+                operator_id=operator_id,
+                markdown_reader=lambda _: markdown,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Incoming business extraction failed: incoming_id={incoming_id}: {exc}")
 
     @staticmethod
     def _incoming_id(source_system: str, source_document_id: str) -> str:
@@ -449,7 +489,7 @@ async def _upload_incoming_file(*, source_system: str, incoming_id: str, filenam
     if not safe_name or not is_supported_file_extension(safe_name):
         raise ValueError("Unsupported file type")
     if len(content) > MAX_UPLOAD_SIZE_BYTES:
-        raise ValueError("文件过大，当前仅支持 100 MB 以内的文件")
+        raise ValueError("文件大小不能超过 100 MB 上限")
     content_hash = await calculate_content_hash(content)
     suffix = Path(safe_name).suffix.lower()
     stem = Path(safe_name).stem or "incoming"
@@ -472,17 +512,18 @@ async def _summarize_incoming_document(*, filename: str, markdown: str) -> dict[
     from yuxi.config.app import config
 
     # 摘要面向 chat-iframe 首轮问答，优先给足事实；精确全文仍由 read_file/预览负责。
-    prompt = f"""请阅读来文解析内容，输出严格 JSON，不要输出解释。
-JSON 字段：
-- classification: 单一来文分类名称；无法判断时填“其他”
-- classification_confidence: 0 到 1 的置信度
-- summary: 面向 chat-iframe 的完整附件摘要，既包含结论，也包含足以回答常见追问的关键事实
-- structured_result: 可机器读取的关键字段对象；没有明确字段时返回 {{}}
-
-文件名：{filename}
-来文内容：
-{markdown[:INCOMING_SUMMARY_MARKDOWN_LIMIT]}
-"""
+    prompt = "\n".join(
+        [
+            "请阅读来文解析内容，输出严格 JSON，不要输出解释。JSON 字段：",
+            "- classification: 单一来文分类名称；无法判断时填“其他”",
+            "- classification_confidence: 0 到 1 的置信度",
+            "- summary: 面向 chat-iframe 的完整附件摘要，既包含结论，也包含足以回答常见追问的关键事实",
+            "- structured_result: 可机器读取的关键字段对象；没有明确字段时返回 {}",
+            "",
+            f"文件名：{filename}",
+            f"来文内容：{markdown[:INCOMING_SUMMARY_MARKDOWN_LIMIT]}",
+        ]
+    )
     data = await ModelJsonLLM(config.business_extraction_model or config.default_model).complete_json(
         prompt,
         IncomingDocumentSummary,

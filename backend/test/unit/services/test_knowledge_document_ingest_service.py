@@ -48,10 +48,7 @@ class FakeKnowledge:
 async def test_run_ingest_auto_indexes_and_preserves_source_path():
     item = "minio://knowledgebases/incoming/inc_1/source.pdf"
     knowledge = FakeKnowledge()
-    service = KnowledgeDocumentIngestService(
-        knowledge=knowledge,
-        business_extraction_submitter=lambda **_kwargs: None,
-    )
+    service = KnowledgeDocumentIngestService(knowledge=knowledge)
 
     result = await service.run_ingest(
         kb_id="kb_1",
@@ -94,11 +91,7 @@ class FakeTasker:
 async def test_enqueue_ingest_wraps_task_payload_and_callback():
     callback_results = []
     tasker = FakeTasker()
-    service = KnowledgeDocumentIngestService(
-        knowledge=FakeKnowledge(),
-        tasker=tasker,
-        business_extraction_submitter=lambda **_kwargs: None,
-    )
+    service = KnowledgeDocumentIngestService(knowledge=FakeKnowledge(), tasker=tasker)
 
     result = await service.enqueue_ingest(
         kb_id="kb_1",

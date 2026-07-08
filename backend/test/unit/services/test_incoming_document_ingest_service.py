@@ -75,6 +75,19 @@ class FakeKnowledgeDocumentIngestService:
         return {"status": "queued", "task_id": "kb_task_1"}
 
 
+class FakeBusinessExtractionService:
+    def __init__(self):
+        self.calls = []
+        self.links = []
+
+    async def run_markdown_extraction(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"run_id": "ber_1", "item_count": 1, "errors": [], "reused": False}
+
+    async def link_knowledge_file(self, *, incoming_id, kb_id, file_id):
+        self.links.append({"incoming_id": incoming_id, "kb_id": kb_id, "file_id": file_id})
+
+
 class FakeContext:
     def __init__(self):
         self.progress = []
@@ -236,6 +249,7 @@ async def test_process_task_parses_markdown_and_saves_summary():
         )
     )
     tasker = FakeTasker()
+    extraction = FakeBusinessExtractionService()
     service = IncomingDocumentIngestService(
         incoming_repo=repo,
         tasker=tasker,
@@ -243,6 +257,7 @@ async def test_process_task_parses_markdown_and_saves_summary():
         parse_document=fake_parse,
         upload_markdown=fake_markdown_upload,
         summarize_document=fake_summarize,
+        business_extraction_service=extraction,
     )
 
     result = await service.ingest_file(
@@ -262,6 +277,9 @@ async def test_process_task_parses_markdown_and_saves_summary():
     assert final_update["summary"] == "客户要求复核 Global Finance 的资质。"
     assert final_update["structured_result"] == {"subject": "Global Finance"}
     assert final_update["processing_error"] is None
+    assert extraction.calls[0]["document_scope"] == "incoming"
+    assert extraction.calls[0]["incoming_id"] == result["incomingId"]
+    assert extraction.calls[0]["markdown_file"] == f"minio://knowledgebases/incoming/{result['incomingId']}/parsed.md"
 
 
 async def test_process_task_marks_document_failed_when_parse_fails():
@@ -322,7 +340,12 @@ async def test_import_to_knowledge_queues_auto_index_and_updates_import_status()
     )
     repo = FakeIncomingRepo(record)
     document_ingest = FakeKnowledgeDocumentIngestService()
-    service = IncomingDocumentIngestService(incoming_repo=repo, tasker=FakeTasker())
+    extraction = FakeBusinessExtractionService()
+    service = IncomingDocumentIngestService(
+        incoming_repo=repo,
+        tasker=FakeTasker(),
+        business_extraction_service=extraction,
+    )
 
     result = await service.import_to_knowledge(
         "inc_1",
@@ -357,3 +380,9 @@ async def test_import_to_knowledge_queues_auto_index_and_updates_import_status()
     assert repo.updates[-1][1]["knowledge_import_status"] == "importing"
     assert repo.updates[-1][1]["knowledge_import_task_id"] == "kb_task_1"
     assert repo.updates[-1][1]["linked_kb_id"] == "kb_1"
+
+    await call["on_success"]({"items": [{"file_id": "file_1", "status": "indexed"}]})
+
+    assert extraction.links == [{"incoming_id": "inc_1", "kb_id": "kb_1", "file_id": "file_1"}]
+    assert repo.updates[-1][1]["knowledge_import_status"] == "indexed"
+    assert repo.updates[-1][1]["linked_file_id"] == "file_1"

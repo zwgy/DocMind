@@ -255,11 +255,13 @@ class PostgresManager(metaclass=SingletonMeta):
             """,
             "ALTER TABLE IF EXISTS knowledge_chunks ADD COLUMN IF NOT EXISTS extraction_result JSONB",
             """
-            CREATE TABLE IF NOT EXISTS knowledge_business_extraction_runs (
+            CREATE TABLE IF NOT EXISTS document_business_extraction_runs (
                 id SERIAL PRIMARY KEY,
                 run_id VARCHAR(64) NOT NULL UNIQUE,
-                kb_id VARCHAR(80) NOT NULL REFERENCES knowledge_bases(kb_id) ON DELETE CASCADE,
-                file_id VARCHAR(64) NOT NULL REFERENCES knowledge_files(file_id) ON DELETE CASCADE,
+                document_scope VARCHAR(32) NOT NULL,
+                incoming_id VARCHAR(64),
+                kb_id VARCHAR(80),
+                file_id VARCHAR(64),
                 status VARCHAR(32) DEFAULT 'running',
                 model_spec VARCHAR(512),
                 run_metadata JSONB,
@@ -270,12 +272,14 @@ class PostgresManager(metaclass=SingletonMeta):
             )
             """,
             """
-            CREATE TABLE IF NOT EXISTS knowledge_business_extraction_results (
+            CREATE TABLE IF NOT EXISTS document_business_extraction_results (
                 id SERIAL PRIMARY KEY,
-                run_id VARCHAR(64) NOT NULL UNIQUE REFERENCES knowledge_business_extraction_runs(run_id)
+                run_id VARCHAR(64) NOT NULL UNIQUE REFERENCES document_business_extraction_runs(run_id)
                     ON DELETE CASCADE,
-                kb_id VARCHAR(80) NOT NULL REFERENCES knowledge_bases(kb_id) ON DELETE CASCADE,
-                file_id VARCHAR(64) NOT NULL REFERENCES knowledge_files(file_id) ON DELETE CASCADE,
+                document_scope VARCHAR(32) NOT NULL,
+                incoming_id VARCHAR(64),
+                kb_id VARCHAR(80),
+                file_id VARCHAR(64),
                 categories JSONB,
                 schema_ids JSONB,
                 status VARCHAR(32) DEFAULT 'draft',
@@ -288,12 +292,14 @@ class PostgresManager(metaclass=SingletonMeta):
             )
             """,
             """
-            CREATE TABLE IF NOT EXISTS knowledge_business_extraction_items (
+            CREATE TABLE IF NOT EXISTS document_business_extraction_items (
                 id SERIAL PRIMARY KEY,
                 item_id VARCHAR(64) NOT NULL UNIQUE,
-                result_id INTEGER NOT NULL REFERENCES knowledge_business_extraction_results(id) ON DELETE CASCADE,
-                kb_id VARCHAR(80) NOT NULL REFERENCES knowledge_bases(kb_id) ON DELETE CASCADE,
-                file_id VARCHAR(64) NOT NULL REFERENCES knowledge_files(file_id) ON DELETE CASCADE,
+                result_id INTEGER NOT NULL REFERENCES document_business_extraction_results(id) ON DELETE CASCADE,
+                document_scope VARCHAR(32) NOT NULL,
+                incoming_id VARCHAR(64),
+                kb_id VARCHAR(80),
+                file_id VARCHAR(64),
                 chunk_id VARCHAR(128) REFERENCES knowledge_chunks(chunk_id) ON DELETE SET NULL,
                 item_type VARCHAR(64) NOT NULL,
                 data JSONB,
@@ -339,23 +345,6 @@ class PostgresManager(metaclass=SingletonMeta):
                 CONSTRAINT uq_incoming_documents_source_identity UNIQUE (source_system, source_document_id)
             )
             """,
-            """
-            CREATE TABLE IF NOT EXISTS incoming_document_extraction_runs (
-                id SERIAL PRIMARY KEY,
-                run_id VARCHAR(64) NOT NULL UNIQUE,
-                incoming_id VARCHAR(64) NOT NULL,
-                status VARCHAR(32) DEFAULT 'running',
-                llm_model_spec VARCHAR(512),
-                prompt_version VARCHAR(64),
-                summary TEXT,
-                classification VARCHAR(128),
-                structured_result JSONB,
-                error_message TEXT,
-                started_at TIMESTAMPTZ DEFAULT NOW(),
-                finished_at TIMESTAMPTZ,
-                created_by VARCHAR(64)
-            )
-            """,
             "CREATE INDEX IF NOT EXISTS ix_incoming_documents_source_key ON incoming_documents(source_key)",
             "CREATE INDEX IF NOT EXISTS ix_incoming_documents_status ON incoming_documents(status)",
             (
@@ -363,42 +352,54 @@ class PostgresManager(metaclass=SingletonMeta):
                 "ON incoming_documents(knowledge_import_status)"
             ),
             (
-                "CREATE INDEX IF NOT EXISTS ix_incoming_document_extraction_runs_incoming_id "
-                "ON incoming_document_extraction_runs(incoming_id)"
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_runs_scope "
+                "ON document_business_extraction_runs(document_scope)"
             ),
             (
-                "CREATE INDEX IF NOT EXISTS ix_incoming_document_extraction_runs_status "
-                "ON incoming_document_extraction_runs(status)"
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_runs_incoming_id "
+                "ON document_business_extraction_runs(incoming_id)"
             ),
-            "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_runs_file_id ON knowledge_business_extraction_runs(file_id)",
-            "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_runs_kb_id ON knowledge_business_extraction_runs(kb_id)",
+            "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_runs_file_id ON document_business_extraction_runs(file_id)",
+            "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_runs_kb_id ON document_business_extraction_runs(kb_id)",
             (
-                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_results_file_id "
-                "ON knowledge_business_extraction_results(file_id)"
-            ),
-            (
-                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_results_kb_id "
-                "ON knowledge_business_extraction_results(kb_id)"
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_results_scope "
+                "ON document_business_extraction_results(document_scope)"
             ),
             (
-                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_results_status "
-                "ON knowledge_business_extraction_results(status)"
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_results_incoming_id "
+                "ON document_business_extraction_results(incoming_id)"
             ),
             (
-                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_items_result_id "
-                "ON knowledge_business_extraction_items(result_id)"
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_results_file_id "
+                "ON document_business_extraction_results(file_id)"
             ),
             (
-                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_items_file_id "
-                "ON knowledge_business_extraction_items(file_id)"
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_results_kb_id "
+                "ON document_business_extraction_results(kb_id)"
             ),
             (
-                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_items_chunk_id "
-                "ON knowledge_business_extraction_items(chunk_id)"
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_results_status "
+                "ON document_business_extraction_results(status)"
             ),
             (
-                "CREATE INDEX IF NOT EXISTS ix_kb_business_extraction_items_type_status "
-                "ON knowledge_business_extraction_items(item_type, status)"
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_items_result_id "
+                "ON document_business_extraction_items(result_id)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_items_incoming_id "
+                "ON document_business_extraction_items(incoming_id)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_items_file_id "
+                "ON document_business_extraction_items(file_id)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_items_chunk_id "
+                "ON document_business_extraction_items(chunk_id)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_items_type_status "
+                "ON document_business_extraction_items(item_type, status)"
             ),
             """
             CREATE TABLE IF NOT EXISTS knowledge_graph_entities (

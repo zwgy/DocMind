@@ -1,4 +1,4 @@
-"""PostgreSQL 知识库模型 - KnowledgeBase、KnowledgeFile、评估相关表"""
+"""PostgreSQL 知识库相关数据模型"""
 
 from sqlalchemy import (
     JSON,
@@ -22,7 +22,7 @@ JSON_VALUE = JSON().with_variant(JSONB, "postgresql")
 
 
 class KnowledgeBase(Base):
-    """知识库模型"""
+    """知识库定义"""
 
     __tablename__ = "knowledge_bases"
     __table_args__ = (UniqueConstraint("kb_id", name="uq_knowledge_bases_kb_id"),)
@@ -47,7 +47,7 @@ class KnowledgeBase(Base):
 
 
 class KnowledgeFile(Base):
-    """知识文件模型"""
+    """知识库文件记录"""
 
     __tablename__ = "knowledge_files"
     __table_args__ = (UniqueConstraint("file_id", name="uq_knowledge_files_file_id"),)
@@ -78,7 +78,7 @@ class KnowledgeFile(Base):
 
 
 class IncomingDocument(Base):
-    """外部系统来文记录，和知识库文件解耦保存。"""
+    """来文记录，外部系统推送的待入库文档"""
 
     __tablename__ = "incoming_documents"
     __table_args__ = (
@@ -119,33 +119,8 @@ class IncomingDocument(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
 
 
-class IncomingDocumentExtractionRun(Base):
-    """来文分类、摘要、结构化抽取运行记录。"""
-
-    __tablename__ = "incoming_document_extraction_runs"
-    __table_args__ = (
-        UniqueConstraint("run_id", name="uq_incoming_document_extraction_runs_run_id"),
-        Index("ix_incoming_document_extraction_runs_incoming_id", "incoming_id"),
-        Index("ix_incoming_document_extraction_runs_status", "status"),
-    )
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    run_id = Column(String(64), unique=True, nullable=False, index=True)
-    incoming_id = Column(String(64), nullable=False, index=True)
-    status = Column(String(32), default="running", index=True)
-    llm_model_spec = Column(String(512))
-    prompt_version = Column(String(64))
-    summary = Column(Text)
-    classification = Column(String(128))
-    structured_result = Column(JSON_VALUE)
-    error_message = Column(Text)
-    started_at = Column(DateTime(timezone=True), default=utc_now_naive)
-    finished_at = Column(DateTime(timezone=True))
-    created_by = Column(String(64))
-
-
 class KnowledgeChunk(Base):
-    """知识库 Chunk 模型"""
+    """知识库 Chunk 切片"""
 
     __tablename__ = "knowledge_chunks"
     __table_args__ = (
@@ -173,20 +148,24 @@ class KnowledgeChunk(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
 
 
-class KnowledgeBusinessExtractionRun(Base):
-    """知识库业务抽取运行记录；未入库来文使用 IncomingDocumentExtractionRun。"""
+class DocumentBusinessExtractionRun(Base):
+    """文档业务结构化抽取运行记录，独立于来文和知识库核心流程。"""
 
-    __tablename__ = "knowledge_business_extraction_runs"
+    __tablename__ = "document_business_extraction_runs"
     __table_args__ = (
-        UniqueConstraint("run_id", name="uq_knowledge_business_extraction_runs_run_id"),
-        Index("ix_kb_business_extraction_runs_file_id", "file_id"),
-        Index("ix_kb_business_extraction_runs_kb_id", "kb_id"),
+        UniqueConstraint("run_id", name="uq_document_business_extraction_runs_run_id"),
+        Index("ix_document_business_extraction_runs_scope", "document_scope"),
+        Index("ix_document_business_extraction_runs_incoming_id", "incoming_id"),
+        Index("ix_document_business_extraction_runs_file_id", "file_id"),
+        Index("ix_document_business_extraction_runs_kb_id", "kb_id"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     run_id = Column(String(64), unique=True, nullable=False, index=True)
-    kb_id = Column(String(80), ForeignKey("knowledge_bases.kb_id", ondelete="CASCADE"), nullable=False)
-    file_id = Column(String(64), ForeignKey("knowledge_files.file_id", ondelete="CASCADE"), nullable=False)
+    document_scope = Column(String(32), nullable=False, index=True)
+    incoming_id = Column(String(64), index=True)
+    kb_id = Column(String(80), index=True)
+    file_id = Column(String(64), index=True)
     status = Column(String(32), default="running", index=True)
     model_spec = Column(String(512))
     run_metadata = Column(JSON_VALUE)
@@ -196,25 +175,29 @@ class KnowledgeBusinessExtractionRun(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
 
 
-class KnowledgeBusinessExtractionResult(Base):
-    """知识库文件级业务分类结果，按 kb_id/file_id 归属知识库文件。"""
+class DocumentBusinessExtractionResult(Base):
+    """文档级业务分类结果，可挂载来文或后续关联知识库文件。"""
 
-    __tablename__ = "knowledge_business_extraction_results"
+    __tablename__ = "document_business_extraction_results"
     __table_args__ = (
-        UniqueConstraint("run_id", name="uq_knowledge_business_extraction_results_run_id"),
-        Index("ix_kb_business_extraction_results_file_id", "file_id"),
-        Index("ix_kb_business_extraction_results_kb_id", "kb_id"),
-        Index("ix_kb_business_extraction_results_status", "status"),
+        UniqueConstraint("run_id", name="uq_document_business_extraction_results_run_id"),
+        Index("ix_document_business_extraction_results_scope", "document_scope"),
+        Index("ix_document_business_extraction_results_incoming_id", "incoming_id"),
+        Index("ix_document_business_extraction_results_file_id", "file_id"),
+        Index("ix_document_business_extraction_results_kb_id", "kb_id"),
+        Index("ix_document_business_extraction_results_status", "status"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     run_id = Column(
         String(64),
-        ForeignKey("knowledge_business_extraction_runs.run_id", ondelete="CASCADE"),
+        ForeignKey("document_business_extraction_runs.run_id", ondelete="CASCADE"),
         nullable=False,
     )
-    kb_id = Column(String(80), ForeignKey("knowledge_bases.kb_id", ondelete="CASCADE"), nullable=False)
-    file_id = Column(String(64), ForeignKey("knowledge_files.file_id", ondelete="CASCADE"), nullable=False)
+    document_scope = Column(String(32), nullable=False, index=True)
+    incoming_id = Column(String(64), index=True)
+    kb_id = Column(String(80), index=True)
+    file_id = Column(String(64), index=True)
     categories = Column(JSON_VALUE)
     schema_ids = Column(JSON_VALUE)
     status = Column(String(32), default="draft", index=True)
@@ -226,27 +209,30 @@ class KnowledgeBusinessExtractionResult(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
 
 
-class KnowledgeBusinessExtractionItem(Base):
-    """知识库业务抽取结构化条目，来源可关联 KnowledgeChunk。"""
+class DocumentBusinessExtractionItem(Base):
+    """业务结构化条目；chunk 关联仅在后续有知识库文件时可选补齐。"""
 
-    __tablename__ = "knowledge_business_extraction_items"
+    __tablename__ = "document_business_extraction_items"
     __table_args__ = (
-        UniqueConstraint("item_id", name="uq_knowledge_business_extraction_items_item_id"),
-        Index("ix_kb_business_extraction_items_result_id", "result_id"),
-        Index("ix_kb_business_extraction_items_file_id", "file_id"),
-        Index("ix_kb_business_extraction_items_chunk_id", "chunk_id"),
-        Index("ix_kb_business_extraction_items_type_status", "item_type", "status"),
+        UniqueConstraint("item_id", name="uq_document_business_extraction_items_item_id"),
+        Index("ix_document_business_extraction_items_result_id", "result_id"),
+        Index("ix_document_business_extraction_items_incoming_id", "incoming_id"),
+        Index("ix_document_business_extraction_items_file_id", "file_id"),
+        Index("ix_document_business_extraction_items_chunk_id", "chunk_id"),
+        Index("ix_document_business_extraction_items_type_status", "item_type", "status"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     item_id = Column(String(64), unique=True, nullable=False, index=True)
     result_id = Column(
         Integer,
-        ForeignKey("knowledge_business_extraction_results.id", ondelete="CASCADE"),
+        ForeignKey("document_business_extraction_results.id", ondelete="CASCADE"),
         nullable=False,
     )
-    kb_id = Column(String(80), ForeignKey("knowledge_bases.kb_id", ondelete="CASCADE"), nullable=False)
-    file_id = Column(String(64), ForeignKey("knowledge_files.file_id", ondelete="CASCADE"), nullable=False)
+    document_scope = Column(String(32), nullable=False, index=True)
+    incoming_id = Column(String(64), index=True)
+    kb_id = Column(String(80), index=True)
+    file_id = Column(String(64), index=True)
     chunk_id = Column(String(128), ForeignKey("knowledge_chunks.chunk_id", ondelete="SET NULL"))
     item_type = Column(String(64), nullable=False)
     data = Column(JSON_VALUE)
@@ -257,7 +243,6 @@ class KnowledgeBusinessExtractionItem(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
     confirmed_by = Column(String(64))
     confirmed_at = Column(DateTime(timezone=True))
-
 
 class KnowledgeGraphEntity(Base):
     """知识图谱实体"""
@@ -281,7 +266,7 @@ class KnowledgeGraphEntity(Base):
 
 
 class KnowledgeGraphEntityMention(Base):
-    """知识图谱实体在 chunk 中的引用"""
+    """实体在 Chunk 中被提及的记录"""
 
     __tablename__ = "knowledge_graph_entity_mentions"
     __table_args__ = (
@@ -324,7 +309,7 @@ class KnowledgeGraphTriple(Base):
 
 
 class KnowledgeGraphTripleMention(Base):
-    """知识图谱三元组在 chunk 中的引用"""
+    """三元组在 Chunk 中被提及的记录"""
 
     __tablename__ = "knowledge_graph_triple_mentions"
     __table_args__ = (
@@ -345,7 +330,7 @@ class KnowledgeGraphTripleMention(Base):
 
 
 class EvaluationDataset(Base):
-    """评估数据集模型"""
+    """评估数据集定义"""
 
     __tablename__ = "evaluation_datasets"
     __table_args__ = (UniqueConstraint("dataset_id", name="uq_evaluation_datasets_dataset_id"),)
@@ -365,7 +350,7 @@ class EvaluationDataset(Base):
 
 
 class EvaluationDatasetItem(Base):
-    """评估数据集题目模型"""
+    """评估数据集条目"""
 
     __tablename__ = "evaluation_dataset_items"
     __table_args__ = (
@@ -391,7 +376,7 @@ class EvaluationDatasetItem(Base):
 
 
 class EvaluationRun(Base):
-    """评估运行模型"""
+    """评估运行记录"""
 
     __tablename__ = "evaluation_runs"
     __table_args__ = (UniqueConstraint("run_id", name="uq_evaluation_runs_run_id"),)
@@ -417,7 +402,7 @@ class EvaluationRun(Base):
 
 
 class EvaluationRunItem(Base):
-    """评估逐题结果模型"""
+    """评估运行条目"""
 
     __tablename__ = "evaluation_run_items"
     __table_args__ = (
