@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_knowledge import IncomingDocument
@@ -60,6 +60,51 @@ class IncomingDocumentRepository:
                 select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id)
             )
             return result.scalar_one_or_none()
+
+    async def list_for_management(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+        status: str | None = None,
+        knowledge_import_status: str | None = None,
+        keyword: str | None = None,
+        source_system: str | None = None,
+        classification: str | None = None,
+    ) -> tuple[list[IncomingDocument], int]:
+        filters = []
+        if status:
+            filters.append(IncomingDocument.status == status)
+        if knowledge_import_status:
+            filters.append(IncomingDocument.knowledge_import_status == knowledge_import_status)
+        if source_system:
+            filters.append(IncomingDocument.source_system == source_system)
+        if classification:
+            filters.append(IncomingDocument.classification == classification)
+        if keyword:
+            cleaned_keyword = keyword.strip()
+            if cleaned_keyword:
+                pattern = f"%{cleaned_keyword}%"
+                filters.append(
+                    or_(
+                        IncomingDocument.filename.ilike(pattern),
+                        IncomingDocument.source_document_id.ilike(pattern),
+                        IncomingDocument.source_key.ilike(pattern),
+                    )
+                )
+
+        page = max(int(page or 1), 1)
+        page_size = min(max(int(page_size or 20), 1), 100)
+        async with pg_manager.get_async_session_context() as session:
+            total = await session.scalar(select(func.count()).select_from(IncomingDocument).where(*filters))
+            result = await session.execute(
+                select(IncomingDocument)
+                .where(*filters)
+                .order_by(IncomingDocument.created_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+            return list(result.scalars().all()), int(total or 0)
 
     async def upsert(self, incoming_id: str, data: dict[str, Any]) -> IncomingDocument:
         sanitized_data = self._sanitize_data(data)

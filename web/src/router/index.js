@@ -145,6 +145,19 @@ const router = createRouter({
       ]
     },
     {
+      path: '/incoming-documents',
+      name: 'incoming-documents',
+      component: AppLayout,
+      children: [
+        {
+          path: '',
+          name: 'IncomingDocumentsComp',
+          component: () => import('../views/IncomingDocumentsView.vue'),
+          meta: { keepAlive: false, requiresAuth: true, requiresAdmin: true }
+        }
+      ]
+    },
+    {
       path: '/:pathMatch(.*)*',
       name: 'NotFound',
       component: () => import('../views/EmptyView.vue'),

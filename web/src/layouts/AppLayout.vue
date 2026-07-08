@@ -6,6 +6,7 @@ import {
   BarChart3,
   ClipboardList,
   LibraryBig,
+  Inbox,
   Box,
   FolderKanban,
   PanelLeftClose,
@@ -146,6 +147,15 @@ const mainList = computed(() => {
     icon: LibraryBig,
     activeIcon: LibraryBig
   })
+
+  if (userStore.isAdmin) {
+    items.push({
+      name: '来文管理',
+      path: '/incoming-documents',
+      icon: Inbox,
+      activeIcon: Inbox
+    })
+  }
 
   items.push({
     name: '智能体管理',

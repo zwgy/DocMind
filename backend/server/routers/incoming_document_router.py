@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
 
 from server.utils.auth_middleware import get_admin_user, get_required_user
+from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
 from yuxi.services.incoming_document_ingest_service import IncomingDocumentIngestService, IncomingKnowledgeImportConflict
 from yuxi.services.incoming_document_service import IncomingDocumentService, IncomingPageFile
 from yuxi.storage.postgres.models_business import User
@@ -45,6 +46,39 @@ async def query_incoming_document_extractions(
 ):
     del current_user
     return await IncomingDocumentService().query_extractions([item.model_dump(by_alias=True) for item in payload.files])
+
+
+@incoming_documents.get("")
+async def list_incoming_documents(
+    page: int = 1,
+    page_size: int = 20,
+    status: str | None = None,
+    knowledge_import_status: str | None = None,
+    keyword: str | None = None,
+    source_system: str | None = None,
+    classification: str | None = None,
+    current_user: User = Depends(get_admin_user),
+):
+    del current_user
+    items, total = await IncomingDocumentRepository().list_for_management(
+        page=page,
+        page_size=page_size,
+        status=status,
+        knowledge_import_status=knowledge_import_status,
+        keyword=keyword,
+        source_system=source_system,
+        classification=classification,
+    )
+    return {"items": [_incoming_document_payload(item, detail=False) for item in items], "total": total}
+
+
+@incoming_documents.get("/{incoming_id}")
+async def get_incoming_document_detail(incoming_id: str, current_user: User = Depends(get_admin_user)):
+    del current_user
+    record = await IncomingDocumentRepository().get_by_incoming_id(incoming_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Incoming document not found: {incoming_id}")
+    return _incoming_document_payload(record, detail=True)
 
 
 @incoming_documents.post("/ingest")
@@ -111,3 +145,42 @@ async def import_incoming_document_to_knowledge(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _iso(value):
+    return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
+
+
+def _incoming_document_payload(record, *, detail: bool) -> dict:
+    payload = {
+        "incomingId": record.incoming_id,
+        "sourceSystem": record.source_system,
+        "sourceDocumentId": record.source_document_id,
+        "sourceKey": getattr(record, "source_key", None),
+        "filename": record.filename,
+        "fileSize": getattr(record, "file_size", None),
+        "status": record.status,
+        "classification": getattr(record, "classification", None),
+        "classificationConfidence": getattr(record, "classification_confidence", None),
+        "processingError": getattr(record, "processing_error", None),
+        "linkedKbId": getattr(record, "linked_kb_id", None),
+        "linkedFileId": getattr(record, "linked_file_id", None),
+        "knowledgeImportStatus": getattr(record, "knowledge_import_status", None) or "none",
+        "knowledgeImportTaskId": getattr(record, "knowledge_import_task_id", None),
+        "knowledgeImportError": getattr(record, "knowledge_import_error", None),
+        "createdAt": _iso(getattr(record, "created_at", None)),
+        "updatedAt": _iso(getattr(record, "updated_at", None)),
+    }
+    if detail:
+        payload.update(
+            {
+                "sourceUrl": getattr(record, "source_url", None),
+                "contentHash": getattr(record, "content_hash", None),
+                "originalFileUrl": getattr(record, "original_file_url", None),
+                "markdownFileUrl": getattr(record, "markdown_file_url", None),
+                "summary": getattr(record, "summary", None),
+                "structuredResult": getattr(record, "structured_result", None) or {},
+                "metadata": getattr(record, "metadata_json", None) or {},
+            }
+        )
+    return payload
