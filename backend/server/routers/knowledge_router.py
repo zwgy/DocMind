@@ -28,6 +28,7 @@ from yuxi.knowledge.utils.sample_question_utils import (
 from yuxi.knowledge.utils.url_fetcher import fetch_url_content
 from yuxi.models.providers.cache import model_cache
 from yuxi.services.business_extraction_task_service import submit_business_extraction_task
+from yuxi.services.knowledge_document_ingest_service import KnowledgeDocumentIngestService
 from yuxi.services.task_service import TaskContext, tasker
 from yuxi.services.workspace_service import MAX_WORKSPACE_UPLOAD_SIZE_BYTES, resolve_workspace_file_path
 from yuxi.storage.minio.client import MinIOClient, StorageError, aupload_file_to_minio, get_minio_client
@@ -665,17 +666,6 @@ async def add_documents(
 
     params = _ensure_document_params(params)
     content_type = params.get("content_type", "file")
-    # 自动入库参数
-    auto_index = params.get("auto_index", False)
-    indexing_params = {}
-    chunk_preset_id = params.get("chunk_preset_id")
-    if chunk_preset_id:
-        indexing_params["chunk_preset_id"] = chunk_preset_id
-
-    chunk_parser_config = params.get("chunk_parser_config")
-    if isinstance(chunk_parser_config, dict):
-        indexing_params["chunk_parser_config"] = chunk_parser_config
-
     if content_type == "url":
         raise HTTPException(status_code=400, detail="URL 处理方式已变更，请使用 fetch-url 接口先获取内容")
     if content_type != "file":
@@ -683,161 +673,13 @@ async def add_documents(
 
     _validate_uploaded_document_items(items, params)
 
-    async def run_ingest(context: TaskContext):
-        await context.set_message("任务初始化")
-        await context.set_progress(5.0, "准备处理文档")
-
-        total = len(items)
-        processed_items: list[dict | None] = [None] * total
-        added_files: list[dict] = []
-
-        try:
-            await context.set_message("第一阶段：添加文件记录")
-            for idx, item in enumerate(items, 1):
-                await context.raise_if_cancelled()
-
-                progress = 5.0 + (idx / total) * 25.0
-                await context.set_progress(progress, f"[1/3] 添加记录 {idx}/{total}")
-
-                try:
-                    file_meta = await knowledge_base.add_file_record(
-                        kb_id, item, params=params, operator_id=current_user.uid
-                    )
-                    added_files.append(
-                        {
-                            "index": idx - 1,
-                            "item": item,
-                            "file_id": file_meta["file_id"],
-                            "file_meta": file_meta,
-                        }
-                    )
-                except Exception as add_error:
-                    logger.error(f"添加文件记录失败 {item}: {add_error}")
-                    error_type = "timeout" if isinstance(add_error, TimeoutError) else "add_failed"
-                    error_msg = "添加超时" if isinstance(add_error, TimeoutError) else "添加记录失败"
-                    processed_items[idx - 1] = {
-                        "item": item,
-                        "status": "failed",
-                        "error": f"{error_msg}: {str(add_error)}",
-                        "error_type": error_type,
-                    }
-
-            await context.set_message("第二阶段：解析文件")
-            parse_end = 60.0 if auto_index else 95.0
-            parse_total = len(added_files)
-            for idx, record in enumerate(added_files, 1):
-                await context.raise_if_cancelled()
-
-                progress = 30.0 + (idx / parse_total) * (parse_end - 30.0)
-                await context.set_progress(progress, f"[2/3] 解析文件 {idx}/{parse_total}")
-
-                item = record["item"]
-                file_id = record["file_id"]
-                try:
-                    file_meta = await knowledge_base.parse_file(kb_id, file_id, operator_id=current_user.uid)
-                    await _submit_business_extraction_after_parse(
-                        kb_id=kb_id,
-                        file_meta=file_meta,
-                        operator_id=current_user.uid,
-                    )
-                    record["file_meta"] = file_meta
-                    if not auto_index or file_meta.get("status") != "parsed":
-                        processed_items[record["index"]] = file_meta
-                except Exception as parse_error:
-                    logger.error(f"解析文件失败 {item} (file_id={file_id}): {parse_error}")
-                    error_type = "timeout" if isinstance(parse_error, TimeoutError) else "parse_failed"
-                    error_msg = "解析超时" if isinstance(parse_error, TimeoutError) else "解析失败"
-                    processed_items[record["index"]] = {
-                        "item": item,
-                        "status": "failed",
-                        "error": f"{error_msg}: {str(parse_error)}",
-                        "error_type": error_type,
-                    }
-
-            if auto_index:
-                await context.set_message("第三阶段：自动入库")
-                parsed_files = [record for record in added_files if record["file_meta"].get("status") == "parsed"]
-                total_parsed = len(parsed_files)
-
-                for idx, record in enumerate(parsed_files, 1):
-                    await context.raise_if_cancelled()
-
-                    progress = 60.0 + (idx / total_parsed) * 35.0
-                    await context.set_progress(progress, f"[3/3] 入库文件 {idx}/{total_parsed}")
-
-                    item = record["item"]
-                    file_id = record["file_id"]
-                    try:
-                        await knowledge_base.update_file_params(
-                            kb_id, file_id, indexing_params, operator_id=current_user.uid
-                        )
-                        result = await knowledge_base.index_file(
-                            kb_id, file_id, operator_id=current_user.uid, params=indexing_params
-                        )
-                        processed_items[record["index"]] = result
-                    except Exception as index_error:
-                        logger.error(f"自动入库失败 {item} (file_id={file_id}): {index_error}")
-                        processed_items[record["index"]] = {
-                            "item": item,
-                            "status": "failed",
-                            "error": f"入库失败: {str(index_error)}",
-                            "error_type": "index_failed",
-                        }
-
-        except asyncio.CancelledError:
-            await context.set_progress(100.0, "任务已取消")
-            raise
-        except Exception as task_error:
-            logger.exception(f"Task processing failed: {task_error}")
-            await context.set_progress(100.0, f"任务处理失败: {str(task_error)}")
-            raise
-
-        final_items = [
-            item
-            if item is not None
-            else {
-                "item": items[index],
-                "status": "failed",
-                "error": "文件未处理",
-                "error_type": "not_processed",
-            }
-            for index, item in enumerate(processed_items)
-        ]
-        failed_count = len([item for item in final_items if _is_failed_item(item)])
-
-        summary = {
-            "kb_id": kb_id,
-            "item_type": "文件",
-            "submitted": total,
-            "failed": failed_count,
-        }
-        message = f"文件处理完成，失败 {failed_count} 个" if failed_count else "文件处理完成"
-        await context.set_result(summary | {"items": final_items})
-        await context.set_progress(100.0, message)
-
-        if failed_count:
-            raise RuntimeError(message)
-
-        return summary | {"items": final_items}
-
     try:
-        database = await knowledge_base.get_database_info(kb_id)
-        task = await tasker.enqueue(
-            name=f"知识库文档处理 ({database['name']})",
-            task_type="knowledge_ingest",
-            payload={
-                "kb_id": kb_id,
-                "items": items,
-                "params": params,
-                "content_type": content_type,
-            },
-            coroutine=run_ingest,
+        return await KnowledgeDocumentIngestService().enqueue_ingest(
+            kb_id=kb_id,
+            items=items,
+            params=params,
+            operator_id=current_user.uid,
         )
-        return {
-            "message": "任务已提交，请在任务中心查看进度",
-            "status": "queued",
-            "task_id": task.id,
-        }
     except Exception as e:  # noqa: BLE001
         logger.error(f"Failed to enqueue {content_type}s: {e}, {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to enqueue task: {e}")

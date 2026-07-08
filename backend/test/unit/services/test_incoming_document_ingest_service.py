@@ -66,6 +66,15 @@ class FakeTasker:
         return FakeTask(), True
 
 
+class FakeKnowledgeDocumentIngestService:
+    def __init__(self):
+        self.calls = []
+
+    async def enqueue_ingest(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"status": "queued", "task_id": "kb_task_1"}
+
+
 class FakeContext:
     def __init__(self):
         self.progress = []
@@ -277,3 +286,53 @@ async def test_process_task_marks_document_failed_when_parse_fails():
 
     assert repo.updates[-1][1]["status"] == "failed"
     assert repo.updates[-1][1]["processing_error"] == "parser crashed"
+
+
+@pytest.mark.asyncio
+async def test_import_to_knowledge_queues_auto_index_and_updates_import_status():
+    record = SimpleNamespace(
+        incoming_id="inc_1",
+        filename="incoming.pdf",
+        original_file_url="minio://knowledgebases/incoming/inc_1/source.pdf",
+        content_hash="hash_1",
+        file_size=123,
+        classification="customer-review",
+        knowledge_import_status="none",
+    )
+    repo = FakeIncomingRepo(record)
+    document_ingest = FakeKnowledgeDocumentIngestService()
+    service = IncomingDocumentIngestService(incoming_repo=repo, tasker=FakeTasker())
+
+    result = await service.import_to_knowledge(
+        "inc_1",
+        kb_id="kb_1",
+        parent_id="folder_1",
+        params={"chunk_preset_id": "general"},
+        operator_id="u1",
+        document_ingest_service=document_ingest,
+    )
+
+    assert result == {
+        "incomingId": "inc_1",
+        "status": "queued",
+        "taskId": "kb_task_1",
+        "knowledgeImportStatus": "importing",
+        "linkedKbId": "kb_1",
+    }
+    call = document_ingest.calls[0]
+    assert call["kb_id"] == "kb_1"
+    assert call["items"] == ["minio://knowledgebases/incoming/inc_1/source.pdf"]
+    assert call["operator_id"] == "u1"
+    params = call["params"]
+    assert params["content_type"] == "file"
+    assert params["auto_index"] is True
+    assert params["parent_id"] == "folder_1"
+    assert params["chunk_preset_id"] == "general"
+    assert params["content_hashes"] == {"minio://knowledgebases/incoming/inc_1/source.pdf": "hash_1"}
+    assert params["file_sizes"] == {"minio://knowledgebases/incoming/inc_1/source.pdf": 123}
+    assert params["source_paths"] == {
+        "minio://knowledgebases/incoming/inc_1/source.pdf": "incoming/customer-review/incoming.pdf"
+    }
+    assert repo.updates[-1][1]["knowledge_import_status"] == "importing"
+    assert repo.updates[-1][1]["knowledge_import_task_id"] == "kb_task_1"
+    assert repo.updates[-1][1]["linked_kb_id"] == "kb_1"

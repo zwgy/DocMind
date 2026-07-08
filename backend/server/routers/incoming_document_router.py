@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
 
-from server.utils.auth_middleware import get_required_user
-from yuxi.services.incoming_document_ingest_service import IncomingDocumentIngestService
+from server.utils.auth_middleware import get_admin_user, get_required_user
+from yuxi.services.incoming_document_ingest_service import IncomingDocumentIngestService, IncomingKnowledgeImportConflict
 from yuxi.services.incoming_document_service import IncomingDocumentService, IncomingPageFile
 from yuxi.storage.postgres.models_business import User
 from yuxi.utils.upload_utils import read_upload_with_limit
@@ -26,6 +26,14 @@ class IncomingIngestJsonRequest(BaseModel):
     source_doc_id: str | None = Field(default=None, alias="sourceDocId")
     source_system: str = Field(default="production", alias="sourceSystem")
     metadata: dict | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class IncomingKnowledgeImportRequest(BaseModel):
+    kb_id: str = Field(alias="kbId")
+    parent_id: str | None = Field(default=None, alias="parentId")
+    params: dict | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -81,5 +89,25 @@ async def ingest_incoming_document(request: Request, current_user: User = Depend
             metadata=metadata_obj,
             operator_id=current_user.uid,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@incoming_documents.post("/{incoming_id}/knowledge-import")
+async def import_incoming_document_to_knowledge(
+    incoming_id: str,
+    payload: IncomingKnowledgeImportRequest,
+    current_user: User = Depends(get_admin_user),
+):
+    try:
+        return await IncomingDocumentIngestService().import_to_knowledge(
+            incoming_id,
+            kb_id=payload.kb_id,
+            parent_id=payload.parent_id,
+            params=payload.params,
+            operator_id=current_user.uid,
+        )
+    except IncomingKnowledgeImportConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

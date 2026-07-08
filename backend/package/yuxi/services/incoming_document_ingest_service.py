@@ -12,6 +12,7 @@ from yuxi.knowledge.parser import Parser
 from yuxi.knowledge.parser import is_supported_file_extension
 from yuxi.knowledge.utils import calculate_content_hash
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
+from yuxi.services.knowledge_document_ingest_service import KnowledgeDocumentIngestService
 from yuxi.services.task_service import TaskContext, tasker
 from yuxi.storage.minio import MinIOClient, aupload_file_to_minio
 from yuxi.utils import hashstr
@@ -40,6 +41,10 @@ INCOMING_ALLOWED_CONTENT_TYPES = (
     "application/xhtml+xml",
     "application/octet-stream",
 )
+
+
+class IncomingKnowledgeImportConflict(ValueError):
+    pass
 
 
 class IncomingDocumentSummary(BaseModel):
@@ -211,6 +216,111 @@ class IncomingDocumentIngestService:
             "knowledgeImportStatus": "none",
         }
 
+    async def import_to_knowledge(
+        self,
+        incoming_id: str,
+        *,
+        kb_id: str,
+        parent_id: str | None = None,
+        params: dict[str, Any] | None = None,
+        operator_id: str | None = None,
+        document_ingest_service: KnowledgeDocumentIngestService | None = None,
+    ) -> dict[str, Any]:
+        record = await self.incoming_repo.get_by_incoming_id(incoming_id)
+        if record is None:
+            raise ValueError(f"Incoming document not found: {incoming_id}")
+        source = getattr(record, "original_file_url", None)
+        if not source:
+            raise ValueError("Incoming document original file is missing")
+
+        current_status = getattr(record, "knowledge_import_status", None) or "none"
+        if current_status == "importing":
+            raise IncomingKnowledgeImportConflict("Incoming document is already importing to knowledge base")
+        if current_status == "indexed" and getattr(record, "linked_kb_id", None) and getattr(record, "linked_file_id", None):
+            return {
+                "incomingId": incoming_id,
+                "status": "exists",
+                "taskId": getattr(record, "knowledge_import_task_id", None),
+                "knowledgeImportStatus": "indexed",
+                "linkedKbId": getattr(record, "linked_kb_id", None),
+                "linkedFileId": getattr(record, "linked_file_id", None),
+            }
+
+        ingest_params = dict(params or {})
+        ingest_params["content_type"] = "file"
+        ingest_params["auto_index"] = True
+        if parent_id:
+            ingest_params["parent_id"] = parent_id
+
+        # 来文入库复用知识库上传参数格式，确保展示名、hash 和大小都进入同一条知识库链路。
+        content_hashes = dict(ingest_params.get("content_hashes") or {})
+        if getattr(record, "content_hash", None):
+            content_hashes[source] = record.content_hash
+        ingest_params["content_hashes"] = content_hashes
+
+        file_sizes = dict(ingest_params.get("file_sizes") or {})
+        if getattr(record, "file_size", None) is not None:
+            file_sizes[source] = int(record.file_size)
+        ingest_params["file_sizes"] = file_sizes
+
+        source_paths = dict(ingest_params.get("source_paths") or {})
+        source_paths.setdefault(source, _incoming_source_path(record))
+        ingest_params["source_paths"] = source_paths
+
+        document_ingest = document_ingest_service or KnowledgeDocumentIngestService()
+        if hasattr(document_ingest, "ensure_database_supports_documents"):
+            await document_ingest.ensure_database_supports_documents(kb_id, "来文存入知识库")
+
+        async def on_success(result: dict[str, Any]) -> None:
+            linked_file_id = _first_result_file_id(result)
+            await self.incoming_repo.update_fields(
+                incoming_id,
+                {
+                    "knowledge_import_status": "indexed",
+                    "knowledge_import_error": None,
+                    "linked_kb_id": kb_id,
+                    "linked_file_id": linked_file_id,
+                    "updated_by": operator_id,
+                },
+            )
+
+        async def on_failure(exc: Exception) -> None:
+            await self.incoming_repo.update_fields(
+                incoming_id,
+                {
+                    "knowledge_import_status": "failed",
+                    "knowledge_import_error": str(exc),
+                    "updated_by": operator_id,
+                },
+            )
+
+        queued = await document_ingest.enqueue_ingest(
+            kb_id=kb_id,
+            items=[source],
+            params=ingest_params,
+            operator_id=operator_id,
+            task_name=f"来文存入知识库 ({record.filename})",
+            on_success=on_success,
+            on_failure=on_failure,
+        )
+        await self.incoming_repo.update_fields(
+            incoming_id,
+            {
+                "knowledge_import_status": "importing",
+                "knowledge_import_task_id": queued["task_id"],
+                "knowledge_import_error": None,
+                "linked_kb_id": kb_id,
+                "updated_by": operator_id,
+            },
+        )
+        return {
+            "incomingId": incoming_id,
+            "status": "queued",
+            "taskId": queued["task_id"],
+            "knowledgeImportStatus": "importing",
+            "linkedKbId": kb_id,
+        }
+
     async def _submit_process_task(self, *, incoming_id: str, operator_id: str | None):
         async def run_process(context: TaskContext):
             return await self.process_incoming_document(incoming_id, operator_id=operator_id, context=context)
@@ -347,3 +457,22 @@ async def _set_progress(context: TaskContext | None, percent: float, message: st
 def _safe_object_segment(value: str) -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in (value or "").strip())
     return cleaned or "production"
+
+
+def _incoming_source_path(record) -> str:
+    classification = (getattr(record, "classification", None) or "uncategorized").strip() or "uncategorized"
+    filename = Path(getattr(record, "filename", None) or "incoming").name
+    return f"incoming/{_safe_object_segment(classification)}/{filename}"
+
+
+def _first_result_file_id(result: dict[str, Any]) -> str | None:
+    for item in result.get("items") or []:
+        if item.get("status") == "failed" or item.get("error"):
+            continue
+        file_id = item.get("file_id")
+        if file_id:
+            return file_id
+        file_meta = item.get("file_meta")
+        if isinstance(file_meta, dict) and file_meta.get("file_id"):
+            return file_meta["file_id"]
+    return None
