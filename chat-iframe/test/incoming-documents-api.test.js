@@ -52,6 +52,7 @@ test('ingestIncomingDocument downloads file and posts multipart with bearer toke
   )
 
   assert.equal(calls[0].url, 'https://oa.example.test/incoming.pdf')
+  assert.equal(calls[0].options.cache, 'no-store')
   assert.equal(calls[1].url, '/api/incoming-documents/ingest')
   assert.equal(calls[1].options.method, 'POST')
   assert.equal(calls[1].options.headers.Authorization, 'Bearer token-1')
@@ -76,6 +77,7 @@ test('ingestIncomingDocument falls back to source url as source file id', async 
   await ingestIncomingDocument({ name: 'incoming.pdf', sourceUrl: 'https://oa.example.test/incoming.pdf' })
 
   const form = calls[1].options.body
+  assert.equal(calls[0].options.cache, 'no-store')
   assert.equal(form.get('source_doc_id'), 'https://oa.example.test/incoming.pdf')
   assert.equal(form.get('source_system'), 'production')
   assert.deepEqual(JSON.parse(form.get('file_metas')), [

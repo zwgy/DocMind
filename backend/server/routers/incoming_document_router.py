@@ -23,6 +23,25 @@ class IncomingExtractionQueryRequest(BaseModel):
     files: list[IncomingPageFile]
 
 
+class IncomingIngestFileMeta(BaseModel):
+    """multipart 字段 file_metas 的单个文件元数据。"""
+
+    source_file_id: str
+    filename: str
+
+
+class IncomingIngestMultipartFields(BaseModel):
+    """multipart 非文件字段；二进制文件通过重复的 files 字段传入。"""
+
+    source_doc_id: str
+    document_number: str | None = None
+    title: str | None = None
+    incoming_type: str | None = None
+    source_unit: str | None = None
+    incoming_date: str | None = None
+    source_system: str = "production"
+
+
 class IncomingKnowledgeImportRequest(BaseModel):
     kb_id: str = Field(alias="kbId")
     parent_id: str | None = Field(default=None, alias="parentId")
@@ -89,11 +108,20 @@ async def ingest_incoming_document(request: Request, current_user: User = Depend
         uploads = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
         if not uploads:
             raise ValueError("files is required")
+        fields = IncomingIngestMultipartFields(
+            source_doc_id=str(form.get("source_doc_id") or "").strip(),
+            document_number=_optional_form_text(form.get("document_number")),
+            title=_optional_form_text(form.get("title")),
+            incoming_type=_optional_form_text(form.get("incoming_type")),
+            source_unit=_optional_form_text(form.get("source_unit")),
+            incoming_date=_optional_form_text(form.get("incoming_date")),
+            source_system=str(form.get("source_system") or "production").strip() or "production",
+        )
         file_metas = _parse_file_metas(form.get("file_metas"), len(uploads))
         files = []
         for upload, meta in zip(uploads, file_metas, strict=True):
-            filename = str(meta.get("filename") or upload.filename or "").strip()
-            source_file_id = str(meta.get("source_file_id") or "").strip()
+            filename = meta.filename.strip() or str(upload.filename or "").strip()
+            source_file_id = meta.source_file_id.strip()
             if not source_file_id:
                 raise ValueError("source_file_id is required")
             if not filename:
@@ -110,13 +138,13 @@ async def ingest_incoming_document(request: Request, current_user: User = Depend
                 }
             )
         return await IncomingDocumentIngestService().ingest_files(
-            source_doc_id=str(form.get("source_doc_id") or "").strip(),
-            document_number=str(form.get("document_number") or "").strip() or None,
-            title=str(form.get("title") or "").strip() or None,
-            incoming_type=str(form.get("incoming_type") or "").strip() or None,
-            source_unit=str(form.get("source_unit") or "").strip() or None,
-            incoming_date=str(form.get("incoming_date") or "").strip() or None,
-            source_system=str(form.get("source_system") or "production").strip() or "production",
+            source_doc_id=fields.source_doc_id,
+            document_number=fields.document_number,
+            title=fields.title,
+            incoming_type=fields.incoming_type,
+            source_unit=fields.source_unit,
+            incoming_date=fields.incoming_date,
+            source_system=fields.source_system,
             files=files,
             operator_id=current_user.uid,
         )
@@ -158,7 +186,12 @@ def _iso(value):
     return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
 
 
-def _parse_file_metas(raw_value, file_count: int) -> list[dict]:
+def _optional_form_text(value) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _parse_file_metas(raw_value, file_count: int) -> list[IncomingIngestFileMeta]:
     if not raw_value:
         raise ValueError("file_metas is required")
     try:
@@ -169,7 +202,7 @@ def _parse_file_metas(raw_value, file_count: int) -> list[dict]:
         raise ValueError("file_metas must be a JSON array with same length as files")
     if not all(isinstance(item, dict) for item in metas):
         raise ValueError("file_metas items must be JSON objects")
-    return metas
+    return [IncomingIngestFileMeta.model_validate(item) for item in metas]
 
 
 def _incoming_document_payload(record, *, detail: bool) -> dict:

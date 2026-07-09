@@ -84,7 +84,7 @@ export async function ingestIncomingDocument(
   if (token) headers.Authorization = `Bearer ${token}`
   const sourceUrl = file.sourceUrl || file.url
   if (!sourceUrl) throw new Error('附件缺少下载地址')
-  const fileResponse = await fetch(sourceUrl)
+  const fileResponse = await fetch(sourceUrl, { cache: 'no-store' })
   if (!fileResponse.ok) throw new Error(`附件下载失败：${fileResponse.status}`)
   const blob = await fileResponse.blob()
   const sourceFileId = file.sourceKey || file.id || sourceUrl || file.name

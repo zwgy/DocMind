@@ -253,6 +253,25 @@ async def test_ingest_files_saves_each_uploaded_file_with_document_metadata():
     assert len(tasker.enqueued) == 2
 
 
+async def test_ingest_files_uses_first_file_as_main_when_document_number_missing():
+    async def fake_upload(*, source_system, incoming_id, filename, content):
+        return {"minio_url": f"minio://incoming/{incoming_id}/{filename}", "content_hash": filename, "size": len(content)}
+
+    repo = FakeIncomingRepo()
+    service = IncomingDocumentIngestService(incoming_repo=repo, tasker=FakeTasker(), upload_file=fake_upload)
+
+    result = await service.ingest_files(
+        source_doc_id="doc-001",
+        files=[
+            {"source_file_id": "file-001", "filename": "主文件.pdf", "content": b"main"},
+            {"source_file_id": "file-002", "filename": "附件.xlsx", "content": b"attachment"},
+        ],
+    )
+
+    assert [item["isMainFile"] for item in result["items"]] == [True, False]
+    assert [record["is_main_file"] for _, record in repo.upserts] == [True, False]
+
+
 @pytest.mark.asyncio
 async def test_ingest_source_url_downloads_document_with_document_limits(monkeypatch):
     captured = {}

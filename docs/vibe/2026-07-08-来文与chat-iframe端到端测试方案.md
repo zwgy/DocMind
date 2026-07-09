@@ -72,6 +72,7 @@ $env:DOCMIND_TOKEN = "Bearer <token>"
 主文件判断规则：
 
 - `filename` 等于 `document_number`，或去掉扩展名后等于 `document_number`，则该文件标记为主文件。
+- 未传 `document_number` 时，文件列表中的第一个文件标记为主文件。
 - 其他文件标记为附件。
 
 请求示例：
@@ -269,8 +270,8 @@ https://你的域名/chat-iframe/example.html?source_system=oa&function_id=e2eIn
 - 后端 run 的 `meta.iframe_context.files[0]` 包含：
   - `incomingId`
   - `summary`
-  - `structuredResult`
   - `hasMarkdown = true`
+- 系统提示词只注入摘要和全文读取方式，不再注入 `structuredResult`，避免与业务结构化抽取结果重复。
 
 ### 3.2 追问细节触发 read_file
 

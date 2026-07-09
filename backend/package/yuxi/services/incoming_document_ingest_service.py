@@ -220,7 +220,7 @@ class IncomingDocumentIngestService:
             raise ValueError("files is required")
 
         items = []
-        for item in files:
+        for index, item in enumerate(files):
             filename = str(item.get("filename") or "").strip()
             source_file_id = str(item.get("source_file_id") or "").strip()
             content = item.get("content")
@@ -230,6 +230,7 @@ class IncomingDocumentIngestService:
                 raise ValueError("filename is required")
             if not isinstance(content, bytes):
                 raise ValueError("file content is required")
+            is_main_file = _is_main_incoming_file(filename, document_number, is_first=index == 0)
             result = await self.ingest_file(
                 content=content,
                 filename=filename,
@@ -242,7 +243,7 @@ class IncomingDocumentIngestService:
                 incoming_type=incoming_type,
                 source_unit=source_unit,
                 incoming_date=incoming_date,
-                is_main_file=_is_main_incoming_file(filename, document_number),
+                is_main_file=is_main_file,
                 operator_id=operator_id,
             )
             items.append(
@@ -252,7 +253,7 @@ class IncomingDocumentIngestService:
                     "status": result["status"],
                     "sourceFileId": source_file_id,
                     "filename": filename,
-                    "isMainFile": _is_main_incoming_file(filename, document_number),
+                    "isMainFile": is_main_file,
                     "knowledgeImportStatus": result["knowledgeImportStatus"],
                 }
             )
@@ -687,10 +688,10 @@ def _safe_object_segment(value: str) -> str:
     return cleaned or "production"
 
 
-def _is_main_incoming_file(filename: str, document_number: str | None) -> bool:
+def _is_main_incoming_file(filename: str, document_number: str | None, *, is_first: bool = False) -> bool:
     number = (document_number or "").strip()
     if not number:
-        return False
+        return is_first
     safe_name = Path(filename).name.strip()
     return safe_name == number or Path(safe_name).stem == number
 

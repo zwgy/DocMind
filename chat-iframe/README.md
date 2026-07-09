@@ -574,5 +574,5 @@ CHAT_IFRAME_TOKEN_RATE_LIMIT_PER_MINUTE=60
 
 - “问网页”开启时，iframe 会把父页面传入的 `title/url/text/html` 放入 `iframe_context.page`。后端优先使用已解析文本；只有 HTML 时会先解析为 Markdown。短页面直接进入系统提示，长页面会写入当前线程沙箱文件，并在提示中给出 `read_file` 可读取路径。
 - “问文件”开启时，iframe 会把本轮选中的全部页面附件放入 `iframe_context.files`，而不是只传第一个附件。已匹配知识库且有摘要的附件会携带摘要、`kbId/fileId`；摘要不足时，模型可按提示使用 `open_kb_document` 读取全文。
-- 如果附件没有摘要但父页面提供了 `sourceUrl/url`，iframe 会先下载附件内容，再用 multipart 调用 `POST /api/incoming-documents/ingest` 上传文件；附件地址必须同源或允许浏览器跨域读取。解析尚未完成时，本轮提示只说明文件正在准备，不要求模型猜测内容。
+- 如果附件没有摘要但父页面提供了 `sourceUrl/url`，iframe 会以 `cache: no-store` 下载附件内容，再用 multipart 调用 `POST /api/incoming-documents/ingest` 上传文件；附件地址必须同源或允许浏览器跨域读取。解析尚未完成时，本轮提示只说明文件正在准备，不要求模型猜测内容。
 - 兼容过渡期仍保留 `meta.page_content`、`meta.selected_file`、`meta.extraction_result` 字段，但新的问答上下文应以 `iframe_context` 为准。
