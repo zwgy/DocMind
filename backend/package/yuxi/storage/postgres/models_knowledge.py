@@ -83,8 +83,14 @@ class IncomingDocument(Base):
     __tablename__ = "incoming_documents"
     __table_args__ = (
         UniqueConstraint("incoming_id", name="uq_incoming_documents_incoming_id"),
-        UniqueConstraint("source_system", "source_document_id", name="uq_incoming_documents_source_identity"),
+        UniqueConstraint(
+            "source_system",
+            "source_document_id",
+            "source_file_id",
+            name="uq_incoming_documents_source_file_identity",
+        ),
         Index("ix_incoming_documents_source_key", "source_key"),
+        Index("ix_incoming_documents_source_file_id", "source_file_id"),
         Index("ix_incoming_documents_status", "status"),
         Index("ix_incoming_documents_knowledge_import_status", "knowledge_import_status"),
     )
@@ -93,9 +99,16 @@ class IncomingDocument(Base):
     incoming_id = Column(String(64), unique=True, nullable=False, index=True)
     source_system = Column(String(64), nullable=False, index=True)
     source_document_id = Column(String(256), nullable=False)
+    source_file_id = Column(String(512), nullable=False)
     source_key = Column(String(512), index=True)
     source_url = Column(String(2048))
     filename = Column(String(512), nullable=False)
+    document_number = Column(String(512))
+    title = Column(String(1024))
+    incoming_type = Column(String(128))
+    source_unit = Column(String(512))
+    incoming_date = Column(String(64))
+    is_main_file = Column(Boolean, default=False)
     content_hash = Column(String(128), index=True)
     file_size = Column(BigInteger)
     mime_type = Column(String(255))

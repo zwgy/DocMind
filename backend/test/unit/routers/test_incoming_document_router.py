@@ -1,7 +1,9 @@
 from datetime import datetime
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
+from starlette.datastructures import FormData, UploadFile
 
 from server.routers import incoming_document_router
 
@@ -118,32 +120,36 @@ async def test_get_incoming_document_detail_returns_summary(monkeypatch):
     assert result["markdownPreview"] == "## Markdown\n\n正文"
 
 
-async def test_ingest_json_uses_project_incoming_fields(monkeypatch):
+async def test_ingest_multipart_accepts_multiple_files_with_snake_case_fields(monkeypatch):
     captured = {}
 
     class FakeRequest:
-        headers = {"content-type": "application/json"}
+        headers = {"content-type": "multipart/form-data; boundary=demo"}
 
-        async def json(self):
-            return {
-                "sourceUrl": "https://oa.example.test/files/risk-001.pdf",
-                "sourceKey": "lw-001",
-                "sourceDocId": "doc-001",
-                "sourceSystem": "oa",
-                "filename": "risk-001.pdf",
-                "metadata": {
-                    "documentNumber": "来文〔2026〕1号",
-                    "title": "风险整改通知",
-                    "incomingType": "安全管理",
-                    "sourceUnit": "安监部",
-                    "incomingDate": "2026-07-09",
-                },
-            }
+        async def form(self):
+            return FormData(
+                [
+                    ("source_doc_id", "doc-001"),
+                    ("document_number", "来文〔2026〕1号"),
+                    ("title", "风险整改通知"),
+                    ("incoming_type", "安全管理"),
+                    ("source_unit", "安监部"),
+                    ("incoming_date", "2026-07-09"),
+                    ("source_system", "oa"),
+                    (
+                        "file_metas",
+                        '[{"source_file_id":"file-001","filename":"来文〔2026〕1号.pdf"},'
+                        '{"source_file_id":"file-002","filename":"附件1.xlsx"}]',
+                    ),
+                    ("files", UploadFile(filename="来文〔2026〕1号.pdf", file=BytesIO(b"main"))),
+                    ("files", UploadFile(filename="附件1.xlsx", file=BytesIO(b"attachment"))),
+                ]
+            )
 
     class FakeIngestService:
-        async def ingest_source_url(self, **kwargs):
+        async def ingest_files(self, **kwargs):
             captured.update(kwargs)
-            return {"status": "accepted"}
+            return {"status": "accepted", "items": []}
 
     monkeypatch.setattr(incoming_document_router, "IncomingDocumentIngestService", FakeIngestService)
 
@@ -152,16 +158,40 @@ async def test_ingest_json_uses_project_incoming_fields(monkeypatch):
         current_user=SimpleNamespace(uid="u1"),
     )
 
-    assert result == {"status": "accepted"}
-    assert captured["source_url"] == "https://oa.example.test/files/risk-001.pdf"
-    assert captured["filename"] == "risk-001.pdf"
-    assert captured["source_key"] == "lw-001"
+    assert result == {"status": "accepted", "items": []}
     assert captured["source_doc_id"] == "doc-001"
-    assert captured["documentNumber"] == "来文〔2026〕1号"
+    assert captured["document_number"] == "来文〔2026〕1号"
     assert captured["title"] == "风险整改通知"
-    assert captured["incomingType"] == "安全管理"
-    assert captured["sourceUnit"] == "安监部"
-    assert captured["incomingDate"] == "2026-07-09"
+    assert captured["incoming_type"] == "安全管理"
+    assert captured["source_unit"] == "安监部"
+    assert captured["incoming_date"] == "2026-07-09"
+    assert captured["source_system"] == "oa"
+    assert [item["source_file_id"] for item in captured["files"]] == ["file-001", "file-002"]
+    assert [item["filename"] for item in captured["files"]] == ["来文〔2026〕1号.pdf", "附件1.xlsx"]
+    assert [item["content"] for item in captured["files"]] == [b"main", b"attachment"]
+
+
+async def test_ingest_multipart_rejects_invalid_file_metas():
+    class FakeRequest:
+        headers = {"content-type": "multipart/form-data; boundary=demo"}
+
+        async def form(self):
+            return FormData(
+                [
+                    ("source_doc_id", "doc-001"),
+                    ("file_metas", "not-json"),
+                    ("files", UploadFile(filename="incoming.pdf", file=BytesIO(b"main"))),
+                ]
+            )
+
+    with pytest.raises(incoming_document_router.HTTPException) as exc:
+        await incoming_document_router.ingest_incoming_document(
+            FakeRequest(),
+            current_user=SimpleNamespace(uid="u1"),
+        )
+
+    assert exc.value.status_code == 400
+    assert "file_metas" in exc.value.detail
 
 
 async def test_retry_incoming_document_delegates_to_ingest_service(monkeypatch):

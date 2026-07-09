@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from yuxi.document_extraction import BusinessExtractionService
 from yuxi.document_extraction.llm import ModelJsonLLM
+from yuxi.document_extraction.schemas import document_category_labels
 from yuxi.knowledge.parser import Parser
 from yuxi.knowledge.parser import is_supported_file_extension
 from yuxi.knowledge.utils import calculate_content_hash
@@ -27,18 +28,6 @@ SummarizeDocumentFn = Callable[..., Awaitable[dict[str, Any]]]
 INCOMING_DOCUMENT_INGEST_TASK_TYPE = "incoming_document_ingest"
 INCOMING_DOCUMENT_PROCESS_TASK_TYPE = "incoming_document_process"
 INCOMING_SUMMARY_MARKDOWN_LIMIT = 20_000
-INCOMING_CLASSIFICATION_CATEGORIES = (
-    "通报类",
-    "考评类",
-    "奖惩处置类",
-    "规章制度类",
-    "技术标准类",
-    "安全管理类",
-    "风险管理类",
-    "阶段性工作类",
-    "长期管理要求类",
-    "其他",
-)
 INCOMING_ALLOWED_CONTENT_TYPES = (
     "application/pdf",
     "application/msword",
@@ -105,9 +94,16 @@ class IncomingDocumentIngestService:
         content: bytes,
         filename: str,
         source_key: str,
+        source_file_id: str | None = None,
         source_url: str | None = None,
         source_doc_id: str | None = None,
         source_system: str = "production",
+        document_number: str | None = None,
+        title: str | None = None,
+        incoming_type: str | None = None,
+        source_unit: str | None = None,
+        incoming_date: str | None = None,
+        is_main_file: bool = False,
         source_size_text: str | None = None,
         file_size: int | None = None,
         content_hash: str | None = None,
@@ -123,12 +119,19 @@ class IncomingDocumentIngestService:
 
         normalized_source_system = (source_system or "production").strip() or "production"
         normalized_source_key = (source_key or "").strip()
+        normalized_source_file_id = (source_file_id or normalized_source_key).strip()
         source_document_id = (source_doc_id or normalized_source_key).strip()
         if not source_document_id:
             raise ValueError("sourceKey is required")
+        if not normalized_source_file_id:
+            raise ValueError("source_file_id is required")
 
-        incoming_id = self._incoming_id(normalized_source_system, source_document_id)
-        existing = await self.incoming_repo.get_by_source_identity(normalized_source_system, source_document_id)
+        incoming_id = self._incoming_id(normalized_source_system, source_document_id, normalized_source_file_id)
+        existing = await self._get_existing_file(
+            normalized_source_system,
+            source_document_id,
+            normalized_source_file_id,
+        )
         if existing is not None and content_hash and getattr(existing, "content_hash", None) == content_hash:
             # 若已有记录且 hash 一致，直接复用已有 payload
             return self._existing_payload(existing)
@@ -150,9 +153,16 @@ class IncomingDocumentIngestService:
             {
                 "source_system": normalized_source_system,
                 "source_document_id": source_document_id,
+                "source_file_id": normalized_source_file_id,
                 "source_key": normalized_source_key,
                 "source_url": source_url,
                 "filename": Path(filename).name,
+                "document_number": (document_number or "").strip() or None,
+                "title": (title or "").strip() or None,
+                "incoming_type": (incoming_type or "").strip() or None,
+                "source_unit": (source_unit or "").strip() or None,
+                "incoming_date": (incoming_date or "").strip() or None,
+                "is_main_file": bool(is_main_file),
                 "content_hash": resolved_hash,
                 "file_size": int(file_size or upload["size"]),
                 "original_file_url": upload["minio_url"],
@@ -168,7 +178,16 @@ class IncomingDocumentIngestService:
                 "knowledge_import_status": "none",
                 "knowledge_import_task_id": None,
                 "knowledge_import_error": None,
-                "metadata_json": metadata or {},
+                "metadata_json": self._metadata_with_document_fields(
+                    metadata,
+                    document_number=document_number,
+                    title=title,
+                    incoming_type=incoming_type,
+                    source_unit=source_unit,
+                    incoming_date=incoming_date,
+                    source_file_id=normalized_source_file_id,
+                    is_main_file=is_main_file,
+                ),
                 "created_by": operator_id,
                 "updated_by": operator_id,
             },
@@ -180,6 +199,64 @@ class IncomingDocumentIngestService:
             "status": "accepted",
             "knowledgeImportStatus": "none",
         }
+
+    async def ingest_files(
+        self,
+        *,
+        source_doc_id: str,
+        document_number: str | None = None,
+        title: str | None = None,
+        incoming_type: str | None = None,
+        source_unit: str | None = None,
+        incoming_date: str | None = None,
+        source_system: str = "production",
+        files: list[dict[str, Any]],
+        operator_id: str | None = None,
+    ) -> dict[str, Any]:
+        source_document_id = (source_doc_id or "").strip()
+        if not source_document_id:
+            raise ValueError("source_doc_id is required")
+        if not files:
+            raise ValueError("files is required")
+
+        items = []
+        for item in files:
+            filename = str(item.get("filename") or "").strip()
+            source_file_id = str(item.get("source_file_id") or "").strip()
+            content = item.get("content")
+            if not source_file_id:
+                raise ValueError("source_file_id is required")
+            if not filename:
+                raise ValueError("filename is required")
+            if not isinstance(content, bytes):
+                raise ValueError("file content is required")
+            result = await self.ingest_file(
+                content=content,
+                filename=filename,
+                source_key=source_file_id,
+                source_file_id=source_file_id,
+                source_doc_id=source_document_id,
+                source_system=source_system,
+                document_number=document_number,
+                title=title,
+                incoming_type=incoming_type,
+                source_unit=source_unit,
+                incoming_date=incoming_date,
+                is_main_file=_is_main_incoming_file(filename, document_number),
+                operator_id=operator_id,
+            )
+            items.append(
+                {
+                    "incomingId": result["incomingId"],
+                    "taskId": result["taskId"],
+                    "status": result["status"],
+                    "sourceFileId": source_file_id,
+                    "filename": filename,
+                    "isMainFile": _is_main_incoming_file(filename, document_number),
+                    "knowledgeImportStatus": result["knowledgeImportStatus"],
+                }
+            )
+        return {"status": "accepted", "sourceDocId": source_document_id, "items": items}
 
     async def ingest_source_url(
         self,
@@ -197,7 +274,7 @@ class IncomingDocumentIngestService:
         source_document_id = (source_doc_id or normalized_source_key).strip()
         if not source_document_id:
             raise ValueError("sourceKey is required")
-        incoming_id = self._incoming_id(normalized_source_system, source_document_id)
+        incoming_id = self._incoming_id(normalized_source_system, source_document_id, normalized_source_key)
 
         async def run_ingest(context: TaskContext):
             from yuxi.knowledge.utils.url_fetcher import fetch_url_content
@@ -485,8 +562,9 @@ class IncomingDocumentIngestService:
             logger.warning(f"Incoming business extraction failed: incoming_id={incoming_id}: {exc}")
 
     @staticmethod
-    def _incoming_id(source_system: str, source_document_id: str) -> str:
-        return f"inc_{hashstr(f'{source_system}:{source_document_id}', 16)}"
+    def _incoming_id(source_system: str, source_document_id: str, source_file_id: str | None = None) -> str:
+        identity = f"{source_system}:{source_document_id}:{source_file_id or source_document_id}"
+        return f"inc_{hashstr(identity, 16)}"
 
     @staticmethod
     def _existing_payload(record) -> dict[str, Any]:
@@ -496,6 +574,39 @@ class IncomingDocumentIngestService:
             "status": "exists",
             "knowledgeImportStatus": getattr(record, "knowledge_import_status", None) or "none",
         }
+
+    async def _get_existing_file(self, source_system: str, source_document_id: str, source_file_id: str):
+        if hasattr(self.incoming_repo, "get_by_file_identity"):
+            existing = await self.incoming_repo.get_by_file_identity(source_system, source_document_id, source_file_id)
+            if existing is not None:
+                return existing
+        return await self.incoming_repo.get_by_source_identity(source_system, source_document_id)
+
+    @staticmethod
+    def _metadata_with_document_fields(
+        metadata: dict[str, Any] | None,
+        *,
+        document_number: str | None,
+        title: str | None,
+        incoming_type: str | None,
+        source_unit: str | None,
+        incoming_date: str | None,
+        source_file_id: str,
+        is_main_file: bool,
+    ) -> dict[str, Any]:
+        merged = dict(metadata or {})
+        for key, value in {
+            "document_number": document_number,
+            "title": title,
+            "incoming_type": incoming_type,
+            "source_unit": source_unit,
+            "incoming_date": incoming_date,
+            "source_file_id": source_file_id,
+            "is_main_file": is_main_file,
+        }.items():
+            if value not in (None, ""):
+                merged[key] = value
+        return merged
 
 
 async def _upload_incoming_file(*, source_system: str, incoming_id: str, filename: str, content: bytes) -> dict[str, Any]:
@@ -532,7 +643,7 @@ async def _summarize_incoming_document(
 
     # 摘要优先给足事实；精确全文仍由 read_file/预览负责。
     metadata_text = json.dumps(metadata or {}, ensure_ascii=False)
-    categories_text = "、".join(INCOMING_CLASSIFICATION_CATEGORIES)
+    categories_text = "、".join(document_category_labels())
     prompt = "\n".join(
         [
             "请阅读来文解析内容，输出严格 JSON，不要输出解释。JSON 字段：",
@@ -574,6 +685,14 @@ async def _set_progress(context: TaskContext | None, percent: float, message: st
 def _safe_object_segment(value: str) -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in (value or "").strip())
     return cleaned or "production"
+
+
+def _is_main_incoming_file(filename: str, document_number: str | None) -> bool:
+    number = (document_number or "").strip()
+    if not number:
+        return False
+    safe_name = Path(filename).name.strip()
+    return safe_name == number or Path(safe_name).stem == number
 
 
 def _incoming_source_path(record) -> str:

@@ -1,5 +1,6 @@
 from yuxi.document_extraction.schemas import (
     DocumentCategoryResult,
+    document_category_labels,
     extraction_schema_ids_for_categories,
     field_description_lines,
     get_extraction_schema,
@@ -18,6 +19,13 @@ def test_category_schema_descriptions_are_prompt_ready():
     lines = field_description_lines(DocumentCategoryResult)
 
     assert any("risk_management" in line and "风险管理类" in line for line in lines)
+
+
+def test_document_category_labels_are_read_from_schema():
+    labels = document_category_labels()
+
+    assert "风险管理类" in labels
+    assert "其他" in labels
 
 
 def test_extraction_schema_exposes_field_descriptions():

@@ -14,47 +14,47 @@ class DocumentCategoryResult(BaseModel):
     notification: CategoryDecision = Field(
         default_factory=CategoryDecision,
         description="通报类：包含通报、批评、问题曝光、情况通报、后续整改要求等内容",
-        json_schema_extra={"extraction_schemas": ["reward_punishment_item", "task_item"]},
+        json_schema_extra={"label": "通报类", "extraction_schemas": ["reward_punishment_item", "task_item"]},
     )
     assessment: CategoryDecision = Field(
         default_factory=CategoryDecision,
         description="考评类：包含考评项目、排名、成绩、评价结果、考评原因等内容",
-        json_schema_extra={"extraction_schemas": ["assessment_item", "reward_punishment_item"]},
+        json_schema_extra={"label": "考评类", "extraction_schemas": ["assessment_item", "reward_punishment_item"]},
     )
     reward_punishment: CategoryDecision = Field(
         default_factory=CategoryDecision,
         description="奖励、表彰、处罚类：包含奖励、表彰、处罚、问责、批评等内容",
-        json_schema_extra={"extraction_schemas": ["reward_punishment_item", "task_item"]},
+        json_schema_extra={"label": "奖惩处置类", "extraction_schemas": ["reward_punishment_item", "task_item"]},
     )
     regulation: CategoryDecision = Field(
         default_factory=CategoryDecision,
         description="规章制度类：制度、规定、办法、流程、长期遵循要求等规范性文件",
-        json_schema_extra={"extraction_schemas": ["management_requirement_item"]},
+        json_schema_extra={"label": "规章制度类", "extraction_schemas": ["management_requirement_item"]},
     )
     technical_standard: CategoryDecision = Field(
         default_factory=CategoryDecision,
         description="技术规范、标准、管理要求类：包含技术标准、作业标准、管理要求、专业要求等内容",
-        json_schema_extra={"extraction_schemas": ["management_requirement_item", "task_item"]},
+        json_schema_extra={"label": "技术标准类", "extraction_schemas": ["management_requirement_item", "task_item"]},
     )
     safety_management: CategoryDecision = Field(
         default_factory=CategoryDecision,
         description="安全管理类：包含安全生产、现场作业、安全检查、平安建设等内容",
-        json_schema_extra={"extraction_schemas": ["risk_item", "task_item", "management_requirement_item"]},
+        json_schema_extra={"label": "安全管理类", "extraction_schemas": ["risk_item", "task_item", "management_requirement_item"]},
     )
     risk_management: CategoryDecision = Field(
         default_factory=CategoryDecision,
         description="风险管理类：包含安全风险、网络安全风险、平安建设风险、风险防控要求等内容",
-        json_schema_extra={"extraction_schemas": ["risk_item", "task_item", "management_requirement_item"]},
+        json_schema_extra={"label": "风险管理类", "extraction_schemas": ["risk_item", "task_item", "management_requirement_item"]},
     )
     staged_work: CategoryDecision = Field(
         default_factory=CategoryDecision,
         description="阶段性工作类：专项行动、近期重点工作、阶段安排、阶段性任务等内容",
-        json_schema_extra={"extraction_schemas": ["task_item"]},
+        json_schema_extra={"label": "阶段性工作类", "extraction_schemas": ["task_item"]},
     )
     long_term_requirement: CategoryDecision = Field(
         default_factory=CategoryDecision,
         description="长期性、持续性管理要求类：长期执行、周期性管理要求、持续整改要求等内容",
-        json_schema_extra={"extraction_schemas": ["task_item", "management_requirement_item"]},
+        json_schema_extra={"label": "长期管理要求类", "extraction_schemas": ["task_item", "management_requirement_item"]},
     )
 
 
@@ -127,6 +127,16 @@ def field_description_lines(model: type[BaseModel]) -> list[str]:
         description = field.description or ""
         lines.append(f"- {name}: {description}")
     return lines
+
+
+def document_category_labels() -> list[str]:
+    labels: list[str] = []
+    for field in DocumentCategoryResult.model_fields.values():
+        extra = field.json_schema_extra or {}
+        label = str(extra.get("label") or "").strip()
+        if label:
+            labels.append(label)
+    return labels + ["其他"]
 
 
 def extraction_schema_ids_for_categories(categories: dict[str, bool | CategoryDecision]) -> list[str]:

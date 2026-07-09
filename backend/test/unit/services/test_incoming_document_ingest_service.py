@@ -23,6 +23,9 @@ class FakeIncomingRepo:
     async def get_by_source_identity(self, source_system, source_document_id):
         return self.existing
 
+    async def get_by_file_identity(self, source_system, source_document_id, source_file_id):
+        return None
+
     async def get_by_incoming_id(self, incoming_id):
         if self.existing and self.existing.incoming_id == incoming_id:
             return self.existing
@@ -205,6 +208,49 @@ async def test_ingest_direct_file_records_incoming_without_default_kb():
     assert repo.upserts[0][1]["source_document_id"] == "S001"
     assert knowledge.add_calls == []
     assert tasker.enqueued[0]["task_type"] == "incoming_document_process"
+
+
+async def test_ingest_files_saves_each_uploaded_file_with_document_metadata():
+    async def fake_upload(*, source_system, incoming_id, filename, content):
+        return {"minio_url": f"minio://incoming/{incoming_id}/{filename}", "content_hash": filename, "size": len(content)}
+
+    repo = FakeIncomingRepo()
+    tasker = FakeTasker()
+    service = IncomingDocumentIngestService(incoming_repo=repo, tasker=tasker, upload_file=fake_upload)
+
+    result = await service.ingest_files(
+        source_doc_id="doc-001",
+        document_number="来文〔2026〕1号",
+        title="风险整改通知",
+        incoming_type="安全管理",
+        source_unit="安监部",
+        incoming_date="2026-07-09",
+        source_system="oa",
+        files=[
+            {"source_file_id": "file-001", "filename": "来文〔2026〕1号.pdf", "content": b"main"},
+            {"source_file_id": "file-002", "filename": "附件1.xlsx", "content": b"attachment"},
+        ],
+        operator_id="u1",
+    )
+
+    assert result["status"] == "accepted"
+    assert [item["sourceFileId"] for item in result["items"]] == ["file-001", "file-002"]
+    assert len(repo.upserts) == 2
+    first = repo.upserts[0][1]
+    second = repo.upserts[1][1]
+    assert first["source_document_id"] == "doc-001"
+    assert first["source_file_id"] == "file-001"
+    assert first["source_key"] == "file-001"
+    assert first["document_number"] == "来文〔2026〕1号"
+    assert first["title"] == "风险整改通知"
+    assert first["incoming_type"] == "安全管理"
+    assert first["source_unit"] == "安监部"
+    assert first["incoming_date"] == "2026-07-09"
+    assert first["is_main_file"] is True
+    assert first["metadata_json"]["document_number"] == "来文〔2026〕1号"
+    assert second["source_file_id"] == "file-002"
+    assert second["is_main_file"] is False
+    assert len(tasker.enqueued) == 2
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,7 @@ from yuxi.services.incoming_document_ingest_service import IncomingDocumentInges
 from yuxi.services.incoming_document_service import IncomingDocumentService, IncomingPageFile
 from yuxi.storage.minio import get_minio_client
 from yuxi.storage.postgres.models_business import User
-from yuxi.utils.upload_utils import read_upload_with_limit
+from yuxi.utils.upload_utils import MAX_UPLOAD_SIZE_BYTES, read_upload_with_limit
 
 incoming_documents = APIRouter(prefix="/incoming-documents", tags=["incoming-documents"])
 INCOMING_MARKDOWN_PREVIEW_CHARS = 40_000
@@ -21,17 +21,6 @@ INCOMING_MARKDOWN_PREVIEW_CHARS = 40_000
 
 class IncomingExtractionQueryRequest(BaseModel):
     files: list[IncomingPageFile]
-
-
-class IncomingIngestJsonRequest(BaseModel):
-    source_url: str = Field(alias="sourceUrl")
-    source_key: str = Field(alias="sourceKey")
-    filename: str
-    source_doc_id: str | None = Field(default=None, alias="sourceDocId")
-    source_system: str = Field(default="production", alias="sourceSystem")
-    metadata: dict | None = None
-
-    model_config = {"populate_by_name": True}
 
 
 class IncomingKnowledgeImportRequest(BaseModel):
@@ -93,44 +82,42 @@ async def get_incoming_document_detail(incoming_id: str, current_user: User = De
 async def ingest_incoming_document(request: Request, current_user: User = Depends(get_required_user)):
     try:
         if request.headers.get("content-type", "").startswith("application/json"):
-            # JSON 模式用于 iframe 传 sourceUrl，让后端自行下载并进入来文处理队列。
-            body = IncomingIngestJsonRequest.model_validate(await request.json())
-            return await IncomingDocumentIngestService().ingest_source_url(
-                source_url=body.source_url,
-                filename=body.filename,
-                source_key=body.source_key,
-                source_system=body.source_system,
-                source_doc_id=body.source_doc_id,
-                operator_id=current_user.uid,
-                **(body.metadata or {}),
-            )
+            raise ValueError("multipart files is required")
 
         form = await request.form()
-        # multipart 模式用于外部系统直接上传二进制附件，同样不自动写入知识库。
-        file = form.get("file")
-        if not isinstance(file, UploadFile):
-            raise ValueError("file is required")
-        source_key = str(form.get("sourceKey") or "").strip()
-        if not source_key:
-            raise ValueError("sourceKey is required")
-        safe_filename = str(form.get("filename") or file.filename or "")
-        if not safe_filename:
-            raise ValueError("filename is required")
-        metadata_obj = json.loads(str(form.get("metadata"))) if form.get("metadata") else None
-        if metadata_obj is not None and not isinstance(metadata_obj, dict):
-            raise ValueError("metadata must be a JSON object")
-        content = await read_upload_with_limit(file, too_large_message="文件过大，当前仅支持 100 MB 以内的文件")
-        return await IncomingDocumentIngestService().ingest_file(
-            content=content,
-            filename=safe_filename,
-            source_key=source_key,
-            source_url=str(form.get("sourceUrl") or "") or None,
-            source_doc_id=str(form.get("sourceDocId") or "") or None,
-            source_system=str(form.get("sourceSystem") or "production"),
-            source_size_text=str(form.get("sourceSizeText") or "") or None,
-            file_size=int(form["fileSize"]) if form.get("fileSize") else None,
-            content_hash=str(form.get("contentHash") or "") or None,
-            metadata=metadata_obj,
+        # 外部系统直接传文件内容；原文长期存 MinIO，数据库只保存地址和来文元数据。
+        uploads = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
+        if not uploads:
+            raise ValueError("files is required")
+        file_metas = _parse_file_metas(form.get("file_metas"), len(uploads))
+        files = []
+        for upload, meta in zip(uploads, file_metas, strict=True):
+            filename = str(meta.get("filename") or upload.filename or "").strip()
+            source_file_id = str(meta.get("source_file_id") or "").strip()
+            if not source_file_id:
+                raise ValueError("source_file_id is required")
+            if not filename:
+                raise ValueError("filename is required")
+            files.append(
+                {
+                    "source_file_id": source_file_id,
+                    "filename": filename,
+                    "content": await read_upload_with_limit(
+                        upload,
+                        max_size_bytes=MAX_UPLOAD_SIZE_BYTES,
+                        too_large_message="文件过大，当前仅支持 100 MB 以内的文件",
+                    ),
+                }
+            )
+        return await IncomingDocumentIngestService().ingest_files(
+            source_doc_id=str(form.get("source_doc_id") or "").strip(),
+            document_number=str(form.get("document_number") or "").strip() or None,
+            title=str(form.get("title") or "").strip() or None,
+            incoming_type=str(form.get("incoming_type") or "").strip() or None,
+            source_unit=str(form.get("source_unit") or "").strip() or None,
+            incoming_date=str(form.get("incoming_date") or "").strip() or None,
+            source_system=str(form.get("source_system") or "production").strip() or "production",
+            files=files,
             operator_id=current_user.uid,
         )
     except ValueError as exc:
@@ -171,13 +158,34 @@ def _iso(value):
     return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
 
 
+def _parse_file_metas(raw_value, file_count: int) -> list[dict]:
+    if not raw_value:
+        raise ValueError("file_metas is required")
+    try:
+        metas = json.loads(str(raw_value))
+    except json.JSONDecodeError as exc:
+        raise ValueError("file_metas must be a JSON array with same length as files") from exc
+    if not isinstance(metas, list) or len(metas) != file_count:
+        raise ValueError("file_metas must be a JSON array with same length as files")
+    if not all(isinstance(item, dict) for item in metas):
+        raise ValueError("file_metas items must be JSON objects")
+    return metas
+
+
 def _incoming_document_payload(record, *, detail: bool) -> dict:
     payload = {
         "incomingId": record.incoming_id,
         "sourceSystem": record.source_system,
         "sourceDocumentId": record.source_document_id,
+        "sourceFileId": getattr(record, "source_file_id", None),
         "sourceKey": getattr(record, "source_key", None),
         "filename": record.filename,
+        "documentNumber": getattr(record, "document_number", None),
+        "title": getattr(record, "title", None),
+        "incomingType": getattr(record, "incoming_type", None),
+        "sourceUnit": getattr(record, "source_unit", None),
+        "incomingDate": getattr(record, "incoming_date", None),
+        "isMainFile": bool(getattr(record, "is_main_file", False)),
         "fileSize": getattr(record, "file_size", None),
         "status": record.status,
         "classification": getattr(record, "classification", None),

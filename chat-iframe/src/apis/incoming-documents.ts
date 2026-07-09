@@ -75,19 +75,37 @@ export async function queryIncomingDocumentExtractions(
   return parseApiResponse<ExtractionQueryResponse>(response, `查询失败：${response.status}`)
 }
 
-export async function ingestIncomingDocument(file: IncomingPageFile, token?: string): Promise<Record<string, unknown>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+export async function ingestIncomingDocument(
+  file: IncomingPageFile,
+  token?: string,
+  options: { sourceSystem?: string } = {}
+): Promise<Record<string, unknown>> {
+  const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
   const sourceUrl = file.sourceUrl || file.url
+  if (!sourceUrl) throw new Error('附件缺少下载地址')
+  const fileResponse = await fetch(sourceUrl)
+  if (!fileResponse.ok) throw new Error(`附件下载失败：${fileResponse.status}`)
+  const blob = await fileResponse.blob()
+  const sourceFileId = file.sourceKey || file.id || sourceUrl || file.name
+  const form = new FormData()
+  form.append('source_doc_id', sourceFileId)
+  form.append('source_system', options.sourceSystem || 'production')
+  form.append('document_number', file.name)
+  form.append('files', blob, file.name)
+  form.append(
+    'file_metas',
+    JSON.stringify([
+      {
+        source_file_id: sourceFileId,
+        filename: file.name
+      }
+    ])
+  )
   const response = await fetch(apiUrl('/api/incoming-documents/ingest'), {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      sourceUrl,
-      // 后端用 sourceKey 生成来文幂等主键；宿主页面只有 URL 时也要能自动同步。
-      sourceKey: file.sourceKey || file.id || sourceUrl || file.name,
-      filename: file.name
-    })
+    body: form
   })
   return parseApiResponse<Record<string, unknown>>(response, `入库失败：${response.status}`)
 }

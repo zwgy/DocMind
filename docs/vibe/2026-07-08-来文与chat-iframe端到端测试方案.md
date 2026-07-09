@@ -16,7 +16,7 @@
 - `BUSINESS_EXTRACTION_MODEL` 或 `DEFAULT_MODEL` 可调用本地模型。
 - 测试用户能访问 chat-iframe 和 `/api/incoming-documents/*`。
 - 管理员能访问 Web「来文管理」。
-- 测试时必须明确 `sourceSystem` 一致性：后端按 `source_system + source_document_id` 做幂等，iframe 摘要查询默认使用附件里的 `sourceSystem`，附件未带时后端按 `production` 查询。外部系统预上传若使用 `sourceSystem=oa`，iframe 附件 payload 也必须带 `sourceSystem=oa`，否则查询会命中不到。
+- 测试时必须明确来源标识一致性：后端按 `source_system + source_document_id + source_file_id` 做单文件幂等，iframe 摘要查询默认使用附件里的 `sourceSystem/sourceKey`，附件未带 `sourceSystem` 时后端按 `production` 查询。外部系统预上传若使用 `source_system=oa`，iframe 附件 payload 也必须带 `sourceSystem=oa`，否则查询会命中不到。
 - 准备 3 个真实附件：
   - `incoming-risk-001.pdf`：包含明确风险、整改要求、责任部门。
   - `incoming-summary-002.docx`：包含摘要可回答的问题，也包含需要全文细节的问题。
@@ -48,98 +48,91 @@ $env:DOCMIND_TOKEN = "Bearer <token>"
 
 ## 场景一：外部系统直接上传来文
 
-### 1.1 JSON sourceUrl 模式
+### 1.1 multipart 多文件上传模式
 
-适用于外部系统只给文件下载地址，docMind 后台自行下载。
+当前只支持外部系统直接把文件内容推给 docMind；暂不支持 URL 拉取模式。上传后原始文件直接保存到 MinIO，解析后的 Markdown 也保存到 MinIO，PostgreSQL 只保存文件地址、来文元数据、处理状态、摘要和入库关联信息。
 
 必填字段：
 
-- `sourceUrl`：附件可下载 URL。
-- `sourceKey`：外部来源中的稳定来文或附件唯一键。
-- `filename`：带扩展名的文件名。
+- `source_doc_id`：来文 ID，对应外部系统 `ID`。
+- `files`：一个或多个文件二进制字段，可重复出现。
+- `file_metas`：JSON 数组，长度必须与 `files` 数量一致。每项必须包含：
+  - `source_file_id`：外部系统给该文件的独立编号。
+  - `filename`：真实文件名，必须保留扩展名。
 
 建议字段：
 
-- `sourceDocId`：外部系统来文或业务单据 ID；不传时后端使用 `sourceKey`。
-- `sourceSystem`：外部系统编码，例如 `oa`；不传默认为 `production`。
-- `metadata`：业务扩展信息，例如 `businessId`、`documentNumber`、`title`、`incomingType`、`sourceUnit`、`incomingDate`。
-- 外部系统原始字段需由接入方映射成上述项目字段后再调用接口。
+- `source_system`：外部系统编码，例如 `oa`；不传默认为 `production`。
+- `document_number`：来文文号，对应外部系统 `lwwh`。
+- `title`：来文标题。
+- `incoming_type`：来文类别，对应外部系统 `lwtype`。
+- `source_unit`：来文单位，对应外部系统 `lwdw`。
+- `incoming_date`：来文日期，对应外部系统 `lwrq`。
+
+主文件判断规则：
+
+- `filename` 等于 `document_number`，或去掉扩展名后等于 `document_number`，则该文件标记为主文件。
+- 其他文件标记为附件。
 
 请求示例：
 
 ```bash
 curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
   -H "Authorization: $DOCMIND_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sourceUrl": "https://oa.example.com/files/incoming-risk-001.pdf",
-    "sourceKey": "att-risk-001",
-    "sourceDocId": "doc-risk-001",
-    "sourceSystem": "oa",
-    "filename": "incoming-risk-001.pdf",
-    "metadata": {
-      "businessId": "risk-case-001",
-      "documentNumber": "来文〔2026〕1号",
-      "title": "风险整改来文",
-      "incomingType": "安全管理",
-      "sourceUnit": "安监部",
-      "incomingDate": "2026-07-09"
-    }
-  }'
+  -F "source_doc_id=doc-risk-001" \
+  -F "document_number=来文〔2026〕1号" \
+  -F "title=风险整改来文" \
+  -F "incoming_type=安全管理" \
+  -F "source_unit=安监部" \
+  -F "incoming_date=2026-07-09" \
+  -F "source_system=oa" \
+  -F "files=@./来文〔2026〕1号.pdf" \
+  -F "files=@./附件1-整改清单.xlsx" \
+  -F 'file_metas=[
+    {"source_file_id":"file-001","filename":"来文〔2026〕1号.pdf"},
+    {"source_file_id":"file-002","filename":"附件1-整改清单.xlsx"}
+  ]'
 ```
 
 期望响应：
 
 ```json
 {
-  "incomingId": "inc_xxx",
-  "taskId": "task_xxx",
   "status": "accepted",
-  "knowledgeImportStatus": "none"
+  "sourceDocId": "doc-risk-001",
+  "items": [
+    {
+      "incomingId": "inc_xxx",
+      "taskId": "task_xxx",
+      "status": "accepted",
+      "sourceFileId": "file-001",
+      "filename": "来文〔2026〕1号.pdf",
+      "isMainFile": true,
+      "knowledgeImportStatus": "none"
+    },
+    {
+      "incomingId": "inc_yyy",
+      "taskId": "task_yyy",
+      "status": "accepted",
+      "sourceFileId": "file-002",
+      "filename": "附件1-整改清单.xlsx",
+      "isMainFile": false,
+      "knowledgeImportStatus": "none"
+    }
+  ]
 }
 ```
 
-### 1.2 multipart 二进制上传模式
-
-适用于外部系统直接把文件内容推给 docMind。
-
-必填字段：
-
-- `file`：文件二进制。
-- `sourceKey`：外部来源中的稳定来文或附件唯一键。
-- `filename`：文件名；不传时可从 `file.filename` 读取。
-
-可选字段：
-
-- `sourceUrl`
-- `sourceDocId`
-- `sourceSystem`
-- `sourceSizeText`
-- `fileSize`
-- `contentHash`
-- `metadata`：JSON 字符串。
-
-请求示例：
-
-```bash
-curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
-  -H "Authorization: $DOCMIND_TOKEN" \
-  -F "file=@./incoming-risk-001.pdf" \
-  -F "sourceKey=att-risk-001-bin" \
-  -F "sourceDocId=doc-risk-001" \
-  -F "sourceSystem=oa" \
-  -F "filename=incoming-risk-001.pdf" \
-  -F "metadata={\"businessId\":\"risk-case-001\",\"documentNumber\":\"来文〔2026〕1号\",\"title\":\"风险整改来文\",\"incomingType\":\"安全管理\",\"sourceUnit\":\"安监部\",\"incomingDate\":\"2026-07-09\"}"
-```
-
-### 1.3 结果检查
+### 1.2 结果检查
 
 1. 打开 Web「来文管理」。
-2. 搜索 `incoming-risk-001.pdf` 或 `att-risk-001`。
+2. 搜索 `来文〔2026〕1号`、`doc-risk-001` 或 `file-001`。
 3. 检查列表字段：
    - 状态最终为 `ready`。
    - 分类有值。
    - 入库状态为 `none`。
+   - 来文文号、标题、类别、单位、日期有值。
+   - 主文件 `isMainFile=true`，附件 `isMainFile=false`。
 4. 打开详情：
    - 原文地址存在。
    - Markdown 预览存在。
@@ -154,9 +147,10 @@ curl -X POST "$DOCMIND_API/incoming-documents/extractions/query" \
   -d '{
     "files": [
       {
-        "id": "att-risk-001",
-        "name": "incoming-risk-001.pdf",
-        "sourceKey": "att-risk-001",
+        "id": "file-001",
+        "name": "来文〔2026〕1号.pdf",
+        "sourceKey": "file-001",
+        "sourceDocId": "doc-risk-001",
         "sourceSystem": "oa"
       }
     ]
@@ -442,13 +436,15 @@ curl "$DOCMIND_API/chat/threads?limit=50&offset=0&conversation_scope_key=oa:e2eI
 - 两次返回的 thread ID 不交叉。
 - 每个 thread 的 `metadata.conversation_scope_key` 与查询 scope 一致。
 
+未预上传时，iframe 会先按 `sourceUrl` 下载附件内容，再用 multipart 方式提交 `/api/incoming-documents/ingest`。因此附件下载地址必须是浏览器可直接访问的同源地址，或外部系统已正确开放 CORS；否则浏览器会在上传前拦截下载。浏览器 Network 中应能看到一次附件下载请求，以及一次 `Content-Type: multipart/form-data` 的来文上传请求。
+
 ## 回归检查矩阵
 
 | 编号 | 场景 | 操作 | 通过标准 |
 | --- | --- | --- | --- |
-| E2E-01 | 外部 JSON 上传 | `POST /incoming-documents/ingest` JSON | 返回 `accepted`，来文最终 `ready` |
-| E2E-02 | 外部 multipart 上传 | 上传真实文件 | 返回 `accepted`，原文和 Markdown 存在 |
-| E2E-03 | 幂等上传 | 同一 `sourceSystem + sourceDocId/sourceKey` 重复上传 | hash 相同返回 `exists` 或复用记录，不重复解析 |
+| E2E-01 | 外部 multipart 多文件上传 | 上传主文件和附件真实文件 | 返回 `accepted`，每个文件生成独立 `items` |
+| E2E-02 | 原文与 Markdown 存储 | 查看来文详情和 MinIO 对象 | 原文和 Markdown 存在，数据库只存地址和元数据 |
+| E2E-03 | 幂等上传 | 同一 `source_system + source_doc_id + source_file_id` 重复上传 | hash 相同返回 `exists` 或复用记录，不重复解析 |
 | E2E-04 | iframe 预上传匹配 | 外部先以 `sourceSystem=oa` 上传，iframe 附件也带 `sourceSystem=oa` | 查询返回 `matched`，不重复自动上传 |
 | E2E-05 | iframe 自动同步 | example 真实附件未预上传 | 首次 `pending_sync`，随后自动 ingest |
 | E2E-06 | 解析中问答 | 任务未 ready 时提问 | 回答提示等待解析，不编造 |
@@ -465,7 +461,9 @@ curl "$DOCMIND_API/chat/threads?limit=50&offset=0&conversation_scope_key=oa:e2eI
 PostgreSQL 可检查：
 
 ```sql
-select incoming_id, source_system, source_document_id, source_key, filename,
+select incoming_id, source_system, source_document_id, source_file_id, source_key,
+       document_number, title, incoming_type, source_unit, incoming_date,
+       is_main_file, filename,
        status, classification, knowledge_import_status, linked_kb_id, linked_file_id
 from incoming_documents
 order by created_at desc
@@ -484,7 +482,6 @@ limit 20;
 
 Tasker 可观察：
 
-- `incoming_document_ingest`：sourceUrl 下载任务。
 - `incoming_document_process`：原文解析、摘要、业务抽取任务。
 - `knowledge_ingest`：人工存入知识库后的知识库解析/索引任务。
 
@@ -492,9 +489,8 @@ Tasker 可观察：
 
 | 现象 | 优先检查 |
 | --- | --- |
-| JSON 上传 422 | 是否缺 `sourceUrl/sourceKey/filename` |
-| multipart 上传 400 | 是否缺 `file/sourceKey/filename`，文件是否超过 100 MB |
-| 自动同步后仍 not_found | Network 是否调用 `/incoming-documents/ingest`，`sourceKey/sourceSystem` 是否与查询一致 |
+| multipart 上传 400 | 是否缺 `source_doc_id/files/file_metas`，`file_metas` 数量是否与文件一致，文件是否超过 100 MB |
+| 自动同步后仍 not_found | Network 是否完成附件下载和 multipart `/incoming-documents/ingest`，`sourceKey/sourceSystem` 是否与查询一致 |
 | 状态一直 parsing | worker 是否运行，Parser 是否支持该文件类型，MinIO 是否可读 |
 | 状态 ready 但无摘要 | 模型配置是否可用，查看 `processing_error` |
 | 业务抽取无结果 | 文档是否命中分类；业务抽取失败不会阻断来文 ready，需看后端 warning |

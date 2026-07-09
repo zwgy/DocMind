@@ -16,9 +16,16 @@ class IncomingDocumentRepository:
     _writable_fields = {
         "source_system",
         "source_document_id",
+        "source_file_id",
         "source_key",
         "source_url",
         "filename",
+        "document_number",
+        "title",
+        "incoming_type",
+        "source_unit",
+        "incoming_date",
+        "is_main_file",
         "content_hash",
         "file_size",
         "mime_type",
@@ -51,9 +58,28 @@ class IncomingDocumentRepository:
     async def get_by_source_identity(self, source_system: str, source_document_id: str) -> IncomingDocument | None:
         async with pg_manager.get_async_session_context() as session:
             result = await session.execute(
+                select(IncomingDocument)
+                .where(
+                    IncomingDocument.source_system == source_system,
+                    IncomingDocument.source_document_id == source_document_id,
+                )
+                .order_by(IncomingDocument.created_at.desc())
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+
+    async def get_by_file_identity(
+        self,
+        source_system: str,
+        source_document_id: str,
+        source_file_id: str,
+    ) -> IncomingDocument | None:
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
                 select(IncomingDocument).where(
                     IncomingDocument.source_system == source_system,
                     IncomingDocument.source_document_id == source_document_id,
+                    IncomingDocument.source_file_id == source_file_id,
                 )
             )
             return result.scalar_one_or_none()
@@ -94,7 +120,10 @@ class IncomingDocumentRepository:
                     or_(
                         IncomingDocument.filename.ilike(pattern),
                         IncomingDocument.source_document_id.ilike(pattern),
+                        IncomingDocument.source_file_id.ilike(pattern),
                         IncomingDocument.source_key.ilike(pattern),
+                        IncomingDocument.document_number.ilike(pattern),
+                        IncomingDocument.title.ilike(pattern),
                     )
                 )
 
