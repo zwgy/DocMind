@@ -27,6 +27,18 @@ SummarizeDocumentFn = Callable[..., Awaitable[dict[str, Any]]]
 INCOMING_DOCUMENT_INGEST_TASK_TYPE = "incoming_document_ingest"
 INCOMING_DOCUMENT_PROCESS_TASK_TYPE = "incoming_document_process"
 INCOMING_SUMMARY_MARKDOWN_LIMIT = 20_000
+INCOMING_CLASSIFICATION_CATEGORIES = (
+    "通报类",
+    "考评类",
+    "奖惩处置类",
+    "规章制度类",
+    "技术标准类",
+    "安全管理类",
+    "风险管理类",
+    "阶段性工作类",
+    "长期管理要求类",
+    "其他",
+)
 INCOMING_ALLOWED_CONTENT_TYPES = (
     "application/pdf",
     "application/msword",
@@ -52,7 +64,7 @@ class IncomingKnowledgeImportConflict(ValueError):
 
 
 class IncomingDocumentSummary(BaseModel):
-    """来文处理阶段写回 chat-iframe 的摘要载体。"""
+    """来文处理阶段写回数据库的摘要载体。"""
 
     classification: str = Field(default="其他")
     classification_confidence: float | None = Field(default=None, ge=0, le=1)
@@ -518,17 +530,29 @@ async def _summarize_incoming_document(
 ) -> dict[str, Any]:
     from yuxi.config.app import config
 
-    # 摘要面向 chat-iframe 首轮问答，优先给足事实；精确全文仍由 read_file/预览负责。
+    # 摘要优先给足事实；精确全文仍由 read_file/预览负责。
     metadata_text = json.dumps(metadata or {}, ensure_ascii=False)
+    categories_text = "、".join(INCOMING_CLASSIFICATION_CATEGORIES)
     prompt = "\n".join(
         [
             "请阅读来文解析内容，输出严格 JSON，不要输出解释。JSON 字段：",
-            "- classification: 单一来文分类名称；无法判断时填“其他”",
+            f"- classification: 单一来文分类名称，只能从以下类别中选择：{categories_text}",
             "- classification_confidence: 0 到 1 的置信度",
-            "- summary: 面向 chat-iframe 的完整附件摘要，既包含结论，也包含足以回答常见追问的关键事实",
-            "- structured_result: 可机器读取的关键字段对象；没有明确字段时返回 {}",
+            "- summary: 完整来文摘要，既包含结论，也包含关键事实、要求、对象、时间节点和注意事项",
+            "- structured_result: 摘要阶段的轻量关键事实对象，用于快速展示；不是正式业务结构化抽取结果。没有明确字段时返回 {}",
             "",
-            "规则：外部元数据可辅助理解标题、文号、类别、来文单位和日期，但最终摘要必须以正文内容为准。",
+            "structured_result 建议字段：",
+            "- document_meta: 文号、标题、来文单位、来文日期等原文或元数据中明确存在的信息",
+            "- key_points: 主要事项列表",
+            "- requirements: 明确要求、整改措施、执行动作列表",
+            "- deadlines: 明确时间节点列表",
+            "- subjects: 涉及部门、单位、人员、系统或对象列表",
+            "- risks: 明确风险或问题列表",
+            "",
+            "规则：",
+            "1. 分类无法判断时填“其他”。",
+            "2. 外部元数据可辅助理解标题、文号、类别、来文单位和日期，但最终摘要必须以正文内容为准。",
+            "3. 不要编造正文和元数据中不存在的信息。",
             "",
             f"文件名：{filename}",
             f"外部元数据：{metadata_text}",

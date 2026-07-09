@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from yuxi.services import incoming_document_ingest_service as ingest_module
 from yuxi.services.incoming_document_ingest_service import IncomingDocumentIngestService
 
 
@@ -94,6 +95,37 @@ class FakeContext:
 
     async def set_progress(self, percent, message):
         self.progress.append((percent, message))
+
+
+async def test_summarize_prompt_declares_categories_and_avoids_iframe_wording(monkeypatch):
+    captured = {}
+
+    class FakeModelJsonLLM:
+        def __init__(self, model_spec):
+            captured["model_spec"] = model_spec
+
+        async def complete_json(self, prompt, schema):
+            captured["prompt"] = prompt
+            return {
+                "classification": "安全管理类",
+                "classification_confidence": 0.8,
+                "summary": "摘要",
+                "structured_result": {"requirements": ["按期整改"]},
+            }
+
+    monkeypatch.setattr(ingest_module, "ModelJsonLLM", FakeModelJsonLLM)
+
+    result = await ingest_module._summarize_incoming_document(
+        filename="incoming.pdf",
+        markdown="请按期完成安全整改。",
+        metadata={"title": "安全整改通知"},
+    )
+
+    assert result["classification"] == "安全管理类"
+    assert "通报类、考评类、奖惩处置类" in captured["prompt"]
+    assert "其他" in captured["prompt"]
+    assert "不是正式业务结构化抽取结果" in captured["prompt"]
+    assert "chat-iframe" not in captured["prompt"]
 
 
 async def test_ingest_direct_file_reuses_existing_source_key():
