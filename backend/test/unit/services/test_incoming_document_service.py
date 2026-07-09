@@ -41,9 +41,34 @@ class FakeIncomingRepo:
         return self.responses.get(("filename", filename), [])
 
 
+class FakeExtractionRepo:
+    def __init__(self, responses=None):
+        self.responses = responses or {}
+
+    async def get_latest_by_incoming_id(self, incoming_id):
+        return self.responses.get(incoming_id)
+
+
 async def test_query_returns_ready_incoming_summary_for_source_key_match():
     service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo({("source_key", "202606100417"): [incoming_record()]})
+        incoming_repo=FakeIncomingRepo({("source_key", "202606100417"): [incoming_record()]}),
+        extraction_repo=FakeExtractionRepo(
+            {
+                "inc_1": {
+                    "run_id": "ber_1",
+                    "categories": {"risk_management": {"matched": True, "evidence": "存在资质风险"}},
+                    "schema_ids": ["risk_item"],
+                    "items": [
+                        {
+                            "item_id": "bei_1",
+                            "item_type": "risk_item",
+                            "data": {"risk_name": "资质待核验"},
+                            "source_quote": "需复核 Global Finance 的资质",
+                        }
+                    ],
+                }
+            }
+        ),
     )
 
     result = await service.query_extractions(
@@ -64,16 +89,18 @@ async def test_query_returns_ready_incoming_summary_for_source_key_match():
     assert item["incomingId"] == "inc_1"
     assert item["classification"] == "客户审查"
     assert item["summary"] == "这是一份客户审查来文摘要。"
-    assert item["structuredResult"] == {"risks": ["资质待核验"]}
+    assert item["runId"] == "ber_1"
+    assert item["schemaIds"] == ["risk_item"]
+    assert item["items"][0]["item_type"] == "risk_item"
+    assert item["items"][0]["data"] == {"risk_name": "资质待核验"}
     assert item["hasMarkdown"] is True
     assert item["knowledgeImportStatus"] == "none"
 
 
 async def test_query_returns_markdown_hint_when_summary_missing():
     service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo(
-            {("source_key", "202606100417"): [incoming_record(summary=None, structured_result=None)]}
-        )
+        incoming_repo=FakeIncomingRepo({("source_key", "202606100417"): [incoming_record(summary=None)]}),
+        extraction_repo=FakeExtractionRepo(),
     )
 
     result = await service.query_extractions(
@@ -98,9 +125,8 @@ async def test_query_returns_markdown_hint_when_summary_missing():
 
 async def test_query_translates_match_miss_states():
     service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo(
-            {("filename", "来文.docx"): [incoming_record(), incoming_record(incoming_id="inc_2")]}
-        )
+        incoming_repo=FakeIncomingRepo({("filename", "来文.docx"): [incoming_record(), incoming_record(incoming_id="inc_2")]}),
+        extraction_repo=FakeExtractionRepo(),
     )
 
     result = await service.query_extractions(

@@ -396,7 +396,7 @@ test('buildIframeContext keeps all selected files without changing the query', (
         kbId: 'kb1',
         fileId: 'file1',
         categories: { risk: { matched: true, evidence: '超期' } },
-        structuredResult: { riskLevel: 'high' },
+        schemaIds: ['risk_item'],
         items: [{ source_quote: '付款超期' }]
       },
       f2: {
@@ -412,7 +412,9 @@ test('buildIframeContext keeps all selected files without changing the query', (
   assert.equal(context.files.length, 2)
   assert.equal(context.files[0].fileId, 'file1')
   assert.match(context.files[0].summary, /付款超期/)
-  assert.deepEqual(context.files[0].structuredResult, { riskLevel: 'high' })
+  assert.deepEqual(context.files[0].categories, { risk: { matched: true, evidence: '超期' } })
+  assert.deepEqual(context.files[0].schemaIds, ['risk_item'])
+  assert.deepEqual(context.files[0].items, [{ source_quote: '付款超期' }])
   assert.equal(context.files[1].name, '报价.pdf')
   assert.equal(context.files[1].summary, undefined)
 })

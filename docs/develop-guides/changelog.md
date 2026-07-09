@@ -8,7 +8,7 @@
 
 ### 开发记录
 - 独立业务结构化抽取模块：将原知识库下的业务抽取迁移为 `document_extraction`，数据表统一为 `document_business_extraction_runs/results/items`；移除旧 `incoming_document_extraction_runs` 与 `knowledge_business_extraction_*` 表语义，来文解析 Markdown 后触发业务抽取，知识库普通上传不再触发业务抽取，从来文存入知识库时仅关联既有抽取结果并补齐 `kb_id/file_id`。
-- 调整来文摘要提示和接口契约：`/api/incoming-documents/ingest` 当前仅支持 multipart 多文件上传，外部系统按 snake_case 字段传入 `source_doc_id/document_number/title/incoming_type/source_unit/incoming_date/files/file_metas`；每个文件以 `source_file_id` 独立保存和处理，未传来文文号时默认首个文件为主文件；原文与 Markdown 仍写入 MinIO，PostgreSQL 仅保存地址、元数据、摘要和状态；`chat-iframe` 自动同步改为以 `no-store` 下载附件内容后 multipart 上传；摘要提示的分类候选从 `DocumentCategoryResult` 动态读取，系统提示词注入摘要、`structuredResult` 和全文读取方式。
+- 调整来文摘要提示和接口契约：`/api/incoming-documents/ingest` 当前仅支持 multipart 多文件上传，外部系统按 snake_case 字段传入 `source_doc_id/document_number/title/incoming_type/source_unit/incoming_date/files/file_metas`；每个文件以 `source_file_id` 独立保存和处理，未传来文文号时默认首个文件为主文件；原文与 Markdown 仍写入 MinIO，PostgreSQL 仅保存地址、元数据、摘要和状态；`chat-iframe` 自动同步改为以 `no-store` 下载附件内容后 multipart 上传；摘要提示的分类候选从 `DocumentCategoryResult` 动态读取，系统提示词注入摘要、业务结构化抽取 items 和全文读取方式。
 
 - 解耦来文接入与知识库默认入库：`/api/incoming-documents/ingest` 不再依赖 `INCOMING_DEFAULT_KB_ID`，来文上传后先保存为独立 `incoming_documents` 记录并提交 `incoming_document_process` 任务；新增来文与来文抽取运行 PostgreSQL 表，查询接口改为返回 `incomingId/processingStatus/summary/hasMarkdown/knowledgeImportStatus` 等来文字段，为后续 Web「来文管理」人工存入知识库打基础。
 - 接入来文解析摘要处理任务：`incoming_document_process` 现在会读取已保存原文，复用现有 Parser 解析为 Markdown 并保存到 MinIO，随后通过默认业务抽取模型生成单一分类、置信度、完整摘要与结构化字段，状态按 `parsing/summarizing/ready/failed` 落回 `incoming_documents`，仍不触发向量化或知识库入库。

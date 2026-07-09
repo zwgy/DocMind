@@ -117,11 +117,24 @@ def _summary_from_file(file_info: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def _structured_result_text(file_info: dict[str, Any]) -> str:
-    structured = file_info.get("structuredResult")
-    if not isinstance(structured, dict) or not structured:
+def _business_items_text(file_info: dict[str, Any]) -> str:
+    items = file_info.get("items")
+    if not isinstance(items, list):
         return ""
-    return json.dumps(structured, ensure_ascii=False)
+    lines: list[str] = []
+    for item in items[:5]:
+        if not isinstance(item, dict):
+            continue
+        item_type = _clean_text(item.get("item_type")) or "unknown"
+        data = item.get("confirmed_data") or item.get("data") or {}
+        source_quote = _clean_text(item.get("source_quote"))
+        parts = [f"- {item_type}"]
+        if isinstance(data, dict) and data:
+            parts.append(json.dumps(data, ensure_ascii=False))
+        if source_quote:
+            parts.append(f"依据：{source_quote}")
+        lines.append("；".join(parts))
+    return "\n".join(lines)
 
 
 async def _read_incoming_markdown(incoming_id: str) -> str:
@@ -148,9 +161,9 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
         summary, _ = _truncate(summary, IFRAME_FILE_SUMMARY_CHARS)
         lines.extend(["  状态：已有摘要", f"  摘要：{summary}"])
 
-    structured = _structured_result_text(file_info)
-    if structured:
-        lines.append(f"  结构化信息：{structured}")
+    business_items = _business_items_text(file_info)
+    if business_items:
+        lines.extend(["  结构化信息：", business_items])
 
     if not summary:
         if match_status == "multiple":

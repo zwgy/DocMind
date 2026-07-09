@@ -96,6 +96,28 @@ class DocumentBusinessExtractionRepository:
             result, run = pair
             return await self._build_view(session, result, run)
 
+    async def get_latest_by_incoming_id(self, incoming_id: str) -> dict[str, Any] | None:
+        async with pg_manager.get_async_session_context() as session:
+            row = await session.execute(
+                select(DocumentBusinessExtractionResult, DocumentBusinessExtractionRun)
+                .join(
+                    DocumentBusinessExtractionRun,
+                    DocumentBusinessExtractionRun.run_id == DocumentBusinessExtractionResult.run_id,
+                )
+                .where(
+                    DocumentBusinessExtractionResult.document_scope == "incoming",
+                    DocumentBusinessExtractionResult.incoming_id == incoming_id,
+                    DocumentBusinessExtractionRun.status == "success",
+                )
+                .order_by(DocumentBusinessExtractionResult.created_at.desc())
+                .limit(1)
+            )
+            pair = row.one_or_none()
+            if pair is None:
+                return None
+            result, run = pair
+            return await self._build_view(session, result, run)
+
     async def link_knowledge_file(self, *, incoming_id: str, kb_id: str, file_id: str) -> None:
         async with pg_manager.get_async_session_context() as session:
             # 来文入库只补充关联，不重新业务抽取，保证来文阶段的抽取结果是唯一来源。

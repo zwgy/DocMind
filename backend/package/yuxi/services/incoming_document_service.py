@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from yuxi.repositories.document_business_extraction_repository import DocumentBusinessExtractionRepository
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
 
 
@@ -31,14 +32,15 @@ class IncomingDocumentService:
         self,
         *,
         incoming_repo: IncomingDocumentRepository | None = None,
+        extraction_repo: DocumentBusinessExtractionRepository | None = None,
         file_repo=None,
-        extraction_repo=None,
         tasker=None,
         model_spec: str | None = None,
     ):
         # 旧依赖已不再参与匹配；保留构造参数，避免调用方一次性大改。
-        del file_repo, extraction_repo, tasker, model_spec
+        del file_repo, tasker, model_spec
         self.incoming_repo = incoming_repo or IncomingDocumentRepository()
+        self.extraction_repo = extraction_repo or DocumentBusinessExtractionRepository()
 
     async def query_extractions(self, files: list[dict[str, Any]]) -> dict[str, Any]:
         return {"items": [await self._query_one(IncomingPageFile.model_validate(item)) for item in files]}
@@ -68,6 +70,7 @@ class IncomingDocumentService:
         has_markdown = bool(getattr(record, "markdown_file_url", None))
         summary = getattr(record, "summary", None)
         extraction_status = "ready" if processing_status == "ready" and summary else processing_status
+        business_extraction = await self.extraction_repo.get_latest_by_incoming_id(record.incoming_id)
         return base | {
             "incomingId": record.incoming_id,
             "matchStatus": "matched",
@@ -75,7 +78,10 @@ class IncomingDocumentService:
             "extractionStatus": extraction_status,
             "classification": getattr(record, "classification", None),
             "summary": summary,
-            "structuredResult": getattr(record, "structured_result", None) or {},
+            "runId": (business_extraction or {}).get("run_id"),
+            "categories": (business_extraction or {}).get("categories") or {},
+            "schemaIds": (business_extraction or {}).get("schema_ids") or [],
+            "items": (business_extraction or {}).get("items") or [],
             "hasMarkdown": has_markdown,
             "knowledgeImportStatus": getattr(record, "knowledge_import_status", None) or "none",
             "linkedKbId": getattr(record, "linked_kb_id", None),

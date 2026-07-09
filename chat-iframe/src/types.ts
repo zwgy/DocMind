@@ -73,7 +73,7 @@ export type ExtractionResult = {
   taskId?: string | null
   categories?: Record<string, ExtractionCategory>
   items?: ExtractionItem[]
-  structuredResult?: Record<string, unknown>
+  schemaIds?: string[]
 }
 
 export type IframeContextFile = IncomingPageFile & {
@@ -86,7 +86,9 @@ export type IframeContextFile = IncomingPageFile & {
   runId?: string | null
   summary?: string
   summaryTruncated?: boolean
-  structuredResult?: Record<string, unknown>
+  categories?: Record<string, ExtractionCategory>
+  items?: ExtractionItem[]
+  schemaIds?: string[]
 }
 
 export type IframeContextPayload = {
