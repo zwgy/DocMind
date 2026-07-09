@@ -92,8 +92,6 @@ class IncomingDocument(Base):
         ),
         Index("ix_incoming_documents_source_function_id", "source_function_id"),
         Index("ix_incoming_documents_source_file_id", "source_file_id"),
-        Index("ix_incoming_documents_status", "status"),
-        Index("ix_incoming_documents_knowledge_import_status", "knowledge_import_status"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -169,9 +167,6 @@ class DocumentBusinessExtractionRun(Base):
     __table_args__ = (
         UniqueConstraint("run_id", name="uq_document_business_extraction_runs_run_id"),
         Index("ix_document_business_extraction_runs_scope", "document_scope"),
-        Index("ix_document_business_extraction_runs_incoming_id", "incoming_id"),
-        Index("ix_document_business_extraction_runs_file_id", "file_id"),
-        Index("ix_document_business_extraction_runs_kb_id", "kb_id"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -196,10 +191,6 @@ class DocumentBusinessExtractionResult(Base):
     __table_args__ = (
         UniqueConstraint("run_id", name="uq_document_business_extraction_results_run_id"),
         Index("ix_document_business_extraction_results_scope", "document_scope"),
-        Index("ix_document_business_extraction_results_incoming_id", "incoming_id"),
-        Index("ix_document_business_extraction_results_file_id", "file_id"),
-        Index("ix_document_business_extraction_results_kb_id", "kb_id"),
-        Index("ix_document_business_extraction_results_status", "status"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -230,8 +221,6 @@ class DocumentBusinessExtractionItem(Base):
     __table_args__ = (
         UniqueConstraint("item_id", name="uq_document_business_extraction_items_item_id"),
         Index("ix_document_business_extraction_items_result_id", "result_id"),
-        Index("ix_document_business_extraction_items_incoming_id", "incoming_id"),
-        Index("ix_document_business_extraction_items_file_id", "file_id"),
         Index("ix_document_business_extraction_items_chunk_id", "chunk_id"),
         Index("ix_document_business_extraction_items_type_status", "item_type", "status"),
     )
