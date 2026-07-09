@@ -49,7 +49,7 @@ class FakeExtractionRepo:
         return self.responses.get(incoming_id)
 
 
-async def test_query_returns_ready_incoming_summary_for_source_key_match():
+async def test_query_returns_ready_incoming_summary_for_source_file_id_match():
     service = IncomingDocumentService(
         incoming_repo=FakeIncomingRepo({("source_key", "202606100417"): [incoming_record()]}),
         extraction_repo=FakeExtractionRepo(
@@ -76,7 +76,7 @@ async def test_query_returns_ready_incoming_summary_for_source_key_match():
             {
                 "id": "202606100417",
                 "name": "来文.docx",
-                "sourceUrl": "http://example/a?202606100417",
+                "source_url": "http://example/a?202606100417",
                 "source_file_id": "202606100417",
                 "source_system": "oa",
             }
@@ -110,7 +110,7 @@ async def test_query_returns_markdown_hint_when_summary_missing():
             {
                 "id": "202606100417",
                 "name": "incoming.docx",
-                "sourceKey": "202606100417",
+                "source_file_id": "202606100417",
             }
         ]
     )
@@ -133,7 +133,7 @@ async def test_query_translates_match_miss_states():
 
     result = await service.query_extractions(
         [
-            {"id": "a", "name": "缺失.docx", "sourceKey": "missing"},
+            {"id": "a", "name": "缺失.docx", "source_file_id": "missing"},
             {"id": "b", "name": "只有文件名.docx"},
             {"id": "c", "name": "来文.docx"},
         ]

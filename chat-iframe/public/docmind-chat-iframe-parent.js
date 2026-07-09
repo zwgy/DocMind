@@ -46,11 +46,10 @@
     return href && href !== '###' && href !== '#' ? href : ''
   }
 
-  function sourceKeyFromUrl(url) {
+  function sourceFileIdFromUrl(url) {
     var text = stripText(url)
     var query = text.split('?')[1]
     if (query) {
-      // 旧系统常把附件 ID 直接放在 query 第一段，保留这个降级能减少对 DOM 属性的依赖。
       var first = query.split('&')[0]
       return first.indexOf('=') >= 0 ? first.split('=').pop() : first
     }
@@ -64,28 +63,26 @@
     })
     var normalized = (files || [])
       .filter(function (file) {
-        return file && isDocumentFile(file.name || file.url || file.sourceUrl)
+        return file && isDocumentFile(file.name || file.source_url)
       })
       .map(function (file) {
-        var sourceUrl = file.sourceUrl || file.url || ''
-        var sourceKey = file.source_file_id || file.sourceFileId || file.sourceKey || file.id || sourceKeyFromUrl(sourceUrl)
+        var sourceUrl = file.source_url || ''
+        var sourceFileId = file.source_file_id || file.id || sourceFileIdFromUrl(sourceUrl)
         var normalizedFile = {
-          id: file.id || sourceKey || file.name,
+          id: file.id || sourceFileId || file.name,
           name: file.name,
-          sourceUrl: sourceUrl,
-          url: sourceUrl,
-          sourceKey: sourceKey,
+          source_url: sourceUrl,
+          source_file_id: sourceFileId,
           type: file.type || 'document',
-          selected: Boolean(file.selected || selectedMap[file.id] || selectedMap[sourceKey])
+          selected: Boolean(file.selected || selectedMap[file.id] || selectedMap[sourceFileId])
         }
-        normalizedFile.source_file_id = file.source_file_id || file.sourceFileId || sourceKey
-        if (file.source_doc_id || file.sourceDocId) normalizedFile.source_doc_id = file.source_doc_id || file.sourceDocId
-        if (file.sourceSystem || file.source_system) normalizedFile.sourceSystem = file.sourceSystem || file.source_system
+        if (file.source_doc_id) normalizedFile.source_doc_id = file.source_doc_id
+        if (file.source_system) normalizedFile.source_system = file.source_system
         ;['document_number', 'title', 'incoming_type', 'source_unit', 'incoming_date'].forEach(function (key) {
           if (file[key]) normalizedFile[key] = file[key]
         })
-        if (file.sizeText) normalizedFile.sizeText = file.sizeText
-        if (file.sizeBytes) normalizedFile.sizeBytes = file.sizeBytes
+        if (file.size_text) normalizedFile.size_text = file.size_text
+        if (file.size_bytes) normalizedFile.size_bytes = file.size_bytes
         if (file.onclick) normalizedFile.onclick = file.onclick
         return normalizedFile
       })
@@ -98,7 +95,14 @@
 
   function extractFilesFromDocument(doc) {
     // 优先走生产系统附件容器，避免全页链接扫描把普通导航误判成来文附件。
-    var links = Array.prototype.slice.call(doc.querySelectorAll('.items .item[attachment] a'))
+    var items = Array.prototype.slice.call(doc.querySelectorAll('.items .item[attachment]'))
+    var links = items
+      .map(function (item) {
+        return item.querySelector
+          ? item.querySelector('a[onclick*="YZSoft.File.download"]') || item.querySelector('a')
+          : null
+      })
+      .filter(Boolean)
     if (!links.length) {
       links = Array.prototype.slice.call(doc.querySelectorAll('a'))
     }
@@ -109,20 +113,18 @@
         var sizeText = cleanSizeText(sizeNode ? sizeNode.textContent : link.textContent)
         var onclick = link.getAttribute ? link.getAttribute('onclick') : ''
         var sourceUrl = extractDownloadUrl(onclick, link.href)
-        // sourceKey 是后端匹配优先级最高的字段，按生产系统最稳定的来源依次降级。
-        var sourceKey =
+        var sourceFileId =
           (item && item.getAttribute && item.getAttribute('attachment')) ||
           (item && item.id ? item.id.replace(/_BOX$/i, '') : '') ||
-          sourceKeyFromUrl(sourceUrl)
+          sourceFileIdFromUrl(sourceUrl)
         var name = cleanName(link.textContent, sizeText)
         if (!name || !isDocumentFile(name)) return null
         return {
-          id: sourceKey || name,
+          id: sourceFileId || name,
           name: name,
-          sourceUrl: sourceUrl,
-          url: sourceUrl,
-          sourceKey: sourceKey,
-          sizeText: sizeText,
+          source_url: sourceUrl,
+          source_file_id: sourceFileId,
+          size_text: sizeText,
           onclick: onclick,
           type: 'document'
         }

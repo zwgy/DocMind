@@ -43,7 +43,7 @@ function cacheExtractionResults(files: IncomingPageFile[], items: ExtractionResu
     const item =
       items.find((candidate) => {
         const incomingId = candidate.incomingFileId || candidate.name
-        return incomingId === file.id || incomingId === file.sourceKey || incomingId === file.sourceUrl || incomingId === file.name
+        return incomingId === file.id || incomingId === file.source_file_id || incomingId === file.source_url || incomingId === file.name
       }) || items[index]
     if (item) next[file.id] = item
   }
@@ -65,13 +65,13 @@ async function refreshExtraction() {
     cacheExtractionResults(queryFiles, response.items || [])
     const pendingFiles = queryFiles.filter((file) => {
       const result = results.value[file.id]
-      return result?.matchStatus === 'pending_sync' && (file.sourceUrl || file.url) && !ingestingFileIds.has(file.id)
+      return result?.matchStatus === 'pending_sync' && file.source_url && !ingestingFileIds.has(file.id)
     })
     if (pendingFiles.length) {
       pendingFiles.forEach((file) => ingestingFileIds.add(file.id))
       await Promise.all(
         pendingFiles.map((file) =>
-          ingestIncomingDocument(file, context.config.token, { sourceSystem: context.config.source_system }).catch(() => null)
+          ingestIncomingDocument(file, context.config.token, { source_system: context.config.source_system }).catch(() => null)
         )
       )
       response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)

@@ -103,7 +103,7 @@ export function buildChatQuery(input: ChatContextInput) {
   }
   if (input.includeFile && input.selectedFile) {
     const fileLines = [`附件：${input.selectedFile.name}`]
-    if (input.selectedFile.sourceKey) fileLines.push(`来源编号：${input.selectedFile.sourceKey}`)
+    if (input.selectedFile.source_file_id) fileLines.push(`来源编号：${input.selectedFile.source_file_id}`)
     const extraction = summarizeExtraction(input.extractionResult)
     if (extraction) fileLines.push(extraction)
     parts.push(`文件上下文：\n${fileLines.join('\n')}`)

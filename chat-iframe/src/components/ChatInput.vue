@@ -265,7 +265,7 @@ watch(text, resizeTextarea)
             <CheckSquare v-if="selectedPageFileIds.has(file.id)" :size="16" />
             <SquareIcon v-else :size="16" />
             <span :title="file.name">{{ file.name }}</span>
-            <small>{{ file.sizeText || file.sourceKey || '文档' }}</small>
+            <small>{{ file.size_text || file.source_file_id || '文档' }}</small>
           </button>
           <p v-if="!pageFiles.length" class="popover-empty">当前页面没有可询问附件</p>
         </div>

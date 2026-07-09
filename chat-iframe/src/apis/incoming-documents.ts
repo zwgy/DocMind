@@ -2,7 +2,7 @@ import type { ExtractionQueryResponse, IncomingPageFile } from '@/types'
 import { apiUrl } from './api-url.ts'
 
 function mockExtractionItem(file: IncomingPageFile, mode: string, index: number) {
-  const incomingFileId = file.id || file.sourceKey || file.sourceUrl || file.name
+  const incomingFileId = file.id || file.source_file_id || file.source_url || file.name
   const shouldReady = mode === 'ready' || (mode === 'mixed' && index === 0)
   if (!shouldReady) {
     return {
@@ -22,7 +22,7 @@ function mockExtractionItem(file: IncomingPageFile, mode: string, index: number)
     hasParsedMarkdown: true,
     extractionStatus: 'ready',
     runId: `ber_mock_${index + 1}`,
-    reason: 'source_key matched',
+    reason: 'source_file_id matched',
     categories: {
       risk: {
         matched: true,
@@ -78,20 +78,20 @@ export async function queryIncomingDocumentExtractions(
 export async function ingestIncomingDocument(
   file: IncomingPageFile,
   token?: string,
-  options: { sourceSystem?: string } = {}
+  options: { source_system?: string } = {}
 ): Promise<Record<string, unknown>> {
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
-  const sourceUrl = file.sourceUrl || file.url
+  const sourceUrl = file.source_url
   if (!sourceUrl) throw new Error('附件缺少下载地址')
   const fileResponse = await fetch(sourceUrl, { cache: 'no-store' })
   if (!fileResponse.ok) throw new Error(`附件下载失败：${fileResponse.status}`)
   const blob = await fileResponse.blob()
-  const sourceFileId = file.source_file_id || file.sourceFileId || file.sourceKey || file.id || sourceUrl || file.name
-  const sourceDocId = file.source_doc_id || file.sourceDocId || sourceFileId
+  const sourceFileId = file.source_file_id || file.id || sourceUrl || file.name
+  const sourceDocId = file.source_doc_id || sourceFileId
   const form = new FormData()
   form.append('source_doc_id', sourceDocId)
-  form.append('source_system', options.sourceSystem || 'production')
+  form.append('source_system', options.source_system || 'production')
   form.append('document_number', file.document_number || file.name)
   if (file.title) form.append('title', file.title)
   if (file.incoming_type) form.append('incoming_type', file.incoming_type)

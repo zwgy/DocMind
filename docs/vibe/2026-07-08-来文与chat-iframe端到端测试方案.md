@@ -100,13 +100,13 @@ curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
 ```json
 {
   "status": "accepted",
-  "sourceDocId": "doc-risk-001",
+  "source_doc_id": "doc-risk-001",
   "items": [
     {
       "incomingId": "inc_xxx",
       "taskId": "task_xxx",
       "status": "accepted",
-      "sourceFileId": "file-001",
+      "source_file_id": "file-001",
       "filename": "来文〔2026〕1号.pdf",
       "isMainFile": true,
       "knowledgeImportStatus": "none"
@@ -115,7 +115,7 @@ curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
       "incomingId": "inc_yyy",
       "taskId": "task_yyy",
       "status": "accepted",
-      "sourceFileId": "file-002",
+      "source_file_id": "file-002",
       "filename": "附件1-整改清单.xlsx",
       "isMainFile": false,
       "knowledgeImportStatus": "none"
@@ -188,7 +188,7 @@ chat.setFiles([
     source_doc_id: '37906',
     source_file_id: '202607080359',
     name: '关于做好2026年度供电6C系统评定工作的通知.doc',
-    sourceUrl: '/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/关于做好2026年度供电6C系统评定工作的通知.doc?202607080359',
+    source_url: '/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/关于做好2026年度供电6C系统评定工作的通知.doc?202607080359',
     document_number: '关于做好2026年度供电6C系统评定工作的通知',
     title: '关于做好2026年度供电6C系统评定工作的通知',
     incoming_type: '集团公司通知',
@@ -418,7 +418,7 @@ curl "$DOCMIND_API/chat/threads?limit=50&offset=0&conversation_scope_key=oa:e2eI
 - 两次返回的 thread ID 不交叉。
 - 每个 thread 的 `metadata.conversation_scope_key` 与查询 scope 一致。
 
-未预上传时，iframe 会先按 `sourceUrl` 下载附件内容，再用 multipart 方式提交 `/api/incoming-documents/ingest`。因此附件下载地址必须是浏览器可直接访问的同源地址，或外部系统已正确开放 CORS；否则浏览器会在上传前拦截下载。浏览器 Network 中应能看到一次附件下载请求，以及一次 `Content-Type: multipart/form-data` 的来文上传请求。
+未预上传时，iframe 会先按 `source_url` 下载附件内容，再用 multipart 方式提交 `/api/incoming-documents/ingest`。因此附件下载地址必须是浏览器可直接访问的同源地址，或外部系统已正确开放 CORS；否则浏览器会在上传前拦截下载。浏览器 Network 中应能看到一次附件下载请求，以及一次 `Content-Type: multipart/form-data` 的来文上传请求。
 
 ## 回归检查矩阵
 

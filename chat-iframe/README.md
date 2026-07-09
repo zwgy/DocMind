@@ -224,9 +224,9 @@ docMind backend
     {
       id: '202606100417',
       name: '来文文件名.docx',
-      sourceUrl: 'http://example/default.ashx?202606100417',
+      source_url: 'http://example/default.ashx?202606100417',
       source_file_id: '202606100417',
-      sizeText: '200.16KB',
+      size_text: '200.16KB',
       selected: true
     }
   ])
@@ -275,7 +275,7 @@ iframe 内部会话列表采用按需左侧抽屉展示，默认不占用聊天�
 2. 降级扫描页面里的 `a`。
 3. 从 `.size` 或文本中提取大小，兼容 `-200.16KB`。
 4. 从 `YZSoft.File.download('...')` 中提取下载地址，因为旧系统 `href` 常是 `###`。
-5. 按 `attachment`、`id` 去掉 `_BOX`、URL query、路径片段的顺序提取 `source_file_id`；旧版 `sourceKey` 仍会兼容。
+5. 按 `attachment`、`id` 去掉 `_BOX`、URL query、路径片段的顺序提取 `source_file_id`。
 6. 只保留 `doc/docx/pdf/xls/xlsx/ppt/pptx/txt/md/csv`。
 
 ## 8. 父页面参数
@@ -451,7 +451,7 @@ Nginx 在 chat-iframe 里同时充当**静态服务器**（托管 Vue 应用）�
 
 从用户点开悬浮按钮到看到结果，完整链路：
 
-1. 父脚本从父页面 DOM 采集附件（`.items .item[attachment] a`），得到 `[{ id, name, sourceUrl, source_file_id, sizeText }]`。
+1. 父脚本从父页面 DOM 采集附件（`.items .item[attachment]`），得到 `[{ id, name, source_url, source_file_id, size_text }]`。
 2. 父脚本通过 `postMessage` 把 `INIT_CONFIG` / `PAGE_CONTENT` / `PAGE_FILES_UPDATED` 推给 iframe。
 3. iframe 内的 `useIframeBridge` 接收消息，存入 Pinia store，默认选中第一个附件。
 4. iframe 调用后端（相对路径）：
@@ -574,5 +574,5 @@ CHAT_IFRAME_TOKEN_RATE_LIMIT_PER_MINUTE=60
 
 - “问网页”开启时，iframe 会把父页面传入的 `title/url/text/html` 放入 `iframe_context.page`。后端优先使用已解析文本；只有 HTML 时会先解析为 Markdown。短页面直接进入系统提示，长页面会写入当前线程沙箱文件，并在提示中给出 `read_file` 可读取路径。
 - “问文件”开启时，iframe 会把本轮选中的全部页面附件放入 `iframe_context.files`，而不是只传第一个附件。已匹配知识库且有摘要的附件会携带摘要、`kbId/fileId`；摘要不足时，模型可按提示使用 `open_kb_document` 读取全文。
-- 如果附件没有摘要但父页面提供了 `sourceUrl/url`，iframe 会以 `cache: no-store` 下载附件内容，再用 multipart 调用 `POST /api/incoming-documents/ingest` 上传文件；附件地址必须同源或允许浏览器跨域读取。解析尚未完成时，本轮提示只说明文件正在准备，不要求模型猜测内容。
+- 如果附件没有摘要但父页面提供了 `source_url`，iframe 会以 `cache: no-store` 下载附件内容，再用 multipart 调用 `POST /api/incoming-documents/ingest` 上传文件；附件地址必须同源或允许浏览器跨域读取。解析尚未完成时，本轮提示只说明文件正在准备，不要求模型猜测内容。
 - 兼容过渡期仍保留 `meta.page_content`、`meta.selected_file`、`meta.extraction_result` 字段，但新的问答上下文应以 `iframe_context` 为准。

@@ -49,7 +49,7 @@ test('ingestIncomingDocument downloads file and posts multipart with bearer toke
     {
       id: 'f1',
       name: 'incoming.pdf',
-      sourceUrl: 'https://oa.example.test/incoming.pdf',
+      source_url: 'https://oa.example.test/incoming.pdf',
       source_doc_id: 'DOC001',
       source_file_id: 'S001',
       document_number: '来文〔2026〕1号',
@@ -59,7 +59,7 @@ test('ingestIncomingDocument downloads file and posts multipart with bearer toke
       incoming_date: '2026-07-09'
     },
     'token-1',
-    { sourceSystem: 'oa' }
+    { source_system: 'oa' }
   )
 
   assert.equal(calls[0].url, 'https://oa.example.test/incoming.pdf')
@@ -89,7 +89,7 @@ test('ingestIncomingDocument falls back to source url as source file id', async 
     return Response.json({ status: 'accepted' })
   }
 
-  await ingestIncomingDocument({ name: 'incoming.pdf', sourceUrl: 'https://oa.example.test/incoming.pdf' })
+  await ingestIncomingDocument({ name: 'incoming.pdf', source_url: 'https://oa.example.test/incoming.pdf' })
 
   const form = calls[1].options.body
   assert.equal(calls[0].options.cache, 'no-store')

@@ -13,15 +13,14 @@ type IframeContextState = {
 function normalizeFiles(files: IncomingPageFile[] = [], selectedIds: string[] = [], sourceSystem = ''): IncomingPageFile[] {
   const selected = new Set(selectedIds)
   const normalized = (files || []).map((file) => {
-    const sourceUrl = file.sourceUrl || file.url || ''
-    const sourceFileId = file.source_file_id || file.sourceFileId || file.sourceKey
+    const sourceUrl = file.source_url || ''
+    const sourceFileId = file.source_file_id
     const id = file.id || sourceFileId || sourceUrl || file.name
     return {
       ...file,
       id,
-      sourceUrl,
-      url: sourceUrl || file.url,
-      sourceSystem: file.sourceSystem || file.source_system || sourceSystem || undefined,
+      source_url: sourceUrl,
+      source_system: file.source_system || sourceSystem || undefined,
       selected: Boolean(file.selected || selected.has(id) || (sourceFileId && selected.has(sourceFileId)))
     }
   })

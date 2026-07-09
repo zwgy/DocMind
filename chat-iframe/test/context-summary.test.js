@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { buildContextSummaryMessage, extractionStatusText } from '../src/utils/context-summary.ts'
 
-const file = { id: 'f1', name: '来文.docx', sourceKey: 'S001' }
+const file = { id: 'f1', name: '来文.docx', source_file_id: 'S001' }
 
 test('buildContextSummaryMessage creates ready context card payload', () => {
   const message = buildContextSummaryMessage({
@@ -48,4 +48,3 @@ test('extractionStatusText renders non-ready states', () => {
   assert.equal(extractionStatusText({ file, result: { matchStatus: 'pending_sync', extractionStatus: 'not_found' } }), '待同步入库')
   assert.equal(extractionStatusText({ file, result: { matchStatus: 'matched', extractionStatus: 'failed' } }), '抽取失败')
 })
-

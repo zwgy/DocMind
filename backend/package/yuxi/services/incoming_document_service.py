@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from yuxi.repositories.document_business_extraction_repository import DocumentBusinessExtractionRepository
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
@@ -13,17 +13,13 @@ class IncomingPageFile(BaseModel):
 
     id: str | None = None
     name: str
-    size_text: str | None = Field(default=None, alias="sizeText")
-    size_bytes: int | None = Field(default=None, alias="sizeBytes")
-    url: str | None = None
-    source_url: str | None = Field(default=None, alias="sourceUrl")
-    source_key: str | None = Field(default=None, alias="sourceKey")
-    source_file_id: str | None = Field(default=None, alias="sourceFileId")
-    source_doc_id: str | None = Field(default=None, alias="sourceDocId")
-    source_system: str | None = Field(default=None, alias="sourceSystem")
+    size_text: str | None = None
+    size_bytes: int | None = None
+    source_url: str | None = None
+    source_file_id: str | None = None
+    source_doc_id: str | None = None
+    source_system: str | None = None
     onclick: str | None = None
-
-    model_config = {"populate_by_name": True}
 
 
 class IncomingDocumentService:
@@ -48,20 +44,19 @@ class IncomingDocumentService:
 
     async def _query_one(self, incoming: IncomingPageFile) -> dict[str, Any]:
         candidates, reason = await self._match(incoming)
-        # 返回字段兼容 iframe 旧语义，但数据源已经切到 incoming_documents。
+        # 这里只做摘要查询，不触发解析；未命中但有来源线索时交给 iframe 自动同步。
         base = {
-            "incomingFileId": incoming.id or incoming.source_file_id or incoming.source_key or incoming.source_url or incoming.name,
+            "incomingFileId": incoming.id or incoming.source_file_id or incoming.source_url or incoming.name,
             "name": incoming.name,
-            "sourceUrl": incoming.source_url or incoming.url,
-            "sourceFileId": incoming.source_file_id or incoming.source_key,
-            "sourceKey": incoming.source_key,
+            "source_url": incoming.source_url,
+            "source_file_id": incoming.source_file_id,
             "matchStatus": "not_found",
             "processingStatus": "not_found",
             "extractionStatus": "not_found",
             "reason": reason,
         }
         if not candidates:
-            has_source_hint = bool(incoming.source_file_id or incoming.source_key or incoming.source_url or incoming.source_doc_id or incoming.url)
+            has_source_hint = bool(incoming.source_file_id or incoming.source_url or incoming.source_doc_id)
             # 有来源线索时让 iframe 去触发同步；没有任何线索则明确 not_found，避免无效上传。
             return base | {"matchStatus": "pending_sync" if has_source_hint else "not_found"}
         if len(candidates) > 1:
@@ -92,10 +87,10 @@ class IncomingDocumentService:
         }
 
     async def _match(self, incoming: IncomingPageFile):
-        source_url = incoming.source_url or incoming.url
+        source_url = incoming.source_url
         source_system = incoming.source_system or "production"
         # 匹配顺序从强到弱：外部系统主键优先，最后才退到文件名，降低误匹配概率。
-        source_file_id = incoming.source_file_id or incoming.source_key
+        source_file_id = incoming.source_file_id
         if source_file_id:
             candidates = await self.incoming_repo.list_by_source_key(source_file_id, source_system)
             if candidates:

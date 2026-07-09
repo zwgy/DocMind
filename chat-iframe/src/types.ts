@@ -10,17 +10,12 @@ export type PageContent = {
 export type IncomingPageFile = {
   id: string
   name: string
-  sizeText?: string
-  sizeBytes?: number
-  url?: string
-  sourceUrl?: string
-  sourceKey?: string
+  size_text?: string
+  size_bytes?: number
+  source_url?: string
   source_file_id?: string
-  sourceFileId?: string
   source_doc_id?: string
-  sourceDocId?: string
   source_system?: string
-  sourceSystem?: string
   document_number?: string
   title?: string
   incoming_type?: string

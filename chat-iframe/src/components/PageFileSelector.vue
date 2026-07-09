@@ -27,7 +27,7 @@ defineEmits<{ select: [fileId: string] }>()
     >
       <FileText :size="16" />
       <span>{{ file.name }}</span>
-      <small>{{ file.sizeText || file.sourceKey || '文档' }}</small>
+      <small>{{ file.size_text || file.source_file_id || '文档' }}</small>
     </button>
   </aside>
 </template>
