@@ -270,8 +270,9 @@ https://你的域名/chat-iframe/example.html?source_system=oa&function_id=e2eIn
 - 后端 run 的 `meta.iframe_context.files[0]` 包含：
   - `incomingId`
   - `summary`
+  - `structuredResult`
   - `hasMarkdown = true`
-- 系统提示词只注入摘要和全文读取方式，不再注入 `structuredResult`，避免与业务结构化抽取结果重复。
+- 系统提示词注入摘要和 `structuredResult`，同时提供全文读取方式；摘要和结构化信息不足以回答细节问题时，再使用 `read_file` 读取全文。
 
 ### 3.2 追问细节触发 read_file
 

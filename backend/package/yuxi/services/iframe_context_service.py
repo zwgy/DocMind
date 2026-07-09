@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -116,6 +117,13 @@ def _summary_from_file(file_info: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _structured_result_text(file_info: dict[str, Any]) -> str:
+    structured = file_info.get("structuredResult")
+    if not isinstance(structured, dict) or not structured:
+        return ""
+    return json.dumps(structured, ensure_ascii=False)
+
+
 async def _read_incoming_markdown(incoming_id: str) -> str:
     record = await IncomingDocumentRepository().get_by_incoming_id(incoming_id)
     markdown_url = getattr(record, "markdown_file_url", None) if record is not None else None
@@ -139,6 +147,10 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
     if summary:
         summary, _ = _truncate(summary, IFRAME_FILE_SUMMARY_CHARS)
         lines.extend(["  状态：已有摘要", f"  摘要：{summary}"])
+
+    structured = _structured_result_text(file_info)
+    if structured:
+        lines.append(f"  结构化信息：{structured}")
 
     if not summary:
         if match_status == "multiple":

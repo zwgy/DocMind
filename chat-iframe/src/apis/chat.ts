@@ -135,7 +135,8 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
       fileId: result?.fileId,
       runId: result?.runId,
       summary: summary || undefined,
-      summaryTruncated: Boolean(summary && summary.length >= 1200)
+      summaryTruncated: Boolean(summary && summary.length >= 1200),
+      structuredResult: result?.structuredResult
     })
   }
   return context
