@@ -122,6 +122,7 @@ test('extracts production YZSoft attachment DOM', () => {
     name: 'incoming-2026-162.pdf',
     sourceUrl: 'http://10.132.235.62:8082/YZSoft/Attachment/dafault.ashx?202606100417',
     url: 'http://10.132.235.62:8082/YZSoft/Attachment/dafault.ashx?202606100417',
+    source_file_id: '202606100417',
     sourceKey: '202606100417',
     sizeText: '200.16KB',
     onclick:

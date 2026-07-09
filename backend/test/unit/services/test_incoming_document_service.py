@@ -77,13 +77,15 @@ async def test_query_returns_ready_incoming_summary_for_source_key_match():
                 "id": "202606100417",
                 "name": "来文.docx",
                 "sourceUrl": "http://example/a?202606100417",
-                "sourceKey": "202606100417",
+                "source_file_id": "202606100417",
+                "source_system": "oa",
             }
         ]
     )
 
     item = result["items"][0]
     assert item["matchStatus"] == "matched"
+    assert item["reason"] == "source_file_id matched"
     assert item["processingStatus"] == "ready"
     assert item["extractionStatus"] == "ready"
     assert item["incomingId"] == "inc_1"

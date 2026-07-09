@@ -82,7 +82,7 @@ VITE_API_URL=http://localhost:5050 corepack pnpm dev --host 0.0.0.0 --port 5174
 http://localhost:5174/chat-iframe/example.html
 ```
 
-`example.html` 会加载 `docmind-chat-iframe-parent.js`，模拟生产系统附件 DOM，并挂载 `public/example-files/2026-07-02-AI文档智能助手第一版开发方案-5.5.md` 作为默认附件。调试页填写 `source_system/function_id/business_id/external_user_id/external_user_name` 后实例化 `DocMindChatIframe`，父脚本会按 `tokenExchangeUrl` 或 `/api/chat-iframe/token` 自动换取 DocMind token。直接打开 `/chat-iframe/` 时没有父页面配置和业务上下文，调用受保护接口会返回“请登录后再访问”，模型列表也不会加载。
+`example.html` 会加载 `docmind-chat-iframe-parent.js`，模拟生产系统附件 DOM，并挂载 `public/关于做好2026年度供电6C系统评定工作的通知/` 下的真实来文附件作为默认附件。调试页填写 `source_system/function_id/business_id/external_user_id/external_user_name` 后实例化 `DocMindChatIframe`，父脚本会按 `tokenExchangeUrl` 或 `/api/chat-iframe/token` 自动换取 DocMind token。直接打开 `/chat-iframe/` 时没有父页面配置和业务上下文，调用受保护接口会返回“请登录后再访问”，模型列表也不会加载。
 
 ```bash
 corepack pnpm typecheck
@@ -225,7 +225,7 @@ docMind backend
       id: '202606100417',
       name: '来文文件名.docx',
       sourceUrl: 'http://example/default.ashx?202606100417',
-      sourceKey: '202606100417',
+      source_file_id: '202606100417',
       sizeText: '200.16KB',
       selected: true
     }
@@ -275,7 +275,7 @@ iframe 内部会话列表采用按需左侧抽屉展示，默认不占用聊天�
 2. 降级扫描页面里的 `a`。
 3. 从 `.size` 或文本中提取大小，兼容 `-200.16KB`。
 4. 从 `YZSoft.File.download('...')` 中提取下载地址，因为旧系统 `href` 常是 `###`。
-5. 按 `attachment`、`id` 去掉 `_BOX`、URL query、路径片段的顺序提取 `sourceKey`。
+5. 按 `attachment`、`id` 去掉 `_BOX`、URL query、路径片段的顺序提取 `source_file_id`；旧版 `sourceKey` 仍会兼容。
 6. 只保留 `doc/docx/pdf/xls/xlsx/ppt/pptx/txt/md/csv`。
 
 ## 8. 父页面参数
@@ -451,7 +451,7 @@ Nginx 在 chat-iframe 里同时充当**静态服务器**（托管 Vue 应用）�
 
 从用户点开悬浮按钮到看到结果，完整链路：
 
-1. 父脚本从父页面 DOM 采集附件（`.items .item[attachment] a`），得到 `[{ id, name, sourceUrl, sourceKey, sizeText }]`。
+1. 父脚本从父页面 DOM 采集附件（`.items .item[attachment] a`），得到 `[{ id, name, sourceUrl, source_file_id, sizeText }]`。
 2. 父脚本通过 `postMessage` 把 `INIT_CONFIG` / `PAGE_CONTENT` / `PAGE_FILES_UPDATED` 推给 iframe。
 3. iframe 内的 `useIframeBridge` 接收消息，存入 Pinia store，默认选中第一个附件。
 4. iframe 调用后端（相对路径）：

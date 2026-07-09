@@ -18,6 +18,7 @@ class IncomingPageFile(BaseModel):
     url: str | None = None
     source_url: str | None = Field(default=None, alias="sourceUrl")
     source_key: str | None = Field(default=None, alias="sourceKey")
+    source_file_id: str | None = Field(default=None, alias="sourceFileId")
     source_doc_id: str | None = Field(default=None, alias="sourceDocId")
     source_system: str | None = Field(default=None, alias="sourceSystem")
     onclick: str | None = None
@@ -49,9 +50,10 @@ class IncomingDocumentService:
         candidates, reason = await self._match(incoming)
         # 返回字段兼容 iframe 旧语义，但数据源已经切到 incoming_documents。
         base = {
-            "incomingFileId": incoming.id or incoming.source_key or incoming.source_url or incoming.name,
+            "incomingFileId": incoming.id or incoming.source_file_id or incoming.source_key or incoming.source_url or incoming.name,
             "name": incoming.name,
             "sourceUrl": incoming.source_url or incoming.url,
+            "sourceFileId": incoming.source_file_id or incoming.source_key,
             "sourceKey": incoming.source_key,
             "matchStatus": "not_found",
             "processingStatus": "not_found",
@@ -59,7 +61,7 @@ class IncomingDocumentService:
             "reason": reason,
         }
         if not candidates:
-            has_source_hint = bool(incoming.source_key or incoming.source_url or incoming.source_doc_id or incoming.url)
+            has_source_hint = bool(incoming.source_file_id or incoming.source_key or incoming.source_url or incoming.source_doc_id or incoming.url)
             # 有来源线索时让 iframe 去触发同步；没有任何线索则明确 not_found，避免无效上传。
             return base | {"matchStatus": "pending_sync" if has_source_hint else "not_found"}
         if len(candidates) > 1:
@@ -93,10 +95,11 @@ class IncomingDocumentService:
         source_url = incoming.source_url or incoming.url
         source_system = incoming.source_system or "production"
         # 匹配顺序从强到弱：外部系统主键优先，最后才退到文件名，降低误匹配概率。
-        if incoming.source_key:
-            candidates = await self.incoming_repo.list_by_source_key(incoming.source_key, source_system)
+        source_file_id = incoming.source_file_id or incoming.source_key
+        if source_file_id:
+            candidates = await self.incoming_repo.list_by_source_key(source_file_id, source_system)
             if candidates:
-                return candidates, "source_key matched"
+                return candidates, "source_file_id matched"
         if source_url:
             candidates = await self.incoming_repo.list_by_source_url(source_url, source_system)
             if candidates:

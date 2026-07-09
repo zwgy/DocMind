@@ -46,7 +46,18 @@ test('ingestIncomingDocument downloads file and posts multipart with bearer toke
   }
 
   const response = await ingestIncomingDocument(
-    { id: 'f1', name: 'incoming.pdf', sourceUrl: 'https://oa.example.test/incoming.pdf', sourceKey: 'S001' },
+    {
+      id: 'f1',
+      name: 'incoming.pdf',
+      sourceUrl: 'https://oa.example.test/incoming.pdf',
+      source_doc_id: 'DOC001',
+      source_file_id: 'S001',
+      document_number: '来文〔2026〕1号',
+      title: '风险整改通知',
+      incoming_type: '安全管理',
+      source_unit: '安监部',
+      incoming_date: '2026-07-09'
+    },
     'token-1',
     { sourceSystem: 'oa' }
   )
@@ -58,9 +69,13 @@ test('ingestIncomingDocument downloads file and posts multipart with bearer toke
   assert.equal(calls[1].options.headers.Authorization, 'Bearer token-1')
   const form = calls[1].options.body
   assert.ok(form instanceof FormData)
-  assert.equal(form.get('source_doc_id'), 'S001')
+  assert.equal(form.get('source_doc_id'), 'DOC001')
   assert.equal(form.get('source_system'), 'oa')
-  assert.equal(form.get('document_number'), 'incoming.pdf')
+  assert.equal(form.get('document_number'), '来文〔2026〕1号')
+  assert.equal(form.get('title'), '风险整改通知')
+  assert.equal(form.get('incoming_type'), '安全管理')
+  assert.equal(form.get('source_unit'), '安监部')
+  assert.equal(form.get('incoming_date'), '2026-07-09')
   assert.deepEqual(JSON.parse(form.get('file_metas')), [{ source_file_id: 'S001', filename: 'incoming.pdf' }])
   assert.equal(form.get('files').name, 'incoming.pdf')
   assert.equal(response.status, 'accepted')

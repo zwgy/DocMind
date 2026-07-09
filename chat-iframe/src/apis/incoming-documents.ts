@@ -87,11 +87,16 @@ export async function ingestIncomingDocument(
   const fileResponse = await fetch(sourceUrl, { cache: 'no-store' })
   if (!fileResponse.ok) throw new Error(`附件下载失败：${fileResponse.status}`)
   const blob = await fileResponse.blob()
-  const sourceFileId = file.sourceKey || file.id || sourceUrl || file.name
+  const sourceFileId = file.source_file_id || file.sourceFileId || file.sourceKey || file.id || sourceUrl || file.name
+  const sourceDocId = file.source_doc_id || file.sourceDocId || sourceFileId
   const form = new FormData()
-  form.append('source_doc_id', sourceFileId)
+  form.append('source_doc_id', sourceDocId)
   form.append('source_system', options.sourceSystem || 'production')
-  form.append('document_number', file.name)
+  form.append('document_number', file.document_number || file.name)
+  if (file.title) form.append('title', file.title)
+  if (file.incoming_type) form.append('incoming_type', file.incoming_type)
+  if (file.source_unit) form.append('source_unit', file.source_unit)
+  if (file.incoming_date) form.append('incoming_date', file.incoming_date)
   form.append('files', blob, file.name)
   form.append(
     'file_metas',

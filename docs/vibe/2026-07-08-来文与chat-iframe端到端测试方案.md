@@ -16,10 +16,10 @@
 - `BUSINESS_EXTRACTION_MODEL` 或 `DEFAULT_MODEL` 可调用本地模型。
 - 测试用户能访问 chat-iframe 和 `/api/incoming-documents/*`。
 - 管理员能访问 Web「来文管理」。
-- 测试时必须明确来源标识一致性：后端按 `source_system + source_document_id + source_file_id` 做单文件幂等，iframe 摘要查询默认使用附件里的 `sourceSystem/sourceKey`，附件未带 `sourceSystem` 时后端按 `production` 查询。外部系统预上传若使用 `source_system=oa`，iframe 附件 payload 也必须带 `sourceSystem=oa`，否则查询会命中不到。
+- 测试时必须明确来源标识一致性：后端按 `source_system + source_document_id + source_file_id` 做单文件幂等，iframe 摘要查询默认使用附件里的 `source_system/source_file_id`。附件未带 `source_system` 时后端按 `production` 查询。外部系统预上传若使用 `source_system=oa`，iframe 附件 payload 也必须带 `source_system=oa`，否则查询会命中不到。
 - 准备 3 个真实附件：
-  - `incoming-risk-001.pdf`：包含明确风险、整改要求、责任部门。
-  - `incoming-summary-002.docx`：包含摘要可回答的问题，也包含需要全文细节的问题。
+  - `关于做好2026年度供电6C系统评定工作的通知.doc`：主文件，source_file_id 为 `202607080359`。
+  - `附件1：2026年上海局供电6C评定实施方案.docx`：附件，source_file_id 为 `202607080360`。
   - `incoming-web-page-long.html` 或一段超过 8000 字的网页正文，用于验证网页 `read_file`。
 
 ## 认证准备
@@ -150,9 +150,9 @@ curl -X POST "$DOCMIND_API/incoming-documents/extractions/query" \
       {
         "id": "file-001",
         "name": "来文〔2026〕1号.pdf",
-        "sourceKey": "file-001",
-        "sourceDocId": "doc-risk-001",
-        "sourceSystem": "oa"
+        "source_file_id": "file-001",
+        "source_doc_id": "doc-risk-001",
+        "source_system": "oa"
       }
     ]
   }'
@@ -167,55 +167,34 @@ curl -X POST "$DOCMIND_API/incoming-documents/extractions/query" \
 - `hasMarkdown = true`
 - `knowledgeImportStatus = none`
 
-## 场景二：example.html 增加真实附件并验证自动上传
+## 场景二：example.html 真实来文附件并验证自动上传
 
 ### 2.1 准备真实附件 URL
 
-把真实测试附件放到部署环境可被 API 下载的位置，推荐两种：
+当前 `chat-iframe/public/example.html` 已挂载真实测试来文：
 
-- 放到外部系统真实下载地址。
-- 放到 chat-iframe 静态目录的测试文件目录，例如 `/chat-iframe/example-files/incoming-risk-001.pdf`。
+- 来文 ID：`37906`
+- 来文类别：`集团公司通知`
+- 来文单位：`供电部`
+- 来文文号/标题：`关于做好2026年度供电6C系统评定工作的通知`
+- 来文日期：`2026-07-08`
 
-要求：
-
-- API 容器能访问该 URL。
-- URL 不需要浏览器登录态，或下载服务允许后端访问。
-- 文件扩展名在支持范围内：`pdf/doc/docx/xls/xlsx/ppt/pptx/txt/md/csv/html`。
-
-### 2.2 修改 example.html 的附件区
-
-在 `chat-iframe/public/example.html` 的 `.items` 下增加真实附件：
-
-```html
-<div class="item" id="real-risk-001_BOX" attachment="real-risk-001">
-  <a
-    href="/chat-iframe/example-files/incoming-risk-001.pdf?real-risk-001"
-    onclick="YZSoft.File.download('/chat-iframe/example-files/incoming-risk-001.pdf?real-risk-001'); return false"
-  >
-    <span class="flag"></span>
-    "incoming-risk-001.pdf"
-    <span class="size">-512KB</span>
-  </a>
-</div>
-```
-
-父页面脚本会抽取：
-
-- `name = incoming-risk-001.pdf`
-- `sourceUrl = /chat-iframe/example-files/incoming-risk-001.pdf?real-risk-001`
-- `sourceKey = real-risk-001`
-- `id = real-risk-001`
-
-如果该附件用于匹配外部系统已经预上传过的来文，需确保传给 iframe 的附件对象包含相同 `sourceSystem`。可在接入方调用 `chat.setFiles()` 时显式传入：
+附件对象由 example 显式调用 `chat.setFiles()` 传入，字段示例：
 
 ```js
 chat.setFiles([
   {
-    id: 'real-risk-001',
-    name: 'incoming-risk-001.pdf',
-    sourceUrl: '/chat-iframe/example-files/incoming-risk-001.pdf?real-risk-001',
-    sourceKey: 'real-risk-001',
-    sourceSystem: 'oa'
+    id: '202607080359',
+    source_doc_id: '37906',
+    source_file_id: '202607080359',
+    name: '关于做好2026年度供电6C系统评定工作的通知.doc',
+    sourceUrl: '/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/关于做好2026年度供电6C系统评定工作的通知.doc?202607080359',
+    document_number: '关于做好2026年度供电6C系统评定工作的通知',
+    title: '关于做好2026年度供电6C系统评定工作的通知',
+    incoming_type: '集团公司通知',
+    source_unit: '供电部',
+    incoming_date: '2026-07-08',
+    source_system: 'oa'
   }
 ])
 ```
@@ -230,7 +209,7 @@ https://你的域名/chat-iframe/example.html?source_system=oa&function_id=e2eIn
 
 2. 登录或通过示例页获取 token。
 3. 打开助手。
-4. 选择真实附件 `incoming-risk-001.pdf`。
+4. 选择真实附件 `关于做好2026年度供电6C系统评定工作的通知.doc`。
 5. 首次查询应返回 `pending_sync`，前端随后自动调用 `/api/incoming-documents/ingest`。
 6. 立即提问：
 
@@ -256,7 +235,7 @@ https://你的域名/chat-iframe/example.html?source_system=oa&function_id=e2eIn
 步骤：
 
 1. 刷新 `example.html`。
-2. 选择 `incoming-risk-001.pdf`。
+2. 选择 `关于做好2026年度供电6C系统评定工作的通知.doc`。
 3. 提问：
 
 ```text
@@ -448,7 +427,7 @@ curl "$DOCMIND_API/chat/threads?limit=50&offset=0&conversation_scope_key=oa:e2eI
 | E2E-01 | 外部 multipart 多文件上传 | 上传主文件和附件真实文件 | 返回 `accepted`，每个文件生成独立 `items` |
 | E2E-02 | 原文与 Markdown 存储 | 查看来文详情和 MinIO 对象 | 原文和 Markdown 存在，数据库只存地址和元数据 |
 | E2E-03 | 幂等上传 | 同一 `source_system + source_doc_id + source_file_id` 重复上传 | hash 相同返回 `exists` 或复用记录，不重复解析 |
-| E2E-04 | iframe 预上传匹配 | 外部先以 `sourceSystem=oa` 上传，iframe 附件也带 `sourceSystem=oa` | 查询返回 `matched`，不重复自动上传 |
+| E2E-04 | iframe 预上传匹配 | 外部先以 `source_system=oa` 上传，iframe 附件也带 `source_system=oa` | 查询返回 `matched`，不重复自动上传 |
 | E2E-05 | iframe 自动同步 | example 真实附件未预上传 | 首次 `pending_sync`，随后自动 ingest |
 | E2E-06 | 解析中问答 | 任务未 ready 时提问 | 回答提示等待解析，不编造 |
 | E2E-07 | ready 摘要问答 | 附件 ready 后提问概述 | 回答使用摘要和结构化信息 |
@@ -493,7 +472,7 @@ Tasker 可观察：
 | 现象 | 优先检查 |
 | --- | --- |
 | multipart 上传 400 | 是否缺 `source_doc_id/files/file_metas`，`file_metas` 数量是否与文件一致，文件是否超过 100 MB |
-| 自动同步后仍 not_found | Network 是否完成附件下载和 multipart `/incoming-documents/ingest`，`sourceKey/sourceSystem` 是否与查询一致 |
+| 自动同步后仍 not_found | Network 是否完成附件下载和 multipart `/incoming-documents/ingest`，`source_file_id/source_system` 是否与查询一致 |
 | 状态一直 parsing | worker 是否运行，Parser 是否支持该文件类型，MinIO 是否可读 |
 | 状态 ready 但无摘要 | 模型配置是否可用，查看 `processing_error` |
 | 业务抽取无结果 | 文档是否命中分类；业务抽取失败不会阻断来文 ready，需看后端 warning |

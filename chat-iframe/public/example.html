@@ -235,42 +235,59 @@
       <section class="grid">
         <article class="panel">
           <h2>生产系统附件区</h2>
-          <p>下面的 DOM 结构刻意贴近 5.5 章节里的线上附件样例，父页面脚本会自动扫描并选中第一个文档附件。</p>
+          <p>下面的 DOM 结构使用真实来文附件样例，父页面脚本会把来文 ID、文件 ID 和来文元数据传给 iframe。</p>
 
           <div class="items">
-            <div class="item" id="docmind-vibe-5-5_BOX" attachment="docmind-vibe-5-5">
+            <div class="item" id="202607080359_BOX" attachment="202607080359">
               <a
-                href="/chat-iframe/example-files/2026-07-02-AI文档智能助手第一版开发方案-5.5.md?docmind-vibe-5-5"
-                onclick="YZSoft.File.download('/chat-iframe/example-files/2026-07-02-AI文档智能助手第一版开发方案-5.5.md?docmind-vibe-5-5'); return false"
+                href="/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/关于做好2026年度供电6C系统评定工作的通知.doc?202607080359"
+                onclick="YZSoft.File.download('/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/关于做好2026年度供电6C系统评定工作的通知.doc?202607080359'); return false"
               >
                 <span class="flag"></span>
-                "2026-07-02-AI文档智能助手第一版开发方案-5.5.md"
-                <span class="size">-1.78KB</span>
+                "关于做好2026年度供电6C系统评定工作的通知.doc"
+                <span class="size">-428.76KB</span>
               </a>
             </div>
-            <div class="item" id="docmind-vibe-5-5-acceptance_BOX" attachment="docmind-vibe-5-5-acceptance">
+            <div class="item" id="202607080360_BOX" attachment="202607080360">
               <a
-                href="/chat-iframe/example-files/2026-07-02-AI文档智能助手第一版开发方案-5.5-验收补充.md?docmind-vibe-5-5-acceptance"
-                onclick="YZSoft.File.download('/chat-iframe/example-files/2026-07-02-AI文档智能助手第一版开发方案-5.5-验收补充.md?docmind-vibe-5-5-acceptance'); return false"
+                href="/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/附件1：2026年上海局供电6C评定实施方案.docx?202607080360"
+                onclick="YZSoft.File.download('/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/附件1：2026年上海局供电6C评定实施方案.docx?202607080360'); return false"
               >
                 <span class="flag"></span>
-                "2026-07-02-AI文档智能助手第一版开发方案-5.5-验收补充.md"
-                <span class="size">-0.94KB</span>
+                "附件1：2026年上海局供电6C评定实施方案.docx"
+                <span class="size">-822.11KB</span>
+              </a>
+            </div>
+            <div class="item" id="202607080362_BOX" attachment="202607080362">
+              <a
+                href="/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/附件3：国铁集团铁路基础设施检测中心关于开展2026年全路供电6C系统评定的通知.pdf?202607080362"
+                onclick="YZSoft.File.download('/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/附件3：国铁集团铁路基础设施检测中心关于开展2026年全路供电6C系统评定的通知.pdf?202607080362'); return false"
+              >
+                <span class="flag"></span>
+                "附件3：国铁集团铁路基础设施检测中心关于开展2026年全路供电6C系统评定的通知.pdf"
+                <span class="size">-12.86MB</span>
+              </a>
+            </div>
+            <div class="item" id="202607080363_BOX" attachment="202607080363">
+              <a
+                href="/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/附件4：铁路供电安全检测监测系统（6C系统）评定细则（基检字〔2023〕3号）.pdf?202607080363"
+                onclick="YZSoft.File.download('/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/附件4：铁路供电安全检测监测系统（6C系统）评定细则（基检字〔2023〕3号）.pdf?202607080363'); return false"
+              >
+                <span class="flag"></span>
+                "附件4：铁路供电安全检测监测系统（6C系统）评定细则（基检字〔2023〕3号）.pdf"
+                <span class="size">-2.20MB</span>
               </a>
             </div>
           </div>
 
           <div class="doc" id="pageContent">
-            <h3>5.5 附件 DOM 识别</h3>
-            <p>生产系统附件示例包含 <code>.items .item[attachment] a</code>、<code>YZSoft.File.download(...)</code> 和附件大小文本。</p>
+            <h3>关于做好2026年度供电6C系统评定工作的通知</h3>
+            <p>来文 ID：37906；来文类别：集团公司通知；来文单位：供电部；来文日期：2026-07-08。</p>
             <ol>
-              <li>优先扫描 <code>.items .item[attachment] a</code>，再降级扫描页面中的 <code>a</code> 元素。</li>
-              <li>从 <code>textContent</code> 中移除 <code>.size</code> 文本，去掉外层引号，得到文件名。</li>
-              <li>从 <code>.size</code> 或完整文本中提取大小，支持 <code>-200.16KB</code> 这类无空格格式。</li>
-              <li>从 <code>onclick="YZSoft.File.download('...')"</code>、普通 <code>onclick</code> 和 <code>href</code> 中提取 URL。</li>
-              <li>按 <code>attachment</code> 属性、<code>id</code> 去掉 <code>_BOX</code> 后缀、URL query、路径片段的顺序提取 <code>sourceKey</code>。</li>
-              <li>文件名后缀命中文档扩展名时加入附件列表。</li>
-              <li>第一个附件标记为默认选中。</li>
+              <li>主文件：关于做好2026年度供电6C系统评定工作的通知.doc，source_file_id 为 202607080359。</li>
+              <li>附件1：2026年上海局供电6C评定实施方案.docx，source_file_id 为 202607080360。</li>
+              <li>附件3：国铁集团铁路基础设施检测中心关于开展2026年全路供电6C系统评定的通知.pdf，source_file_id 为 202607080362。</li>
+              <li>附件4：铁路供电安全检测监测系统（6C系统）评定细则（基检字〔2023〕3号）.pdf，source_file_id 为 202607080363。</li>
             </ol>
           </div>
         </article>
@@ -278,8 +295,8 @@
         <aside class="panel">
           <h2>嵌入参数</h2>
           <p>
-            本调试页默认启用结构化摘要 mock：<code>mockExtraction=mixed</code>。追加
-            <code>?mockExtraction=off</code> 可改走真实后端，追加 <code>?mockExtraction=not_found</code> 可查看未匹配状态。
+            本调试页默认走真实后端，便于验证 iframe 自动下载附件并 multipart 上传。追加
+            <code>?mockExtraction=mixed</code> 可启用 mock，追加 <code>?mockExtraction=not_found</code> 可查看未匹配状态。
           </p>
 
           <div class="field">
@@ -362,12 +379,52 @@
       const tokenExchangeUrlInput = document.getElementById('tokenExchangeUrlInput')
       const agentInput = document.getElementById('agentInput')
       const statusText = document.getElementById('statusText')
+      const incomingDocument = {
+        source_system: 'oa',
+        source_doc_id: '37906',
+        document_number: '关于做好2026年度供电6C系统评定工作的通知',
+        title: '关于做好2026年度供电6C系统评定工作的通知',
+        incoming_type: '集团公司通知',
+        source_unit: '供电部',
+        incoming_date: '2026-07-08'
+      }
+      const incomingAttachments = [
+        {
+          id: '202607080359',
+          source_file_id: '202607080359',
+          name: '关于做好2026年度供电6C系统评定工作的通知.doc',
+          sourceUrl: '/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/关于做好2026年度供电6C系统评定工作的通知.doc?202607080359',
+          sizeText: '428.76KB',
+          selected: true
+        },
+        {
+          id: '202607080360',
+          source_file_id: '202607080360',
+          name: '附件1：2026年上海局供电6C评定实施方案.docx',
+          sourceUrl: '/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/附件1：2026年上海局供电6C评定实施方案.docx?202607080360',
+          sizeText: '822.11KB'
+        },
+        {
+          id: '202607080362',
+          source_file_id: '202607080362',
+          name: '附件3：国铁集团铁路基础设施检测中心关于开展2026年全路供电6C系统评定的通知.pdf',
+          sourceUrl: '/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/附件3：国铁集团铁路基础设施检测中心关于开展2026年全路供电6C系统评定的通知.pdf?202607080362',
+          sizeText: '12.86MB'
+        },
+        {
+          id: '202607080363',
+          source_file_id: '202607080363',
+          name: '附件4：铁路供电安全检测监测系统（6C系统）评定细则（基检字〔2023〕3号）.pdf',
+          sourceUrl: '/chat-iframe/关于做好2026年度供电6C系统评定工作的通知/附件4：铁路供电安全检测监测系统（6C系统）评定细则（基检字〔2023〕3号）.pdf?202607080363',
+          sizeText: '2.20MB'
+        }
+      ].map((file) => ({ ...incomingDocument, ...file, type: 'document' }))
 
       const params = new URLSearchParams(window.location.search)
       const initialApiBaseUrl = params.get('apiBaseUrl') || localStorage.getItem(API_BASE_STORAGE_KEY) || ''
       sourceSystemInput.value = params.get('source_system') || 'oa'
-      functionIdInput.value = params.get('function_id') || 'contractApproval'
-      businessIdInput.value = params.get('business_id') || 'contract-20260706-001'
+      functionIdInput.value = params.get('function_id') || 'incomingDocument'
+      businessIdInput.value = params.get('business_id') || incomingDocument.source_doc_id
       externalUserIdInput.value = params.get('external_user_id') || '1001'
       externalUserNameInput.value = params.get('external_user_name') || '张三'
       tokenExchangeUrlInput.value = params.get('tokenExchangeUrl') || ''
@@ -428,7 +485,7 @@
         const tokenExchangeUrl = tokenExchangeUrlInput.value.trim()
         if (window.chatIframe) window.chatIframe.destroy()
         window.chatIframe = new DocMindChatIframe({
-          iframeSrc: `${location.origin}/chat-iframe/?mockExtraction=${params.get('mockExtraction') || 'mixed'}`,
+          iframeSrc: `${location.origin}/chat-iframe/?mockExtraction=${params.get('mockExtraction') || 'off'}`,
           apiBaseUrl,
           agentId,
           tokenExchangeUrl,
@@ -442,10 +499,11 @@
           initialState: 'minimized',
           width: 460,
           height: 680,
-          selectedFileIds: ['docmind-vibe-5-5', 'docmind-vibe-5-5-acceptance']
+          selectedFileIds: ['202607080359']
         })
         // 主动发送页面摘要，是为了让端到端调试不依赖父脚本对整页 HTML 的默认采集时机。
         window.chatIframe.setPageContent(pageContent())
+        window.chatIframe.setFiles(incomingAttachments)
         setStatus(`已初始化 iframe：${sourceSystem}:${functionId}:${businessId} / ${externalUserId}`)
       }
 
@@ -458,7 +516,7 @@
       document.getElementById('refreshContextButton').addEventListener('click', () => {
         if (!window.chatIframe) return
         window.chatIframe.setPageContent(pageContent())
-        window.chatIframe.setFiles(DocMindChatIframe.extractFilesFromDocument(document))
+        window.chatIframe.setFiles(incomingAttachments)
         setStatus('已重新发送页面上下文和附件列表。')
       })
 

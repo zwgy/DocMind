@@ -68,7 +68,7 @@
       })
       .map(function (file) {
         var sourceUrl = file.sourceUrl || file.url || ''
-        var sourceKey = file.sourceKey || file.id || sourceKeyFromUrl(sourceUrl)
+        var sourceKey = file.source_file_id || file.sourceFileId || file.sourceKey || file.id || sourceKeyFromUrl(sourceUrl)
         var normalizedFile = {
           id: file.id || sourceKey || file.name,
           name: file.name,
@@ -78,6 +78,12 @@
           type: file.type || 'document',
           selected: Boolean(file.selected || selectedMap[file.id] || selectedMap[sourceKey])
         }
+        normalizedFile.source_file_id = file.source_file_id || file.sourceFileId || sourceKey
+        if (file.source_doc_id || file.sourceDocId) normalizedFile.source_doc_id = file.source_doc_id || file.sourceDocId
+        if (file.sourceSystem || file.source_system) normalizedFile.sourceSystem = file.sourceSystem || file.source_system
+        ;['document_number', 'title', 'incoming_type', 'source_unit', 'incoming_date'].forEach(function (key) {
+          if (file[key]) normalizedFile[key] = file[key]
+        })
         if (file.sizeText) normalizedFile.sizeText = file.sizeText
         if (file.sizeBytes) normalizedFile.sizeBytes = file.sizeBytes
         if (file.onclick) normalizedFile.onclick = file.onclick

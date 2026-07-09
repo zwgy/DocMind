@@ -15,6 +15,17 @@ export type IncomingPageFile = {
   url?: string
   sourceUrl?: string
   sourceKey?: string
+  source_file_id?: string
+  sourceFileId?: string
+  source_doc_id?: string
+  sourceDocId?: string
+  source_system?: string
+  sourceSystem?: string
+  document_number?: string
+  title?: string
+  incoming_type?: string
+  source_unit?: string
+  incoming_date?: string
   onclick?: string
   type?: 'document' | 'image' | 'unknown'
   selected?: boolean
