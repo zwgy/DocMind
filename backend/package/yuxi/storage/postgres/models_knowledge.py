@@ -22,7 +22,7 @@ JSON_VALUE = JSON().with_variant(JSONB, "postgresql")
 
 
 class KnowledgeBase(Base):
-    """知识库定义"""
+    """知识库模型"""
 
     __tablename__ = "knowledge_bases"
     __table_args__ = (UniqueConstraint("kb_id", name="uq_knowledge_bases_kb_id"),)
@@ -47,7 +47,7 @@ class KnowledgeBase(Base):
 
 
 class KnowledgeFile(Base):
-    """知识库文件记录"""
+    """知识文件模型"""
 
     __tablename__ = "knowledge_files"
     __table_args__ = (UniqueConstraint("file_id", name="uq_knowledge_files_file_id"),)
@@ -120,7 +120,7 @@ class IncomingDocument(Base):
 
 
 class KnowledgeChunk(Base):
-    """知识库 Chunk 切片"""
+    """知识库 Chunk 模型"""
 
     __tablename__ = "knowledge_chunks"
     __table_args__ = (
@@ -266,7 +266,7 @@ class KnowledgeGraphEntity(Base):
 
 
 class KnowledgeGraphEntityMention(Base):
-    """实体在 Chunk 中被提及的记录"""
+    """知识图谱实体在 chunk 中的引用"""
 
     __tablename__ = "knowledge_graph_entity_mentions"
     __table_args__ = (
@@ -309,7 +309,7 @@ class KnowledgeGraphTriple(Base):
 
 
 class KnowledgeGraphTripleMention(Base):
-    """三元组在 Chunk 中被提及的记录"""
+    """知识图谱三元组在 chunk 中的引用"""
 
     __tablename__ = "knowledge_graph_triple_mentions"
     __table_args__ = (
@@ -330,7 +330,7 @@ class KnowledgeGraphTripleMention(Base):
 
 
 class EvaluationDataset(Base):
-    """评估数据集定义"""
+    """评估数据集模型"""
 
     __tablename__ = "evaluation_datasets"
     __table_args__ = (UniqueConstraint("dataset_id", name="uq_evaluation_datasets_dataset_id"),)
@@ -350,7 +350,7 @@ class EvaluationDataset(Base):
 
 
 class EvaluationDatasetItem(Base):
-    """评估数据集条目"""
+    """评估数据集题目模型"""
 
     __tablename__ = "evaluation_dataset_items"
     __table_args__ = (
@@ -376,7 +376,7 @@ class EvaluationDatasetItem(Base):
 
 
 class EvaluationRun(Base):
-    """评估运行记录"""
+    """评估运行模型"""
 
     __tablename__ = "evaluation_runs"
     __table_args__ = (UniqueConstraint("run_id", name="uq_evaluation_runs_run_id"),)
@@ -402,7 +402,7 @@ class EvaluationRun(Base):
 
 
 class EvaluationRunItem(Base):
-    """评估运行条目"""
+    """评估逐题结果模型"""
 
     __tablename__ = "evaluation_run_items"
     __table_args__ = (
