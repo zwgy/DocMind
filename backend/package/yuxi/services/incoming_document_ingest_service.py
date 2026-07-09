@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import json
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -415,7 +416,8 @@ class IncomingDocumentIngestService:
                 incoming_id,
                 {"status": "summarizing", "markdown_file_url": markdown_url, "updated_by": operator_id},
             )
-            raw_summary = await self.summarize_document(filename=record.filename, markdown=markdown)
+            metadata = getattr(record, "metadata_json", None) or {}
+            raw_summary = await self.summarize_document(filename=record.filename, markdown=markdown, metadata=metadata)
             summary = IncomingDocumentSummary.model_validate(raw_summary)
             await self._run_business_extraction(
                 incoming_id=incoming_id,
@@ -508,10 +510,16 @@ async def _upload_incoming_markdown(*, incoming_id: str, markdown: str) -> str:
     return await aupload_file_to_minio(MinIOClient.KB_BUCKETS["parsed"], object_name, markdown.encode("utf-8"))
 
 
-async def _summarize_incoming_document(*, filename: str, markdown: str) -> dict[str, Any]:
+async def _summarize_incoming_document(
+    *,
+    filename: str,
+    markdown: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     from yuxi.config.app import config
 
     # 摘要面向 chat-iframe 首轮问答，优先给足事实；精确全文仍由 read_file/预览负责。
+    metadata_text = json.dumps(metadata or {}, ensure_ascii=False)
     prompt = "\n".join(
         [
             "请阅读来文解析内容，输出严格 JSON，不要输出解释。JSON 字段：",
@@ -520,7 +528,10 @@ async def _summarize_incoming_document(*, filename: str, markdown: str) -> dict[
             "- summary: 面向 chat-iframe 的完整附件摘要，既包含结论，也包含足以回答常见追问的关键事实",
             "- structured_result: 可机器读取的关键字段对象；没有明确字段时返回 {}",
             "",
+            "规则：外部元数据可辅助理解标题、文号、类别、来文单位和日期，但最终摘要必须以正文内容为准。",
+            "",
             f"文件名：{filename}",
+            f"外部元数据：{metadata_text}",
             f"来文内容：{markdown[:INCOMING_SUMMARY_MARKDOWN_LIMIT]}",
         ]
     )

@@ -9,6 +9,7 @@
 ### 开发记录
 - 独立业务结构化抽取模块：将原知识库下的业务抽取迁移为 `document_extraction`，数据表统一为 `document_business_extraction_runs/results/items`；移除旧 `incoming_document_extraction_runs` 与 `knowledge_business_extraction_*` 表语义，来文解析 Markdown 后触发业务抽取，知识库普通上传不再触发业务抽取，从来文存入知识库时仅关联既有抽取结果并补齐 `kb_id/file_id`。
 - 修复 `chat-iframe` 来文自动同步兜底：附件只有 `sourceUrl/url`、没有显式 `sourceKey/id` 时，调用 `/api/incoming-documents/ingest` 会使用 URL 作为 `sourceKey`，避免后端因缺少幂等主键返回 422。
+- 调整来文外部系统字段接入：`/api/incoming-documents/ingest` 支持 `ID/lwwh/title/lwtype/lwdw/lwfj/lwrq`，其中 `ID` 映射为来文幂等主键，`lwfj` 可作为 JSON 下载地址或 multipart 文件字段，其余字段归一化写入 metadata 并参与来文摘要提示。
 
 - 解耦来文接入与知识库默认入库：`/api/incoming-documents/ingest` 不再依赖 `INCOMING_DEFAULT_KB_ID`，来文上传后先保存为独立 `incoming_documents` 记录并提交 `incoming_document_process` 任务；新增来文与来文抽取运行 PostgreSQL 表，查询接口改为返回 `incomingId/processingStatus/summary/hasMarkdown/knowledgeImportStatus` 等来文字段，为后续 Web「来文管理」人工存入知识库打基础。
 - 接入来文解析摘要处理任务：`incoming_document_process` 现在会读取已保存原文，复用现有 Parser 解析为 Markdown 并保存到 MinIO，随后通过默认业务抽取模型生成单一分类、置信度、完整摘要与结构化字段，状态按 `parsing/summarizing/ready/failed` 落回 `incoming_documents`，仍不触发向量化或知识库入库。

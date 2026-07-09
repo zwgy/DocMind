@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from typing import Any
+from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from starlette.datastructures import UploadFile
 
 from server.utils.auth_middleware import get_admin_user, get_required_user
@@ -17,6 +20,14 @@ from yuxi.utils.upload_utils import read_upload_with_limit
 
 incoming_documents = APIRouter(prefix="/incoming-documents", tags=["incoming-documents"])
 INCOMING_MARKDOWN_PREVIEW_CHARS = 40_000
+EXTERNAL_INCOMING_METADATA_FIELDS = {
+    "ID": "externalId",
+    "lwwh": "documentNumber",
+    "title": "title",
+    "lwtype": "incomingType",
+    "lwdw": "sourceUnit",
+    "lwrq": "incomingDate",
+}
 
 
 class IncomingExtractionQueryRequest(BaseModel):
@@ -24,14 +35,32 @@ class IncomingExtractionQueryRequest(BaseModel):
 
 
 class IncomingIngestJsonRequest(BaseModel):
-    source_url: str = Field(alias="sourceUrl")
-    source_key: str = Field(alias="sourceKey")
-    filename: str
-    source_doc_id: str | None = Field(default=None, alias="sourceDocId")
+    source_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("sourceUrl", "lwfj"),
+        serialization_alias="sourceUrl",
+    )
+    source_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("sourceKey", "ID"),
+        serialization_alias="sourceKey",
+    )
+    filename: str | None = None
+    source_doc_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("sourceDocId", "ID"),
+        serialization_alias="sourceDocId",
+    )
     source_system: str = Field(default="production", alias="sourceSystem")
     metadata: dict | None = None
+    external_id: str | None = Field(default=None, alias="ID")
+    document_number: str | None = Field(default=None, alias="lwwh")
+    title: str | None = None
+    incoming_type: str | None = Field(default=None, alias="lwtype")
+    source_unit: str | None = Field(default=None, alias="lwdw")
+    incoming_date: str | None = Field(default=None, alias="lwrq")
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "extra": "ignore"}
 
 
 class IncomingKnowledgeImportRequest(BaseModel):
@@ -95,42 +124,52 @@ async def ingest_incoming_document(request: Request, current_user: User = Depend
         if request.headers.get("content-type", "").startswith("application/json"):
             # JSON 模式用于 iframe 传 sourceUrl，让后端自行下载并进入来文处理队列。
             body = IncomingIngestJsonRequest.model_validate(await request.json())
+            source_url = (body.source_url or "").strip()
+            if not source_url:
+                raise ValueError("sourceUrl/lwfj is required")
+            source_key = (body.source_key or body.source_doc_id or "").strip()
+            if not source_key:
+                raise ValueError("sourceKey/ID is required")
+            filename = (body.filename or _filename_from_url(source_url) or "").strip()
+            if not filename:
+                raise ValueError("filename is required")
             return await IncomingDocumentIngestService().ingest_source_url(
-                source_url=body.source_url,
-                filename=body.filename,
-                source_key=body.source_key,
+                source_url=source_url,
+                filename=filename,
+                source_key=source_key,
                 source_system=body.source_system,
-                source_doc_id=body.source_doc_id,
+                source_doc_id=body.source_doc_id or source_key,
                 operator_id=current_user.uid,
-                **(body.metadata or {}),
+                **_merge_incoming_metadata(body.metadata, body),
             )
 
         form = await request.form()
         # multipart 模式用于外部系统直接上传二进制附件，同样不自动写入知识库。
-        file = form.get("file")
+        file = form.get("file") or form.get("lwfj")
         if not isinstance(file, UploadFile):
-            raise ValueError("file is required")
-        source_key = str(form.get("sourceKey") or "").strip()
+            raise ValueError("file/lwfj is required")
+        source_key = str(form.get("sourceKey") or form.get("ID") or "").strip()
         if not source_key:
-            raise ValueError("sourceKey is required")
+            raise ValueError("sourceKey/ID is required")
         safe_filename = str(form.get("filename") or file.filename or "")
         if not safe_filename:
             raise ValueError("filename is required")
         metadata_obj = json.loads(str(form.get("metadata"))) if form.get("metadata") else None
         if metadata_obj is not None and not isinstance(metadata_obj, dict):
             raise ValueError("metadata must be a JSON object")
+        metadata = _merge_incoming_metadata(metadata_obj, form)
         content = await read_upload_with_limit(file, too_large_message="文件过大，当前仅支持 100 MB 以内的文件")
         return await IncomingDocumentIngestService().ingest_file(
             content=content,
             filename=safe_filename,
             source_key=source_key,
             source_url=str(form.get("sourceUrl") or "") or None,
-            source_doc_id=str(form.get("sourceDocId") or "") or None,
+            source_doc_id=str(form.get("sourceDocId") or form.get("ID") or "") or None,
             source_system=str(form.get("sourceSystem") or "production"),
             source_size_text=str(form.get("sourceSizeText") or "") or None,
             file_size=int(form["fileSize"]) if form.get("fileSize") else None,
             content_hash=str(form.get("contentHash") or "") or None,
-            metadata=metadata_obj,
+            metadata=metadata,
             operator_id=current_user.uid,
         )
     except ValueError as exc:
@@ -169,6 +208,44 @@ async def retry_incoming_document_processing(incoming_id: str, current_user: Use
 
 def _iso(value):
     return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
+
+
+def _merge_incoming_metadata(base: dict[str, Any] | None, source: Any) -> dict[str, Any]:
+    metadata = dict(base or {})
+    external_fields: dict[str, str] = {}
+    for raw_key, internal_key in EXTERNAL_INCOMING_METADATA_FIELDS.items():
+        value = _external_value(source, raw_key)
+        if value:
+            metadata[internal_key] = value
+            external_fields[raw_key] = value
+    if external_fields:
+        # 保留原始字段名，便于和外部系统联调时直接对照报文。
+        metadata["externalFields"] = external_fields
+    return metadata
+
+
+def _external_value(source: Any, raw_key: str) -> str | None:
+    if isinstance(source, IncomingIngestJsonRequest):
+        attr = {
+            "ID": "external_id",
+            "lwwh": "document_number",
+            "title": "title",
+            "lwtype": "incoming_type",
+            "lwdw": "source_unit",
+            "lwrq": "incoming_date",
+        }[raw_key]
+        value = getattr(source, attr, None)
+    else:
+        value = source.get(raw_key) if hasattr(source, "get") else None
+    if isinstance(value, UploadFile):
+        return None
+    text = str(value or "").strip()
+    return text or None
+
+
+def _filename_from_url(source_url: str) -> str:
+    parsed = urlparse(source_url)
+    return Path(unquote(parsed.path)).name
 
 
 def _incoming_document_payload(record, *, detail: bool) -> dict:

@@ -118,6 +118,48 @@ async def test_get_incoming_document_detail_returns_summary(monkeypatch):
     assert result["markdownPreview"] == "## Markdown\n\n正文"
 
 
+async def test_ingest_json_accepts_external_incoming_fields(monkeypatch):
+    captured = {}
+
+    class FakeRequest:
+        headers = {"content-type": "application/json"}
+
+        async def json(self):
+            return {
+                "ID": "lw-001",
+                "lwwh": "来文〔2026〕1号",
+                "title": "风险整改通知",
+                "lwtype": "安全管理",
+                "lwdw": "安监部",
+                "lwfj": "https://oa.example.test/files/risk-001.pdf",
+                "lwrq": "2026-07-09",
+            }
+
+    class FakeIngestService:
+        async def ingest_source_url(self, **kwargs):
+            captured.update(kwargs)
+            return {"status": "accepted"}
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentIngestService", FakeIngestService)
+
+    result = await incoming_document_router.ingest_incoming_document(
+        FakeRequest(),
+        current_user=SimpleNamespace(uid="u1"),
+    )
+
+    assert result == {"status": "accepted"}
+    assert captured["source_url"] == "https://oa.example.test/files/risk-001.pdf"
+    assert captured["filename"] == "risk-001.pdf"
+    assert captured["source_key"] == "lw-001"
+    assert captured["source_doc_id"] == "lw-001"
+    assert captured["externalId"] == "lw-001"
+    assert captured["documentNumber"] == "来文〔2026〕1号"
+    assert captured["incomingType"] == "安全管理"
+    assert captured["sourceUnit"] == "安监部"
+    assert captured["incomingDate"] == "2026-07-09"
+    assert captured["externalFields"]["ID"] == "lw-001"
+
+
 async def test_retry_incoming_document_delegates_to_ingest_service(monkeypatch):
     class FakeIngestService:
         async def retry_processing(self, incoming_id, *, operator_id=None):

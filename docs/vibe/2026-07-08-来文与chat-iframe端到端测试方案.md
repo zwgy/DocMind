@@ -54,15 +54,15 @@ $env:DOCMIND_TOKEN = "Bearer <token>"
 
 必填字段：
 
-- `sourceUrl`：附件可下载 URL。
-- `sourceKey`：外部系统附件唯一键，建议使用附件 ID。
-- `filename`：带扩展名的文件名。
+- 通用字段：`sourceUrl/sourceKey/filename`。
+- 外部系统字段：`ID` 来文 ID、`lwfj` 来文文件下载 URL。后端会把 `lwfj` 映射为 `sourceUrl`，把 `ID` 映射为 `sourceKey/sourceDocId`；`filename` 未传时会尝试从 `lwfj` URL 路径中解析。
 
 建议字段：
 
 - `sourceDocId`：外部系统来文或业务单据 ID；不传时后端使用 `sourceKey`。
 - `sourceSystem`：外部系统编码，例如 `oa`；不传默认为 `production`。
 - `metadata`：业务扩展信息，例如 `businessId`、`title`、`department`。
+- 外部系统字段会归一化到 metadata：`lwwh -> documentNumber`、`title -> title`、`lwtype -> incomingType`、`lwdw -> sourceUnit`、`lwrq -> incomingDate`，并保留 `externalFields` 原始键。
 
 请求示例：
 
@@ -71,14 +71,16 @@ curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
   -H "Authorization: $DOCMIND_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "sourceUrl": "https://oa.example.com/files/incoming-risk-001.pdf",
-    "sourceKey": "att-risk-001",
-    "sourceDocId": "doc-risk-001",
+    "ID": "doc-risk-001",
+    "lwwh": "来文〔2026〕1号",
+    "title": "风险整改来文",
+    "lwtype": "安全管理",
+    "lwdw": "安监部",
+    "lwfj": "https://oa.example.com/files/incoming-risk-001.pdf",
+    "lwrq": "2026-07-09",
     "sourceSystem": "oa",
-    "filename": "incoming-risk-001.pdf",
     "metadata": {
-      "businessId": "risk-case-001",
-      "title": "风险整改来文"
+      "businessId": "risk-case-001"
     }
   }'
 ```
@@ -100,8 +102,8 @@ curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
 
 必填字段：
 
-- `file`：文件二进制。
-- `sourceKey`：外部系统附件唯一键。
+- `file` 或 `lwfj`：文件二进制。
+- `sourceKey` 或 `ID`：外部系统附件/来文唯一键。
 - `filename`：文件名；不传时可从 `file.filename` 读取。
 
 可选字段：
@@ -119,12 +121,16 @@ curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
 ```bash
 curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
   -H "Authorization: $DOCMIND_TOKEN" \
-  -F "file=@./incoming-risk-001.pdf" \
-  -F "sourceKey=att-risk-001-bin" \
-  -F "sourceDocId=doc-risk-001" \
+  -F "lwfj=@./incoming-risk-001.pdf" \
+  -F "ID=doc-risk-001" \
+  -F "lwwh=来文〔2026〕1号" \
+  -F "title=风险整改来文" \
+  -F "lwtype=安全管理" \
+  -F "lwdw=安监部" \
+  -F "lwrq=2026-07-09" \
   -F "sourceSystem=oa" \
   -F "filename=incoming-risk-001.pdf" \
-  -F "metadata={\"businessId\":\"risk-case-001\",\"title\":\"风险整改来文\"}"
+  -F "metadata={\"businessId\":\"risk-case-001\"}"
 ```
 
 ### 1.3 结果检查

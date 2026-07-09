@@ -231,9 +231,10 @@ async def test_process_task_parses_markdown_and_saves_summary():
         assert "Global Finance" in markdown
         return f"minio://knowledgebases/incoming/{incoming_id}/parsed.md"
 
-    async def fake_summarize(*, filename, markdown):
+    async def fake_summarize(*, filename, markdown, metadata):
         assert filename == "incoming.pdf"
         assert "客户要求复核" in markdown
+        assert metadata["title"] == "客户审查来文"
         return {
             "classification": "客户审查",
             "classification_confidence": 0.86,
@@ -246,6 +247,7 @@ async def test_process_task_parses_markdown_and_saves_summary():
             incoming_id="inc_1",
             filename="incoming.pdf",
             original_file_url="minio://docs/inc_1/incoming.pdf",
+            metadata_json={"title": "客户审查来文"},
         )
     )
     tasker = FakeTasker()
@@ -265,6 +267,7 @@ async def test_process_task_parses_markdown_and_saves_summary():
         filename="incoming.pdf",
         source_key="S001",
         content_hash="new-hash",
+        metadata={"title": "客户审查来文"},
     )
     task_result = await tasker.enqueued[0]["coroutine"](FakeContext())
 
