@@ -10,9 +10,6 @@ class FakeFileRepo:
     def __init__(self, existing=None):
         self.existing = existing or []
 
-    async def list_by_source_key(self, source_key, source_system=None):
-        return self.existing
-
 
 class FakeIncomingRepo:
     def __init__(self, existing=None):
@@ -20,11 +17,11 @@ class FakeIncomingRepo:
         self.upserts = []
         self.updates = []
 
-    async def get_by_source_identity(self, source_system, source_document_id):
+    async def get_by_source_identity(self, source_system, source_function_id, source_document_id):
         return self.existing
 
-    async def get_by_file_identity(self, source_system, source_document_id, source_file_id):
-        return None
+    async def get_by_file_identity(self, source_system, source_function_id, source_document_id, source_file_id):
+        return self.existing
 
     async def get_by_incoming_id(self, incoming_id):
         if self.existing and self.existing.incoming_id == incoming_id:
@@ -131,7 +128,7 @@ async def test_summarize_prompt_declares_categories_and_avoids_iframe_wording(mo
     assert "chat-iframe" not in captured["prompt"]
 
 
-async def test_ingest_direct_file_reuses_existing_source_key():
+async def test_ingest_direct_file_reuses_existing_source_file_id():
     service = IncomingDocumentIngestService(
         incoming_repo=FakeIncomingRepo(
             SimpleNamespace(incoming_id="inc_old", content_hash="hash", knowledge_import_status="none")
@@ -143,7 +140,10 @@ async def test_ingest_direct_file_reuses_existing_source_key():
     result = await service.ingest_file(
         content=b"demo",
         filename="incoming.docx",
-        source_key="202606100417",
+        source_system="oa",
+        source_function_id="incomingDocument",
+        source_doc_id="37906",
+        source_file_id="202606100417",
         content_hash="hash",
         operator_id="u1",
     )
@@ -166,7 +166,10 @@ async def test_ingest_direct_file_adds_record_and_queues_parse(monkeypatch):
     result = await service.ingest_file(
         content=b"demo",
         filename="incoming.docx",
-        source_key="202606100417",
+        source_system="oa",
+        source_function_id="incomingDocument",
+        source_doc_id="37906",
+        source_file_id="202606100417",
         source_url="http://example/a?202606100417",
         operator_id="u1",
     )
@@ -196,8 +199,10 @@ async def test_ingest_direct_file_records_incoming_without_default_kb():
     result = await service.ingest_file(
         content=b"demo",
         filename="incoming.docx",
-        source_key="S001",
         source_system="oa",
+        source_function_id="incomingDocument",
+        source_doc_id="DOC001",
+        source_file_id="S001",
         operator_id="u1",
     )
 
@@ -205,7 +210,8 @@ async def test_ingest_direct_file_records_incoming_without_default_kb():
     assert result["status"] == "accepted"
     assert result["knowledgeImportStatus"] == "none"
     assert repo.upserts[0][1]["original_file_url"] == f"minio://incoming/{result['incomingId']}/incoming.docx"
-    assert repo.upserts[0][1]["source_document_id"] == "S001"
+    assert repo.upserts[0][1]["source_function_id"] == "incomingDocument"
+    assert repo.upserts[0][1]["source_document_id"] == "DOC001"
     assert knowledge.add_calls == []
     assert tasker.enqueued[0]["task_type"] == "incoming_document_process"
 
@@ -220,6 +226,7 @@ async def test_ingest_files_saves_each_uploaded_file_with_document_metadata():
 
     result = await service.ingest_files(
         source_doc_id="doc-001",
+        source_function_id="incomingDocument",
         document_number="来文〔2026〕1号",
         title="风险整改通知",
         incoming_type="安全管理",
@@ -234,13 +241,13 @@ async def test_ingest_files_saves_each_uploaded_file_with_document_metadata():
     )
 
     assert result["status"] == "accepted"
-    assert [item["sourceFileId"] for item in result["items"]] == ["file-001", "file-002"]
+    assert [item["source_file_id"] for item in result["items"]] == ["file-001", "file-002"]
     assert len(repo.upserts) == 2
     first = repo.upserts[0][1]
     second = repo.upserts[1][1]
     assert first["source_document_id"] == "doc-001"
+    assert first["source_function_id"] == "incomingDocument"
     assert first["source_file_id"] == "file-001"
-    assert first["source_key"] == "file-001"
     assert first["document_number"] == "来文〔2026〕1号"
     assert first["title"] == "风险整改通知"
     assert first["incoming_type"] == "安全管理"
@@ -262,13 +269,14 @@ async def test_ingest_files_uses_first_file_as_main_when_document_number_missing
 
     result = await service.ingest_files(
         source_doc_id="doc-001",
+        source_function_id="incomingDocument",
         files=[
             {"source_file_id": "file-001", "filename": "主文件.pdf", "content": b"main"},
             {"source_file_id": "file-002", "filename": "附件.xlsx", "content": b"attachment"},
         ],
     )
 
-    assert [item["isMainFile"] for item in result["items"]] == [True, False]
+    assert [item["is_main_file"] for item in result["items"]] == [True, False]
     assert [record["is_main_file"] for _, record in repo.upserts] == [True, False]
 
 
@@ -299,7 +307,10 @@ async def test_ingest_source_url_downloads_document_with_document_limits(monkeyp
     result = await service.ingest_source_url(
         source_url="https://oa.example.test/incoming.pdf",
         filename="incoming.pdf",
-        source_key="S001",
+        source_system="oa",
+        source_function_id="incomingDocument",
+        source_doc_id="DOC001",
+        source_file_id="S001",
         operator_id="u1",
     )
 
@@ -362,7 +373,9 @@ async def test_process_task_parses_markdown_and_saves_summary():
     result = await service.ingest_file(
         content=b"demo",
         filename="incoming.pdf",
-        source_key="S001",
+        source_function_id="incomingDocument",
+        source_doc_id="DOC001",
+        source_file_id="S001",
         content_hash="new-hash",
         metadata={"title": "客户审查来文"},
     )

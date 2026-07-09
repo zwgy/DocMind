@@ -15,9 +15,9 @@ class IncomingDocumentRepository:
     # 只允许服务层明确声明的字段落库，避免外部 metadata 或表单字段误写业务列。
     _writable_fields = {
         "source_system",
+        "source_function_id",
         "source_document_id",
         "source_file_id",
-        "source_key",
         "source_url",
         "filename",
         "document_number",
@@ -55,12 +55,18 @@ class IncomingDocumentRepository:
             sanitized["updated_at"] = utc_now_naive()
         return sanitized
 
-    async def get_by_source_identity(self, source_system: str, source_document_id: str) -> IncomingDocument | None:
+    async def get_by_source_identity(
+        self,
+        source_system: str,
+        source_function_id: str,
+        source_document_id: str,
+    ) -> IncomingDocument | None:
         async with pg_manager.get_async_session_context() as session:
             result = await session.execute(
                 select(IncomingDocument)
                 .where(
                     IncomingDocument.source_system == source_system,
+                    IncomingDocument.source_function_id == source_function_id,
                     IncomingDocument.source_document_id == source_document_id,
                 )
                 .order_by(IncomingDocument.created_at.desc())
@@ -71,6 +77,7 @@ class IncomingDocumentRepository:
     async def get_by_file_identity(
         self,
         source_system: str,
+        source_function_id: str,
         source_document_id: str,
         source_file_id: str,
     ) -> IncomingDocument | None:
@@ -78,6 +85,7 @@ class IncomingDocumentRepository:
             result = await session.execute(
                 select(IncomingDocument).where(
                     IncomingDocument.source_system == source_system,
+                    IncomingDocument.source_function_id == source_function_id,
                     IncomingDocument.source_document_id == source_document_id,
                     IncomingDocument.source_file_id == source_file_id,
                 )
@@ -119,9 +127,9 @@ class IncomingDocumentRepository:
                 filters.append(
                     or_(
                         IncomingDocument.filename.ilike(pattern),
+                        IncomingDocument.source_function_id.ilike(pattern),
                         IncomingDocument.source_document_id.ilike(pattern),
                         IncomingDocument.source_file_id.ilike(pattern),
-                        IncomingDocument.source_key.ilike(pattern),
                         IncomingDocument.document_number.ilike(pattern),
                         IncomingDocument.title.ilike(pattern),
                     )
@@ -169,24 +177,44 @@ class IncomingDocumentRepository:
                 setattr(record, key, value)
             return record
 
-    async def list_by_source_key(self, source_key: str, source_system: str | None = None) -> list[IncomingDocument]:
-        if not source_key:
+    async def list_by_source_file_id(
+        self,
+        source_file_id: str,
+        *,
+        source_system: str,
+        source_function_id: str,
+        source_document_id: str,
+    ) -> list[IncomingDocument]:
+        if not source_file_id:
             return []
-        filters = [IncomingDocument.source_key == source_key]
-        if source_system:
-            filters.append(IncomingDocument.source_system == source_system)
+        filters = [
+            IncomingDocument.source_system == source_system,
+            IncomingDocument.source_function_id == source_function_id,
+            IncomingDocument.source_document_id == source_document_id,
+            IncomingDocument.source_file_id == source_file_id,
+        ]
         async with pg_manager.get_async_session_context() as session:
             result = await session.execute(
                 select(IncomingDocument).where(*filters).order_by(IncomingDocument.created_at.desc())
             )
             return list(result.scalars().all())
 
-    async def list_by_source_url(self, source_url: str, source_system: str | None = None) -> list[IncomingDocument]:
+    async def list_by_source_url(
+        self,
+        source_url: str,
+        *,
+        source_system: str,
+        source_function_id: str,
+        source_document_id: str,
+    ) -> list[IncomingDocument]:
         if not source_url:
             return []
-        filters = [IncomingDocument.source_url == source_url]
-        if source_system:
-            filters.append(IncomingDocument.source_system == source_system)
+        filters = [
+            IncomingDocument.source_system == source_system,
+            IncomingDocument.source_function_id == source_function_id,
+            IncomingDocument.source_document_id == source_document_id,
+            IncomingDocument.source_url == source_url,
+        ]
         async with pg_manager.get_async_session_context() as session:
             result = await session.execute(
                 select(IncomingDocument).where(*filters).order_by(IncomingDocument.created_at.desc())
@@ -197,17 +225,19 @@ class IncomingDocumentRepository:
         self,
         source_document_id: str,
         filename: str,
-        source_system: str | None = None,
+        *,
+        source_system: str,
+        source_function_id: str,
     ) -> list[IncomingDocument]:
         normalized = filename.strip().lower()
         if not source_document_id or not normalized:
             return []
         filters = [
             IncomingDocument.source_document_id == source_document_id,
+            IncomingDocument.source_function_id == source_function_id,
             func.lower(IncomingDocument.filename) == normalized,
         ]
-        if source_system:
-            filters.append(IncomingDocument.source_system == source_system)
+        filters.append(IncomingDocument.source_system == source_system)
         async with pg_manager.get_async_session_context() as session:
             result = await session.execute(
                 select(IncomingDocument).where(*filters).order_by(IncomingDocument.created_at.desc())

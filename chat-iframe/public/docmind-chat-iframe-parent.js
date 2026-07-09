@@ -18,46 +18,9 @@
     return DOCUMENT_EXTENSIONS.indexOf(ext) !== -1
   }
 
-  function cleanSizeText(value) {
-    // 生产系统把大小拼在文件名后，例如 "-200.16KB"，这里先抽出来供文件名清洗和展示共用。
-    var match = stripText(value).match(/-?\s*(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB)/i)
-    return match ? match[1] + match[2].toUpperCase() : ''
-  }
-
-  function cleanName(text, sizeText) {
-    var name = stripText(text)
-    // 文件名来自 textContent，会混入大小和外层引号；不清洗会导致扩展名判断失败。
-    name = name.replace(/-\s*\d+(?:\.\d+)?\s*(B|KB|MB|GB|TB)/gi, '').trim()
-    if (sizeText) {
-      name = name.replace(sizeText, '').replace('-' + sizeText, '')
-    }
-    name = name.replace(/-+$/g, '').trim()
-    return name.replace(/^["'“”]+|["'“”]+$/g, '').trim()
-  }
-
-  function extractDownloadUrl(onclick, href) {
-    var text = stripText(onclick)
-    // 目标生产系统的下载地址藏在 onclick 中，href 常是 "###"，所以 onclick 优先。
-    var quoted = text.match(/YZSoft\.File\.download\(['"]([^'"]+)['"]\)/i)
-    if (quoted) return quoted[1]
-    var anyUrl = text.match(/https?:\/\/[^'")\s]+/i)
-    if (anyUrl) return anyUrl[0]
-    href = stripText(href)
-    return href && href !== '###' && href !== '#' ? href : ''
-  }
-
-  function sourceFileIdFromUrl(url) {
-    var text = stripText(url)
-    var query = text.split('?')[1]
-    if (query) {
-      var first = query.split('&')[0]
-      return first.indexOf('=') >= 0 ? first.split('=').pop() : first
-    }
-    return text.split('/').filter(Boolean).pop() || ''
-  }
-
-  function normalizeFiles(files, selectedIds) {
+  function normalizeFiles(files, selectedIds, options) {
     var selectedMap = {}
+    options = options || {}
     ;(selectedIds || []).forEach(function (id) {
       selectedMap[id] = true
     })
@@ -67,7 +30,7 @@
       })
       .map(function (file) {
         var sourceUrl = file.source_url || ''
-        var sourceFileId = file.source_file_id || file.id || sourceFileIdFromUrl(sourceUrl)
+        var sourceFileId = file.source_file_id || file.id
         var normalizedFile = {
           id: file.id || sourceFileId || file.name,
           name: file.name,
@@ -78,6 +41,10 @@
         }
         if (file.source_doc_id) normalizedFile.source_doc_id = file.source_doc_id
         if (file.source_system) normalizedFile.source_system = file.source_system
+        if (!normalizedFile.source_doc_id && options.business_id) normalizedFile.source_doc_id = options.business_id
+        if (file.source_function_id) normalizedFile.source_function_id = file.source_function_id
+        if (!normalizedFile.source_function_id && options.function_id) normalizedFile.source_function_id = options.function_id
+        if (!normalizedFile.source_system && options.source_system) normalizedFile.source_system = options.source_system
         ;['document_number', 'title', 'incoming_type', 'source_unit', 'incoming_date'].forEach(function (key) {
           if (file[key]) normalizedFile[key] = file[key]
         })
@@ -91,46 +58,6 @@
       normalized[0].selected = true
     }
     return normalized
-  }
-
-  function extractFilesFromDocument(doc) {
-    // 优先走生产系统附件容器，避免全页链接扫描把普通导航误判成来文附件。
-    var items = Array.prototype.slice.call(doc.querySelectorAll('.items .item[attachment]'))
-    var links = items
-      .map(function (item) {
-        return item.querySelector
-          ? item.querySelector('a[onclick*="YZSoft.File.download"]') || item.querySelector('a')
-          : null
-      })
-      .filter(Boolean)
-    if (!links.length) {
-      links = Array.prototype.slice.call(doc.querySelectorAll('a'))
-    }
-    var files = links
-      .map(function (link) {
-        var item = link.closest ? link.closest('.item[attachment]') : null
-        var sizeNode = link.querySelector ? link.querySelector('.size') : null
-        var sizeText = cleanSizeText(sizeNode ? sizeNode.textContent : link.textContent)
-        var onclick = link.getAttribute ? link.getAttribute('onclick') : ''
-        var sourceUrl = extractDownloadUrl(onclick, link.href)
-        var sourceFileId =
-          (item && item.getAttribute && item.getAttribute('attachment')) ||
-          (item && item.id ? item.id.replace(/_BOX$/i, '') : '') ||
-          sourceFileIdFromUrl(sourceUrl)
-        var name = cleanName(link.textContent, sizeText)
-        if (!name || !isDocumentFile(name)) return null
-        return {
-          id: sourceFileId || name,
-          name: name,
-          source_url: sourceUrl,
-          source_file_id: sourceFileId,
-          size_text: sizeText,
-          onclick: onclick,
-          type: 'document'
-        }
-      })
-      .filter(Boolean)
-    return normalizeFiles(files)
   }
 
   function DocMindChatIframe(options) {
@@ -180,8 +107,6 @@
     if (this.options.autoInit) this.init()
   }
 
-  DocMindChatIframe.extractFilesFromDocument = extractFilesFromDocument
-
   DocMindChatIframe.prototype.init = function () {
     if (this.container) return this
     this.container = document.createElement('div')
@@ -190,8 +115,6 @@
     document.body.appendChild(this.container)
     this.iframe = this.container.querySelector('iframe')
     this.iframe.src = this.options.iframeSrc
-    // 显式 setFiles 尚未调用时先扫 DOM，保证只嵌脚本的生产页面也能进入最小闭环。
-    if (this.options.includeFiles) this.pageFiles = extractFilesFromDocument(document)
     this._bindEvents()
     this._setWindowState(this.windowState, false)
     return this
@@ -205,7 +128,7 @@
   }
 
   DocMindChatIframe.prototype.setFiles = function (files) {
-    this.pageFiles = normalizeFiles(files, this.options.selectedFileIds)
+    this.pageFiles = normalizeFiles(files, this.options.selectedFileIds, this.options)
     if (this.container) this._sendToIframe('PAGE_FILES_UPDATED', this.pageFiles)
     return this
   }

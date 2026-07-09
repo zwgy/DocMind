@@ -14,6 +14,7 @@ export type IncomingPageFile = {
   size_bytes?: number
   source_url?: string
   source_file_id?: string
+  source_function_id?: string
   source_doc_id?: string
   source_system?: string
   document_number?: string

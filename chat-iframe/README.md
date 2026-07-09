@@ -256,27 +256,7 @@ docMind backend
 iframe 内部会话列表采用按需左侧抽屉展示，默认不占用聊天区域；点击顶部对话列表按钮后再展开历史会话和新建聊天入口。
 底部输入区的“问文件”会打开页面附件选择弹窗，显示当前页面识别到的附件名称，可多选/取消；未选择任何附件时会自动取消文件上下文，不再把附件摘要拼入提问。模型选择采用输入框右下角的模型按钮和搜索弹窗。左下角回形针按钮参考主站 `AttachmentOptionsComponent`，先弹出“添加附件 / 上传图片”小菜单；添加附件再打开拖拽上传弹窗，确认后进入当前消息的待发送附件列表。
 
-父脚本会优先扫描生产系统常见结构：
-
-```html
-<div class="items">
-  <div class="item" id="202606100417_BOX" attachment="202606100417">
-    <a href="###" onclick="YZSoft.File.download('http://example/default.ashx?202606100417')">
-      "来文.pdf"
-      <span class="size">-200.16KB</span>
-    </a>
-  </div>
-</div>
-```
-
-识别规则：
-
-1. 优先扫描 `.items .item[attachment] a`，避免把页面普通导航误判为附件。
-2. 降级扫描页面里的 `a`。
-3. 从 `.size` 或文本中提取大小，兼容 `-200.16KB`。
-4. 从 `YZSoft.File.download('...')` 中提取下载地址，因为旧系统 `href` 常是 `###`。
-5. 按 `attachment`、`id` 去掉 `_BOX`、URL query、路径片段的顺序提取 `source_file_id`。
-6. 只保留 `doc/docx/pdf/xls/xlsx/ppt/pptx/txt/md/csv`。
+父脚本不自动解析宿主页面 DOM。接入方需要在初始化后调用 `setFiles()` 显式传入附件列表，避免不同业务系统的页面结构差异导致误识别。文件对象至少包含 `name/source_url/source_file_id`；`source_system/source_function_id/source_doc_id` 可由初始化参数自动补齐。
 
 ## 8. 父页面参数
 
@@ -451,7 +431,7 @@ Nginx 在 chat-iframe 里同时充当**静态服务器**（托管 Vue 应用）�
 
 从用户点开悬浮按钮到看到结果，完整链路：
 
-1. 父脚本从父页面 DOM 采集附件（`.items .item[attachment]`），得到 `[{ id, name, source_url, source_file_id, size_text }]`。
+1. 外部系统初始化 `DocMindChatIframe` 后调用 `setFiles([{ id, name, source_url, source_file_id, size_text }])`。
 2. 父脚本通过 `postMessage` 把 `INIT_CONFIG` / `PAGE_CONTENT` / `PAGE_FILES_UPDATED` 推给 iframe。
 3. iframe 内的 `useIframeBridge` 接收消息，存入 Pinia store，默认选中第一个附件。
 4. iframe 调用后端（相对路径）：
@@ -507,13 +487,10 @@ corepack pnpm test
 
 当前覆盖两类最容易出错的边界：
 
-父页面脚本的生产系统附件 DOM 识别：
+父页面脚本的附件传入契约：
 
-- `.items .item[attachment] a`
-- `YZSoft.File.download('...')`
-- `_BOX` 后缀
-- `-200.16KB` 无空格大小
-- 文件名外层引号清理
+- 只通过 `setFiles()` 接收附件列表
+- 自动补齐 `source_system/source_function_id/source_doc_id`
 - 多附件默认选中第一项
 
 聊天链路的最小契约：

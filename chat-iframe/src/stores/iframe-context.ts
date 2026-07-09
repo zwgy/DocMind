@@ -10,7 +10,7 @@ type IframeContextState = {
   isEmbedded: boolean
 }
 
-function normalizeFiles(files: IncomingPageFile[] = [], selectedIds: string[] = [], sourceSystem = ''): IncomingPageFile[] {
+function normalizeFiles(files: IncomingPageFile[] = [], selectedIds: string[] = [], config: IframeConfig = {}): IncomingPageFile[] {
   const selected = new Set(selectedIds)
   const normalized = (files || []).map((file) => {
     const sourceUrl = file.source_url || ''
@@ -20,7 +20,9 @@ function normalizeFiles(files: IncomingPageFile[] = [], selectedIds: string[] = 
       ...file,
       id,
       source_url: sourceUrl,
-      source_system: file.source_system || sourceSystem || undefined,
+      source_system: file.source_system || config.source_system || undefined,
+      source_function_id: file.source_function_id || config.function_id || undefined,
+      source_doc_id: file.source_doc_id || config.business_id || undefined,
       selected: Boolean(file.selected || selected.has(id) || (sourceFileId && selected.has(sourceFileId)))
     }
   })
@@ -54,7 +56,7 @@ export const useIframeContextStore = defineStore('iframe-context', {
       this.pageContent = content || {}
     },
     setFiles(files?: IncomingPageFile[]) {
-      this.files = normalizeFiles(files, this.config.selectedFileIds || [], this.config.source_system || '')
+      this.files = normalizeFiles(files, this.config.selectedFileIds || [], this.config)
       const preferred = this.files.find((file) => file.selected) || this.files[0]
       this.selectedFileId = preferred?.id || ''
     },

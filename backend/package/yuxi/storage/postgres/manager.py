@@ -317,9 +317,9 @@ class PostgresManager(metaclass=SingletonMeta):
                 id SERIAL PRIMARY KEY,
                 incoming_id VARCHAR(64) NOT NULL UNIQUE,
                 source_system VARCHAR(64) NOT NULL,
+                source_function_id VARCHAR(128) NOT NULL,
                 source_document_id VARCHAR(256) NOT NULL,
                 source_file_id VARCHAR(512) NOT NULL,
-                source_key VARCHAR(512),
                 source_url VARCHAR(2048),
                 filename VARCHAR(512) NOT NULL,
                 document_number VARCHAR(512),
@@ -351,11 +351,13 @@ class PostgresManager(metaclass=SingletonMeta):
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
                 CONSTRAINT uq_incoming_documents_source_file_identity UNIQUE (
                     source_system,
+                    source_function_id,
                     source_document_id,
                     source_file_id
                 )
             )
             """,
+            "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS source_function_id VARCHAR(128)",
             "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS source_file_id VARCHAR(512)",
             "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS document_number VARCHAR(512)",
             "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS title VARCHAR(1024)",
@@ -364,7 +366,11 @@ class PostgresManager(metaclass=SingletonMeta):
             "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS incoming_date VARCHAR(64)",
             "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS is_main_file BOOLEAN DEFAULT FALSE",
             "ALTER TABLE IF EXISTS incoming_documents DROP CONSTRAINT IF EXISTS uq_incoming_documents_source_identity",
-            "UPDATE incoming_documents SET source_file_id = COALESCE(NULLIF(source_file_id, ''), source_key, source_document_id)",
+            "ALTER TABLE IF EXISTS incoming_documents DROP CONSTRAINT IF EXISTS uq_incoming_documents_source_file_identity",
+            "UPDATE incoming_documents SET source_function_id = COALESCE(NULLIF(source_function_id, ''), 'default')",
+            "UPDATE incoming_documents SET source_file_id = COALESCE(NULLIF(source_file_id, ''), source_document_id)",
+            "ALTER TABLE IF EXISTS incoming_documents DROP COLUMN IF EXISTS source_key",
+            "ALTER TABLE IF EXISTS incoming_documents ALTER COLUMN source_function_id SET NOT NULL",
             "ALTER TABLE IF EXISTS incoming_documents ALTER COLUMN source_file_id SET NOT NULL",
             """
             DO $$
@@ -375,11 +381,11 @@ class PostgresManager(metaclass=SingletonMeta):
                 ) THEN
                     ALTER TABLE incoming_documents
                     ADD CONSTRAINT uq_incoming_documents_source_file_identity
-                    UNIQUE (source_system, source_document_id, source_file_id);
+                    UNIQUE (source_system, source_function_id, source_document_id, source_file_id);
                 END IF;
             END $$;
             """,
-            "CREATE INDEX IF NOT EXISTS ix_incoming_documents_source_key ON incoming_documents(source_key)",
+            "CREATE INDEX IF NOT EXISTS ix_incoming_documents_source_function_id ON incoming_documents(source_function_id)",
             "CREATE INDEX IF NOT EXISTS ix_incoming_documents_source_file_id ON incoming_documents(source_file_id)",
             "CREATE INDEX IF NOT EXISTS ix_incoming_documents_status ON incoming_documents(status)",
             (

@@ -93,7 +93,7 @@ class IncomingDocumentIngestService:
         *,
         content: bytes,
         filename: str,
-        source_key: str,
+        source_function_id: str,
         source_file_id: str | None = None,
         source_url: str | None = None,
         source_doc_id: str | None = None,
@@ -118,17 +118,25 @@ class IncomingDocumentIngestService:
             raise ValueError("文件大小不能超过 100 MB 上限")
 
         normalized_source_system = (source_system or "production").strip() or "production"
-        normalized_source_key = (source_key or "").strip()
-        normalized_source_file_id = (source_file_id or normalized_source_key).strip()
-        source_document_id = (source_doc_id or normalized_source_key).strip()
+        normalized_source_function_id = (source_function_id or "").strip()
+        normalized_source_file_id = (source_file_id or "").strip()
+        source_document_id = (source_doc_id or "").strip()
+        if not normalized_source_function_id:
+            raise ValueError("source_function_id is required")
         if not source_document_id:
-            raise ValueError("sourceKey is required")
+            raise ValueError("source_doc_id is required")
         if not normalized_source_file_id:
             raise ValueError("source_file_id is required")
 
-        incoming_id = self._incoming_id(normalized_source_system, source_document_id, normalized_source_file_id)
+        incoming_id = self._incoming_id(
+            normalized_source_system,
+            normalized_source_function_id,
+            source_document_id,
+            normalized_source_file_id,
+        )
         existing = await self._get_existing_file(
             normalized_source_system,
+            normalized_source_function_id,
             source_document_id,
             normalized_source_file_id,
         )
@@ -152,9 +160,9 @@ class IncomingDocumentIngestService:
             incoming_id,
             {
                 "source_system": normalized_source_system,
+                "source_function_id": normalized_source_function_id,
                 "source_document_id": source_document_id,
                 "source_file_id": normalized_source_file_id,
-                "source_key": normalized_source_key,
                 "source_url": source_url,
                 "filename": Path(filename).name,
                 "document_number": (document_number or "").strip() or None,
@@ -185,6 +193,7 @@ class IncomingDocumentIngestService:
                     incoming_type=incoming_type,
                     source_unit=source_unit,
                     incoming_date=incoming_date,
+                    source_function_id=normalized_source_function_id,
                     source_file_id=normalized_source_file_id,
                     is_main_file=is_main_file,
                 ),
@@ -204,6 +213,7 @@ class IncomingDocumentIngestService:
         self,
         *,
         source_doc_id: str,
+        source_function_id: str,
         document_number: str | None = None,
         title: str | None = None,
         incoming_type: str | None = None,
@@ -216,6 +226,9 @@ class IncomingDocumentIngestService:
         source_document_id = (source_doc_id or "").strip()
         if not source_document_id:
             raise ValueError("source_doc_id is required")
+        normalized_source_function_id = (source_function_id or "").strip()
+        if not normalized_source_function_id:
+            raise ValueError("source_function_id is required")
         if not files:
             raise ValueError("files is required")
 
@@ -234,7 +247,7 @@ class IncomingDocumentIngestService:
             result = await self.ingest_file(
                 content=content,
                 filename=filename,
-                source_key=source_file_id,
+                source_function_id=normalized_source_function_id,
                 source_file_id=source_file_id,
                 source_doc_id=source_document_id,
                 source_system=source_system,
@@ -251,31 +264,47 @@ class IncomingDocumentIngestService:
                     "incomingId": result["incomingId"],
                     "taskId": result["taskId"],
                     "status": result["status"],
-                    "sourceFileId": source_file_id,
+                    "source_file_id": source_file_id,
                     "filename": filename,
-                    "isMainFile": is_main_file,
+                    "is_main_file": is_main_file,
                     "knowledgeImportStatus": result["knowledgeImportStatus"],
                 }
             )
-        return {"status": "accepted", "sourceDocId": source_document_id, "items": items}
+        return {
+            "status": "accepted",
+            "source_function_id": normalized_source_function_id,
+            "source_doc_id": source_document_id,
+            "items": items,
+        }
 
     async def ingest_source_url(
         self,
         *,
         source_url: str,
         filename: str,
-        source_key: str,
+        source_function_id: str,
+        source_file_id: str,
         source_doc_id: str | None = None,
         source_system: str = "production",
         operator_id: str | None = None,
         **metadata,
     ) -> dict[str, Any]:
         normalized_source_system = (source_system or "production").strip() or "production"
-        normalized_source_key = (source_key or "").strip()
-        source_document_id = (source_doc_id or normalized_source_key).strip()
+        normalized_source_function_id = (source_function_id or "").strip()
+        normalized_source_file_id = (source_file_id or "").strip()
+        source_document_id = (source_doc_id or "").strip()
+        if not normalized_source_function_id:
+            raise ValueError("source_function_id is required")
         if not source_document_id:
-            raise ValueError("sourceKey is required")
-        incoming_id = self._incoming_id(normalized_source_system, source_document_id, normalized_source_key)
+            raise ValueError("source_doc_id is required")
+        if not normalized_source_file_id:
+            raise ValueError("source_file_id is required")
+        incoming_id = self._incoming_id(
+            normalized_source_system,
+            normalized_source_function_id,
+            source_document_id,
+            normalized_source_file_id,
+        )
 
         async def run_ingest(context: TaskContext):
             from yuxi.knowledge.utils.url_fetcher import fetch_url_content
@@ -289,7 +318,8 @@ class IncomingDocumentIngestService:
             return await self.ingest_file(
                 content=content,
                 filename=filename,
-                source_key=normalized_source_key,
+                source_function_id=normalized_source_function_id,
+                source_file_id=normalized_source_file_id,
                 source_url=source_url,
                 source_doc_id=source_document_id,
                 source_system=normalized_source_system,
@@ -298,12 +328,13 @@ class IncomingDocumentIngestService:
             )
 
         task, _ = await self.tasker.enqueue_unique_by_payload(
-            name=f"来文下载处理 ({normalized_source_key})",
+            name=f"来文下载处理 ({normalized_source_file_id})",
             task_type=INCOMING_DOCUMENT_INGEST_TASK_TYPE,
             payload={
                 "incoming_id": incoming_id,
                 "source_system": normalized_source_system,
-                "source_key": normalized_source_key,
+                "source_function_id": normalized_source_function_id,
+                "source_file_id": normalized_source_file_id,
                 "source_document_id": source_document_id,
                 "source_url": source_url,
             },
@@ -563,8 +594,13 @@ class IncomingDocumentIngestService:
             logger.warning(f"Incoming business extraction failed: incoming_id={incoming_id}: {exc}")
 
     @staticmethod
-    def _incoming_id(source_system: str, source_document_id: str, source_file_id: str | None = None) -> str:
-        identity = f"{source_system}:{source_document_id}:{source_file_id or source_document_id}"
+    def _incoming_id(
+        source_system: str,
+        source_function_id: str,
+        source_document_id: str,
+        source_file_id: str,
+    ) -> str:
+        identity = f"{source_system}:{source_function_id}:{source_document_id}:{source_file_id}"
         return f"inc_{hashstr(identity, 16)}"
 
     @staticmethod
@@ -576,12 +612,21 @@ class IncomingDocumentIngestService:
             "knowledgeImportStatus": getattr(record, "knowledge_import_status", None) or "none",
         }
 
-    async def _get_existing_file(self, source_system: str, source_document_id: str, source_file_id: str):
+    async def _get_existing_file(
+        self,
+        source_system: str,
+        source_function_id: str,
+        source_document_id: str,
+        source_file_id: str,
+    ):
         if hasattr(self.incoming_repo, "get_by_file_identity"):
-            existing = await self.incoming_repo.get_by_file_identity(source_system, source_document_id, source_file_id)
-            if existing is not None:
-                return existing
-        return await self.incoming_repo.get_by_source_identity(source_system, source_document_id)
+            return await self.incoming_repo.get_by_file_identity(
+                source_system,
+                source_function_id,
+                source_document_id,
+                source_file_id,
+            )
+        return None
 
     @staticmethod
     def _metadata_with_document_fields(
@@ -592,6 +637,7 @@ class IncomingDocumentIngestService:
         incoming_type: str | None,
         source_unit: str | None,
         incoming_date: str | None,
+        source_function_id: str,
         source_file_id: str,
         is_main_file: bool,
     ) -> dict[str, Any]:
@@ -602,6 +648,7 @@ class IncomingDocumentIngestService:
             "incoming_type": incoming_type,
             "source_unit": source_unit,
             "incoming_date": incoming_date,
+            "source_function_id": source_function_id,
             "source_file_id": source_file_id,
             "is_main_file": is_main_file,
         }.items():

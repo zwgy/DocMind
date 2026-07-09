@@ -25,14 +25,14 @@ class FakeIncomingRepo:
     def __init__(self, responses):
         self.responses = responses
 
-    async def list_by_source_key(self, source_key, source_system=None):
-        return self.responses.get(("source_key", source_key), [])
+    async def list_by_source_file_id(self, source_file_id, *, source_system, source_function_id, source_document_id):
+        return self.responses.get(("source_file_id", source_system, source_function_id, source_document_id, source_file_id), [])
 
-    async def list_by_source_url(self, source_url, source_system=None):
-        return self.responses.get(("source_url", source_url), [])
+    async def list_by_source_url(self, source_url, *, source_system, source_function_id, source_document_id):
+        return self.responses.get(("source_url", source_system, source_function_id, source_document_id, source_url), [])
 
-    async def list_by_source_doc_id_and_filename(self, source_doc_id, filename, source_system=None):
-        return self.responses.get(("source_doc_id_filename", source_doc_id, filename), [])
+    async def list_by_source_doc_id_and_filename(self, source_doc_id, filename, *, source_system, source_function_id):
+        return self.responses.get(("source_doc_id_filename", source_system, source_function_id, source_doc_id, filename), [])
 
     async def list_by_filename_and_size(self, filename, file_size):
         return self.responses.get(("filename_size", filename, file_size), [])
@@ -51,7 +51,7 @@ class FakeExtractionRepo:
 
 async def test_query_returns_ready_incoming_summary_for_source_file_id_match():
     service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo({("source_key", "202606100417"): [incoming_record()]}),
+        incoming_repo=FakeIncomingRepo({("source_file_id", "oa", "incomingDocument", "37906", "202606100417"): [incoming_record()]}),
         extraction_repo=FakeExtractionRepo(
             {
                 "inc_1": {
@@ -78,6 +78,8 @@ async def test_query_returns_ready_incoming_summary_for_source_file_id_match():
                 "name": "来文.docx",
                 "source_url": "http://example/a?202606100417",
                 "source_file_id": "202606100417",
+                "source_function_id": "incomingDocument",
+                "source_doc_id": "37906",
                 "source_system": "oa",
             }
         ]
@@ -101,7 +103,7 @@ async def test_query_returns_ready_incoming_summary_for_source_file_id_match():
 
 async def test_query_returns_markdown_hint_when_summary_missing():
     service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo({("source_key", "202606100417"): [incoming_record(summary=None)]}),
+        incoming_repo=FakeIncomingRepo({("source_file_id", "production", "incomingDocument", "37906", "202606100417"): [incoming_record(summary=None)]}),
         extraction_repo=FakeExtractionRepo(),
     )
 
@@ -111,6 +113,8 @@ async def test_query_returns_markdown_hint_when_summary_missing():
                 "id": "202606100417",
                 "name": "incoming.docx",
                 "source_file_id": "202606100417",
+                "source_function_id": "incomingDocument",
+                "source_doc_id": "37906",
             }
         ]
     )
@@ -127,15 +131,25 @@ async def test_query_returns_markdown_hint_when_summary_missing():
 
 async def test_query_translates_match_miss_states():
     service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo({("filename", "来文.docx"): [incoming_record(), incoming_record(incoming_id="inc_2")]}),
+        incoming_repo=FakeIncomingRepo(
+            {
+                (
+                    "source_doc_id_filename",
+                    "production",
+                    "incomingDocument",
+                    "37906",
+                    "来文.docx",
+                ): [incoming_record(), incoming_record(incoming_id="inc_2")]
+            }
+        ),
         extraction_repo=FakeExtractionRepo(),
     )
 
     result = await service.query_extractions(
         [
-            {"id": "a", "name": "缺失.docx", "source_file_id": "missing"},
+            {"id": "a", "name": "缺失.docx", "source_file_id": "missing", "source_function_id": "incomingDocument", "source_doc_id": "37906"},
             {"id": "b", "name": "只有文件名.docx"},
-            {"id": "c", "name": "来文.docx"},
+            {"id": "c", "name": "来文.docx", "source_function_id": "incomingDocument", "source_doc_id": "37906"},
         ]
     )
 

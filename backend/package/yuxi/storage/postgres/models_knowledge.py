@@ -85,11 +85,12 @@ class IncomingDocument(Base):
         UniqueConstraint("incoming_id", name="uq_incoming_documents_incoming_id"),
         UniqueConstraint(
             "source_system",
+            "source_function_id",
             "source_document_id",
             "source_file_id",
             name="uq_incoming_documents_source_file_identity",
         ),
-        Index("ix_incoming_documents_source_key", "source_key"),
+        Index("ix_incoming_documents_source_function_id", "source_function_id"),
         Index("ix_incoming_documents_source_file_id", "source_file_id"),
         Index("ix_incoming_documents_status", "status"),
         Index("ix_incoming_documents_knowledge_import_status", "knowledge_import_status"),
@@ -98,9 +99,9 @@ class IncomingDocument(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     incoming_id = Column(String(64), unique=True, nullable=False, index=True)
     source_system = Column(String(64), nullable=False, index=True)
+    source_function_id = Column(String(128), nullable=False)
     source_document_id = Column(String(256), nullable=False)
     source_file_id = Column(String(512), nullable=False)
-    source_key = Column(String(512), index=True)
     source_url = Column(String(2048))
     filename = Column(String(512), nullable=False)
     document_number = Column(String(512))

@@ -34,6 +34,7 @@ class IncomingIngestMultipartFields(BaseModel):
     """multipart 非文件字段；二进制文件通过重复的 files 字段传入。"""
 
     source_doc_id: str
+    source_function_id: str
     document_number: str | None = None
     title: str | None = None
     incoming_type: str | None = None
@@ -110,6 +111,7 @@ async def ingest_incoming_document(request: Request, current_user: User = Depend
             raise ValueError("files is required")
         fields = IncomingIngestMultipartFields(
             source_doc_id=str(form.get("source_doc_id") or "").strip(),
+            source_function_id=str(form.get("source_function_id") or "").strip(),
             document_number=_optional_form_text(form.get("document_number")),
             title=_optional_form_text(form.get("title")),
             incoming_type=_optional_form_text(form.get("incoming_type")),
@@ -139,6 +141,7 @@ async def ingest_incoming_document(request: Request, current_user: User = Depend
             )
         return await IncomingDocumentIngestService().ingest_files(
             source_doc_id=fields.source_doc_id,
+            source_function_id=fields.source_function_id,
             document_number=fields.document_number,
             title=fields.title,
             incoming_type=fields.incoming_type,
@@ -209,9 +212,9 @@ def _incoming_document_payload(record, *, detail: bool) -> dict:
     payload = {
         "incomingId": record.incoming_id,
         "sourceSystem": record.source_system,
+        "sourceFunctionId": getattr(record, "source_function_id", None),
         "sourceDocumentId": record.source_document_id,
         "sourceFileId": getattr(record, "source_file_id", None),
-        "sourceKey": getattr(record, "source_key", None),
         "filename": record.filename,
         "documentNumber": getattr(record, "document_number", None),
         "title": getattr(record, "title", None),

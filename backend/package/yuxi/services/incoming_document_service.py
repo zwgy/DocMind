@@ -17,6 +17,7 @@ class IncomingPageFile(BaseModel):
     size_bytes: int | None = None
     source_url: str | None = None
     source_file_id: str | None = None
+    source_function_id: str | None = None
     source_doc_id: str | None = None
     source_system: str | None = None
     onclick: str | None = None
@@ -50,13 +51,19 @@ class IncomingDocumentService:
             "name": incoming.name,
             "source_url": incoming.source_url,
             "source_file_id": incoming.source_file_id,
+            "source_function_id": incoming.source_function_id,
+            "source_doc_id": incoming.source_doc_id,
             "matchStatus": "not_found",
             "processingStatus": "not_found",
             "extractionStatus": "not_found",
             "reason": reason,
         }
         if not candidates:
-            has_source_hint = bool(incoming.source_file_id or incoming.source_url or incoming.source_doc_id)
+            has_source_hint = bool(
+                incoming.source_function_id
+                and incoming.source_doc_id
+                and (incoming.source_file_id or incoming.source_url)
+            )
             # 有来源线索时让 iframe 去触发同步；没有任何线索则明确 not_found，避免无效上传。
             return base | {"matchStatus": "pending_sync" if has_source_hint else "not_found"}
         if len(candidates) > 1:
@@ -89,30 +96,37 @@ class IncomingDocumentService:
     async def _match(self, incoming: IncomingPageFile):
         source_url = incoming.source_url
         source_system = incoming.source_system or "production"
-        # 匹配顺序从强到弱：外部系统主键优先，最后才退到文件名，降低误匹配概率。
+        source_function_id = incoming.source_function_id
+        source_document_id = incoming.source_doc_id
+        if not source_function_id or not source_document_id:
+            return [], "source_function_id/source_doc_id is required"
+        # 匹配顺序从强到弱：同一来文内文件 ID 优先，最后只在同一来文内按文件名兜底。
         source_file_id = incoming.source_file_id
         if source_file_id:
-            candidates = await self.incoming_repo.list_by_source_key(source_file_id, source_system)
+            candidates = await self.incoming_repo.list_by_source_file_id(
+                source_file_id,
+                source_system=source_system,
+                source_function_id=source_function_id,
+                source_document_id=source_document_id,
+            )
             if candidates:
                 return candidates, "source_file_id matched"
         if source_url:
-            candidates = await self.incoming_repo.list_by_source_url(source_url, source_system)
+            candidates = await self.incoming_repo.list_by_source_url(
+                source_url,
+                source_system=source_system,
+                source_function_id=source_function_id,
+                source_document_id=source_document_id,
+            )
             if candidates:
                 return candidates, "source_url matched"
-        if incoming.source_doc_id and incoming.name:
+        if incoming.name:
             candidates = await self.incoming_repo.list_by_source_doc_id_and_filename(
-                incoming.source_doc_id,
+                source_document_id,
                 incoming.name,
-                source_system,
+                source_system=source_system,
+                source_function_id=source_function_id,
             )
             if candidates:
                 return candidates, "source_document_id + filename matched"
-        if incoming.name and incoming.size_bytes:
-            candidates = await self.incoming_repo.list_by_filename_and_size(incoming.name, incoming.size_bytes)
-            if candidates:
-                return candidates, "filename + file_size matched"
-        if incoming.name:
-            candidates = await self.incoming_repo.list_by_filename(incoming.name)
-            if candidates:
-                return candidates, "filename matched"
         return [], "not found"

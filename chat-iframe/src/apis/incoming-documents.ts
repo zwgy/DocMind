@@ -88,11 +88,15 @@ export async function ingestIncomingDocument(
   if (!fileResponse.ok) throw new Error(`附件下载失败：${fileResponse.status}`)
   const blob = await fileResponse.blob()
   const sourceFileId = file.source_file_id || file.id || sourceUrl || file.name
-  const sourceDocId = file.source_doc_id || sourceFileId
+  const sourceDocId = file.source_doc_id
+  const sourceFunctionId = file.source_function_id
+  if (!sourceDocId) throw new Error('附件缺少 source_doc_id')
+  if (!sourceFunctionId) throw new Error('附件缺少 source_function_id')
   const form = new FormData()
   form.append('source_doc_id', sourceDocId)
-  form.append('source_system', options.source_system || 'production')
-  form.append('document_number', file.document_number || file.name)
+  form.append('source_function_id', sourceFunctionId)
+  form.append('source_system', file.source_system || options.source_system || 'production')
+  if (file.document_number) form.append('document_number', file.document_number)
   if (file.title) form.append('title', file.title)
   if (file.incoming_type) form.append('incoming_type', file.incoming_type)
   if (file.source_unit) form.append('source_unit', file.source_unit)

@@ -27,8 +27,9 @@ async def test_list_incoming_documents_returns_management_page(monkeypatch):
     record = SimpleNamespace(
         incoming_id="inc_1",
         source_system="oa",
+        source_function_id="incomingDocument",
         source_document_id="doc_1",
-        source_key="S001",
+        source_file_id="S001",
         filename="incoming.pdf",
         file_size=123,
         status="ready",
@@ -78,8 +79,9 @@ async def test_get_incoming_document_detail_returns_summary(monkeypatch):
     record = SimpleNamespace(
         incoming_id="inc_1",
         source_system="oa",
+        source_function_id="incomingDocument",
         source_document_id="doc_1",
-        source_key="S001",
+        source_file_id="S001",
         source_url="https://oa.example/doc_1",
         filename="incoming.pdf",
         content_hash="hash_1",
@@ -130,6 +132,7 @@ async def test_ingest_multipart_accepts_multiple_files_with_snake_case_fields(mo
             return FormData(
                 [
                     ("source_doc_id", "doc-001"),
+                    ("source_function_id", "incomingDocument"),
                     ("document_number", "来文〔2026〕1号"),
                     ("title", "风险整改通知"),
                     ("incoming_type", "安全管理"),
@@ -160,6 +163,7 @@ async def test_ingest_multipart_accepts_multiple_files_with_snake_case_fields(mo
 
     assert result == {"status": "accepted", "items": []}
     assert captured["source_doc_id"] == "doc-001"
+    assert captured["source_function_id"] == "incomingDocument"
     assert captured["document_number"] == "来文〔2026〕1号"
     assert captured["title"] == "风险整改通知"
     assert captured["incoming_type"] == "安全管理"
@@ -179,6 +183,7 @@ async def test_ingest_multipart_rejects_invalid_file_metas():
             return FormData(
                 [
                     ("source_doc_id", "doc-001"),
+                    ("source_function_id", "incomingDocument"),
                     ("file_metas", "not-json"),
                     ("files", UploadFile(filename="incoming.pdf", file=BytesIO(b"main"))),
                 ]

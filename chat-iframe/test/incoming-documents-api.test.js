@@ -51,6 +51,7 @@ test('ingestIncomingDocument downloads file and posts multipart with bearer toke
       name: 'incoming.pdf',
       source_url: 'https://oa.example.test/incoming.pdf',
       source_doc_id: 'DOC001',
+      source_function_id: 'incomingDocument',
       source_file_id: 'S001',
       document_number: '来文〔2026〕1号',
       title: '风险整改通知',
@@ -70,6 +71,7 @@ test('ingestIncomingDocument downloads file and posts multipart with bearer toke
   const form = calls[1].options.body
   assert.ok(form instanceof FormData)
   assert.equal(form.get('source_doc_id'), 'DOC001')
+  assert.equal(form.get('source_function_id'), 'incomingDocument')
   assert.equal(form.get('source_system'), 'oa')
   assert.equal(form.get('document_number'), '来文〔2026〕1号')
   assert.equal(form.get('title'), '风险整改通知')
@@ -89,11 +91,17 @@ test('ingestIncomingDocument falls back to source url as source file id', async 
     return Response.json({ status: 'accepted' })
   }
 
-  await ingestIncomingDocument({ name: 'incoming.pdf', source_url: 'https://oa.example.test/incoming.pdf' })
+  await ingestIncomingDocument({
+    name: 'incoming.pdf',
+    source_url: 'https://oa.example.test/incoming.pdf',
+    source_function_id: 'incomingDocument',
+    source_doc_id: 'DOC001'
+  })
 
   const form = calls[1].options.body
   assert.equal(calls[0].options.cache, 'no-store')
-  assert.equal(form.get('source_doc_id'), 'https://oa.example.test/incoming.pdf')
+  assert.equal(form.get('source_doc_id'), 'DOC001')
+  assert.equal(form.get('source_function_id'), 'incomingDocument')
   assert.equal(form.get('source_system'), 'production')
   assert.deepEqual(JSON.parse(form.get('file_metas')), [
     { source_file_id: 'https://oa.example.test/incoming.pdf', filename: 'incoming.pdf' }

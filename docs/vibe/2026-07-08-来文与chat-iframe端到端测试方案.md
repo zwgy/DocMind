@@ -16,7 +16,7 @@
 - `BUSINESS_EXTRACTION_MODEL` 或 `DEFAULT_MODEL` 可调用本地模型。
 - 测试用户能访问 chat-iframe 和 `/api/incoming-documents/*`。
 - 管理员能访问 Web「来文管理」。
-- 测试时必须明确来源标识一致性：后端按 `source_system + source_document_id + source_file_id` 做单文件幂等，iframe 摘要查询默认使用附件里的 `source_system/source_file_id`。附件未带 `source_system` 时后端按 `production` 查询。外部系统预上传若使用 `source_system=oa`，iframe 附件 payload 也必须带 `source_system=oa`，否则查询会命中不到。
+- 测试时必须明确来源标识一致性：后端按 `source_system + source_function_id + source_doc_id + source_file_id` 做单文件幂等，iframe 摘要查询默认使用附件里的 `source_system/source_function_id/source_doc_id/source_file_id`。外部系统预上传与 iframe 附件 payload 的四个字段必须一致，否则查询会命中不到。
 - 准备 3 个真实附件：
   - `关于做好2026年度供电6C系统评定工作的通知.doc`：主文件，source_file_id 为 `202607080359`。
   - `附件1：2026年上海局供电6C评定实施方案.docx`：附件，source_file_id 为 `202607080360`。
@@ -55,6 +55,7 @@ $env:DOCMIND_TOKEN = "Bearer <token>"
 必填字段：
 
 - `source_doc_id`：来文 ID，对应外部系统 `ID`。
+- `source_function_id`：外部系统功能 ID。同一 `source_system` 下，不同功能可能存在相同 `source_doc_id`，必须用该字段隔离。
 - `files`：一个或多个文件二进制字段，可重复出现。
 - `file_metas`：JSON 数组，长度必须与 `files` 数量一致。每项必须包含：
   - `source_file_id`：外部系统给该文件的独立编号。
@@ -81,6 +82,7 @@ $env:DOCMIND_TOKEN = "Bearer <token>"
 curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
   -H "Authorization: $DOCMIND_TOKEN" \
   -F "source_doc_id=doc-risk-001" \
+  -F "source_function_id=incomingDocument" \
   -F "document_number=来文〔2026〕1号" \
   -F "title=风险整改来文" \
   -F "incoming_type=安全管理" \
@@ -100,6 +102,7 @@ curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
 ```json
 {
   "status": "accepted",
+  "source_function_id": "incomingDocument",
   "source_doc_id": "doc-risk-001",
   "items": [
     {
@@ -108,7 +111,7 @@ curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
       "status": "accepted",
       "source_file_id": "file-001",
       "filename": "来文〔2026〕1号.pdf",
-      "isMainFile": true,
+      "is_main_file": true,
       "knowledgeImportStatus": "none"
     },
     {
@@ -117,7 +120,7 @@ curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
       "status": "accepted",
       "source_file_id": "file-002",
       "filename": "附件1-整改清单.xlsx",
-      "isMainFile": false,
+      "is_main_file": false,
       "knowledgeImportStatus": "none"
     }
   ]
@@ -133,7 +136,7 @@ curl -X POST "$DOCMIND_API/incoming-documents/ingest" \
    - 分类有值。
    - 入库状态为 `none`。
    - 来文文号、标题、类别、单位、日期有值。
-   - 主文件 `isMainFile=true`，附件 `isMainFile=false`。
+   - 主文件 `is_main_file=true`，附件 `is_main_file=false`。
 4. 打开详情：
    - 原文地址存在。
    - Markdown 预览存在。
@@ -151,6 +154,7 @@ curl -X POST "$DOCMIND_API/incoming-documents/extractions/query" \
         "id": "file-001",
         "name": "来文〔2026〕1号.pdf",
         "source_file_id": "file-001",
+        "source_function_id": "incomingDocument",
         "source_doc_id": "doc-risk-001",
         "source_system": "oa"
       }
@@ -185,6 +189,7 @@ curl -X POST "$DOCMIND_API/incoming-documents/extractions/query" \
 chat.setFiles([
   {
     id: '202607080359',
+    source_function_id: 'incomingDocument',
     source_doc_id: '37906',
     source_file_id: '202607080359',
     name: '关于做好2026年度供电6C系统评定工作的通知.doc',
@@ -426,7 +431,7 @@ curl "$DOCMIND_API/chat/threads?limit=50&offset=0&conversation_scope_key=oa:e2eI
 | --- | --- | --- | --- |
 | E2E-01 | 外部 multipart 多文件上传 | 上传主文件和附件真实文件 | 返回 `accepted`，每个文件生成独立 `items` |
 | E2E-02 | 原文与 Markdown 存储 | 查看来文详情和 MinIO 对象 | 原文和 Markdown 存在，数据库只存地址和元数据 |
-| E2E-03 | 幂等上传 | 同一 `source_system + source_doc_id + source_file_id` 重复上传 | hash 相同返回 `exists` 或复用记录，不重复解析 |
+| E2E-03 | 幂等上传 | 同一 `source_system + source_function_id + source_doc_id + source_file_id` 重复上传 | hash 相同返回 `exists` 或复用记录，不重复解析 |
 | E2E-04 | iframe 预上传匹配 | 外部先以 `source_system=oa` 上传，iframe 附件也带 `source_system=oa` | 查询返回 `matched`，不重复自动上传 |
 | E2E-05 | iframe 自动同步 | example 真实附件未预上传 | 首次 `pending_sync`，随后自动 ingest |
 | E2E-06 | 解析中问答 | 任务未 ready 时提问 | 回答提示等待解析，不编造 |
@@ -443,7 +448,7 @@ curl "$DOCMIND_API/chat/threads?limit=50&offset=0&conversation_scope_key=oa:e2eI
 PostgreSQL 可检查：
 
 ```sql
-select incoming_id, source_system, source_document_id, source_file_id, source_key,
+select incoming_id, source_system, source_function_id, source_document_id, source_file_id,
        document_number, title, incoming_type, source_unit, incoming_date,
        is_main_file, filename,
        status, classification, knowledge_import_status, linked_kb_id, linked_file_id
@@ -471,8 +476,8 @@ Tasker 可观察：
 
 | 现象 | 优先检查 |
 | --- | --- |
-| multipart 上传 400 | 是否缺 `source_doc_id/files/file_metas`，`file_metas` 数量是否与文件一致，文件是否超过 100 MB |
-| 自动同步后仍 not_found | Network 是否完成附件下载和 multipart `/incoming-documents/ingest`，`source_file_id/source_system` 是否与查询一致 |
+| multipart 上传 400 | 是否缺 `source_doc_id/source_function_id/files/file_metas`，`file_metas` 数量是否与文件一致，文件是否超过 100 MB |
+| 自动同步后仍 not_found | Network 是否完成附件下载和 multipart `/incoming-documents/ingest`，`source_system/source_function_id/source_doc_id/source_file_id` 是否与查询一致 |
 | 状态一直 parsing | worker 是否运行，Parser 是否支持该文件类型，MinIO 是否可读 |
 | 状态 ready 但无摘要 | 模型配置是否可用，查看 `processing_error` |
 | 业务抽取无结果 | 文档是否命中分类；业务抽取失败不会阻断来文 ready，需看后端 warning |

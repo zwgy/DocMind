@@ -21,52 +21,6 @@ function loadScript(overrides = {}) {
   return sandbox.window.DocMindChatIframe
 }
 
-function attachmentElement() {
-  const sizeNode = { textContent: '-200.16KB' }
-  const downloadLink = {
-    textContent: '"incoming-2026-162.pdf"-200.16KB',
-    href: '###',
-    getAttribute(name) {
-      return name === 'onclick'
-        ? "YZSoft.File.download('http://10.132.235.62:8082/YZSoft/Attachment/dafault.ashx?202606100417')"
-        : null
-    },
-    querySelector(selector) {
-      return selector === '.size' ? sizeNode : null
-    },
-    closest(selector) {
-      return selector === '.item[attachment]' ? item : null
-    }
-  }
-  const previewLink = {
-    textContent: '预览',
-    href: '###',
-    getAttribute(name) {
-      return name === 'onclick'
-        ? "YZSoft.XForm.Attachment.PostUrl('incoming-2026-162.pdf', 'http://10.132.235.62:8082/WebUI/Doc/DocumentViewer/DocumentViewer.aspx?FileID=202606100417')"
-        : null
-    },
-    querySelector() {
-      return null
-    },
-    closest(selector) {
-      return selector === '.item[attachment]' ? item : null
-    }
-  }
-  const item = {
-    id: '202606100417_BOX',
-    getAttribute(name) {
-      return name === 'attachment' ? '202606100417' : null
-    },
-    querySelector(selector) {
-      if (selector === 'a[onclick*="YZSoft.File.download"]') return downloadLink
-      if (selector === 'a') return previewLink
-      return null
-    }
-  }
-  return item
-}
-
 function parentHarness(options = {}) {
   const sentMessages = []
   const listeners = {}
@@ -127,28 +81,6 @@ function parentHarness(options = {}) {
 function tick() {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
-
-test('extracts production YZSoft attachment DOM', () => {
-  const DocMindChatIframe = loadScript()
-  const files = DocMindChatIframe.extractFilesFromDocument({
-    querySelectorAll(selector) {
-      return selector === '.items .item[attachment]' ? [attachmentElement()] : []
-    }
-  })
-
-  assert.equal(files.length, 1)
-  assert.deepEqual(JSON.parse(JSON.stringify(files[0])), {
-    id: '202606100417',
-    name: 'incoming-2026-162.pdf',
-    source_file_id: '202606100417',
-    source_url: 'http://10.132.235.62:8082/YZSoft/Attachment/dafault.ashx?202606100417',
-    size_text: '200.16KB',
-    onclick:
-      "YZSoft.File.download('http://10.132.235.62:8082/YZSoft/Attachment/dafault.ashx?202606100417')",
-    type: 'document',
-    selected: true
-  })
-})
 
 test('accepts iframe messages by targetOrigin and keeps originAllowlist for iframe side', () => {
   const { DocMindChatIframe, listeners, sentMessages } = parentHarness({
@@ -244,7 +176,10 @@ test('setFiles and explicit requests send compatible iframe messages', () => {
   const chat = new DocMindChatIframe({
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
     targetOrigin: 'https://docmind.example.com',
-    includeFiles: false
+    includeFiles: false,
+    source_system: 'oa',
+    function_id: 'incomingDocument',
+    business_id: '37906'
   })
 
   chat.setPageContent('page text')
@@ -256,6 +191,9 @@ test('setFiles and explicit requests send compatible iframe messages', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(sentMessages.at(-4).message.payload)), { text: 'page text' })
   assert.equal(sentMessages.at(-3).message.type, 'PAGE_FILES_UPDATED')
   assert.equal(sentMessages.at(-3).message.payload[0].source_url, 'https://oa/files/source-1')
+  assert.equal(sentMessages.at(-3).message.payload[0].source_system, 'oa')
+  assert.equal(sentMessages.at(-3).message.payload[0].source_function_id, 'incomingDocument')
+  assert.equal(sentMessages.at(-3).message.payload[0].source_doc_id, '37906')
   assert.equal(sentMessages.at(-2).message.type, 'PAGE_CONTENT')
   assert.equal(sentMessages.at(-1).message.type, 'FILE_LIST')
   chat.destroy()
