@@ -87,7 +87,7 @@
                 :loading="retryingId === record.incomingId"
                 @click="retryProcessing(record)"
               >
-                重试处理
+                重新处理
               </a-button>
               <a-button
                 type="link"
@@ -242,7 +242,7 @@
               :loading="retryingId === detail.incomingId"
               @click="retryProcessing(detail)"
             >
-              重试处理
+              重新处理
             </a-button>
           </section>
         </div>
@@ -466,7 +466,8 @@ function canImport(record) {
 }
 
 function canRetry(record) {
-  return record?.status === 'failed'
+  // 已完成但结构化结果为空时也需要人工重跑，正在处理中的状态不开放重复提交。
+  return record?.status === 'failed' || record?.status === 'ready'
 }
 
 function canOpenKnowledgePreview(record) {

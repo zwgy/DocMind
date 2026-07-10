@@ -11,6 +11,7 @@
 - 修复超级管理员创建用户时部门下拉可能为空：打开「添加用户」弹窗前补拉部门列表，避免用户角色状态晚于组件挂载恢复时跳过部门加载。
 - 修复 chat-iframe 问文件摘要卡片在后端已有来文摘要但业务结构化明细为空时误显示“暂无结构化摘要明细”的问题：前端会展示后端摘要；当业务结构化明细存在时，同时保留摘要、分类命中和结构化依据传入 iframe 上下文。
 - 修复来文结构化抽取重复分类导致 schema 选择为空的问题：来文摘要阶段已产生分类时，正式业务结构化抽取直接复用该分类选择抽取 schema，不再重复调用 `_classify_chunks`。
+- 来文管理的“重新处理”入口支持已完成来文，便于摘要成功但业务结构化抽取为空时由管理员重跑解析、摘要和结构化抽取流程。
 - 修复来文与业务结构化抽取表启动建表失败：移除 SQLAlchemy 模型中与 `Column(index=True)` 重名的显式单列索引，避免 `metadata.create_all` 在 PostgreSQL 上重复创建 `ix_incoming_documents_*` 等索引导致启动事务回滚、`incoming_documents` 表缺失。
 - 独立业务结构化抽取模块：将原知识库下的业务抽取迁移为 `document_extraction`，数据表统一为 `document_business_extraction_runs/results/items`；移除旧 `incoming_document_extraction_runs` 与 `knowledge_business_extraction_*` 表语义，来文解析 Markdown 后触发业务抽取，知识库普通上传不再触发业务抽取，从来文存入知识库时仅关联既有抽取结果并补齐 `kb_id/file_id`。
 - 调整来文摘要提示和接口契约：`/api/incoming-documents/ingest` 当前仅支持 multipart 多文件上传，外部系统按 snake_case 字段传入 `source_doc_id/document_number/title/incoming_type/source_unit/incoming_date/files/file_metas`；每个文件以 `source_file_id` 独立保存和处理，未传来文文号时默认首个文件为主文件；原文与 Markdown 仍写入 MinIO，PostgreSQL 仅保存地址、元数据、摘要和状态；`chat-iframe` 自动同步改为以 `no-store` 下载附件内容后 multipart 上传，并区分文档级 `source_doc_id` 与文件级 `source_file_id`；摘要提示的分类候选从 `DocumentCategoryResult` 动态读取，系统提示词注入摘要、业务结构化抽取 items 和全文读取方式；`example.html` 默认挂载 2026 年供电 6C 系统评定真实来文附件用于端到端测试。
