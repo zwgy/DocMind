@@ -80,7 +80,7 @@ function summarizeExtraction(result?: ExtractionResult | null) {
   const lines: string[] = summary ? [summary] : [`匹配状态：${result.matchStatus}`, `抽取状态：${result.extractionStatus}`]
   const categories = Object.entries(result.categories || {})
     .filter(([, value]) => value?.matched)
-    .map(([key, value]) => `${key}：命中${value.evidence ? `，依据：${value.evidence}` : ''}`)
+    .map(([key, value]) => `${result.display?.categoryLabels?.[key] || key}：命中${value.evidence ? `，依据：${value.evidence}` : ''}`)
   if (categories.length) lines.push(`分类：${categories.join('；')}`)
   const quotes = (result.items || [])
     .map((item) => item.source_quote || '')
@@ -140,7 +140,8 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
       summaryTruncated: Boolean(summary && summary.length >= 1200),
       categories: result?.categories,
       items: result?.items,
-      schemaIds: result?.schemaIds
+      schemaIds: result?.schemaIds,
+      display: result?.display
     })
   }
   return context

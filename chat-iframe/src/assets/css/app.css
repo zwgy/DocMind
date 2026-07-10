@@ -498,6 +498,10 @@
 }
 
 .panel-toolbar h1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   margin: 3px 0 0;
   font-size: 18px;
   line-height: 1.35;
@@ -722,12 +726,31 @@
 }
 
 .context-summary-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0;
   color: var(--main-900);
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.context-summary-file > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.classification-badge {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--main-900);
+  background: var(--main-50);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .context-summary-card.unavailable .context-summary-file,

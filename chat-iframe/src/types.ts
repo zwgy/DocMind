@@ -66,6 +66,13 @@ export type ExtractionItem = {
   source_quote?: string | null
 }
 
+export type ExtractionDisplay = {
+  classificationLabel?: string | null
+  categoryLabels?: Record<string, string>
+  schemaLabels?: Record<string, string>
+  fieldLabels?: Record<string, Record<string, string>>
+}
+
 export type ExtractionResult = {
   incomingFileId?: string
   name?: string
@@ -78,11 +85,13 @@ export type ExtractionResult = {
   fileStatus?: string
   hasParsedMarkdown?: boolean
   taskId?: string | null
+  classification?: string | null
   categories?: Record<string, ExtractionCategory>
   items?: ExtractionItem[]
   schemaIds?: string[]
   summary?: string | null
   structuredResult?: Record<string, unknown> | null
+  display?: ExtractionDisplay
 }
 
 export type IframeContextFile = IncomingPageFile & {
@@ -98,6 +107,7 @@ export type IframeContextFile = IncomingPageFile & {
   categories?: Record<string, ExtractionCategory>
   items?: ExtractionItem[]
   schemaIds?: string[]
+  display?: ExtractionDisplay
 }
 
 export type IframeContextPayload = {

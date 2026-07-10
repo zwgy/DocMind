@@ -34,12 +34,32 @@ export function extractionStatusText(input: SummaryInput) {
 export function matchedExtractionCategories(result?: ExtractionResult | null) {
   return Object.entries(result?.categories || {})
     .filter(([, value]) => value?.matched)
-    .map(([name, value]) => ({ name, evidence: value.evidence }))
+    .map(([name, value]) => ({ name: result?.display?.categoryLabels?.[name] || name, evidence: value.evidence }))
 }
 
 export function extractionSummaryText(result?: ExtractionResult | null) {
   // 后端 summary 与结构化 items 是两类结果；保留 summary 可避免用户看到“已生成”但无内容的误导状态。
   return String(result?.summary || '').trim()
+}
+
+export function extractionClassificationText(result?: ExtractionResult | null) {
+  return String(result?.display?.classificationLabel || result?.classification || '').trim()
+}
+
+export function extractionItemTypeText(type?: string | null, result?: ExtractionResult | null) {
+  const normalized = String(type || '').trim()
+  return result?.display?.schemaLabels?.[normalized] || normalized || '结构化结果'
+}
+
+export function displayExtractionDataEntries(
+  data?: Record<string, unknown> | null,
+  itemType?: string | null,
+  result?: ExtractionResult | null
+) {
+  const fieldLabels = result?.display?.fieldLabels?.[String(itemType || '')] || {}
+  return Object.entries(data || {})
+    .filter(([key, value]) => key !== 'source_quote' && value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => [fieldLabels[key] || key, value] as [string, unknown])
 }
 
 function summaryContent(input: SummaryInput) {

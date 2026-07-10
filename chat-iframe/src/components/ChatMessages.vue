@@ -4,7 +4,12 @@ import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import MessageRefs from '@/components/MessageRefs.vue'
 import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
 import type { ChatMessage } from '@/types'
-import { extractionSummaryText } from '@/utils/context-summary'
+import {
+  displayExtractionDataEntries,
+  extractionClassificationText,
+  extractionItemTypeText,
+  extractionSummaryText
+} from '@/utils/context-summary'
 import { groupMessageDisplayItems } from '@/utils/message-display'
 
 const props = withDefaults(
@@ -45,7 +50,7 @@ function displayValue(value: unknown) {
 
 function hasSummaryDetails(message: ChatMessage) {
   const summary = message.contextSummary
-  return Boolean(summary?.items.length || extractionSummaryText(summary?.result))
+  return Boolean(summary?.matchedCategories.length || summary?.items.length || extractionSummaryText(summary?.result))
 }
 
 function isSummaryReady(message: ChatMessage) {
@@ -129,7 +134,10 @@ watch([displayItems, showGeneratingStatus], scrollToBottom, { flush: 'post', dee
             </div>
           </div>
           <p class="context-summary-file" :title="item.message.contextSummary.file.name">
-            {{ item.message.contextSummary.file.name }}
+            <span>{{ item.message.contextSummary.file.name }}</span>
+            <span v-if="extractionClassificationText(item.message.contextSummary.result)" class="classification-badge">
+              {{ extractionClassificationText(item.message.contextSummary.result) }}
+            </span>
           </p>
           <div v-if="!hasSummaryDetails(item.message)" class="context-summary-empty">
             <strong>{{ item.message.contextSummary.statusText }}</strong>
@@ -141,10 +149,10 @@ watch([displayItems, showGeneratingStatus], scrollToBottom, { flush: 'post', dee
               <blockquote>{{ extractionSummaryText(item.message.contextSummary.result) }}</blockquote>
             </article>
             <p v-if="!item.message.contextSummary.items.length && !extractionSummaryText(item.message.contextSummary.result)" class="muted">暂无结构化明细</p>
-            <article v-for="summaryItem in item.message.contextSummary.items.slice(0, 3)" :key="summaryItem.item_id" class="item-row">
-              <strong>{{ summaryItem.item_type }}</strong>
-              <dl v-if="summaryItem.data && Object.keys(summaryItem.data).length">
-                <template v-for="[key, value] in Object.entries(summaryItem.data)" :key="key">
+            <article v-for="(summaryItem, index) in item.message.contextSummary.items.slice(0, 3)" :key="summaryItem.item_id" class="item-row">
+              <strong>{{ extractionItemTypeText(summaryItem.item_type, item.message.contextSummary.result) }} {{ index + 1 }}</strong>
+              <dl v-if="displayExtractionDataEntries(summaryItem.data, summaryItem.item_type, item.message.contextSummary.result).length">
+                <template v-for="[key, value] in displayExtractionDataEntries(summaryItem.data, summaryItem.item_type, item.message.contextSummary.result)" :key="key">
                   <dt>{{ key }}</dt>
                   <dd>{{ displayValue(value) }}</dd>
                 </template>

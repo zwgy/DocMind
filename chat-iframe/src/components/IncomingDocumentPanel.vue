@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RefreshCw } from 'lucide-vue-next'
-import { extractionStatusText, matchedExtractionCategories } from '@/utils/context-summary'
+import {
+  displayExtractionDataEntries,
+  extractionClassificationText,
+  extractionItemTypeText,
+  extractionStatusText
+} from '@/utils/context-summary'
 import type { ExtractionResult, IncomingPageFile } from '@/types'
 
 const props = withDefaults(
@@ -17,7 +22,6 @@ const props = withDefaults(
 defineEmits(['refresh'])
 
 const statusText = computed(() => extractionStatusText(props))
-const matchedCategories = computed(() => matchedExtractionCategories(props.result))
 
 const items = computed(() => props.result?.items || [])
 
@@ -31,7 +35,12 @@ function displayValue(value: unknown) {
     <div class="panel-toolbar">
       <div>
         <span class="eyebrow">结构化识别</span>
-        <h1>{{ file?.name || '等待附件' }}</h1>
+        <h1>
+          <span>{{ file?.name || '等待附件' }}</span>
+          <span v-if="extractionClassificationText(result)" class="classification-badge">
+            {{ extractionClassificationText(result) }}
+          </span>
+        </h1>
       </div>
       <button type="button" title="刷新" @click="$emit('refresh')">
         <RefreshCw :size="16" />
@@ -44,21 +53,12 @@ function displayValue(value: unknown) {
 
     <template v-if="result?.matchStatus === 'matched' && result?.extractionStatus === 'ready'">
       <section class="result-section">
-        <h2>文档分类</h2>
-        <p v-if="!matchedCategories.length" class="muted">未命中业务分类</p>
-        <article v-for="category in matchedCategories" :key="category.name" class="category-row">
-          <strong>{{ category.name }}</strong>
-          <p v-if="category.evidence">{{ category.evidence }}</p>
-        </article>
-      </section>
-
-      <section class="result-section">
         <h2>结构化明细</h2>
         <p v-if="!items.length" class="muted">暂无结构化明细</p>
-        <article v-for="item in items" :key="item.item_id" class="item-row">
-          <strong>{{ item.item_type }}</strong>
+        <article v-for="(item, index) in items" :key="item.item_id" class="item-row">
+          <strong>{{ extractionItemTypeText(item.item_type, result) }} {{ index + 1 }}</strong>
           <dl>
-            <template v-for="[key, value] in Object.entries(item.data || {})" :key="key">
+            <template v-for="[key, value] in displayExtractionDataEntries(item.data, item.item_type, result)" :key="key">
               <dt>{{ key }}</dt>
               <dd>{{ displayValue(value) }}</dd>
             </template>
