@@ -25,6 +25,16 @@ class FakeIncomingRepo:
         return self.record if incoming_id == self.record.incoming_id else None
 
 
+class FakeExtractionRepo:
+    def __init__(self, result=None):
+        self.result = result
+        self.calls = []
+
+    async def get_latest_by_incoming_id(self, incoming_id):
+        self.calls.append(incoming_id)
+        return self.result
+
+
 async def test_list_incoming_documents_returns_management_page(monkeypatch):
     record = SimpleNamespace(
         incoming_id="inc_1",
@@ -106,11 +116,27 @@ async def test_get_incoming_document_detail_returns_summary(monkeypatch):
         updated_at=datetime(2026, 7, 8, 1, 3, 3),
     )
     repo = FakeIncomingRepo(record)
+    extraction_repo = FakeExtractionRepo(
+        {
+            "run_id": "run_1",
+            "categories": {"risk_management": {"matched": True, "evidence": "risk"}},
+            "schema_ids": ["risk_item"],
+            "items": [
+                {
+                    "item_id": "item_1",
+                    "item_type": "risk_item",
+                    "data": {"risk_name": "qualification risk"},
+                    "source_quote": "source quote",
+                }
+            ],
+        }
+    )
 
     async def fake_preview(record):
         return "## Markdown\n\n正文"
 
     monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", lambda: repo)
+    monkeypatch.setattr(incoming_document_router, "DocumentBusinessExtractionRepository", lambda: extraction_repo)
     monkeypatch.setattr(incoming_document_router, "_read_incoming_markdown_preview", fake_preview)
 
     result = await incoming_document_router.get_incoming_document_detail(
@@ -121,8 +147,13 @@ async def test_get_incoming_document_detail_returns_summary(monkeypatch):
     assert result["incomingId"] == "inc_1"
     assert result["summary"] == "summary"
     assert result["structuredResult"] == {"subject": "Global Finance"}
+    assert result["businessExtraction"]["runId"] == "run_1"
+    assert result["businessExtraction"]["schemaIds"] == ["risk_item"]
+    assert result["businessExtraction"]["items"][0]["data"] == {"risk_name": "qualification risk"}
+    assert result["businessExtraction"]["display"]["schemaLabels"]["risk_item"] == "风险事项"
     assert result["metadata"] == {"title": "demo"}
     assert result["markdownPreview"] == "## Markdown\n\n正文"
+    assert extraction_repo.calls == ["inc_1"]
 
 
 async def test_ingest_multipart_accepts_multiple_files_with_snake_case_fields(monkeypatch):

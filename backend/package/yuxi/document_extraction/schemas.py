@@ -66,7 +66,7 @@ class RiskItem(BaseModel):
 
     risk_name: str = Field(
         description="风险事项名称，必须来自原文，不要自行编造",
-        json_schema_extra={"label": "风险事项"},
+        json_schema_extra={"label": "风险名称"},
     )
     department: str | None = Field(
         default=None,

@@ -8,7 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
+from yuxi.document_extraction.schemas import extraction_schema_display_metadata
 from yuxi.knowledge.utils import parse_minio_url
+from yuxi.repositories.document_business_extraction_repository import DocumentBusinessExtractionRepository
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
 from yuxi.services.file_preview import (
     MAX_BINARY_PREVIEW_SIZE_BYTES,
@@ -109,6 +111,8 @@ async def get_incoming_document_detail(incoming_id: str, current_user: User = De
     if record is None:
         raise HTTPException(status_code=404, detail=f"Incoming document not found: {incoming_id}")
     payload = _incoming_document_payload(record, detail=True)
+    business_extraction = await DocumentBusinessExtractionRepository().get_latest_by_incoming_id(incoming_id)
+    payload["businessExtraction"] = _business_extraction_payload(business_extraction)
     # 未入库来文没有知识库 file_id，只能在详情里提供解析 Markdown 的轻量预览。
     payload["markdownPreview"] = await _read_incoming_markdown_preview(record)
     return payload
@@ -321,6 +325,20 @@ def _incoming_document_payload(record, *, detail: bool) -> dict:
             }
         )
     return payload
+
+
+def _business_extraction_payload(extraction: dict | None) -> dict | None:
+    if not extraction:
+        return None
+    schema_ids = extraction.get("schema_ids") or []
+    return {
+        "runId": extraction.get("run_id"),
+        "categories": extraction.get("categories") or {},
+        "schemaIds": schema_ids,
+        "items": extraction.get("items") or [],
+        # 后端统一透出展示标签，避免前端重复维护抽取 schema 的中文名。
+        "display": extraction_schema_display_metadata(schema_ids),
+    }
 
 
 async def _read_incoming_markdown_preview(record) -> str:
