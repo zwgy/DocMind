@@ -66,7 +66,7 @@
           </div>
         </div>
 
-        <div v-if="showStarCard" class="settings-star-card">
+        <div v-if="SHOW_SETTINGS_STAR_CARD && showStarCard" class="settings-star-card">
           <div class="star-card-header">
             <div class="star-card-badge">
               <Star :size="12" />
@@ -207,6 +207,7 @@ const emit = defineEmits(['update:visible', 'close'])
 const userStore = useUserStore()
 const activeTab = ref('account')
 const showStarCard = ref(true)
+const SHOW_SETTINGS_STAR_CARD = false
 
 const STAR_CARD_STORAGE_KEY = 'yuxi-settings-star-card-dismissed'
 const projectRepoUrl = 'https://github.com/xerrors/Yuxi'

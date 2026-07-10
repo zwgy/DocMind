@@ -33,7 +33,7 @@
             </div>
           </a-menu-item>
           <a-menu-divider />
-          <a-menu-item key="docs" @click="openDocs">
+          <a-menu-item v-if="SHOW_DOCS_MENU" key="docs" @click="openDocs">
             <template #icon><BookOpen :size="16" /></template>
             <span class="menu-text">文档中心</span>
           </a-menu-item>
@@ -84,6 +84,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const themeStore = useThemeStore()
 const slots = useSlots()
+const SHOW_DOCS_MENU = false
 
 // 调试面板状态
 const showDebug = ref(false)
