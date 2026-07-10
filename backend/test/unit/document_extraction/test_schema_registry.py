@@ -2,6 +2,7 @@ from yuxi.document_extraction.schemas import (
     DocumentCategoryResult,
     category_result_for_classification_label,
     document_category_labels,
+    extraction_schema_display_metadata,
     extraction_schema_ids_for_categories,
     field_description_lines,
     get_extraction_schema,
@@ -43,3 +44,12 @@ def test_extraction_schema_exposes_field_descriptions():
 
     assert any("risk_name" in line and "风险事项" in line for line in lines)
     assert any("source_quote" in line and "原文" in line for line in lines)
+
+
+def test_extraction_schema_display_metadata_uses_schema_labels():
+    display = extraction_schema_display_metadata(["management_requirement_item"])
+
+    assert display["categoryLabels"]["regulation"] == "规章制度类"
+    assert display["schemaLabels"]["management_requirement_item"] == "管理要求"
+    assert display["fieldLabels"]["management_requirement_item"]["department"] == "涉及部门"
+    assert display["fieldLabels"]["management_requirement_item"]["source_quote"] == "原文依据"

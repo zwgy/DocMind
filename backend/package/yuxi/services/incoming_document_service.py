@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from yuxi.document_extraction.schemas import extraction_schema_display_metadata
 from yuxi.repositories.document_business_extraction_repository import DocumentBusinessExtractionRepository
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
 
@@ -75,17 +76,25 @@ class IncomingDocumentService:
         summary = getattr(record, "summary", None)
         extraction_status = "ready" if processing_status == "ready" and summary else processing_status
         business_extraction = await self.extraction_repo.get_latest_by_incoming_id(record.incoming_id)
+        schema_ids = (business_extraction or {}).get("schema_ids") or []
+        display = extraction_schema_display_metadata(schema_ids)
+        classification = getattr(record, "classification", None)
+        display["classificationLabel"] = classification or _first_matched_category_label(
+            (business_extraction or {}).get("categories") or {},
+            display.get("categoryLabels") or {},
+        )
         return base | {
             "incomingId": record.incoming_id,
             "matchStatus": "matched",
             "processingStatus": processing_status,
             "extractionStatus": extraction_status,
-            "classification": getattr(record, "classification", None),
+            "classification": classification,
             "summary": summary,
             "runId": (business_extraction or {}).get("run_id"),
             "categories": (business_extraction or {}).get("categories") or {},
-            "schemaIds": (business_extraction or {}).get("schema_ids") or [],
+            "schemaIds": schema_ids,
             "items": (business_extraction or {}).get("items") or [],
+            "display": display,
             "hasMarkdown": has_markdown,
             "knowledgeImportStatus": getattr(record, "knowledge_import_status", None) or "none",
             "linkedKbId": getattr(record, "linked_kb_id", None),
@@ -130,3 +139,10 @@ class IncomingDocumentService:
             if candidates:
                 return candidates, "source_document_id + filename matched"
         return [], "not found"
+
+
+def _first_matched_category_label(categories: dict[str, Any], category_labels: dict[str, str]) -> str | None:
+    for name, value in categories.items():
+        if isinstance(value, dict) and value.get("matched"):
+            return category_labels.get(name) or name
+    return None

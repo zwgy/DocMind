@@ -51,7 +51,9 @@ class FakeExtractionRepo:
 
 async def test_query_returns_ready_incoming_summary_for_source_file_id_match():
     service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo({("source_file_id", "oa", "incomingDocument", "37906", "202606100417"): [incoming_record()]}),
+        incoming_repo=FakeIncomingRepo(
+            {("source_file_id", "oa", "incomingDocument", "37906", "202606100417"): [incoming_record()]}
+        ),
         extraction_repo=FakeExtractionRepo(
             {
                 "inc_1": {
@@ -92,6 +94,9 @@ async def test_query_returns_ready_incoming_summary_for_source_file_id_match():
     assert item["extractionStatus"] == "ready"
     assert item["incomingId"] == "inc_1"
     assert item["classification"] == "客户审查"
+    assert item["display"]["categoryLabels"]["risk_management"] == "风险管理类"
+    assert item["display"]["schemaLabels"]["risk_item"] == "风险事项"
+    assert item["display"]["fieldLabels"]["risk_item"]["risk_name"] == "风险事项"
     assert item["summary"] == "这是一份客户审查来文摘要。"
     assert item["runId"] == "ber_1"
     assert item["schemaIds"] == ["risk_item"]
@@ -101,9 +106,75 @@ async def test_query_returns_ready_incoming_summary_for_source_file_id_match():
     assert item["knowledgeImportStatus"] == "none"
 
 
+async def test_query_returns_schema_display_metadata_for_regulation():
+    service = IncomingDocumentService(
+        incoming_repo=FakeIncomingRepo(
+            {
+                ("source_file_id", "oa", "incomingDocument", "37908", "202010200206"): [
+                    incoming_record(classification="规章制度类")
+                ]
+            }
+        ),
+        extraction_repo=FakeExtractionRepo(
+            {
+                "inc_1": {
+                    "run_id": "ber_1",
+                    "categories": {"regulation": {"matched": True, "evidence": "摘要阶段分类：规章制度类"}},
+                    "schema_ids": ["management_requirement_item"],
+                    "items": [
+                        {
+                            "item_id": "bei_1",
+                            "item_type": "management_requirement_item",
+                            "data": {
+                                "department": "集团公司车辆部",
+                                "role": None,
+                                "period_type": "长期性",
+                                "requirement": "制定路用客车检修运用管理办法。",
+                                "source_quote": "原文依据",
+                            },
+                            "source_quote": "原文依据",
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+
+    result = await service.query_extractions(
+        [
+            {
+                "id": "202010200206",
+                "name": "上铁辆〔2020〕316号.pdf",
+                "source_file_id": "202010200206",
+                "source_function_id": "incomingDocument",
+                "source_doc_id": "37908",
+                "source_system": "oa",
+            }
+        ]
+    )
+
+    display = result["items"][0]["display"]
+    assert display["classificationLabel"] == "规章制度类"
+    assert display["categoryLabels"]["regulation"] == "规章制度类"
+    assert display["schemaLabels"]["management_requirement_item"] == "管理要求"
+    assert display["fieldLabels"]["management_requirement_item"] == {
+        "requirement": "管理要求",
+        "department": "涉及部门",
+        "role": "涉及岗位、角色",
+        "period_type": "要求类型",
+        "source_quote": "原文依据",
+    }
+
+
 async def test_query_returns_markdown_hint_when_summary_missing():
     service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo({("source_file_id", "production", "incomingDocument", "37906", "202606100417"): [incoming_record(summary=None)]}),
+        incoming_repo=FakeIncomingRepo(
+            {
+                ("source_file_id", "production", "incomingDocument", "37906", "202606100417"): [
+                    incoming_record(summary=None)
+                ]
+            }
+        ),
         extraction_repo=FakeExtractionRepo(),
     )
 
