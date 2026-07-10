@@ -109,7 +109,7 @@ def _summary_from_file(file_info: dict[str, Any]) -> str:
                 evidence = _clean_text(value.get("evidence"))
                 parts.append(f"{name}：{evidence}" if evidence else str(name))
     if isinstance(items, list):
-        for item in items[:5]:
+        for item in items:
             if isinstance(item, dict):
                 quote = _clean_text(item.get("source_quote"))
                 if quote:
@@ -122,7 +122,7 @@ def _business_items_text(file_info: dict[str, Any]) -> str:
     if not isinstance(items, list):
         return ""
     lines: list[str] = []
-    for item in items[:5]:
+    for item in items:
         if not isinstance(item, dict):
             continue
         item_type = _clean_text(item.get("item_type")) or "unknown"

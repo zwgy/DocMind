@@ -76,6 +76,41 @@ async def test_render_iframe_context_marks_unready_files_without_tool_path(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_render_iframe_context_keeps_business_items_until_total_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr(svc.app_config, "save_dir", str(tmp_path))
+    monkeypatch.setattr(svc, "IFRAME_CONTEXT_TOTAL_CHARS", 4000)
+
+    prompt = await svc.render_iframe_context_prompt(
+        thread_id="thread-1",
+        uid="user-1",
+        iframe_context={
+            "files": [
+                {
+                    "name": "requirements.pdf",
+                    "matchStatus": "matched",
+                    "extractionStatus": "ready",
+                    "hasParsedMarkdown": True,
+                    "kbId": "kb1",
+                    "fileId": "file1",
+                    "items": [
+                        {
+                            "item_type": "management_requirement_item",
+                            "data": {"requirement": f"requirement-{index}"},
+                            "source_quote": f"source quote {index}",
+                        }
+                        for index in range(8)
+                    ],
+                }
+            ]
+        },
+    )
+
+    assert "requirement-0" in prompt
+    assert "requirement-7" in prompt
+    assert "source quote 7" in prompt
+
+
+@pytest.mark.asyncio
 async def test_render_iframe_context_writes_incoming_markdown_to_thread_file(tmp_path, monkeypatch):
     monkeypatch.setattr(svc.app_config, "save_dir", str(tmp_path))
 
