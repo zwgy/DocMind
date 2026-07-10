@@ -153,7 +153,30 @@
 
           <section class="detail-section">
             <h2>结构化结果</h2>
-            <pre class="json-box">{{ stringifyJson(detail.structuredResult) }}</pre>
+            <div v-if="businessExtractionItems.length" class="business-extraction-list">
+              <article
+                v-for="(item, index) in businessExtractionItems"
+                :key="item.item_id || index"
+                class="business-extraction-item"
+              >
+                <strong>{{ extractionItemTypeText(item.item_type) }} {{ index + 1 }}</strong>
+                <dl v-if="displayExtractionDataEntries(item).length">
+                  <template v-for="[key, value] in displayExtractionDataEntries(item)" :key="key">
+                    <dt>{{ key }}</dt>
+                    <dd>{{ displayValue(value) }}</dd>
+                  </template>
+                </dl>
+                <blockquote v-if="item.source_quote">{{ item.source_quote }}</blockquote>
+              </article>
+            </div>
+            <div v-else class="empty-content compact">
+              <p>正式结构化结果暂未生成</p>
+            </div>
+            <a-collapse v-if="hasSummaryStructuredResult" ghost class="summary-result-collapse">
+              <a-collapse-panel key="summary" header="摘要阶段关键事实">
+                <pre class="json-box">{{ stringifyJson(detail.structuredResult) }}</pre>
+              </a-collapse-panel>
+            </a-collapse>
           </section>
 
           <section class="detail-section">
@@ -479,6 +502,26 @@ const hasMarkdownFile = computed(() => Boolean(detail.value?.markdownFileUrl))
 const sourcePreviewHasContent = computed(
   () => Boolean(sourcePreview.content) || Boolean(sourcePreview.previewUrl || sourcePreview.url)
 )
+const businessExtractionItems = computed(() => detail.value?.businessExtraction?.items || [])
+const hasSummaryStructuredResult = computed(() => Object.keys(detail.value?.structuredResult || {}).length > 0)
+
+function extractionItemTypeText(itemType) {
+  return detail.value?.businessExtraction?.display?.schemaLabels?.[itemType] || itemType || '结构化对象'
+}
+
+function displayExtractionDataEntries(item) {
+  const data = item?.confirmed_data || item?.data || {}
+  const labels = detail.value?.businessExtraction?.display?.fieldLabels?.[item?.item_type] || {}
+  return Object.entries(data)
+    .filter(([key, value]) => key !== 'source_quote' && value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => [labels[key] || key, value])
+}
+
+function displayValue(value) {
+  if (Array.isArray(value)) return value.join('、')
+  if (value && typeof value === 'object') return JSON.stringify(value)
+  return String(value ?? '')
+}
 
 function revokeSourcePreviewUrl() {
   // 释放上一份 blob URL，避免反复打开时泄漏
@@ -832,6 +875,56 @@ onBeforeUnmount(() => {
   line-height: 1.5;
 }
 
+.business-extraction-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.business-extraction-item {
+  padding: 12px;
+  border: 1px solid var(--gray-150);
+  border-radius: 6px;
+  background: var(--gray-25);
+}
+
+.business-extraction-item strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--gray-900);
+  font-size: 13px;
+}
+
+.business-extraction-item dl {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 6px 10px;
+  margin: 0;
+}
+
+.business-extraction-item dt {
+  color: var(--gray-500);
+}
+
+.business-extraction-item dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--gray-800);
+  word-break: break-word;
+}
+
+.business-extraction-item blockquote {
+  margin: 10px 0 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--gray-200);
+  color: var(--gray-600);
+  white-space: pre-wrap;
+}
+
+.summary-result-collapse {
+  margin-top: 10px;
+}
+
 .markdown-box {
   max-height: 420px;
   white-space: pre-wrap;
@@ -882,6 +975,10 @@ onBeforeUnmount(() => {
   padding: 40px 0;
   text-align: center;
   color: var(--gray-500);
+}
+
+.empty-content.compact {
+  padding: 18px 0;
 }
 
 @media (max-width: 760px) {
