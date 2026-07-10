@@ -4,6 +4,7 @@ import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import MessageRefs from '@/components/MessageRefs.vue'
 import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
 import type { ChatMessage } from '@/types'
+import { extractionSummaryText } from '@/utils/context-summary'
 import { groupMessageDisplayItems } from '@/utils/message-display'
 
 const props = withDefaults(
@@ -44,7 +45,7 @@ function displayValue(value: unknown) {
 
 function hasSummaryDetails(message: ChatMessage) {
   const summary = message.contextSummary
-  return Boolean(summary?.items.length)
+  return Boolean(summary?.items.length || extractionSummaryText(summary?.result))
 }
 
 function isSummaryReady(message: ChatMessage) {
@@ -135,7 +136,11 @@ watch([displayItems, showGeneratingStatus], scrollToBottom, { flush: 'post', dee
             <p>{{ summaryEmptyText(item.message) }}</p>
           </div>
           <section v-if="hasSummaryDetails(item.message)" class="context-summary-section">
-            <p v-if="!item.message.contextSummary.items.length" class="muted">暂无结构化明细</p>
+            <article v-if="extractionSummaryText(item.message.contextSummary.result)" class="item-row">
+              <strong>摘要</strong>
+              <blockquote>{{ extractionSummaryText(item.message.contextSummary.result) }}</blockquote>
+            </article>
+            <p v-if="!item.message.contextSummary.items.length && !extractionSummaryText(item.message.contextSummary.result)" class="muted">暂无结构化明细</p>
             <article v-for="summaryItem in item.message.contextSummary.items.slice(0, 3)" :key="summaryItem.item_id" class="item-row">
               <strong>{{ summaryItem.item_type }}</strong>
               <dl v-if="summaryItem.data && Object.keys(summaryItem.data).length">

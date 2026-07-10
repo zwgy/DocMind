@@ -197,6 +197,47 @@ test('buildIframeContext omits disabled page and files', () => {
   assert.deepEqual(context.files, [])
 })
 
+test('buildIframeContext uses backend summary when extraction items are empty', () => {
+  const context = buildIframeContext({
+    text: 'Summarize',
+    includePage: false,
+    includeFile: true,
+    selectedPageFiles: [{ id: 'f1', name: 'a.docx', source_file_id: 'S001' }],
+    extractionResults: {
+      f1: {
+        matchStatus: 'matched',
+        extractionStatus: 'ready',
+        summary: 'Full document summary',
+        items: []
+      }
+    }
+  })
+
+  assert.equal(context.files[0].summary, 'Full document summary')
+})
+
+test('buildIframeContext keeps structured extraction details with backend summary', () => {
+  const context = buildIframeContext({
+    text: 'Summarize',
+    includePage: false,
+    includeFile: true,
+    selectedPageFiles: [{ id: 'f1', name: 'a.docx', source_file_id: 'S001' }],
+    extractionResults: {
+      f1: {
+        matchStatus: 'matched',
+        extractionStatus: 'ready',
+        summary: 'Full document summary',
+        categories: { risk: { matched: true, evidence: 'Risk evidence' } },
+        items: [{ item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' }]
+      }
+    }
+  })
+
+  assert.match(context.files[0].summary, /Full document summary/)
+  assert.match(context.files[0].summary, /Source quote/)
+  assert.deepEqual(context.files[0].items, [{ item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' }])
+})
+
 test('readRunEventStream emits text deltas from compact run SSE events', async () => {
   const encoder = new TextEncoder()
   const stream = new ReadableStream({

@@ -81,6 +81,8 @@ export type ExtractionResult = {
   categories?: Record<string, ExtractionCategory>
   items?: ExtractionItem[]
   schemaIds?: string[]
+  summary?: string | null
+  structuredResult?: Record<string, unknown> | null
 }
 
 export type IframeContextFile = IncomingPageFile & {

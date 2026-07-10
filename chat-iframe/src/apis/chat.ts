@@ -75,7 +75,9 @@ async function parseResponse<T>(response: Response, fallbackMessage: string): Pr
 function summarizeExtraction(result?: ExtractionResult | null) {
   if (!result) return ''
   if (result.matchStatus !== 'matched' || result.extractionStatus !== 'ready') return ''
-  const lines: string[] = [`匹配状态：${result.matchStatus}`, `抽取状态：${result.extractionStatus}`]
+  const summary = String(result.summary || '').trim()
+  // 后端 summary 与业务抽取 items 都可能有价值；只在没有结构化细节时返回纯摘要，避免两者互相覆盖。
+  const lines: string[] = summary ? [summary] : [`匹配状态：${result.matchStatus}`, `抽取状态：${result.extractionStatus}`]
   const categories = Object.entries(result.categories || {})
     .filter(([, value]) => value?.matched)
     .map(([key, value]) => `${key}：命中${value.evidence ? `，依据：${value.evidence}` : ''}`)

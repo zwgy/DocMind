@@ -37,11 +37,18 @@ export function matchedExtractionCategories(result?: ExtractionResult | null) {
     .map(([name, value]) => ({ name, evidence: value.evidence }))
 }
 
+export function extractionSummaryText(result?: ExtractionResult | null) {
+  // 后端 summary 与结构化 items 是两类结果；保留 summary 可避免用户看到“已生成”但无内容的误导状态。
+  return String(result?.summary || '').trim()
+}
+
 function summaryContent(input: SummaryInput) {
   const status = extractionStatusText(input)
   const lines = [`### 文档结构化摘要`, `附件：${input.file?.name || '未选择附件'}`, `状态：${status}`]
   const categories = matchedExtractionCategories(input.result)
   if (categories.length) lines.push(`分类：${categories.map((item) => item.name).join('、')}`)
+  const summary = extractionSummaryText(input.result)
+  if (summary) lines.push(`摘要：${summary}`)
   const quotes = (input.result?.items || [])
     .map((item) => item.source_quote || '')
     .filter(Boolean)
@@ -72,4 +79,3 @@ export function buildContextSummaryMessage(input: SummaryInput): ChatMessage | n
     }
   }
 }
-

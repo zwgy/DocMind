@@ -42,6 +42,20 @@ test('buildContextSummaryMessage updates with switched file', () => {
   assert.equal(message?.contextSummary?.statusText, '等待查询')
 })
 
+test('buildContextSummaryMessage keeps backend summary when extraction items are empty', () => {
+  const message = buildContextSummaryMessage({
+    file,
+    result: {
+      matchStatus: 'matched',
+      extractionStatus: 'ready',
+      summary: 'Full document summary',
+      items: []
+    }
+  })
+
+  assert.match(message?.content || '', /Full document summary/)
+})
+
 test('extractionStatusText renders non-ready states', () => {
   assert.equal(extractionStatusText({ file, result: null, loading: true }), '查询中')
   assert.equal(extractionStatusText({ file, result: null, error: '查询失败' }), '查询失败')
