@@ -16,8 +16,14 @@ assert.match(
 
 assert.match(
   component,
-  /businessExtractionItems/,
-  '详情页结构化结果应展示分类完成后的正式业务抽取结果'
+  /businessExtractionGroups/,
+  '详情页结构化结果应按 schema 分组展示正式业务抽取结果'
+)
+
+assert.doesNotMatch(
+  component,
+  /v-for="\([\s\S]*?\) in businessExtractionItems"/,
+  '详情页不应直接平铺业务抽取 item'
 )
 
 assert.match(

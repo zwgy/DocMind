@@ -153,21 +153,24 @@
 
           <section class="detail-section">
             <h2>结构化结果</h2>
-            <div v-if="businessExtractionItems.length" class="business-extraction-list">
-              <article
-                v-for="(item, index) in businessExtractionItems"
-                :key="item.item_id || index"
-                class="business-extraction-item"
-              >
-                <strong>{{ extractionItemTypeText(item.item_type) }} {{ index + 1 }}</strong>
-                <dl v-if="displayExtractionDataEntries(item).length">
-                  <template v-for="[key, value] in displayExtractionDataEntries(item)" :key="key">
-                    <dt>{{ key }}</dt>
-                    <dd>{{ displayValue(value) }}</dd>
-                  </template>
-                </dl>
-                <blockquote v-if="item.source_quote">{{ item.source_quote }}</blockquote>
-              </article>
+            <div v-if="businessExtractionGroups.length" class="business-extraction-list">
+              <section v-for="group in businessExtractionGroups" :key="group.itemType" class="business-extraction-group">
+                <h3>{{ group.label }}（{{ group.items.length }}）</h3>
+                <article
+                  v-for="(item, index) in group.items"
+                  :key="item.item_id || `${group.itemType}-${index}`"
+                  class="business-extraction-item"
+                >
+                  <strong>{{ group.label }} {{ index + 1 }}</strong>
+                  <dl v-if="displayExtractionDataEntries(item).length">
+                    <template v-for="[key, value] in displayExtractionDataEntries(item)" :key="key">
+                      <dt>{{ key }}</dt>
+                      <dd>{{ displayValue(value) }}</dd>
+                    </template>
+                  </dl>
+                  <blockquote v-if="item.source_quote">{{ item.source_quote }}</blockquote>
+                </article>
+              </section>
             </div>
             <div v-else class="empty-content compact">
               <p>正式结构化结果暂未生成</p>
@@ -503,6 +506,25 @@ const sourcePreviewHasContent = computed(
   () => Boolean(sourcePreview.content) || Boolean(sourcePreview.previewUrl || sourcePreview.url)
 )
 const businessExtractionItems = computed(() => detail.value?.businessExtraction?.items || [])
+const businessExtractionGroups = computed(() => {
+  const groups = new Map()
+  businessExtractionItems.value.forEach((item) => {
+    const itemType = item?.item_type || 'unknown'
+    if (!groups.has(itemType)) {
+      groups.set(itemType, {
+        itemType,
+        label: extractionItemTypeText(itemType),
+        items: []
+      })
+    }
+    groups.get(itemType).items.push(item)
+  })
+  const schemaIds = detail.value?.businessExtraction?.schemaIds || []
+  return [
+    ...schemaIds.filter((itemType) => groups.has(itemType)).map((itemType) => groups.get(itemType)),
+    ...Array.from(groups.values()).filter((group) => !schemaIds.includes(group.itemType))
+  ]
+})
 const hasSummaryStructuredResult = computed(() => Object.keys(detail.value?.structuredResult || {}).length > 0)
 
 function extractionItemTypeText(itemType) {
@@ -878,7 +900,20 @@ onBeforeUnmount(() => {
 .business-extraction-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
+}
+
+.business-extraction-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.business-extraction-group h3 {
+  margin: 0;
+  color: var(--gray-800);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .business-extraction-item {
