@@ -56,6 +56,15 @@ async function refreshExtraction() {
     chat.setContextSummary({ file: null, result: null })
     return
   }
+  if (context.config.authError) {
+    chat.setContextSummary({ file, result: results.value[file.id] || null, error: context.config.authError })
+    return
+  }
+  if (!context.config.token) {
+    // 父页面可能先响应附件列表、后完成换票；这里等待 token 到达，避免无凭证请求把摘要卡片打成 401。
+    chat.setContextSummary({ file, result: results.value[file.id] || null })
+    return
+  }
   const queryFiles = context.files.length ? context.files : [file]
   loading.value = true
   error.value = ''
@@ -183,10 +192,18 @@ watch(
   () => {
     if (context.config.authError) {
       chat.error = context.config.authError
+      if (selectedFile.value) {
+        chat.setContextSummary({
+          file: selectedFile.value,
+          result: results.value[selectedFile.value.id] || null,
+          error: context.config.authError
+        })
+      }
       return
     }
     if (!context.config.token) return
     void chat.bootstrap(context.config.token, context.config.agentId, context.config.conversationScopeKey)
+    void refreshExtraction()
   },
   { immediate: true }
 )
