@@ -513,7 +513,9 @@ const handleRefresh = async () => {
 }
 
 // 打开添加用户模态框
-const showAddUserModal = () => {
+const showAddUserModal = async () => {
+  // 角色状态可能晚于组件挂载恢复，打开弹窗前补拉一次部门，避免超级管理员下拉为空。
+  await fetchDepartments()
   userManagement.modalTitle = '添加用户'
   userManagement.editMode = false
   userManagement.editUserId = null
