@@ -10,6 +10,7 @@
 - 修复删除用户后同名重建账号登录误报已注销：登录查询改为优先匹配未删除账号的 `uid/phone_number/username`，只有没有活跃账号时才返回旧注销账号提示，并同步登录框文案。
 - 修复超级管理员创建用户时部门下拉可能为空：打开「添加用户」弹窗前补拉部门列表，避免用户角色状态晚于组件挂载恢复时跳过部门加载。
 - 修复 chat-iframe 问文件摘要卡片在后端已有来文摘要但业务结构化明细为空时误显示“暂无结构化摘要明细”的问题：前端会展示后端摘要；当业务结构化明细存在时，同时保留摘要、分类命中和结构化依据传入 iframe 上下文。
+- 优化 chat-iframe 来文结构化结果展示：后端从 `document_extraction.schemas` 导出分类、抽取对象和字段的 display label，`/api/incoming-documents/extractions/query` 随结构化结果返回，前端按后端 label 渲染文件名分类标记、抽取对象和字段名，并隐藏空字段及重复的 `source_quote` 字段。
 - 修复来文结构化抽取重复分类导致 schema 选择为空的问题：来文摘要阶段已产生分类时，正式业务结构化抽取直接复用该分类选择抽取 schema，不再重复调用 `_classify_chunks`。
 - 来文管理的“重新处理”入口支持已完成来文，便于摘要成功但业务结构化抽取为空时由管理员重跑解析、摘要和结构化抽取流程。
 - 修复来文与业务结构化抽取表启动建表失败：移除 SQLAlchemy 模型中与 `Column(index=True)` 重名的显式单列索引，避免 `metadata.create_all` 在 PostgreSQL 上重复创建 `ix_incoming_documents_*` 等索引导致启动事务回滚、`incoming_documents` 表缺失。
