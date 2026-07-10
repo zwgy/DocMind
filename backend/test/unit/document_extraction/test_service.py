@@ -52,6 +52,29 @@ class FakeNoCategoryLLM(FakeLLM):
         }
 
 
+class FakeDuplicateManagementLLM(FakeLLM):
+    def __init__(self):
+        super().__init__()
+        self.extraction_calls = 0
+
+    async def complete_json(self, prompt, schema):
+        self.prompts.append(prompt)
+        if "DocumentCategoryResult" in prompt:
+            raise AssertionError("should not classify when category_result is provided")
+        self.extraction_calls += 1
+        return {
+            "items": [
+                {
+                    "requirement": "建立问题整改台账",
+                    "department": "各单位",
+                    "role": None,
+                    "period_type": "长期性",
+                    "source_quote": f"第 {self.extraction_calls} 段要求建立问题整改台账",
+                }
+            ]
+        }
+
+
 async def test_extract_file_runs_category_first_then_matching_schemas():
     service = BusinessExtractionService(llm=FakeLLM())
 
@@ -88,6 +111,25 @@ async def test_extract_chunks_uses_known_category_without_reclassifying():
 
     assert result.schema_ids == ["management_requirement_item"]
     assert result.items[0].item_type == "management_requirement_item"
+
+
+async def test_extract_chunks_merges_obvious_duplicate_items_from_chunks():
+    service = BusinessExtractionService(llm=FakeDuplicateManagementLLM())
+
+    result = await service.extract_chunks(
+        document_scope="incoming",
+        incoming_id="inc_1",
+        chunks=[
+            {"chunk_id": "chunk_1", "content": "各单位应建立问题整改台账。", "chunk_index": 0},
+            {"chunk_id": "chunk_2", "content": "各单位持续建立问题整改台账。", "chunk_index": 1},
+        ],
+        category_result=category_result_for_classification_label("规章制度类"),
+    )
+
+    assert len(result.items) == 1
+    assert result.items[0].data["requirement"] == "建立问题整改台账"
+    assert "第 1 段要求建立问题整改台账" in result.items[0].source_quote
+    assert "第 2 段要求建立问题整改台账" in result.items[0].source_quote
 
 
 class FakeExtractionRepo:

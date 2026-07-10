@@ -25,6 +25,13 @@ from yuxi.utils.datetime_utils import utc_isoformat
 
 MarkdownReader = Callable[[str], str | Awaitable[str]]
 SHORT_MARKDOWN_EXTRACTION_LIMIT = 12_000
+ITEM_MERGE_KEY_FIELDS = {
+    "risk_item": ("risk_name", "department", "role"),
+    "task_item": ("task_name", "department", "deadline"),
+    "assessment_item": ("target", "project", "result"),
+    "reward_punishment_item": ("target", "action_type", "result"),
+    "management_requirement_item": ("requirement", "department", "role"),
+}
 
 
 @dataclass(slots=True)
@@ -140,7 +147,7 @@ class BusinessExtractionService:
             file_id=file_id,
             categories=category_result,
             schema_ids=schema_ids,
-            items=items,
+            items=_merge_obvious_duplicate_items(items),
             errors=errors,
         )
 
@@ -352,3 +359,51 @@ class BusinessExtractionService:
         if not model_spec:
             raise ValueError("model_spec is required when no JsonLLM is injected")
         return ModelJsonLLM(model_spec)
+
+
+def _merge_obvious_duplicate_items(items: list[ExtractedBusinessItem]) -> list[ExtractedBusinessItem]:
+    merged: list[ExtractedBusinessItem] = []
+    index_by_key: dict[tuple[str, tuple[str, ...]], int] = {}
+    for item in items:
+        key = _item_merge_key(item)
+        if key is None:
+            merged.append(item)
+            continue
+        existing_index = index_by_key.get(key)
+        if existing_index is None:
+            index_by_key[key] = len(merged)
+            merged.append(item)
+            continue
+        _merge_item_into(merged[existing_index], item)
+    return merged
+
+
+def _item_merge_key(item: ExtractedBusinessItem) -> tuple[str, tuple[str, ...]] | None:
+    fields = ITEM_MERGE_KEY_FIELDS.get(item.item_type)
+    if not fields:
+        return None
+    values = tuple(_normalize_merge_value(item.data.get(field)) for field in fields)
+    if not any(values):
+        return None
+    return item.item_type, values
+
+
+def _normalize_merge_value(value: Any) -> str:
+    if value is None:
+        return ""
+    return " ".join(str(value).strip().lower().split())
+
+
+def _merge_item_into(target: ExtractedBusinessItem, source: ExtractedBusinessItem) -> None:
+    # 保守合并：只补空字段和追加依据，避免把不确定的跨块信息揉成新事实。
+    for key, value in source.data.items():
+        if _is_empty_value(target.data.get(key)) and not _is_empty_value(value):
+            target.data[key] = value
+    quotes = [quote for quote in [target.source_quote, source.source_quote] if quote]
+    unique_quotes = list(dict.fromkeys(quotes))
+    target.source_quote = "\n".join(unique_quotes)
+    target.data["source_quote"] = target.source_quote
+
+
+def _is_empty_value(value: Any) -> bool:
+    return value is None or value == "" or value == []
