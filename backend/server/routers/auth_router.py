@@ -196,19 +196,30 @@ def _raise_cli_auth_error(exc: CLIAuthError) -> None:
 # =============================================================================
 
 
+async def _find_login_user(db: AsyncSession, login_identifier: str) -> User | None:
+    # 先查未删除账号，避免同名账号重建后被旧注销 uid 抢先命中。
+    for field in (User.uid, User.phone_number, User.username):
+        result = await db.execute(select(User).filter(field == login_identifier, User.is_deleted == 0))
+        user = result.scalar_one_or_none()
+        if user:
+            return user
+
+    # 没有活跃账号时再返回旧注销账号，让前端保留“该账户已注销”的明确提示。
+    for field in (User.uid, User.phone_number, User.username):
+        result = await db.execute(select(User).filter(field == login_identifier))
+        user = result.scalar_one_or_none()
+        if user:
+            return user
+
+    return None
+
+
 @auth.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
-    # 查找用户 - 支持user_id和phone_number登录
+    # 查找用户 - 支持 uid、手机号和用户名登录
     login_identifier = form_data.username  # OAuth2表单中的username字段作为登录标识符
 
-    # 尝试通过user_id查找
-    result = await db.execute(select(User).filter(User.uid == login_identifier))
-    user = result.scalar_one_or_none()
-
-    # 如果通过user_id没找到，尝试通过phone_number查找
-    if not user:
-        result = await db.execute(select(User).filter(User.phone_number == login_identifier))
-        user = result.scalar_one_or_none()
+    user = await _find_login_user(db, login_identifier)
 
     # 如果用户不存在，为防止用户名枚举攻击，返回通用错误信息
     if not user:
