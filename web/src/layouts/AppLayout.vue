@@ -127,6 +127,13 @@ const mainList = computed(() => {
     activeIcon: LibraryBig
   })
 
+  items.push({
+    name: '智能体管理',
+    path: '/model-manage',
+    icon: Box,
+    activeIcon: Box
+  })
+
   if (userStore.isAdmin) {
     items.push({
       name: '来文管理',
@@ -135,13 +142,6 @@ const mainList = computed(() => {
       activeIcon: Inbox
     })
   }
-
-  items.push({
-    name: '智能体管理',
-    path: '/model-manage',
-    icon: Box,
-    activeIcon: Box
-  })
 
   if (userStore.isSuperAdmin) {
     items.push({
