@@ -803,6 +803,18 @@
   font-size: 12px;
 }
 
+.context-summary-group {
+  display: grid;
+  gap: 6px;
+}
+
+.context-summary-group summary {
+  cursor: pointer;
+  color: var(--gray-700);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .context-summary-section .item-row {
   padding: 10px;
 }

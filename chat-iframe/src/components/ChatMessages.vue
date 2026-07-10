@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import MessageRefs from '@/components/MessageRefs.vue'
 import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
-import type { ChatMessage } from '@/types'
+import type { ChatMessage, ExtractionItem } from '@/types'
 import {
   displayExtractionDataEntries,
   extractionClassificationText,
@@ -38,6 +38,12 @@ const lastAssistantMessageId = computed(() => {
   return ''
 })
 
+type ContextSummaryItemGroup = {
+  itemType: string
+  label: string
+  items: ExtractionItem[]
+}
+
 function imageSrc(content?: string) {
   if (!content) return ''
   if (content.startsWith('data:') || content.startsWith('blob:')) return content
@@ -46,6 +52,27 @@ function imageSrc(content?: string) {
 
 function displayValue(value: unknown) {
   return Array.isArray(value) ? value.join('、') : String(value ?? '')
+}
+
+function contextSummaryItemGroups(message: ChatMessage): ContextSummaryItemGroup[] {
+  const summary = message.contextSummary
+  const groups = new Map<string, ContextSummaryItemGroup>()
+  for (const item of summary?.items || []) {
+    const itemType = item.item_type || 'unknown'
+    if (!groups.has(itemType)) {
+      groups.set(itemType, {
+        itemType,
+        label: extractionItemTypeText(itemType, summary?.result),
+        items: []
+      })
+    }
+    groups.get(itemType)?.items.push(item)
+  }
+  const schemaIds = summary?.result?.schemaIds || []
+  return [
+    ...schemaIds.filter((itemType) => groups.has(itemType)).map((itemType) => groups.get(itemType)!),
+    ...Array.from(groups.values()).filter((group) => !schemaIds.includes(group.itemType))
+  ]
 }
 
 function hasSummaryDetails(message: ChatMessage) {
@@ -149,16 +176,24 @@ watch([displayItems, showGeneratingStatus], scrollToBottom, { flush: 'post', dee
               <blockquote>{{ extractionSummaryText(item.message.contextSummary.result) }}</blockquote>
             </article>
             <p v-if="!item.message.contextSummary.items.length && !extractionSummaryText(item.message.contextSummary.result)" class="muted">暂无结构化明细</p>
-            <article v-for="(summaryItem, index) in item.message.contextSummary.items.slice(0, 3)" :key="summaryItem.item_id" class="item-row">
-              <strong>{{ extractionItemTypeText(summaryItem.item_type, item.message.contextSummary.result) }} {{ index + 1 }}</strong>
-              <dl v-if="displayExtractionDataEntries(summaryItem.data, summaryItem.item_type, item.message.contextSummary.result).length">
-                <template v-for="[key, value] in displayExtractionDataEntries(summaryItem.data, summaryItem.item_type, item.message.contextSummary.result)" :key="key">
-                  <dt>{{ key }}</dt>
-                  <dd>{{ displayValue(value) }}</dd>
-                </template>
-              </dl>
-              <blockquote v-if="summaryItem.source_quote">{{ summaryItem.source_quote }}</blockquote>
-            </article>
+            <details
+              v-for="group in contextSummaryItemGroups(item.message)"
+              :key="group.itemType"
+              class="context-summary-group"
+              open
+            >
+              <summary>{{ group.label }}（{{ group.items.length }}）</summary>
+              <article v-for="(summaryItem, index) in group.items" :key="summaryItem.item_id" class="item-row">
+                <strong>{{ group.label }} {{ index + 1 }}</strong>
+                <dl v-if="displayExtractionDataEntries(summaryItem.data, summaryItem.item_type, item.message.contextSummary.result).length">
+                  <template v-for="[key, value] in displayExtractionDataEntries(summaryItem.data, summaryItem.item_type, item.message.contextSummary.result)" :key="key">
+                    <dt>{{ key }}</dt>
+                    <dd>{{ displayValue(value) }}</dd>
+                  </template>
+                </dl>
+                <blockquote v-if="summaryItem.source_quote">{{ summaryItem.source_quote }}</blockquote>
+              </article>
+            </details>
           </section>
         </div>
       </template>
