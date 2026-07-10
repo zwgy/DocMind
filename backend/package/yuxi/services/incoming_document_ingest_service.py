@@ -545,6 +545,7 @@ class IncomingDocumentIngestService:
                 filename=record.filename,
                 markdown=markdown,
                 markdown_url=markdown_url,
+                classification=summary.classification,
                 operator_id=operator_id,
             )
             await self.incoming_repo.update_fields(
@@ -575,6 +576,7 @@ class IncomingDocumentIngestService:
         markdown: str,
         markdown_url: str,
         operator_id: str | None,
+        classification: str | None = None,
     ) -> None:
         try:
             from yuxi.config.app import config
@@ -585,7 +587,7 @@ class IncomingDocumentIngestService:
                 incoming_id=incoming_id,
                 markdown_file=markdown_url,
                 filename=filename,
-                processing_params={},
+                processing_params={"classification": classification},
                 model_spec=config.business_extraction_model or config.default_model,
                 operator_id=operator_id,
                 markdown_reader=lambda _: markdown,

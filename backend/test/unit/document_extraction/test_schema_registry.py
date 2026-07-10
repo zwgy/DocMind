@@ -1,5 +1,6 @@
 from yuxi.document_extraction.schemas import (
     DocumentCategoryResult,
+    category_result_for_classification_label,
     document_category_labels,
     extraction_schema_ids_for_categories,
     field_description_lines,
@@ -13,6 +14,14 @@ def test_category_fields_carry_extraction_schema_mapping():
     assert "risk_item" in schema_ids
     assert "task_item" in schema_ids
     assert "assessment_item" in schema_ids
+
+
+def test_classification_label_maps_to_category_result():
+    result = category_result_for_classification_label("规章制度类")
+    schema_ids = extraction_schema_ids_for_categories({"regulation": result.regulation})
+
+    assert result.regulation.matched is True
+    assert schema_ids == ["management_requirement_item"]
 
 
 def test_category_schema_descriptions_are_prompt_ready():

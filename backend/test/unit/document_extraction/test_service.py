@@ -1,3 +1,4 @@
+from yuxi.document_extraction.schemas import category_result_for_classification_label
 from yuxi.document_extraction.service import BusinessExtractionService
 
 
@@ -33,6 +34,24 @@ class FakeLLM:
         }
 
 
+class FakeNoCategoryLLM(FakeLLM):
+    async def complete_json(self, prompt, schema):
+        self.prompts.append(prompt)
+        if "DocumentCategoryResult" in prompt:
+            raise AssertionError("should not classify when category_result is provided")
+        return {
+            "items": [
+                {
+                    "requirement": "执行路用客车检修运用管理办法",
+                    "department": "车辆段",
+                    "role": None,
+                    "period_type": "长期性",
+                    "source_quote": "路用客车检修运用管理办法",
+                }
+            ]
+        }
+
+
 async def test_extract_file_runs_category_first_then_matching_schemas():
     service = BusinessExtractionService(llm=FakeLLM())
 
@@ -55,6 +74,20 @@ async def test_extract_file_runs_category_first_then_matching_schemas():
     assert result.items[0].item_type == "risk_item"
     assert result.items[0].chunk_id == "file_1_chunk_0"
     assert result.items[0].data["risk_name"] == "现场作业监护不到位"
+
+
+async def test_extract_chunks_uses_known_category_without_reclassifying():
+    service = BusinessExtractionService(llm=FakeNoCategoryLLM())
+
+    result = await service.extract_chunks(
+        document_scope="incoming",
+        incoming_id="inc_1",
+        chunks=[{"chunk_id": None, "content": "路用客车检修运用管理办法", "chunk_index": 0}],
+        category_result=category_result_for_classification_label("规章制度类"),
+    )
+
+    assert result.schema_ids == ["management_requirement_item"]
+    assert result.items[0].item_type == "management_requirement_item"
 
 
 class FakeExtractionRepo:
@@ -117,3 +150,21 @@ async def test_run_markdown_extraction_reuses_same_markdown_and_model():
     assert result["run_id"] == "ber_old"
     assert result["reused"] is True
     assert repo.runs == []
+
+
+async def test_run_markdown_extraction_does_not_reuse_empty_result_when_classification_has_schema():
+    repo = FakeExtractionRepo(reusable={"run_id": "ber_old", "schema_ids": [], "items": []})
+    service = BusinessExtractionService(llm=FakeNoCategoryLLM(), extraction_repo=repo)
+
+    result = await service.run_markdown_extraction(
+        document_scope="incoming",
+        incoming_id="inc_1",
+        markdown_file="minio://knowledgebases/incoming/inc_1/parsed.md",
+        model_spec="model-a",
+        processing_params={"classification": "规章制度类"},
+        markdown_reader=lambda _: "# 路用客车检修运用管理办法",
+    )
+
+    assert result["reused"] is False
+    assert repo.runs
+    assert repo.results[0]["result_data"]["schema_ids"] == ["management_requirement_item"]

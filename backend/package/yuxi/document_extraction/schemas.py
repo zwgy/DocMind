@@ -155,6 +155,21 @@ def extraction_schema_ids_for_categories(categories: dict[str, bool | CategoryDe
     return selected
 
 
+def category_result_for_classification_label(label: str | None) -> DocumentCategoryResult:
+    result = DocumentCategoryResult()
+    normalized = str(label or "").strip()
+    if not normalized:
+        return result
+    for name, field in DocumentCategoryResult.model_fields.items():
+        extra = field.json_schema_extra or {}
+        if str(extra.get("label") or "").strip() != normalized:
+            continue
+        # 摘要分类已经由同一套标签约束产生；复用它，避免结构化抽取阶段重复分类并被模型漏判短路。
+        setattr(result, name, CategoryDecision(matched=True, evidence=f"摘要阶段分类：{normalized}"))
+        return result
+    return result
+
+
 def category_result_to_mapping(result: DocumentCategoryResult) -> dict[str, bool]:
     return {name: getattr(result, name).matched for name in DocumentCategoryResult.model_fields}
 

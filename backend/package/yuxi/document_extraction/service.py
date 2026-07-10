@@ -11,6 +11,7 @@ from yuxi.document_extraction.llm import JsonLLM, ModelJsonLLM
 from yuxi.document_extraction.prompts import build_category_prompt, build_extraction_prompt
 from yuxi.document_extraction.schemas import (
     DocumentCategoryResult,
+    category_result_for_classification_label,
     category_result_to_mapping,
     extraction_schema_ids_for_categories,
     get_extraction_schema,
@@ -79,6 +80,7 @@ class BusinessExtractionService:
         file_id: str | None = None,
         chunks: list[dict[str, Any]],
         model_spec: str | None = None,
+        category_result: DocumentCategoryResult | None = None,
     ) -> BusinessExtractionDraft:
         llm = self._resolve_llm(model_spec)
         normalized_chunks = [
@@ -91,7 +93,8 @@ class BusinessExtractionService:
             if chunk.get("content")
         ]
 
-        category_result = await self._classify_chunks(llm, normalized_chunks)
+        if category_result is None:
+            category_result = await self._classify_chunks(llm, normalized_chunks)
         category_mapping = category_result_to_mapping(category_result)
         schema_ids = extraction_schema_ids_for_categories(category_mapping)
         if not schema_ids:
@@ -155,6 +158,12 @@ class BusinessExtractionService:
         operator_id: str | None = None,
         markdown_reader: MarkdownReader | None = None,
     ) -> dict[str, Any]:
+        processing_params = processing_params or {}
+        category_result = category_result_for_classification_label(processing_params.get("classification"))
+        category_result = category_result if any(category_result_to_mapping(category_result).values()) else None
+        expected_schema_ids = (
+            extraction_schema_ids_for_categories(category_result_to_mapping(category_result)) if category_result else []
+        )
         reusable = await self.extraction_repo.get_success_by_document_markdown_model(
             document_scope=document_scope,
             incoming_id=incoming_id,
@@ -162,7 +171,7 @@ class BusinessExtractionService:
             markdown_file=markdown_file,
             model_spec=model_spec,
         )
-        if reusable:
+        if reusable and not (expected_schema_ids and not reusable.get("schema_ids")):
             return {**reusable, "reused": True}
 
         markdown = await self._read_markdown(markdown_file, markdown_reader)
@@ -171,7 +180,7 @@ class BusinessExtractionService:
             markdown=markdown,
             document_key=document_key,
             filename=filename or document_key,
-            processing_params=processing_params or {},
+            processing_params=processing_params,
         )
         run_id = f"ber_{hashstr(f'{document_scope}:{document_key}:{markdown_file}:{utc_isoformat()}', 16)}"
         run_metadata = {
@@ -200,6 +209,7 @@ class BusinessExtractionService:
                 file_id=file_id,
                 model_spec=model_spec,
                 chunks=segments,
+                category_result=category_result,
             )
             await self.extraction_repo.replace_result(
                 run_id=run_id,

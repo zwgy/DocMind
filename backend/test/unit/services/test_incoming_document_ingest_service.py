@@ -393,6 +393,7 @@ async def test_process_task_parses_markdown_and_saves_summary():
     assert extraction.calls[0]["document_scope"] == "incoming"
     assert extraction.calls[0]["incoming_id"] == result["incomingId"]
     assert extraction.calls[0]["markdown_file"] == f"minio://knowledgebases/incoming/{result['incomingId']}/parsed.md"
+    assert extraction.calls[0]["processing_params"] == {"classification": "客户审查"}
 
 
 async def test_process_task_marks_document_failed_when_parse_fails():
