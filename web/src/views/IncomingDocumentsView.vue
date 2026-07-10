@@ -158,7 +158,52 @@
 
           <section class="detail-section">
             <h2>原文预览</h2>
-            <pre class="markdown-box">{{ detail.markdownPreview || '暂无可预览内容' }}</pre>
+            <a-tabs
+              v-if="hasOriginalFile || hasMarkdownFile"
+              v-model:active-key="previewTab"
+              class="preview-tabs"
+            >
+              <a-tab-pane v-if="hasOriginalFile" key="source">
+                <template #tab>
+                  <span class="preview-tab-label">
+                    <FileSearch :size="14" />
+                    原文
+                  </span>
+                </template>
+                <div class="source-preview-wrapper">
+                  <a-spin v-if="sourcePreview.loading" tip="正在加载原文..." />
+                  <div
+                    v-else-if="sourcePreview.message && !sourcePreviewHasContent"
+                    class="empty-content"
+                  >
+                    <p>{{ sourcePreview.message }}</p>
+                  </div>
+                  <AgentFilePreview
+                    v-else-if="sourcePreviewHasContent"
+                    :file="sourcePreview"
+                    :file-path="detail.filename || ''"
+                    :show-header="false"
+                    :show-download="false"
+                    :full-height="true"
+                    :borderless="true"
+                    container-class="source-preview-container"
+                    content-class="source-preview-content"
+                  />
+                </div>
+              </a-tab-pane>
+              <a-tab-pane v-if="hasMarkdownFile" key="markdown">
+                <template #tab>
+                  <span class="preview-tab-label">
+                    <FileText :size="14" />
+                    Markdown
+                  </span>
+                </template>
+                <pre class="markdown-box">{{ detail.markdownPreview || '暂无可预览内容' }}</pre>
+              </a-tab-pane>
+            </a-tabs>
+            <div v-else class="empty-content">
+              <p>暂无可预览内容</p>
+            </div>
           </section>
 
           <section class="detail-section">
@@ -254,16 +299,18 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import { message } from 'ant-design-vue'
-import { FileText, RefreshCw } from 'lucide-vue-next'
+import { FileSearch, FileText, RefreshCw } from 'lucide-vue-next'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import AgentFilePreview from '@/components/AgentFilePreview.vue'
 import ChunkParamsConfig from '@/components/ChunkParamsConfig.vue'
 import FileDetailModal from '@/components/FileDetailModal.vue'
 import { incomingDocumentApi } from '@/apis/incoming_document_api'
 import { databaseApi, documentApi } from '@/apis/knowledge_api'
 import { buildChunkParamsPayload } from '@/utils/chunk_presets'
+import { getPreviewTypeByPath, normalizePreviewResponse } from '@/utils/file_preview'
 
 const documents = ref([])
 const total = ref(0)
@@ -276,6 +323,18 @@ const importOpen = ref(false)
 const importing = ref(false)
 const importTarget = ref(null)
 const retryingId = ref('')
+// "原文 / Markdown" Tab 与原文预览状态，与知识库 FileDetailModal 保持同样的请求序号防抖模式。
+const previewTab = ref('source')
+const sourcePreviewSeq = ref(0)
+const sourcePreview = reactive({
+  loading: false,
+  url: '',
+  content: null,
+  previewType: '',
+  previewUrl: '',
+  supported: true,
+  message: ''
+})
 const folderLoading = ref(false)
 const folderTreeData = ref([])
 const knowledgePreviewOpen = ref(false)
@@ -412,6 +471,76 @@ function canRetry(record) {
 
 function canOpenKnowledgePreview(record) {
   return Boolean(record?.linkedKbId && record?.linkedFileId)
+}
+
+const hasOriginalFile = computed(() => Boolean(detail.value?.originalFileUrl))
+const hasMarkdownFile = computed(() => Boolean(detail.value?.markdownFileUrl))
+const sourcePreviewHasContent = computed(
+  () => Boolean(sourcePreview.content) || Boolean(sourcePreview.previewUrl || sourcePreview.url)
+)
+
+function revokeSourcePreviewUrl() {
+  // 释放上一份 blob URL，避免反复打开时泄漏
+  const url = sourcePreview.previewUrl || sourcePreview.url
+  if (url && url.startsWith('blob:')) {
+    try {
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      // 静默忽略；URL 可能已被其他清理路径释放
+      console.warn('revokeObjectURL failed:', err)
+    }
+  }
+}
+
+function resetSourcePreview() {
+  sourcePreviewSeq.value += 1
+  revokeSourcePreviewUrl()
+  sourcePreview.loading = false
+  sourcePreview.url = ''
+  sourcePreview.content = null
+  sourcePreview.previewType = ''
+  sourcePreview.previewUrl = ''
+  sourcePreview.supported = true
+  sourcePreview.message = ''
+}
+
+function pickDefaultPreviewTab(record) {
+  if (!record?.originalFileUrl) return 'markdown'
+  // 文件类型不可预览（zip、exe 等）时直接落到 Markdown，避免空白原文 tab
+  return getPreviewTypeByPath(record.filename || '') === 'unsupported' ? 'markdown' : 'source'
+}
+
+async function loadSourcePreview() {
+  if (!detail.value?.originalFileUrl) return
+  const requestId = ++sourcePreviewSeq.value
+  sourcePreview.loading = true
+  sourcePreview.message = ''
+  try {
+    const response = await incomingDocumentApi.getOriginalFile(detail.value.incomingId)
+    if (requestId !== sourcePreviewSeq.value) {
+      // 用户已经切换详情或关闭抽屉，丢弃延迟到达的响应
+      if (response?.blob) {
+        response.blob().then((blob) => window.URL.revokeObjectURL(window.URL.createObjectURL(blob))).catch(() => {})
+      }
+      return
+    }
+    revokeSourcePreviewUrl()
+    const preview = await normalizePreviewResponse(response)
+    sourcePreview.previewType = preview.previewType || ''
+    sourcePreview.previewUrl = preview.previewUrl || ''
+    sourcePreview.url = preview.previewUrl || ''
+    sourcePreview.content = preview.content ?? null
+    sourcePreview.supported = preview.supported !== false
+    sourcePreview.message = preview.message || ''
+  } catch (error) {
+    if (requestId !== sourcePreviewSeq.value) return
+    sourcePreview.supported = false
+    sourcePreview.message = error?.message || '加载原文失败'
+  } finally {
+    if (requestId === sourcePreviewSeq.value) {
+      sourcePreview.loading = false
+    }
+  }
 }
 
 function buildFolderTree(items) {
@@ -591,6 +720,41 @@ watch(
     }
   }
 )
+
+// 详情切换 / drawer 关闭时重置原文预览，并自动挑选默认 tab
+watch(
+  () => detail.value?.incomingId,
+  (incomingId) => {
+    if (!incomingId) {
+      resetSourcePreview()
+      previewTab.value = 'source'
+      return
+    }
+    resetSourcePreview()
+    previewTab.value = pickDefaultPreviewTab(detail.value)
+    if (previewTab.value === 'source') {
+      loadSourcePreview()
+    }
+  }
+)
+
+// 用户从 Markdown tab 切回原文 tab 时按需触发加载
+watch(previewTab, (tab) => {
+  if (tab === 'source' && !sourcePreviewHasContent.value && !sourcePreview.loading) {
+    loadSourcePreview()
+  }
+})
+
+watch(detailOpen, (open) => {
+  if (!open) {
+    resetSourcePreview()
+    previewTab.value = 'source'
+  }
+})
+
+onBeforeUnmount(() => {
+  resetSourcePreview()
+})
 </script>
 
 <style scoped lang="less">
@@ -686,6 +850,37 @@ watch(
 .detail-action-button {
   margin-top: 12px;
   margin-right: 8px;
+}
+
+.preview-tabs {
+  margin-top: 4px;
+}
+
+.preview-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.source-preview-wrapper {
+  min-height: 240px;
+  max-height: 480px;
+  overflow: auto;
+  border: 1px solid var(--gray-150);
+  border-radius: 6px;
+  background: var(--gray-25);
+}
+
+.source-preview-wrapper :deep(.source-preview-container),
+.source-preview-wrapper :deep(.source-preview-content) {
+  min-height: 240px;
+  background: var(--gray-25);
+}
+
+.empty-content {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--gray-500);
 }
 
 @media (max-width: 760px) {

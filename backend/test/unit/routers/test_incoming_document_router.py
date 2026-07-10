@@ -20,6 +20,8 @@ class FakeIncomingRepo:
         return [self.record], 1
 
     async def get_by_incoming_id(self, incoming_id):
+        if self.record is None:
+            return None
         return self.record if incoming_id == self.record.incoming_id else None
 
 
@@ -104,6 +106,7 @@ async def test_get_incoming_document_detail_returns_summary(monkeypatch):
         updated_at=datetime(2026, 7, 8, 1, 3, 3),
     )
     repo = FakeIncomingRepo(record)
+
     async def fake_preview(record):
         return "## Markdown\n\n正文"
 
@@ -212,3 +215,172 @@ async def test_retry_incoming_document_delegates_to_ingest_service(monkeypatch):
     )
 
     assert result == {"incomingId": "inc_1", "taskId": "task_1", "status": "accepted", "operatorId": "admin"}
+
+
+def _record_with_original(filename, original_file_url):
+    return SimpleNamespace(
+        incoming_id="inc_1",
+        filename=filename,
+        original_file_url=original_file_url,
+    )
+
+
+def _patch_minio(monkeypatch, content):
+    """把 get_minio_client 换成只返回固定字节的假实现。"""
+
+    class FakeMinio:
+        async def adownload_file(self, bucket_name, object_name):
+            return content
+
+    fake_instance = FakeMinio()
+    monkeypatch.setattr(
+        incoming_document_router,
+        "get_minio_client",
+        lambda: fake_instance,
+    )
+    return fake_instance
+
+
+async def test_get_incoming_original_file_streams_pdf(monkeypatch):
+    record = _record_with_original("incoming.pdf", "minio://docs/inc_1/incoming.pdf")
+    repo = FakeIncomingRepo(record)
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", lambda: repo)
+    pdf_bytes = b"%PDF-1.4\nfake"
+    _patch_minio(monkeypatch, pdf_bytes)
+    # 跳过 office 转 PDF 分支
+    monkeypatch.setattr(
+        incoming_document_router,
+        "is_office_pdf_preview_file",
+        lambda path: False,
+    )
+    monkeypatch.setattr(
+        incoming_document_router,
+        "detect_media_type",
+        lambda path, content: "application/pdf",
+    )
+
+    result = await incoming_document_router.get_incoming_document_original_file(
+        "inc_1",
+        current_user=SimpleNamespace(uid="admin"),
+    )
+
+    assert result.headers["X-Yuxi-Preview-Type"] == "pdf"
+    assert "incoming.pdf" in result.headers["Content-Disposition"]
+    body = b"".join([chunk async for chunk in result.body_iterator])
+    assert body == pdf_bytes
+
+
+async def test_get_incoming_original_file_converts_docx_to_pdf(monkeypatch):
+    record = _record_with_original("incoming.docx", "minio://docs/inc_1/incoming.docx")
+    repo = FakeIncomingRepo(record)
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", lambda: repo)
+    _patch_minio(monkeypatch, b"PK\x03\x04docx-bytes")
+    monkeypatch.setattr(
+        incoming_document_router,
+        "is_office_pdf_preview_file",
+        lambda path: True,
+    )
+
+    async def fake_convert(filename, content):
+        return b"%PDF-1.4\nconverted"
+
+    monkeypatch.setattr(incoming_document_router, "convert_office_to_pdf", fake_convert)
+
+    result = await incoming_document_router.get_incoming_document_original_file(
+        "inc_1",
+        current_user=SimpleNamespace(uid="admin"),
+    )
+
+    assert result.headers["X-Yuxi-Preview-Type"] == "pdf"
+    assert result.media_type == "application/pdf"
+    assert "incoming.pdf" in result.headers["Content-Disposition"]
+
+
+async def test_get_incoming_original_file_rejects_oversize(monkeypatch):
+    record = _record_with_original("big.bin", "minio://docs/inc_1/big.bin")
+    repo = FakeIncomingRepo(record)
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", lambda: repo)
+    _patch_minio(monkeypatch, b"\x00" * (incoming_document_router.MAX_BINARY_PREVIEW_SIZE_BYTES + 1))
+
+    result = await incoming_document_router.get_incoming_document_original_file(
+        "inc_1",
+        current_user=SimpleNamespace(uid="admin"),
+    )
+
+    # 过大走 JSON 字典分支
+    assert result["supported"] is False
+    assert "30 MB" in result["message"]
+    assert result["limit"] == incoming_document_router.MAX_BINARY_PREVIEW_SIZE_BYTES
+
+
+async def test_get_incoming_original_file_returns_text_content(monkeypatch):
+    record = _record_with_original("notes.txt", "minio://docs/inc_1/notes.txt")
+    repo = FakeIncomingRepo(record)
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", lambda: repo)
+    _patch_minio(monkeypatch, "hello world\n".encode("utf-8"))
+
+    # 让后端走文本分支：is_office_pdf_preview_file=False；detect_preview_type 也走 text 路径
+    monkeypatch.setattr(
+        incoming_document_router,
+        "is_office_pdf_preview_file",
+        lambda path: False,
+    )
+
+    result = await incoming_document_router.get_incoming_document_original_file(
+        "inc_1",
+        current_user=SimpleNamespace(uid="admin"),
+    )
+
+    # render_preview_payload 使用蛇形命名，与 file_preview 模块保持一致
+    assert result["preview_type"] == "text"
+    assert result["supported"] is True
+    assert "hello world" in result["content"]
+
+
+async def test_get_incoming_original_file_returns_unsupported_for_binary(monkeypatch):
+    record = _record_with_original("archive.zip", "minio://docs/inc_1/archive.zip")
+    repo = FakeIncomingRepo(record)
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", lambda: repo)
+    _patch_minio(monkeypatch, b"PK\x05\x06fakezip")
+    monkeypatch.setattr(
+        incoming_document_router,
+        "is_office_pdf_preview_file",
+        lambda path: False,
+    )
+
+    result = await incoming_document_router.get_incoming_document_original_file(
+        "inc_1",
+        current_user=SimpleNamespace(uid="admin"),
+    )
+
+    assert result["supported"] is False
+    assert result["content"] is None
+    assert result["message"]  # 应当给出"暂不支持预览"类提示
+
+
+async def test_get_incoming_original_file_404_when_no_url(monkeypatch):
+    record = _record_with_original("incoming.pdf", None)
+    repo = FakeIncomingRepo(record)
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", lambda: repo)
+
+    with pytest.raises(incoming_document_router.HTTPException) as exc:
+        await incoming_document_router.get_incoming_document_original_file(
+            "inc_1",
+            current_user=SimpleNamespace(uid="admin"),
+        )
+
+    assert exc.value.status_code == 404
+    assert "原文文件尚未上传" in exc.value.detail
+
+
+async def test_get_incoming_original_file_404_when_record_missing(monkeypatch):
+    repo = FakeIncomingRepo(record=None)
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", lambda: repo)
+
+    with pytest.raises(incoming_document_router.HTTPException) as exc:
+        await incoming_document_router.get_incoming_document_original_file(
+            "inc_missing",
+            current_user=SimpleNamespace(uid="admin"),
+        )
+
+    assert exc.value.status_code == 404

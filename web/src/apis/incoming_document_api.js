@@ -20,6 +20,10 @@ export const incomingDocumentApi = {
     return apiAdminGet(`/api/incoming-documents/${incomingId}`)
   },
 
+  getOriginalFile: async (incomingId) => {
+    return apiAdminGet(`/api/incoming-documents/${incomingId}/file/original`, {}, 'blob')
+  },
+
   importToKnowledge: async (incomingId, payload) => {
     return apiAdminPost(`/api/incoming-documents/${incomingId}/knowledge-import`, payload)
   },

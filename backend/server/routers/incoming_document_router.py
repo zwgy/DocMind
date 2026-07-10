@@ -1,19 +1,35 @@
 from __future__ import annotations
 
+import io
 import json
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
-
-from server.utils.auth_middleware import get_admin_user, get_required_user
 from yuxi.knowledge.utils import parse_minio_url
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
-from yuxi.services.incoming_document_ingest_service import IncomingDocumentIngestService, IncomingKnowledgeImportConflict
+from yuxi.services.file_preview import (
+    MAX_BINARY_PREVIEW_SIZE_BYTES,
+    convert_office_to_pdf,
+    detect_media_type,
+    detect_preview_type,
+    is_binary_preview_type,
+    is_office_pdf_preview_file,
+    render_preview_payload,
+    render_preview_too_large_payload,
+)
+from yuxi.services.incoming_document_ingest_service import (
+    IncomingDocumentIngestService,
+    IncomingKnowledgeImportConflict,
+)
 from yuxi.services.incoming_document_service import IncomingDocumentService, IncomingPageFile
 from yuxi.storage.minio import get_minio_client
 from yuxi.storage.postgres.models_business import User
 from yuxi.utils.upload_utils import MAX_UPLOAD_SIZE_BYTES, read_upload_with_limit
+
+from server.utils.auth_middleware import get_admin_user, get_required_user
 
 incoming_documents = APIRouter(prefix="/incoming-documents", tags=["incoming-documents"])
 INCOMING_MARKDOWN_PREVIEW_CHARS = 40_000
@@ -185,6 +201,63 @@ async def retry_incoming_document_processing(incoming_id: str, current_user: Use
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@incoming_documents.get("/{incoming_id}/file/original")
+async def get_incoming_document_original_file(incoming_id: str, current_user: User = Depends(get_admin_user)):
+    """预览来文原文（MinIO 上的原始文件），不依赖知识库入库状态。"""
+    del current_user
+    record = await IncomingDocumentRepository().get_by_incoming_id(incoming_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Incoming document not found: {incoming_id}")
+    original_url = getattr(record, "original_file_url", None)
+    if not original_url:
+        raise HTTPException(status_code=404, detail="原文文件尚未上传")
+
+    filename = record.filename or "incoming"
+    try:
+        bucket_name, object_name = parse_minio_url(original_url)
+        content = await get_minio_client().adownload_file(bucket_name, object_name)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=f"原文文件不存在: {exc}") from exc
+
+    if len(content) > MAX_BINARY_PREVIEW_SIZE_BYTES:
+        # 超出二进制预览上限时复用 file_preview 提供的标准化超大响应。
+        return render_preview_too_large_payload()
+
+    # .docx/.pptx 与知识库一致先转换为 PDF，便于浏览器内嵌预览。
+    if is_office_pdf_preview_file(filename):
+        pdf_bytes = await convert_office_to_pdf(filename, content)
+        return _stream_incoming_binary(
+            filename=f"{(filename.rsplit('.', 1)[0] or 'preview')}.pdf",
+            content=pdf_bytes,
+            media_type="application/pdf",
+            preview_type="pdf",
+        )
+
+    preview_type, supported, message = detect_preview_type(filename, content)
+    if not supported:
+        # 二进制格式无法预览（zip/exe 等）— 返回受支持的预览元信息，前端据此渲染"暂不支持"提示。
+        return {
+            "content": None,
+            "preview_type": preview_type,
+            "supported": False,
+            "message": message,
+            "truncated": False,
+            "limit": None,
+        }
+
+    if is_binary_preview_type(preview_type):
+        # 图片 / PDF 等可由浏览器直接渲染，按二进制流返回。
+        return _stream_incoming_binary(
+            filename=filename,
+            content=content,
+            media_type=detect_media_type(filename, content),
+            preview_type=preview_type,
+        )
+
+    # 文本类文件（txt、md、代码等）— 返回 JSON，前端 AgentFilePreview 走 content 分支展示。
+    return render_preview_payload(filename, content)
+
+
 def _iso(value):
     return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
 
@@ -257,3 +330,17 @@ async def _read_incoming_markdown_preview(record) -> str:
     bucket_name, object_name = parse_minio_url(markdown_url)
     content = (await get_minio_client().adownload_file(bucket_name, object_name)).decode("utf-8", errors="replace")
     return content[:INCOMING_MARKDOWN_PREVIEW_CHARS]
+
+
+def _stream_incoming_binary(*, filename: str, content: bytes, media_type: str, preview_type: str) -> StreamingResponse:
+    """统一构造来文文件二进制响应，沿用知识库预览的头部约定以便前端 AgentFilePreview 复用。"""
+    quoted = quote(filename or "preview", safe="")
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=media_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{quoted}",
+            "X-Yuxi-Preview-Type": preview_type,
+            "X-Yuxi-Preview-Filename": quoted,
+        },
+    )
