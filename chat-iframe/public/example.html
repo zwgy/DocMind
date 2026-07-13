@@ -3,469 +3,277 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>docMind chat-iframe 本地嵌入调试页</title>
+    <title>docMind chat-iframe 嵌入示例</title>
     <style>
-      :root {
-        color-scheme: light;
-        --bg: #f5f7f8;
-        --panel: #ffffff;
-        --line: #d8e0e3;
-        --text: #17252b;
-        --muted: #667780;
-        --accent: #046a82;
-        --accent-strong: #034d5f;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
 
       body {
-        margin: 0;
-        min-height: 100vh;
-        background: var(--bg);
-        color: var(--text);
-        font-family:
-          Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-
-      main {
-        max-width: 1180px;
-        margin: 0 auto;
-        padding: 32px 24px 96px;
-      }
-
-      header {
-        display: flex;
-        align-items: flex-end;
-        justify-content: space-between;
-        gap: 24px;
-        padding-bottom: 24px;
-        border-bottom: 1px solid var(--line);
-      }
-
-      h1 {
-        margin: 0 0 8px;
-        font-size: 28px;
-        line-height: 1.25;
-        font-weight: 700;
-      }
-
-      h2 {
-        margin: 0 0 12px;
-        font-size: 18px;
-      }
-
-      p {
-        margin: 0;
-        color: var(--muted);
-        line-height: 1.7;
-      }
-
-      button,
-      input {
-        font: inherit;
-      }
-
-      .grid {
-        display: grid;
-        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
-        gap: 20px;
-        margin-top: 24px;
-      }
-
-      .panel {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 20px;
-      }
-
-      .toolbar {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-top: 16px;
-      }
-
-      .field {
-        display: grid;
-        gap: 8px;
-        margin-top: 16px;
-      }
-
-      .field label {
-        font-size: 13px;
-        color: var(--muted);
-      }
-
-      input {
-        width: 100%;
-        min-width: 0;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        padding: 10px 12px;
-        color: var(--text);
-        background: #fff;
-      }
-
-      button {
-        border: 0;
-        border-radius: 6px;
-        padding: 10px 14px;
-        background: var(--accent);
-        color: #fff;
-        cursor: pointer;
-        white-space: nowrap;
-      }
-
-      button:hover {
-        background: var(--accent-strong);
-      }
-
-      button.secondary {
-        border: 1px solid var(--line);
-        background: #fff;
-        color: var(--text);
-      }
-
-      button.secondary:hover {
-        background: #eef4f6;
-      }
-
-      .status {
-        min-height: 22px;
-        margin-top: 12px;
-        font-size: 13px;
-        color: var(--muted);
-      }
-
-      .items {
-        display: grid;
-        gap: 10px;
-        margin-top: 14px;
-      }
-
-      .item[attachment] a {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        width: 100%;
-        min-height: 44px;
-        padding: 10px 12px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        color: var(--accent);
-        text-decoration: none;
-        background: #fbfdfe;
-      }
-
-      .flag {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: #1f9d7a;
-      }
-
-      .size {
-        margin-left: auto;
-        color: var(--muted);
-        font-size: 13px;
-      }
-
-      .doc {
-        margin-top: 16px;
-        padding: 16px;
-        border: 1px dashed var(--line);
-        border-radius: 8px;
-        background: #fbfdfe;
-      }
-
-      .doc h3 {
-        margin: 0 0 10px;
-        font-size: 16px;
-      }
-
-      .doc ol {
-        margin: 10px 0 0;
-        padding-left: 22px;
-        color: var(--text);
-        line-height: 1.8;
-      }
-
-      code,
-      pre {
-        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-      }
-
-      pre {
-        overflow: auto;
-        margin: 12px 0 0;
-        padding: 12px;
-        border-radius: 6px;
-        background: #10262d;
-        color: #e6f2f5;
-        font-size: 12px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Microsoft YaHei', sans-serif;
+        background: #f0f2f5;
+        color: #1f2937;
         line-height: 1.6;
       }
 
-      @media (max-width: 860px) {
-        header,
-        .grid {
-          display: block;
-        }
-
-        .panel + .panel {
-          margin-top: 20px;
-        }
-
+      .hero {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 28px 40px;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
       }
+      .hero h1 { font-size: 24px; font-weight: 600; }
+      .hero p { opacity: 0.9; margin-top: 6px; font-size: 14px; max-width: 720px; }
+
+      .container {
+        max-width: 1080px;
+        margin: 28px auto 80px;
+        padding: 0 20px;
+        display: grid;
+        gap: 20px;
+      }
+
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 24px 28px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+      }
+      .card-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #1a1a1a;
+        margin-bottom: 14px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #667eea;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .doc {
+        padding: 18px 20px;
+        border: 1px dashed #cbd5e1;
+        border-radius: 8px;
+        background: #fbfdfe;
+      }
+      .doc h3 { font-size: 16px; margin-bottom: 8px; color: #0f172a; }
+      .doc p, .doc li { color: #334155; font-size: 14px; }
+      .doc ol { margin: 8px 0 0; padding-left: 22px; }
+
+      .file-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 14px;
+        margin-top: 12px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: #fff;
+      }
+      .file-row .icon {
+        width: 36px; height: 36px;
+        background: #eef2ff;
+        color: #4f46e5;
+        border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 12px; font-weight: 700;
+      }
+      .file-row .name { flex: 1; font-size: 14px; color: #1e293b; }
+      .file-row .meta { font-size: 12px; color: #64748b; }
+
+      pre {
+        margin: 0;
+        padding: 20px 22px;
+        border-radius: 8px;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+        font-size: 13px;
+        line-height: 1.7;
+        overflow-x: auto;
+      }
+      pre code { font-family: inherit; }
+      .tk-com { color: #64748b; font-style: italic; }
+      .tk-key { color: #93c5fd; }
+      .tk-str { color: #fcd34d; }
+      .tk-num { color: #f0abfc; }
+      .tk-fn  { color: #c4b5fd; }
+
+      .ai-hint {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%);
+        border: 1px solid rgba(102, 126, 234, 0.2);
+        border-radius: 8px;
+        padding: 16px 20px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .ai-hint-icon {
+        width: 38px; height: 38px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        color: white; font-size: 18px;
+        flex-shrink: 0;
+      }
+      .ai-hint-text { flex: 1; font-size: 13px; color: #475569; }
+      .ai-hint-text strong { color: #4f46e5; }
     </style>
   </head>
   <body>
-    <main>
-      <header>
-        <div>
-          <h1>docMind chat-iframe 本地嵌入调试页</h1>
-          <p>模拟外部生产系统页面：页面正文、附件 DOM 和外部业务用户信息都从这里进入 iframe。</p>
+    <header class="hero">
+      <h1>📄 docMind chat-iframe 嵌入示例</h1>
+      <p>展示 DocMindChatIframe 的完整接入方式：父页面只需构造一次，即可把页面正文、附件和业务身份送入智能助手。</p>
+    </header>
+
+    <main class="container">
+      <!-- 1. 模拟生产系统页面 -->
+      <section class="card">
+        <h2 class="card-title"><span>📋</span> 模拟生产页面：来文详情</h2>
+        <div class="doc">
+          <h3>中国铁路上海局集团有限公司关于重新印发《中国铁路上海局集团有限公司路用客车检修运用管理办法》的通知</h3>
+          <p>来文 ID：37908；来文类别：集团公司通知；来文单位：供电部；来文日期：2020-10-20。</p>
+          <ol>
+            <li>主文件：上铁辆〔2020〕316号.pdf，source_file_id 为 202010200206</li>
+          </ol>
+          <div class="file-row">
+            <div class="icon">PDF</div>
+            <div class="name">上铁辆〔2020〕316号.pdf</div>
+            <div class="meta">428.76 KB · 已选中</div>
+          </div>
         </div>
-        <button id="openChatButton" type="button">打开助手</button>
-      </header>
+      </section>
 
-      <section class="grid">
-        <article class="panel">
-          <h2>生产系统附件区</h2>
-          <p>下面的 DOM 结构使用真实来文附件样例，父页面脚本会把来文 ID、文件 ID 和来文元数据传给 iframe。</p>
+      <!-- 2. DocMindChatIframe 完整调用示例（页面内可见） -->
+      <section class="card">
+        <h2 class="card-title"><span>💻</span> DocMindChatIframe 完整调用示例</h2>
+        <pre><code><span class="tk-com">// 1. 构造悬浮助手（autoInit: false 让初始化顺序在代码中显式呈现）</span>
+<span class="tk-key">const</span> chat = <span class="tk-key">new</span> DocMindChatIframe({
+  <span class="tk-key">iframeSrc</span>: <span class="tk-str">'./'</span>, <span class="tk-com">// iframe 入口；同源部署用相对路径即可</span>
 
-          <div class="items">
-            <div class="item" id="202010200206_BOX" attachment="202010200206">
-              <a
-                href="/chat-iframe/中国铁路上海局集团有限公司关于重新印发《中国铁路上海局集团有限公司路用客车检修运用管理办法》的通知/上铁辆〔2020〕316号.pdf?202010200206"
-                onclick="YZSoft.File.download('/chat-iframe/中国铁路上海局集团有限公司关于重新印发《中国铁路上海局集团有限公司路用客车检修运用管理办法》的通知/上铁辆〔2020〕316号.pdf?202010200206'); return false"
-              >
-                <span class="flag"></span>
-                "上铁辆〔2020〕316号.pdf"
-                <span class="size">-428.76KB</span>
-              </a>
-            </div>
-          </div>
+  <span class="tk-com">// 业务身份（必填，缺失会抛错）</span>
+  <span class="tk-key">source_system</span>:      <span class="tk-str">'oa'</span>,
+  <span class="tk-key">function_id</span>:        <span class="tk-str">'incomingDocument'</span>,
+  <span class="tk-key">business_id</span>:        <span class="tk-str">'37908'</span>,
+  <span class="tk-key">external_user_id</span>:   <span class="tk-str">'1001'</span>,
+  <span class="tk-key">external_user_name</span>: <span class="tk-str">'张三'</span>,
+})
 
-          <div class="doc" id="pageContent">
-            <h3>中国铁路上海局集团有限公司关于重新印发《中国铁路上海局集团有限公司路用客车检修运用管理办法》的通知</h3>
-            <p>来文 ID：37908；来文类别：集团公司通知；来文单位：供电部；来文日期：2020-10-20。</p>
-            <ol>
-              <li>主文件：上铁辆〔2020〕316号.pdf，source_file_id 为 202010200206</li>
-            </ol>
-          </div>
-        </article>
+<span class="tk-com">// 可选参数速查（按需启用，未列出的使用默认值；详见 docmind-chat-iframe-parent.js 构造函数）：</span>
+<span class="tk-com">//   apiBaseUrl:         'http://api.example.com'        // 后端地址；留空走同源 /api 代理</span>
+<span class="tk-com">//   agentId:            'default-chatbot'               // 后端智能体 ID</span>
+<span class="tk-com">//   tokenExchangeUrl:   '/api/chat-iframe/token'        // 信任后端换 token 直连地址（绕过同源代理）</span>
+<span class="tk-com">//   targetOrigin:       'https://docmind.example.com'   // postMessage 目标 origin；同源可省</span>
+<span class="tk-com">//   originAllowlist:    ['https://app.example.com']     // iframe 允许接收的父页面 origin 列表</span>
+<span class="tk-com">//   position:           'bottom-right'                  // 悬浮位置：bottom-right/left、top-right/left</span>
+<span class="tk-com">//   width / height:     460 / 680                       // 普通窗口尺寸（像素）</span>
+<span class="tk-com">//   initialState:       'minimized'                     // 初始状态：minimized / normal / maximized / closed</span>
+<span class="tk-com">//   includePageContent: true                            // iframe 是否自动抓取页面 HTML</span>
+<span class="tk-com">//   includeFiles:       true                            // iframe 是否自动拉取附件列表</span>
+<span class="tk-com">//   offsetX / offsetY:  24 / 24                         // 距视口边缘偏移（像素）</span>
+<span class="tk-com">//   buttonHtml:         '<span>🤖</span>'               // 自定义悬浮按钮内容</span>
 
-        <aside class="panel">
-          <h2>嵌入参数</h2>
-          <p>
-            本调试页默认走真实后端，便于验证 iframe 自动下载附件并 multipart 上传。追加
-            <code>?mockExtraction=mixed</code> 可启用 mock，追加 <code>?mockExtraction=not_found</code> 可查看未匹配状态。
-          </p>
+<span class="tk-com">// 2. 设置自定义页面内容（可选，设置后不再实时获取网页HTML，且不转markdown）</span>
+chat.<span class="tk-fn">setPageContent</span>([
+  <span class="tk-str">'页面标题：中国铁路上海局集团有限公司关于重新印发…的通知'</span>,
+  <span class="tk-str">'来文 ID：37908；来文类别：集团公司通知；来文单位：供电部；来文日期：2020-10-20'</span>,
+  <span class="tk-str">'主文件：上铁辆〔2020〕316号.pdf（428.76 KB）'</span>,
+].<span class="tk-fn">join</span>(<span class="tk-str">'\n'</span>))
 
-          <div class="field">
-            <label for="sourceSystemInput">source_system</label>
-            <input id="sourceSystemInput" type="text" />
-          </div>
+<span class="tk-com">// 3. 设置附件列表（被助手默认带入；selected: true 的项会被高亮选中）</span>
+chat.<span class="tk-fn">setFiles</span>([
+  {
+    <span class="tk-key">id</span>:         <span class="tk-str">'202010200206'</span>,
+    <span class="tk-key">name</span>:       <span class="tk-str">'上铁辆〔2020〕316号.pdf'</span>,
+    <span class="tk-key">source_url</span>: <span class="tk-str">'/chat-iframe/test1/上铁辆〔2020〕316号.pdf'</span>,
+    <span class="tk-key">type</span>:       <span class="tk-str">'document'</span>,
+    <span class="tk-key">selected</span>:   <span class="tk-num">true</span>,
+  },
+  {
+    <span class="tk-key">id</span>:         <span class="tk-str">'202010200207'</span>,
+    <span class="tk-key">name</span>:       <span class="tk-str">'附件4.xls'</span>,
+    <span class="tk-key">source_url</span>: <span class="tk-str">'/chat-iframe/test1/附件4.xls'</span>,
+    <span class="tk-key">type</span>:       <span class="tk-str">'document'</span>,
+  },
+  {
+    <span class="tk-key">id</span>:         <span class="tk-str">'202010200209'</span>,
+    <span class="tk-key">name</span>:       <span class="tk-str">'附件1～3.doc'</span>,
+    <span class="tk-key">source_url</span>: <span class="tk-str">'/chat-iframe/test1/附件1～3.doc'</span>,
+    <span class="tk-key">type</span>:       <span class="tk-str">'document'</span>,
+  },
+])
 
-          <div class="field">
-            <label for="functionIdInput">function_id</label>
-            <input id="functionIdInput" type="text" />
-          </div>
+<span class="tk-com">// 4. 监听助手事件（可选）</span>
+chat.<span class="tk-fn">on</span>(<span class="tk-str">'conversationCreated'</span>, (data) => console.log(<span class="tk-str">'新会话'</span>, data.conversationId))
+chat.<span class="tk-fn">on</span>(<span class="tk-str">'messageSent'</span>,         (data) => console.log(<span class="tk-str">'用户提问'</span>, data.query))
+chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,         (data) => console.log(<span class="tk-str">'窗口状态'</span>, data.state))
 
-          <div class="field">
-            <label for="businessIdInput">business_id</label>
-            <input id="businessIdInput" type="text" />
-          </div>
+<span class="tk-com">// 5. 显式初始化（autoInit: false 时必调）</span>
+chat.<span class="tk-fn">init</span>()</code></pre>
+      </section>
 
-          <div class="field">
-            <label for="externalUserIdInput">external_user_id</label>
-            <input id="externalUserIdInput" type="text" />
-          </div>
-
-          <div class="field">
-            <label for="externalUserNameInput">external_user_name</label>
-            <input id="externalUserNameInput" type="text" />
-          </div>
-
-          <div class="field">
-            <label for="apiBaseInput">API Base</label>
-            <input id="apiBaseInput" type="url" placeholder="例如 http://192.168.1.220:5173，留空则使用本地 /api 代理" />
-          </div>
-
-          <div class="field">
-            <label for="tokenExchangeUrlInput">tokenExchangeUrl</label>
-            <input id="tokenExchangeUrlInput" type="url" placeholder="留空则调用 /api/chat-iframe/token" />
-          </div>
-
-          <div class="field">
-            <label for="agentInput">Agent ID</label>
-            <input id="agentInput" type="text" value="default-chatbot" />
-          </div>
-
-          <div class="toolbar">
-            <button id="createChatButton" type="button">确认初始化</button>
-            <button id="refreshContextButton" class="secondary" type="button">重新发送上下文</button>
-          </div>
-
-          <p class="status" id="statusText"></p>
-
-          <pre>new DocMindChatIframe({
-  source_system,
-  function_id,
-  business_id,
-  external_user_id,
-  external_user_name
-})</pre>
-        </aside>
+      <!-- 3. AI 提示 -->
+      <section class="ai-hint">
+        <div class="ai-hint-icon">🤖</div>
+        <div class="ai-hint-text">
+          点击右下角的 <strong>AI 助手</strong> 按钮，可以让助手：
+          <br />• 总结当前来文的核心要点
+          <br />• 解读附件 PDF 的关键内容
+          <br />• 根据来文类别推荐处理意见
+        </div>
       </section>
     </main>
 
-    <script>
-      // 模拟线上系统的全局下载对象，让父脚本能从 onclick 中提取真实附件 URL。
-      window.YZSoft = {
-        File: {
-          download(url) {
-            window.open(url, '_blank', 'noopener')
-          }
-        }
-      }
-    </script>
     <script src="/chat-iframe/docmind-chat-iframe-parent.js"></script>
     <script>
-      const API_BASE_STORAGE_KEY = 'docmind_chat_iframe_debug_api_base'
-      const apiBaseInput = document.getElementById('apiBaseInput')
-      const sourceSystemInput = document.getElementById('sourceSystemInput')
-      const functionIdInput = document.getElementById('functionIdInput')
-      const businessIdInput = document.getElementById('businessIdInput')
-      const externalUserIdInput = document.getElementById('externalUserIdInput')
-      const externalUserNameInput = document.getElementById('externalUserNameInput')
-      const tokenExchangeUrlInput = document.getElementById('tokenExchangeUrlInput')
-      const agentInput = document.getElementById('agentInput')
-      const statusText = document.getElementById('statusText')
-      const incomingDocument = {
-        source_system: 'oa',
-        source_doc_id: '37908',
-        document_number: '上铁辆〔2020〕316号',
-        title: '中国铁路上海局集团有限公司关于重新印发《中国铁路上海局集团有限公司路用客车检修运用管理办法》的通知',
-        incoming_type: '集团公司通知',
-        source_unit: '供电部',
-        incoming_date: '2020-10-20'
+      // 允许通过 URL 参数注入测试数据，便于 e2e 场景覆盖不同业务身份。
+      // 例如：?source_system=oa&function_id=e2eIncoming&business_id=auto-sync-001
+      const params = new URLSearchParams(window.location.search)
+      const business = {
+        source_system:      params.get('source_system')      || 'oa',
+        function_id:        params.get('function_id')        || 'incomingDocument',
+        business_id:        params.get('business_id')        || '37908',
+        external_user_id:   params.get('external_user_id')   || '1001',
+        external_user_name: params.get('external_user_name') || '张三',
       }
-      const incomingAttachments = [
+
+      const chat = new DocMindChatIframe({
+        iframeSrc: './',
+        ...business,
+      })
+
+      // 设置自定义页面内容（可选，设置后不再实时获取网页HTML，且不转markdown）
+      chat.setPageContent([
+        '页面标题：' + document.title,
+        '来文 ID：37908；来文类别：集团公司通知；来文单位：供电部；来文日期：2020-10-20',
+        '主文件：上铁辆〔2020〕316号.pdf（428.76 KB）',
+      ].join('\n'))
+
+      // 设置附件列表（被助手默认带入；selected: true 的项会被高亮选中）
+      chat.setFiles([
         {
           id: '202010200206',
-          source_file_id: '202010200206',
           name: '上铁辆〔2020〕316号.pdf',
-          source_url: '/chat-iframe/中国铁路上海局集团有限公司关于重新印发《中国铁路上海局集团有限公司路用客车检修运用管理办法》的通知/上铁辆〔2020〕316号.pdf?202010200206',
-          size_text: '428.76KB',
-          selected: true
-        }
-      ].map((file) => ({ ...incomingDocument, ...file, type: 'document' }))
+          source_url: '/chat-iframe/test1/上铁辆〔2020〕316号.pdf',
+          type: 'document',
+          selected: true,
+        },
+        {
+          id: '202010200207',
+          name: '附件4.xls',
+          source_url: '/chat-iframe/test1/附件4.xls',
+          type: 'document',
+        },
+        {
+          id: '202010200209',
+          name: '附件1～3.doc',
+          source_url: '/chat-iframe/test1/附件1～3.doc',
+          type: 'document',
+        },
+      ])
 
-      const params = new URLSearchParams(window.location.search)
-      const initialApiBaseUrl = params.get('apiBaseUrl') || localStorage.getItem(API_BASE_STORAGE_KEY) || ''
-      sourceSystemInput.value = params.get('source_system') || 'oa'
-      functionIdInput.value = params.get('function_id') || 'incomingDocument'
-      businessIdInput.value = params.get('business_id') || incomingDocument.source_doc_id
-      externalUserIdInput.value = params.get('external_user_id') || '1001'
-      externalUserNameInput.value = params.get('external_user_name') || '张三'
-      tokenExchangeUrlInput.value = params.get('tokenExchangeUrl') || ''
-      apiBaseInput.value = initialApiBaseUrl
-      agentInput.value = params.get('agentId') || agentInput.value
-
-      function setStatus(message) {
-        statusText.textContent = message
-      }
-
-      function pageContent() {
-        const section = document.getElementById('pageContent')
-        return {
-          title: document.title,
-          url: location.href,
-          text: section ? section.innerText : document.body.innerText,
-          html: section ? section.outerHTML : document.documentElement.outerHTML
-        }
-      }
-
-      function currentApiBaseUrl() {
-        return apiBaseInput.value.trim().replace(/\/+$/, '')
-      }
-
-      function saveApiBaseUrl() {
-        const apiBaseUrl = currentApiBaseUrl()
-        apiBaseInput.value = apiBaseUrl
-        if (apiBaseUrl) localStorage.setItem(API_BASE_STORAGE_KEY, apiBaseUrl)
-        else localStorage.removeItem(API_BASE_STORAGE_KEY)
-        return apiBaseUrl
-      }
-
-      function requiredValue(input, label) {
-        const value = input.value.trim()
-        if (!value) throw new Error(`请输入 ${label}`)
-        return value
-      }
-
-      function createChat() {
-        let sourceSystem
-        let functionId
-        let businessId
-        let externalUserId
-        let externalUserName
-        try {
-          sourceSystem = requiredValue(sourceSystemInput, 'source_system')
-          functionId = requiredValue(functionIdInput, 'function_id')
-          businessId = requiredValue(businessIdInput, 'business_id')
-          externalUserId = requiredValue(externalUserIdInput, 'external_user_id')
-          externalUserName = requiredValue(externalUserNameInput, 'external_user_name')
-        } catch (error) {
-          setStatus(error instanceof Error ? error.message : '嵌入参数不完整')
-          return
-        }
-
-        const apiBaseUrl = saveApiBaseUrl()
-        const agentId = agentInput.value.trim() || 'default-chatbot'
-        const tokenExchangeUrl = tokenExchangeUrlInput.value.trim()
-        if (window.chatIframe) window.chatIframe.destroy()
-        window.chatIframe = new DocMindChatIframe({
-          iframeSrc: `${location.origin}/chat-iframe/?mockExtraction=${params.get('mockExtraction') || 'off'}`,
-          apiBaseUrl,
-          agentId,
-          tokenExchangeUrl,
-          source_system: sourceSystem,
-          function_id: functionId,
-          business_id: businessId,
-          external_user_id: externalUserId,
-          external_user_name: externalUserName,
-          targetOrigin: location.origin,
-          originAllowlist: [location.origin],
-          initialState: 'minimized',
-          width: 460,
-          height: 680
-        })
-        // 主动发送页面摘要，是为了让端到端调试不依赖父脚本对整页 HTML 的默认采集时机。
-        window.chatIframe.setPageContent(pageContent())
-        window.chatIframe.setFiles(incomingAttachments)
-        setStatus(`已初始化 iframe：${sourceSystem}:${functionId}:${businessId} / ${externalUserId}`)
-      }
-
-      document.getElementById('openChatButton').addEventListener('click', () => {
-        if (window.chatIframe) window.chatIframe.restore()
-      })
-
-      document.getElementById('createChatButton').addEventListener('click', createChat)
-
-      document.getElementById('refreshContextButton').addEventListener('click', () => {
-        if (!window.chatIframe) return
-        window.chatIframe.setPageContent(pageContent())
-        window.chatIframe.setFiles(incomingAttachments)
-        setStatus('已重新发送页面上下文和附件列表。')
-      })
-
-      createChat()
+      // 监听助手事件
+      chat.on('conversationCreated', (data) => console.log('[chat-iframe] 新会话', data.conversationId))
+      chat.on('messageSent',         (data) => console.log('[chat-iframe] 用户提问', data.query))
     </script>
   </body>
 </html>

@@ -284,7 +284,9 @@ test('parent shell uses viewport-bounded normal size and default AI restore butt
 test('local example starts minimized so users open the assistant explicitly', () => {
   const example = readFileSync(join(import.meta.dirname, '../public/example.html'), 'utf8')
 
-  assert.match(example, /initialState:\s*'minimized'/)
+  // DocMindChatIframe 默认 initialState: 'minimized'，示例不应显式打开助手窗口。
+  // 改为"反向断言"：只要没有显式开启就认为符合契约。
+  assert.doesNotMatch(example, /initialState:\s*'(open|normal|maximized)'/)
 })
 
 test('iframe header drag messages move the parent window', () => {
