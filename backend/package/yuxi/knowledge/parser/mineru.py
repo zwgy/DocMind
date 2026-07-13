@@ -124,7 +124,7 @@ class MinerUParser(BaseDocumentProcessor):
 
         data = {
             "lang_list": params.get("lang_list", ["ch"]),
-            "backend": params.get("backend", "hybrid-auto-engine"),
+            "backend": params.get("backend") or os.getenv("MINERU_BACKEND") or "hybrid-engine",
             "parse_method": params.get("parse_method", "auto"),
             "formula_enable": params.get("formula_enable", True),
             "table_enable": params.get("table_enable", True),
@@ -189,18 +189,19 @@ class MinerUParser(BaseDocumentProcessor):
                     tmp_zip.write(zip_data)
                     tmp_zip.flush()
 
-                    try:
-                        image_bucket = params.get("image_bucket") or "public"
-                        image_prefix = params.get("image_prefix") or "unknown/kb-images"
+                # Windows 不允许删除仍被 NamedTemporaryFile 占用的文件，先关闭再解析和清理。
+                try:
+                    image_bucket = params.get("image_bucket") or "public"
+                    image_prefix = params.get("image_prefix") or "unknown/kb-images"
 
-                        processed = process_zip_file_sync(
-                            tmp_zip.name,
-                            image_bucket=image_bucket,
-                            image_prefix=image_prefix,
-                        )
-                        text = processed["markdown_content"]
-                    finally:
-                        os.unlink(tmp_zip.name)
+                    processed = process_zip_file_sync(
+                        tmp_zip.name,
+                        image_bucket=image_bucket,
+                        image_prefix=image_prefix,
+                    )
+                    text = processed["markdown_content"]
+                finally:
+                    os.unlink(tmp_zip.name)
 
                 if not text:
                     logger.error("MinerU 未返回任何文本内容")

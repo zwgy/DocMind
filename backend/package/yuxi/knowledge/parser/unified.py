@@ -362,9 +362,6 @@ async def _process_file_to_markdown_core(
         elif file_ext == ".pptx":
             result = _convert_with_docling(file_path_obj, params=params)
 
-        elif file_ext == ".doc":
-            result = _convert_legacy_office_with_docling(file_path_obj, params=params)
-
         elif file_ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"]:
             text = await parse_image_async(str(file_path_obj), params=params)
             result = f"{text}"
@@ -388,7 +385,7 @@ async def _process_file_to_markdown_core(
 
             result = markdown_content.strip()
 
-        elif file_ext == ".xls":
+        elif file_ext in [".doc", ".xls"]:
             result = _convert_legacy_office_with_docling(file_path_obj, params=params)
 
         elif file_ext == ".xlsx":
