@@ -291,7 +291,7 @@ services:
   mineru-api:
     build:
       context: .
-      dockerfile: docker/mineru.Dockerfile
+      dockerfile: docker/mineru/mineru.Dockerfile
     image: mineru-vllm:latest
     container_name: mineru-api
     profiles:

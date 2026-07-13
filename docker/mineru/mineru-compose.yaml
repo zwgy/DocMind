@@ -1,0 +1,40 @@
+name: mineru
+
+services:
+  mineru-api:
+    build:
+      context: .
+      dockerfile: mineru.Dockerfile
+    image: mineru-vllm:latest
+    container_name: mineru-api
+    ports:
+      - "${MINERU_BIND_HOST:-0.0.0.0}:${MINERU_PORT:-30001}:30001"
+    environment:
+      MINERU_MODEL_SOURCE: local
+      VLLM_USE_V1: "1"
+    entrypoint: mineru-api
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "30001"
+      - --gpu-memory-utilization
+      - "${MINERU_GPU_MEMORY_UTILIZATION:-0.7}"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    ipc: host
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:30001/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${MINERU_GPU_DEVICE_ID:-0}"]
+              capabilities: [gpu]
+    restart: unless-stopped
