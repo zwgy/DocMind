@@ -11,7 +11,7 @@ import yuxi.knowledge.parser.unified as parser_unified
 from docx import Document
 from PIL import Image
 
-from yuxi.knowledge.parser import Parser
+from yuxi.knowledge.parser import Parser, is_supported_file_extension
 from yuxi.knowledge.parser.factory import DocumentProcessorFactory
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
@@ -63,6 +63,36 @@ def test_parser_parse_docx_file_returns_markdown_text(tmp_path: Path, monkeypatc
     assert isinstance(markdown, str)
     assert "Parser DOCX content" in markdown
     assert len(markdown.strip()) > 0
+
+
+@pytest.mark.parametrize(("legacy_ext", "modern_ext"), [(".doc", ".docx"), (".xls", ".xlsx")])
+def test_parser_converts_legacy_office_before_docling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    legacy_ext: str,
+    modern_ext: str,
+) -> None:
+    file_path = tmp_path / f"legacy{legacy_ext}"
+    file_path.write_bytes(b"legacy office")
+    converted_paths: list[Path] = []
+
+    def _fake_run(command, **kwargs):
+        output_dir = Path(command[command.index("--outdir") + 1])
+        (output_dir / f"legacy{modern_ext}").write_bytes(b"modern office")
+        return SimpleNamespace(returncode=0)
+
+    def _fake_docling(path: Path, params=None) -> str:
+        converted_paths.append(path)
+        return "legacy content"
+
+    monkeypatch.setattr(parser_unified.subprocess, "run", _fake_run)
+    monkeypatch.setattr(parser_unified, "_convert_with_docling", _fake_docling)
+
+    markdown = Parser.parse(str(file_path))
+
+    assert markdown == "legacy content"
+    assert converted_paths[0].suffix == modern_ext
+    assert is_supported_file_extension(file_path)
 
 
 def test_convert_with_docling_reinserts_image_links_in_document_order(

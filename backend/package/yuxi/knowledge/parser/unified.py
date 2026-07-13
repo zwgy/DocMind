@@ -6,6 +6,7 @@ import asyncio
 import base64
 import os
 import re
+import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ from yuxi.utils import logger
 SUPPORTED_FILE_EXTENSIONS: tuple[str, ...] = (
     ".txt",
     ".md",
+    ".doc",
     ".docx",
     ".html",
     ".htm",
@@ -159,6 +161,32 @@ def _convert_with_docling(file_path: Path, params: dict | None = None) -> str:
         return markdown
 
     return doc.export_to_markdown()
+
+
+def _convert_legacy_office_with_docling(file_path: Path, params: dict | None = None) -> str:
+    """先用 LibreOffice 转换旧版 Office 文件，再交给 Docling 解析。"""
+    target_ext = {".doc": ".docx", ".xls": ".xlsx"}[file_path.suffix.lower()]
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # 旧版 Office 是二进制格式，Docling 不支持；复用镜像内 LibreOffice 做格式边界转换。
+        subprocess.run(
+            [
+                "libreoffice",
+                "--headless",
+                f"-env:UserInstallation=file://{Path(temp_dir).as_posix()}/profile",
+                "--convert-to",
+                target_ext.removeprefix("."),
+                "--outdir",
+                temp_dir,
+                str(file_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        converted_path = Path(temp_dir) / f"{file_path.stem}{target_ext}"
+        if not converted_path.exists():
+            raise RuntimeError(f"LibreOffice 未生成转换文件: {converted_path.name}")
+        return _convert_with_docling(converted_path, params=params)
 
 
 def _convert_docx_with_python_docx(file_path: Path) -> str:
@@ -335,11 +363,7 @@ async def _process_file_to_markdown_core(
             result = _convert_with_docling(file_path_obj, params=params)
 
         elif file_ext == ".doc":
-            from langchain_community.document_loaders import UnstructuredWordDocumentLoader
-
-            loader = UnstructuredWordDocumentLoader(str(file_path_obj))
-            docs = loader.load()
-            result = "\n".join(doc.page_content for doc in docs).strip()
+            result = _convert_legacy_office_with_docling(file_path_obj, params=params)
 
         elif file_ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"]:
             text = await parse_image_async(str(file_path_obj), params=params)
@@ -364,7 +388,10 @@ async def _process_file_to_markdown_core(
 
             result = markdown_content.strip()
 
-        elif file_ext in [".xls", ".xlsx"]:
+        elif file_ext == ".xls":
+            result = _convert_legacy_office_with_docling(file_path_obj, params=params)
+
+        elif file_ext == ".xlsx":
             result = _convert_with_docling(file_path_obj, params=params)
 
         elif file_ext == ".json":

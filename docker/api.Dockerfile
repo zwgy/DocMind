@@ -38,6 +38,7 @@ RUN set -ex \
         libsm6 \
         libxext6 \
         libreoffice-impress-nogui \
+        libreoffice-calc-nogui \
         libreoffice-writer-nogui \
     # (D) 清理垃圾，减小体积
     && apt-get clean \
