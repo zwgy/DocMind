@@ -7,6 +7,7 @@
 ## v0.7.1 (current)
 
 ### 开发记录
+- 整理 MinerU 独立部署：将官方镜像构建文件、独立 Compose、`.env` 和部署说明集中到可直接复制的 `docker/mineru` 目录；主 Compose 与生产 Compose 同步引用新 Dockerfile 路径。支持通过 `MINERU_GPU_DEVICE_ID` 和 `MINERU_GPU_MEMORY_UTILIZATION` 选择 GPU、限制显存，默认后端同步为 MinerU 3.4 的 `hybrid-engine`，同时修复 Windows 下 MinerU 响应 ZIP 尚未关闭便删除导致的解析失败。
 - 修复旧版 Office 文档解析：将 `.doc` 纳入允许上传格式，`.doc/.xls` 先通过 API 镜像内的 LibreOffice 转换为 `.docx/.xlsx`，再复用 Docling 解析；补装 `libreoffice-calc-nogui` 以支持旧版 Excel。
 - 优化来文管理详情页结构化结果展示：`GET /api/incoming-documents/{incomingId}` 透出最新成功的正式业务结构化抽取 `businessExtraction` 与后端 display label，Web 详情抽屉默认展示分类完成后的业务抽取明细；摘要阶段 `structuredResult` 保留为「摘要阶段关键事实」折叠辅助信息，避免把分类/摘要阶段轻量结果误当成正式结构化结果。
 - 优化来文业务结构化抽取提示词与结果展示：`build_extraction_prompt` 明确每个 item 表示一个独立业务事项，同一事项的背景、依据、责任对象和要求合并到同一个 item，只有多个并列且可独立执行或确认的事项才拆成多个 items；分块抽取完成后按同一 schema 的关键字段保守合并明显重复的 items，并追加保留多段 `source_quote` 依据；Web 来文详情按 schema 分组展示正式业务抽取明细，减少同一 schema 下结果过度分散和平铺卡片噪声。

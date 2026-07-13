@@ -68,15 +68,19 @@ Yuxi 支持多种文档格式的智能解析，从简单的文本文件到复杂
 
 ### MinerU（高精度）
 
-项目已内置 mineru-api 服务（位于 docker-compose.yml，属于 all profile），无需额外下载官方 compose 文件。首次构建镜像时会基于 docker/mineru.Dockerfile 下载模型，该过程耗时较长。
+项目将完整 MinerU 部署文件集中在 `docker/mineru`，该目录可直接复制到其他联网电脑独立部署。首次构建镜像时会下载模型，该过程耗时较长。
+
+完整的主机检查、GPU 选择、构建、验证和 Yuxi 接入步骤见 `docker/mineru/README.md`。
 
 启动服务（需要 GPU）：
 
 ```bash
-docker compose --profile all up -d --build mineru-api
+docker compose -f docker/mineru/mineru-compose.yaml up -d --build
 ```
 
-该服务在 `30001` 端口提供 `/file_parse` 接口，后端 `api` / `worker` 默认通过 `MINERU_API_URI=http://mineru-api:30001` 连接，通常无需额外配置。
+该服务在宿主机 `30001` 端口提供 `/file_parse` 接口。Yuxi 与 MinerU 同机但分别使用独立 Compose 时，配置 `MINERU_API_URI=http://host.docker.internal:30001`；跨主机部署时改为 MinerU 主机内网 IP。
+
+如果主机已有 GPUStack 等 GPU 工作负载，在 `.env` 中用 `MINERU_GPU_DEVICE_ID` 选择 MinerU 使用的 GPU，并通过 `MINERU_GPU_MEMORY_UTILIZATION` 限制 vLLM 显存占比。建议优先为 MinerU 独占一块 GPU；共享 24GB GPU 时可从 `0.7` 开始，根据实际剩余显存继续下调。
 
 ::: tip 显存不足
 若显存有限导致启动失败，可在 `docker-compose.yml` 的 `mineru-api` 服务下放开 `--gpu-memory-utilization` 参数（如 `0.5`，必要时进一步降低）。
