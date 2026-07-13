@@ -319,7 +319,6 @@ const chat = new DocMindChatIframe({
 | `maximize()` | 最大化为全屏 |
 | `restore()` | 恢复普通窗口 |
 | `destroy()` | 移除 DOM 和消息监听，SPA 切页时应调用 |
-| `setUser(user)` | 更新用户并重发配置 |
 | `setPageContent(content)` | 显式设置页面内容，支持字符串或对象 |
 | `setFiles(files)` | 覆盖附件列表 |
 | `addFile(file)` | 追加附件 |
@@ -331,7 +330,7 @@ const chat = new DocMindChatIframe({
 
 | 消息 | 载荷 | 用途 |
 | --- | --- | --- |
-| `INIT_CONFIG` | `{ user, token, apiBaseUrl, agentId, conversationScopeKey, includePageContent, includeFiles, selectedFileIds, originAllowlist }` | 初始化配置；`token` 由父脚本自动换票后下发 |
+| `INIT_CONFIG` | `{ token, apiBaseUrl, agentId, conversationScopeKey, includePageContent, includeFiles, selectedFileIds, originAllowlist }` | 初始化配置；`token` 由父脚本自动换票后下发 |
 | `PAGE_CONTENT` | `{ title?, url?, html?, text? }` | 页面内容 |
 | `PAGE_FILES_UPDATED` | `IncomingPageFile[]` | 页面附件列表 |
 | `FILE_LIST` | `IncomingPageFile[]` | 兼容旧消息名 |

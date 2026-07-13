@@ -64,7 +64,6 @@
     this.options = Object.assign(
       {
         iframeSrc: '/',
-        user: null,
         apiBaseUrl: null,
         agentId: null,
         tokenExchangeUrl: null,
@@ -135,12 +134,6 @@
 
   DocMindChatIframe.prototype.addFile = function (file) {
     this.setFiles(this.pageFiles.concat([file]))
-    return this
-  }
-
-  DocMindChatIframe.prototype.setUser = function (user) {
-    this.options.user = user
-    this._sendConfig()
     return this
   }
 
@@ -436,7 +429,6 @@
 
   DocMindChatIframe.prototype._configPayload = function (token, authError) {
     var payload = {
-      user: this.options.user,
       token: token || null,
       apiBaseUrl: this.options.apiBaseUrl,
       agentId: this.options.agentId,
