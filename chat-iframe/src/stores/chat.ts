@@ -77,6 +77,13 @@ function waitForStreamReconnect() {
   return new Promise((resolve) => setTimeout(resolve, 500))
 }
 
+function requestIdFromMessage(message: ChatMessage) {
+  const raw = message.raw || {}
+  const extra = raw.extra_metadata as Record<string, unknown> | undefined
+  const requestId = extra?.request_id || raw.request_id
+  return typeof requestId === 'string' ? requestId : ''
+}
+
 function tmpAttachmentPayload(uploaded: Record<string, unknown>) {
   return {
     file_name: uploaded.file_name,
@@ -206,6 +213,26 @@ export const useChatStore = defineStore('chat', {
       this.ensureRuntime(threadId).messages = await listMessages(threadId, token)
       void this.resumeActiveRun(threadId, token)
     },
+    async syncThreadHistory(threadId: string, token?: string, requestId = '') {
+      const runtime = this.ensureRuntime(threadId)
+      const history = await listMessages(threadId, token)
+      if (!requestId) {
+        if (history.length) runtime.messages = history
+        return history
+      }
+
+      const persistedTurn = history.filter((message) => requestIdFromMessage(message) === requestId)
+      const start = runtime.messages.findIndex((message) => requestIdFromMessage(message) === requestId)
+      if (!persistedTurn.length || start < 0) return []
+
+      const nextUser = runtime.messages.findIndex((message, index) => index > start && message.role === 'user')
+      runtime.messages = [
+        ...runtime.messages.slice(0, start),
+        ...persistedTurn,
+        ...runtime.messages.slice(nextUser < 0 ? runtime.messages.length : nextUser)
+      ]
+      return persistedTurn
+    },
     async resumeActiveRun(threadId: string, token?: string) {
       if (!threadId) return
       const runtime = this.ensureRuntime(threadId)
@@ -305,6 +332,7 @@ export const useChatStore = defineStore('chat', {
           runtime.activeRunId = ''
           runtime.abortController = null
         }
+        if (reachedTerminalEvent && !controller.signal.aborted) await this.syncThreadHistory(threadId, token).catch(() => null)
       }
     },
     async ensureThread(token?: string, agentId?: string, conversationScopeKey?: string) {
@@ -465,6 +493,7 @@ export const useChatStore = defineStore('chat', {
         const uploadedAttachments = await this.attachFiles(threadId, options.files || [], token)
         const imageContent = options.imageFile ? (await uploadImage(options.imageFile, token)).image_content || null : null
         let runId = ''
+        let requestId = ''
         try {
           const result = await sendMessageStream(
             {
@@ -488,6 +517,8 @@ export const useChatStore = defineStore('chat', {
             streamHandlers
           )
           runId = result.runId
+          requestId = result.requestId
+          userMessage.raw = { request_id: requestId }
         } catch (error) {
           if (!runtime.activeRunId || controller.signal.aborted) throw error
           runId = runtime.activeRunId
@@ -513,7 +544,9 @@ export const useChatStore = defineStore('chat', {
         }
         assistantMessage.status = assistantMessage.status === 'error' ? 'error' : 'done'
         runtime.messages = [...runtime.messages]
-        return { threadId, messageId: userMessage.id }
+        const persistedTurn = await this.syncThreadHistory(threadId, token, requestId).catch(() => [])
+        const persistedUserMessage = persistedTurn.find((message) => message.role === 'user')
+        return { threadId, messageId: persistedUserMessage?.id || userMessage.id }
       } catch (error) {
         if (controller.signal.aborted) {
           clearTextTimer()

@@ -44,7 +44,9 @@ export function normalizeChatMessage(item: Record<string, unknown>): ChatMessage
   const responseMetadata =
     item.response_metadata && typeof item.response_metadata === 'object'
       ? (item.response_metadata as Record<string, unknown>)
-      : {}
+      : extra.response_metadata && typeof extra.response_metadata === 'object'
+        ? (extra.response_metadata as Record<string, unknown>)
+        : {}
 
   return {
     id: String(item.id || crypto.randomUUID()),
