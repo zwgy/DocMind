@@ -78,7 +78,7 @@ Yuxi 支持多种文档格式的智能解析，从简单的文本文件到复杂
 docker compose -f docker/mineru/mineru-compose.yaml up -d --build
 ```
 
-该服务在宿主机 `30001` 端口提供 `/file_parse` 接口。Yuxi 与 MinerU 同机但分别使用独立 Compose 时，配置 `MINERU_API_URI=http://host.docker.internal:30001`；跨主机部署时改为 MinerU 主机内网 IP。
+该服务由独立 Compose 中的 Nginx 在宿主机 `30001` 端口提供 `/file_parse` 接口，MinerU 容器不直接暴露宿主机端口。Yuxi 与 MinerU 同机但分别使用独立 Compose 时，配置 `MINERU_API_URI=http://host.docker.internal:30001`；跨主机部署时改为 MinerU 主机内网 IP。后续应用可在同一 Nginx 上按不同路径转发，无需再开放宿主机端口。
 
 如果主机已有 GPUStack 等 GPU 工作负载，在 `.env` 中用 `MINERU_GPU_DEVICE_ID` 选择 MinerU 使用的 GPU，并通过 `MINERU_GPU_MEMORY_UTILIZATION` 限制 vLLM 显存占比。建议优先为 MinerU 独占一块 GPU；共享 24GB GPU 时可从 `0.7` 开始，根据实际剩余显存继续下调。
 
