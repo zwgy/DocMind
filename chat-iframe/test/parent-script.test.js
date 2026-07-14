@@ -69,7 +69,7 @@ function parentHarness(options = {}) {
     innerWidth: 900,
     innerHeight: 700,
     addEventListener(type, callback) {
-      listeners[type] = callback
+      listeners[type] = (event) => callback({ source: iframe.contentWindow, ...event })
     },
     removeEventListener() {}
   }
@@ -106,6 +106,31 @@ test('accepts iframe messages by targetOrigin and keeps originAllowlist for ifra
     assert.equal(sentMessages[0].targetOrigin, 'https://docmind.example.com')
     chat.destroy()
   })
+})
+
+test('rejects messages from another window or origin', () => {
+  const { container, DocMindChatIframe, listeners } = parentHarness()
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    targetOrigin: 'https://docmind.example.com',
+    includeFiles: false
+  })
+
+  listeners.message({ source: {}, origin: 'https://docmind.example.com', data: { type: 'MAXIMIZE' } })
+  listeners.message({ origin: 'https://evil.example.com', data: { type: 'MAXIMIZE' } })
+
+  assert.doesNotMatch(container.className, /maximized/)
+  chat.destroy()
+})
+
+test('derives the default target origin from iframeSrc', () => {
+  const { DocMindChatIframe, sentMessages } = parentHarness()
+  const chat = new DocMindChatIframe({ iframeSrc: 'https://docmind.example.com/chat-iframe/', includeFiles: false })
+
+  chat.setPageContent('safe content')
+
+  assert.equal(sentMessages.at(-1).targetOrigin, 'https://docmind.example.com')
+  chat.destroy()
 })
 
 test('fetches docMind iframe token and sends conversation scope to iframe', async () => {

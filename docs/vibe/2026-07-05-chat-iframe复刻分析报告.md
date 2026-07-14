@@ -457,9 +457,9 @@ iframe 在配置到达前必须接收 `INIT_CONFIG`，但当前任何来源的�
   - 验证：回归测试覆盖历史反馈归一化、重复点击只发起一次反馈请求，以及并发重试只产生一条乐观用户消息。
   - 依赖：P0-5。
 
-- [ ] `P0-8` 收紧 postMessage 信任边界 — 状态：待办
-  - 实现：首次 `INIT_CONFIG` 绑定父窗口和 origin；后续消息同时校验 `event.source` 与 origin；父页面只接受 `iframe.contentWindow`；生产示例使用明确 `targetOrigin`。
-  - 验证：其他 window、错误 origin、第二次恶意 `INIT_CONFIG` 均无法覆盖 token、API 地址或 allowlist。
+- [x] `P0-8` 收紧 postMessage 信任边界 — 状态：已完成
+  - 实现：首次 `INIT_CONFIG` 绑定父窗口和 origin，后续消息同时校验 `event.source` 与 origin 且拒绝二次配置；父页面只接受 `iframe.contentWindow` 的消息，并将默认 `targetOrigin` 收敛到 iframe 地址的 origin；生产示例显式指定 `targetOrigin`。
+  - 验证：回归测试覆盖其他 window、错误 origin、配置前非配置消息与第二次 `INIT_CONFIG` 均被拒绝。
   - 依赖：无。
 
 - [ ] `P0-9` 建立生产可靠性测试门禁 — 状态：待办
@@ -591,3 +591,4 @@ iframe 在配置到达前必须接收 `INIT_CONFIG`，但当前任何来源的�
 | P0-5 | 2026-07-14 | 当前工作区 | `corepack pnpm test`：71 通过、3 跳过；`corepack pnpm typecheck` 通过 | 终态按 request ID 以服务端消息校准本轮乐观消息。 |
 | P0-6 | 2026-07-14 | 当前工作区 | `corepack pnpm test`：73 通过、3 跳过；`corepack pnpm typecheck` 通过 | 追问/审批恢复原 parent run，retryable worker error 不提前显示最终失败。 |
 | P0-7 | 2026-07-14 | 当前工作区 | `corepack pnpm test`：75 通过、3 跳过；`corepack pnpm typecheck` 通过 | 重试采用追加新一轮语义；反馈使用正式消息 ID，支持历史状态与点踩原因。 |
+| P0-8 | 2026-07-14 | 当前工作区 | `corepack pnpm test`：78 通过、3 跳过；`corepack pnpm typecheck` 通过 | 首次配置锁定父窗口与 origin，父页面仅接受自身 iframe 消息。 |

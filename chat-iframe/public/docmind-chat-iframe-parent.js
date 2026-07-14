@@ -13,6 +13,16 @@
     return base ? base + path : path
   }
 
+  function originFromUrl(value) {
+    var match = stripText(value).match(/^[a-z][a-z\d+.-]*:\/\/[^/]+/i)
+    return match ? match[0] : ''
+  }
+
+  function resolveTargetOrigin(targetOrigin, iframeSrc) {
+    if (targetOrigin && targetOrigin !== '*') return targetOrigin
+    return originFromUrl(iframeSrc) || originFromUrl(global.location && global.location.href) || '*'
+  }
+
   function isDocumentFile(name) {
     var ext = stripText(name).split('.').pop().toLowerCase()
     return DOCUMENT_EXTENSIONS.indexOf(ext) !== -1
@@ -88,6 +98,7 @@
       },
       options || {}
     )
+    this.targetOrigin = resolveTargetOrigin(this.options.targetOrigin, this.options.iframeSrc)
     this.windowState = this.options.initialState
     this.pageContent = null
     this.pageFiles = []
@@ -317,8 +328,8 @@
   DocMindChatIframe.prototype._handleMessage = function (event) {
     var message = event.data || {}
     if (!message.type) return
-    // 父页面接收的是 iframe 发来的消息，应按 iframe 的 targetOrigin 校验；originAllowlist 会下发给 iframe 校验父页面来源。
-    if (this.options.targetOrigin !== '*' && event.origin !== this.options.targetOrigin) {
+    // WindowProxy 在 iframe 导航后仍可能不变，必须同时锁定来源窗口和初始 iframe origin。
+    if (!this.iframe || event.source !== this.iframe.contentWindow || event.origin !== this.targetOrigin) {
       return
     }
     switch (message.type) {
@@ -464,8 +475,7 @@
 
   DocMindChatIframe.prototype._sendToIframe = function (type, payload) {
     if (!this.iframe || !this.iframe.contentWindow) return
-    // 默认 targetOrigin 由接入方配置，避免父页面脚本猜测跨域部署形态。
-    this.iframe.contentWindow.postMessage({ type: type, payload: payload, timestamp: Date.now() }, this.options.targetOrigin)
+    this.iframe.contentWindow.postMessage({ type: type, payload: payload, timestamp: Date.now() }, this.targetOrigin)
   }
 
   DocMindChatIframe.prototype._setWindowState = function (state, notify) {

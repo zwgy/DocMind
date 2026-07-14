@@ -2,6 +2,7 @@ import { onMounted, onUnmounted } from 'vue'
 import { setApiBaseUrl } from '@/apis/api-url'
 import { useIframeContextStore } from '@/stores/iframe-context'
 import type { IframeConfig, IncomingPageFile, PageContent, ParentMessage, WindowState } from '@/types'
+import { createTrustedParentMessageGuard } from '@/utils/iframe-message'
 
 function isEmbedded() {
   try {
@@ -13,20 +14,23 @@ function isEmbedded() {
 
 export function useIframeBridge() {
   const context = useIframeContextStore()
+  const isTrustedParentMessage = createTrustedParentMessageGuard(window.parent)
+  let parentOrigin = ''
 
   function send(type: string, payload?: unknown) {
     if (!context.isEmbedded) return
-    window.parent.postMessage({ type, payload, timestamp: Date.now() }, '*')
+    // 完成握手后使用锁定的父页面 origin，避免把运行期消息广播给其他嵌入方。
+    window.parent.postMessage({ type, payload, timestamp: Date.now() }, parentOrigin || '*')
   }
 
   function handleMessage(event: MessageEvent) {
     const message = (event.data || {}) as ParentMessage
-    if (!message.type) return
+    if (!message.type || !isTrustedParentMessage(event, message)) return
     const allowlist = context.config.originAllowlist || []
-    // 配置到达前必须接收 INIT_CONFIG；后续消息才按 allowlist 收紧。
-    if (message.type !== 'INIT_CONFIG' && allowlist.length && !allowlist.includes(event.origin)) return
+    if (allowlist.length && !allowlist.includes(event.origin)) return
     switch (message.type) {
       case 'INIT_CONFIG':
+        parentOrigin = event.origin
         context.setConfig(message.payload as IframeConfig | undefined)
         setApiBaseUrl((message.payload as IframeConfig | undefined)?.apiBaseUrl)
         break
