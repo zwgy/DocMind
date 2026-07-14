@@ -47,6 +47,7 @@ export function normalizeChatMessage(item: Record<string, unknown>): ChatMessage
       : extra.response_metadata && typeof extra.response_metadata === 'object'
         ? (extra.response_metadata as Record<string, unknown>)
         : {}
+  const feedback = item.feedback && typeof item.feedback === 'object' ? (item.feedback as Record<string, unknown>) : null
 
   return {
     id: String(item.id || crypto.randomUUID()),
@@ -61,6 +62,10 @@ export function normalizeChatMessage(item: Record<string, unknown>): ChatMessage
     errorType: errorType || undefined,
     errorMessage: errorMessage || undefined,
     modelName: typeof responseMetadata.model_name === 'string' ? responseMetadata.model_name : undefined,
+    feedback:
+      feedback?.rating === 'like' || feedback?.rating === 'dislike'
+        ? { rating: feedback.rating, reason: typeof feedback.reason === 'string' ? feedback.reason : null }
+        : undefined,
     createdAt: typeof item.created_at === 'string' ? item.created_at : undefined,
     raw: item
   }

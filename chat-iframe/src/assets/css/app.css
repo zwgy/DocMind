@@ -1319,9 +1319,43 @@
 
 .message-refs {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   margin-top: 10px;
+}
+
+.message-refs button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.message-refs button.selected {
+  color: var(--primary-600);
+}
+
+.feedback-reason {
+  flex-basis: 100%;
+  display: grid;
+  gap: 6px;
+  color: var(--gray-700);
+  font-size: 12px;
+}
+
+.feedback-reason textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  resize: vertical;
+}
+
+.feedback-reason div {
+  display: flex;
+  gap: 10px;
 }
 
 .ref-chip {

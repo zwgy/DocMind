@@ -120,6 +120,14 @@ async function submitInterrupt(answer: unknown) {
   }
 }
 
+async function submitFeedback(event: { messageId: string; rating: 'like' | 'dislike'; reason: string | null }) {
+  try {
+    await chat.feedback(event, context.config.token)
+  } catch (err) {
+    chat.error = err instanceof Error ? err.message : '提交反馈失败'
+  }
+}
+
 function resumeVisibleThread() {
   if (document.visibilityState !== 'visible' || !context.config.token) return
   void chat.resumeActiveRun(chat.currentThreadId, context.config.token)
@@ -284,7 +292,7 @@ onUnmounted(() => {
           :loading="chat.isLoading"
           :streaming="chat.isStreaming"
           @retry="chat.retry(context.config.token, context.config.agentId, context.config.conversationScopeKey)"
-          @feedback="(event) => chat.feedback(event, context.config.token)"
+          @feedback="submitFeedback"
         />
         <RunInterruptCard
           v-if="chat.pendingInterrupt"

@@ -424,7 +424,20 @@ export const useChatStore = defineStore('chat', {
       return this.send(runtime.lastUserMessageForRetry, token, agentId, conversationScopeKey)
     },
     async feedback(payload: { messageId: string; rating: 'like' | 'dislike'; reason: string | null }, token?: string) {
-      await submitMessageFeedback(payload.messageId, payload.rating, payload.reason, token)
+      const runtime = this.ensureRuntime()
+      const message = runtime.messages.find((item) => item.id === payload.messageId)
+      if (!message || message.feedback || message.feedbackSubmitting) return
+
+      // 提交中的本地状态先落下，避免同一条正式消息被快速重复点击。
+      message.feedbackSubmitting = true
+      runtime.messages = [...runtime.messages]
+      try {
+        await submitMessageFeedback(payload.messageId, payload.rating, payload.reason, token)
+        message.feedback = { rating: payload.rating, reason: payload.reason }
+      } finally {
+        message.feedbackSubmitting = false
+        runtime.messages = [...runtime.messages]
+      }
     },
     async send(options: SendOptions, token?: string, agentId?: string, conversationScopeKey?: string) {
       const text = options.text.trim()

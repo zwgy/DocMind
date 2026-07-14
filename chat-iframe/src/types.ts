@@ -140,6 +140,11 @@ export type ChatThread = {
 
 export type ChatMessageRole = 'user' | 'assistant' | 'system' | 'tool'
 
+export type ChatMessageFeedback = {
+  rating: 'like' | 'dislike'
+  reason: string | null
+}
+
 export type ChatToolCall = {
   id: string
   name: string
@@ -171,6 +176,8 @@ export type ChatMessage = {
   errorType?: string
   errorMessage?: string
   modelName?: string
+  feedback?: ChatMessageFeedback
+  feedbackSubmitting?: boolean
   contextSummary?: ContextSummaryPayload
   createdAt?: string
   raw?: Record<string, unknown>
