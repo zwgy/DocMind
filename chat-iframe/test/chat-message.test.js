@@ -49,8 +49,8 @@ test('appendRunChunkSegment keeps streaming text and tool calls in event order',
     { type: 'tool_call', toolCallId: 'tool-1', name: 'list_kbs', args: {} },
     createSegment
   )
-  current = appendRunChunkSegment(messages, current, { type: 'tool_result', toolCallId: 'tool-1', content: 'test1' }, createSegment)
-  current = appendRunChunkSegment(messages, current, { type: 'text', content: '目前有 1 个知识库。' }, createSegment)
+  appendRunChunkSegment(messages, current, { type: 'tool_result', toolCallId: 'tool-1', content: 'test1' }, createSegment)
+  appendRunChunkSegment(messages, current, { type: 'text', content: '目前有 1 个知识库。' }, createSegment)
 
   assert.deepEqual(
     messages.map((message) => ({

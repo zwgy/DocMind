@@ -462,9 +462,10 @@ iframe 在配置到达前必须接收 `INIT_CONFIG`，但当前任何来源的�
   - 验证：回归测试覆盖其他 window、错误 origin、配置前非配置消息与第二次 `INIT_CONFIG` 均被拒绝。
   - 依赖：无。
 
-- [ ] `P0-9` 建立生产可靠性测试门禁 — 状态：待办
-  - 实现：为 P0-1～P0-8 增加 store/API/component 回归测试，并增加至少一条真实浏览器主链路 E2E。
-  - 验证：测试覆盖串会话、断流续接、活动 run、历史校准、审批、retryable error、反馈 ID 和 postMessage 来源校验；Docker 环境中执行测试、Lint 和 E2E。
+- [ ] `P0-9` 建立生产可靠性测试门禁 — 状态：进行中
+  - 实现：已增加 `test:p0` 覆盖 P0-1～P0-8 的 store/API/component 回归，并增加 `test:reliability` 统一执行回归、类型检查和 lint；真实浏览器主链路 E2E 将在内网部署机执行。
+  - 本地验证：`corepack pnpm test:reliability` 已通过（22 通过、0 跳过），此前阻塞 lint 的 3 项已修复。
+  - 待完成：内网 E2E 需提供部署 URL、独立测试业务身份和部署机浏览器自动化运行器，验证 iframe 打开、握手与一次真实问答后才能标记完成。
   - 依赖：P0-1～P0-8。
 
 ### 12.4 阶段二：高频聊天体验（P1）

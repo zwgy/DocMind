@@ -102,6 +102,14 @@ corepack pnpm lint
 
 运行 ESLint。
 
+### P0 生产可靠性门禁
+
+```bash
+corepack pnpm test:reliability
+```
+
+该命令只运行 P0-1 至 P0-8 的回归测试，再执行类型检查和 lint。真实浏览器 E2E 必须在内网部署机执行：需要该机器的部署 URL、可用的测试业务身份，以及已安装的浏览器自动化运行器；不要在无 URL 或无测试身份的开发机上把它伪装成已通过。
+
 ```bash
 corepack pnpm build
 ```

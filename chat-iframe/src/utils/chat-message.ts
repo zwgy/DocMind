@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatMessageRole, ChatToolCall, RunStreamChunk } from '../types'
+import type { ChatMessage, ChatMessageRole, RunStreamChunk } from '../types'
 import { normalizeToolCalls } from './tool-calls.ts'
 
 function roleFromType(type: string): ChatMessageRole {
