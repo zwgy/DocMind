@@ -274,13 +274,16 @@ onUnmounted(() => {
           :threads="chat.threads"
           :current-thread-id="chat.currentThreadId"
           :loading="chat.isLoading"
+          :has-more="chat.hasMoreThreads"
+          :loading-more="chat.isLoadingMoreThreads"
           @new="createChat"
           @close="showSidebar = false"
           @refresh="chat.refreshThreads(context.config.token, context.config.agentId, context.config.conversationScopeKey)"
+          @load-more="chat.loadMoreThreads(context.config.token, context.config.agentId, context.config.conversationScopeKey)"
           @select="selectThread"
           @rename="(event) => event.title && chat.renameConversation(event.threadId, event.title, context.config.token)"
           @delete="(threadId) => chat.removeConversation(threadId, context.config.token)"
-          @pin="(threadId) => chat.togglePinConversation(threadId, context.config.token)"
+          @pin="(threadId) => chat.togglePinConversation(threadId, context.config.token, context.config.agentId, context.config.conversationScopeKey)"
         />
       </aside>
     </Transition>

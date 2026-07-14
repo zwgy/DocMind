@@ -56,6 +56,9 @@ type ChatState = {
   threads: ChatThread[]
   currentThreadId: string
   threadRuntimes: Record<string, ThreadRuntime>
+  threadOffset: number
+  hasMoreThreads: boolean
+  isLoadingMoreThreads: boolean
   contextSummaryMessage: ChatMessage | null
   modelOptions: ModelOption[]
   selectedModelSpec: string
@@ -69,6 +72,7 @@ type ChatState = {
 
 const DRAFT_THREAD_KEY = '__draft__'
 const DEFAULT_THREAD_TITLE = '来文咨询'
+const THREAD_PAGE_SIZE = 50
 
 function createThreadRuntime(): ThreadRuntime {
   return {
@@ -110,6 +114,10 @@ function modelSpecFromHistory(messages: ChatMessage[]) {
   return ''
 }
 
+function nonPinnedThreadCount(threads: ChatThread[]) {
+  return threads.filter((thread) => !thread.is_pinned).length
+}
+
 function tmpAttachmentPayload(uploaded: Record<string, unknown>) {
   return {
     file_name: uploaded.file_name,
@@ -126,6 +134,9 @@ export const useChatStore = defineStore('chat', {
     threads: [],
     currentThreadId: '',
     threadRuntimes: {},
+    threadOffset: 0,
+    hasMoreThreads: false,
+    isLoadingMoreThreads: false,
     contextSummaryMessage: null,
     modelOptions: [],
     selectedModelSpec: '',
@@ -206,10 +217,12 @@ export const useChatStore = defineStore('chat', {
       this.error = ''
       try {
         const [threads, models] = await Promise.all([
-          listConversations(token, agentId, conversationScopeKey),
+          listConversations(token, agentId, conversationScopeKey, 0, THREAD_PAGE_SIZE),
           listChatModels(token).catch(() => [])
         ])
         this.threads = threads
+        this.threadOffset = nonPinnedThreadCount(threads)
+        this.hasMoreThreads = this.threadOffset === THREAD_PAGE_SIZE
         this.modelOptions = models
         if (!this.selectedModelSpec && models[0]) this.selectedModelSpec = models[0].value
         if (threads[0]) await this.selectThread(threads[0].id, token)
@@ -223,11 +236,30 @@ export const useChatStore = defineStore('chat', {
       // 打开侧边栏只刷新列表，避免把当前会话悄悄切到第一条。
       this.isLoading = true
       try {
-        this.threads = await listConversations(token, agentId, conversationScopeKey)
+        const threads = await listConversations(token, agentId, conversationScopeKey, 0, THREAD_PAGE_SIZE)
+        this.threads = threads
+        this.threadOffset = nonPinnedThreadCount(threads)
+        this.hasMoreThreads = this.threadOffset === THREAD_PAGE_SIZE
       } catch (error) {
         this.error = error instanceof Error ? error.message : '刷新对话列表失败'
       } finally {
         this.isLoading = false
+      }
+    },
+    async loadMoreThreads(token?: string, agentId?: string, conversationScopeKey?: string) {
+      if (!this.hasMoreThreads || this.isLoadingMoreThreads) return
+      this.isLoadingMoreThreads = true
+      try {
+        const page = await listConversations(token, agentId, conversationScopeKey, this.threadOffset, THREAD_PAGE_SIZE)
+        const seen = new Set(this.threads.map((thread) => thread.id))
+        this.threads = [...this.threads, ...page.filter((thread) => !seen.has(thread.id))]
+        const loaded = nonPinnedThreadCount(page)
+        this.threadOffset += loaded
+        this.hasMoreThreads = loaded === THREAD_PAGE_SIZE
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : '加载更多对话失败'
+      } finally {
+        this.isLoadingMoreThreads = false
       }
     },
     async newConversation(token?: string, agentId?: string, conversationScopeKey?: string) {
@@ -240,6 +272,7 @@ export const useChatStore = defineStore('chat', {
     async createThread(token?: string, agentId?: string, conversationScopeKey?: string) {
       const thread = await createConversation({ token, agentId, conversationScopeKey })
       this.threads = [thread, ...this.threads.filter((item) => item.id !== thread.id)]
+      if (!thread.is_pinned) this.threadOffset += 1
       const draftRuntime = this.threadRuntimes[DRAFT_THREAD_KEY]
       const draftModelSpec = this.modelSpecsByThread[DRAFT_THREAD_KEY] || this.selectedModelSpec
       if (draftModelSpec) this.modelSpecsByThread[thread.id] = draftModelSpec
@@ -260,17 +293,18 @@ export const useChatStore = defineStore('chat', {
       const thread = await updateConversation(threadId, { title }, token)
       this.threads = this.threads.map((item) => (item.id === threadId ? { ...item, ...thread } : item))
     },
-    async togglePinConversation(threadId: string, token?: string) {
+    async togglePinConversation(threadId: string, token?: string, agentId?: string, conversationScopeKey?: string) {
       const thread = this.threads.find((item) => item.id === threadId)
       if (!thread) return
       const nextPinned = !thread.is_pinned
       await updateConversation(threadId, { isPinned: nextPinned }, token)
-      thread.is_pinned = nextPinned
-      this.threads = [...this.threads].sort((a, b) => Number(Boolean(b.is_pinned)) - Number(Boolean(a.is_pinned)))
+      await this.refreshThreads(token, agentId, conversationScopeKey)
     },
     async removeConversation(threadId: string, token?: string) {
+      const thread = this.threads.find((item) => item.id === threadId)
       await deleteConversation(threadId, token)
       this.threads = this.threads.filter((item) => item.id !== threadId)
+      if (thread && !thread.is_pinned) this.threadOffset = Math.max(0, this.threadOffset - 1)
       delete this.threadRuntimes[threadId]
       if (this.currentThreadId === threadId) {
         this.currentThreadId = this.threads[0]?.id || ''

@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { Check, Copy, RotateCcw, ThumbsDown, ThumbsUp } from 'lucide-vue-next'
+import { BookOpen, Check, ChevronDown, Copy, RotateCcw, ThumbsDown, ThumbsUp } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import type { ChatMessage } from '@/types'
+import KbResultGroupedList from '@/components/KbResultGroupedList.vue'
+import type { ChatSources } from '@/utils/tool-calls'
 
-const props = defineProps<{ message: ChatMessage }>()
+const props = withDefaults(defineProps<{ message: ChatMessage; sources?: ChatSources }>(), {
+  sources: () => ({ knowledgeChunks: [], webSources: [] })
+})
 const emit = defineEmits<{
   retry: []
   feedback: [payload: { messageId: string; rating: 'like' | 'dislike'; reason: string | null }]
@@ -12,7 +16,9 @@ const emit = defineEmits<{
 const copied = ref(false)
 const dislikeOpen = ref(false)
 const dislikeReason = ref('')
+const sourcesOpen = ref(false)
 const feedbackLocked = computed(() => Boolean(props.message.feedback || props.message.feedbackSubmitting))
+const sourceCount = computed(() => props.sources.knowledgeChunks.length + props.sources.webSources.length)
 
 async function copyText(text: string) {
   await navigator.clipboard?.writeText(text)
@@ -62,6 +68,31 @@ function submitDislike() {
       <Check v-if="copied" :size="13" />
       <Copy v-else :size="13" />
     </button>
+    <span v-if="message.modelName" class="message-model">{{ message.modelName }}</span>
+    <button v-if="sourceCount" type="button" class="message-source-toggle" title="查看来源" @click="sourcesOpen = !sourcesOpen">
+      <BookOpen :size="13" />
+      来源 {{ sourceCount }}
+      <ChevronDown :size="13" :class="{ rotated: sourcesOpen }" />
+    </button>
+    <section v-if="sourcesOpen && sourceCount" class="message-sources">
+      <div v-if="sources.knowledgeChunks.length" class="message-source-section">
+        <strong>知识库来源（{{ sources.knowledgeChunks.length }}）</strong>
+        <KbResultGroupedList :chunks="sources.knowledgeChunks" />
+      </div>
+      <div v-if="sources.webSources.length" class="message-source-section">
+        <strong>网页来源（{{ sources.webSources.length }}）</strong>
+        <a
+          v-for="source in sources.webSources"
+          :key="source.url"
+          class="message-web-source"
+          :href="source.url"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {{ source.title }}
+        </a>
+      </div>
+    </section>
     <form v-if="dislikeOpen" class="feedback-reason" @submit.prevent="submitDislike">
       <label>
         点踩原因（可选）

@@ -11,6 +11,7 @@ import {
   extractionSummaryText
 } from '@/utils/context-summary'
 import { groupMessageDisplayItems } from '@/utils/message-display'
+import { extractFinalAnswerSources } from '@/utils/tool-calls'
 
 const props = withDefaults(
   defineProps<{
@@ -121,6 +122,10 @@ function showAssistantRefs(message: ChatMessage) {
   return message.role === 'assistant' && message.status === 'done' && message.id === lastAssistantMessageId.value
 }
 
+function assistantSources(message: ChatMessage) {
+  return extractFinalAnswerSources(props.messages, message.id)
+}
+
 async function scrollToBottom() {
   if (!props.streaming) return
   await nextTick()
@@ -221,6 +226,7 @@ watch([displayItems, showGeneratingStatus], scrollToBottom, { flush: 'post', dee
           <MessageRefs
             v-if="showAssistantRefs(item.message)"
             :message="item.message"
+            :sources="assistantSources(item.message)"
             @retry="$emit('retry')"
             @feedback="$emit('feedback', $event)"
           />

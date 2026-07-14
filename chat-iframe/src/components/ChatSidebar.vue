@@ -18,8 +18,10 @@ withDefaults(
     threads?: ChatThread[]
     currentThreadId?: string
     loading?: boolean
+    hasMore?: boolean
+    loadingMore?: boolean
   }>(),
-  { threads: () => [], currentThreadId: '', loading: false }
+  { threads: () => [], currentThreadId: '', loading: false, hasMore: false, loadingMore: false }
 )
 
 const emit = defineEmits<{
@@ -30,6 +32,7 @@ const emit = defineEmits<{
   rename: [payload: { threadId: string; title: string }]
   delete: [threadId: string]
   pin: [threadId: string]
+  loadMore: []
 }>()
 
 const openActionsThreadId = ref('')
@@ -145,6 +148,9 @@ function closeDialog() {
             </button>
           </span>
         </div>
+        <button v-if="hasMore" type="button" class="sidebar-load-more" :disabled="loadingMore" @click="$emit('loadMore')">
+          {{ loadingMore ? '加载中...' : '加载更多' }}
+        </button>
       </template>
     </div>
 

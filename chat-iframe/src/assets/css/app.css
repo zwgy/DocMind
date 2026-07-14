@@ -183,6 +183,22 @@
   overflow-y: auto;
 }
 
+.sidebar-load-more {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px;
+  color: var(--main-700);
+  font-size: 13px;
+  background: var(--main-50);
+  border: 0;
+  border-radius: 6px;
+}
+
+.sidebar-load-more:disabled {
+  color: var(--gray-400);
+}
+
 .sidebar-state {
   display: grid;
   justify-items: center;
@@ -1332,6 +1348,43 @@
 
 .message-refs button.selected {
   color: var(--primary-600);
+}
+
+.message-model {
+  color: var(--gray-500);
+  font-size: 12px;
+}
+
+.message-source-toggle .rotated {
+  transform: rotate(180deg);
+}
+
+.message-sources {
+  flex-basis: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--gray-150);
+  border-radius: 8px;
+  background: var(--gray-25);
+}
+
+.message-source-section {
+  display: grid;
+  gap: 6px;
+}
+
+.message-source-section > strong {
+  color: var(--gray-700);
+  font-size: 12px;
+}
+
+.message-web-source {
+  overflow: hidden;
+  color: var(--primary-700);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .feedback-reason {

@@ -363,8 +363,14 @@ export async function createResumeRun(input: {
   return { runId, requestId }
 }
 
-export async function listConversations(token?: string, agentId?: string, conversationScopeKey?: string): Promise<ChatThread[]> {
-  const params = new URLSearchParams({ limit: '50', offset: '0' })
+export async function listConversations(
+  token?: string,
+  agentId?: string,
+  conversationScopeKey?: string,
+  offset = 0,
+  limit = 50
+): Promise<ChatThread[]> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
   if (agentId) params.set('agent_id', agentId)
   if (conversationScopeKey) params.set('conversation_scope_key', conversationScopeKey)
   const response = await fetch(apiUrl(`/api/chat/threads?${params.toString()}`), {

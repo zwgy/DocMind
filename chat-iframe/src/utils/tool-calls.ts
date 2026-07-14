@@ -1,4 +1,4 @@
-import type { ChatToolCall } from '../types'
+import type { ChatMessage, ChatToolCall } from '../types'
 
 const HIDDEN_TOOLS = new Set(['present_artifacts'])
 
@@ -149,6 +149,53 @@ export function parseQueryKbResult(value: unknown): QueryKbResult {
       : [],
     references: Array.isArray(payload.references) ? payload.references.map((item) => asRecord(item)) : []
   }
+}
+
+export type ChatSources = {
+  knowledgeChunks: Record<string, unknown>[]
+  webSources: Array<{ title: string; url: string; content: string; score: number | null }>
+}
+
+export function extractFinalAnswerSources(messages: ChatMessage[], messageId: string): ChatSources {
+  const answerIndex = messages.findIndex((message) => message.id === messageId)
+  if (answerIndex < 0) return { knowledgeChunks: [], webSources: [] }
+
+  let turnStart = answerIndex
+  while (turnStart > 0 && messages[turnStart - 1].role !== 'user') turnStart -= 1
+  const toolCalls = messages.slice(turnStart, answerIndex + 1).flatMap((message) => message.toolCalls || [])
+  const knowledgeChunks: Record<string, unknown>[] = []
+  const webSources: ChatSources['webSources'] = []
+  const knowledgeKeys = new Set<string>()
+  const webUrls = new Set<string>()
+
+  for (const tool of toolCalls) {
+    if (tool.name === 'query_kb') {
+      for (const chunk of parseQueryKbResult(getToolResult(tool)).chunks) {
+        const metadata = asRecord(chunk.metadata)
+        const key = `${chunk.file_id || metadata.file_id || ''}:${chunk.id || chunk.chunk_id || ''}:${chunk.content || ''}`
+        if (!knowledgeKeys.has(key)) {
+          knowledgeKeys.add(key)
+          knowledgeChunks.push(chunk)
+        }
+      }
+    }
+
+    if (!tool.name.toLowerCase().includes('tavily_search')) continue
+    const payload = asRecord(getToolResult(tool))
+    for (const result of Array.isArray(payload.results) ? payload.results : []) {
+      const item = asRecord(result)
+      const url = String(item.url || '').trim()
+      if (!url || webUrls.has(url)) continue
+      webUrls.add(url)
+      webSources.push({
+        title: String(item.title || url).trim(),
+        url,
+        content: String(item.content || ''),
+        score: typeof item.score === 'number' ? item.score : null
+      })
+    }
+  }
+  return { knowledgeChunks, webSources }
 }
 
 export type KbChunkGroup = {
