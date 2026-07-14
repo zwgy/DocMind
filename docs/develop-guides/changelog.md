@@ -241,6 +241,8 @@
 - 新增面向用户的 Langfuse 集成文档：在“高级配置”分组中说明 Langfuse 的定位、能力、配置方式与查看路径，并与当前 `LANGFUSE_BASE_URL` 配置保持一致
 
 - 新增 chat-iframe 外部用户换票与业务会话隔离：支持可信后端 `/api/external-users/token` 与低信任 iframe `/api/chat-iframe/token` 两种模式，自动创建默认普通用户，并通过 `conversation_scope_key` 隔离同一外部用户在不同业务界面的会话列表。
+- 优化 `chat-iframe` 高频聊天体验：模型选择改为按会话草稿隔离，并在打开历史会话时从最近用户消息的 `model_spec` 恢复，避免切换会话后误用其他会话的模型；首轮问答成功后异步调用 `/api/chat/call` 生成会话标题，服务端以受限 `meta.use_fast_model` 标记选择快速模型，人工重命名或标题生成失败均不会影响正式聊天。
+
 <!-- 添加到这里 -->
 
 ### 修复

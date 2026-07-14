@@ -67,7 +67,11 @@ async def call(query: str = Body(...), meta: dict = Body(None), current_user: Us
     if "request_id" not in meta or not meta.get("request_id"):
         meta["request_id"] = str(uuid.uuid4())
 
-    model = select_model(model_spec=meta.get("model_spec") or meta.get("model") or conf.default_model)
+    # 标题生成无需让嵌入页读取管理配置；由服务端按受限标记选择快速模型。
+    model_spec = meta.get("model_spec") or meta.get("model")
+    if not model_spec and meta.get("use_fast_model"):
+        model_spec = conf.fast_model
+    model = select_model(model_spec=model_spec or conf.default_model)
 
     response = await model.call(query)
     logger.debug({"query": query, "response": response.content})

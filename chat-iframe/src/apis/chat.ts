@@ -388,6 +388,19 @@ export async function createConversation(options: CreateConversationOptions = {}
   return parseResponse<ChatThread>(response, '创建对话失败')
 }
 
+export async function generateConversationTitle(query: string, token?: string): Promise<string> {
+  const response = await fetch(apiUrl('/api/chat/call'), {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({
+      query: `根据以下对话内容生成一个简短的标题（最多20个字符，中英文均可），不要包含 markdown 标记：\n\n${query.slice(0, 2000)}`,
+      meta: { use_fast_model: true }
+    })
+  })
+  const data = await parseResponse<{ response?: string }>(response, '生成会话标题失败')
+  return data.response || ''
+}
+
 export async function listMessages(threadId: string, token?: string): Promise<ChatMessage[]> {
   const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/history`), {
     headers: authHeaders(token, false)

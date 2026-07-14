@@ -5,6 +5,7 @@ import {
   createResumeRun,
   createConversation,
   deleteConversation,
+  generateConversationTitle,
   getRun,
   getThreadActiveRun,
   listConversations,
@@ -58,6 +59,8 @@ type ChatState = {
   contextSummaryMessage: ChatMessage | null
   modelOptions: ModelOption[]
   selectedModelSpec: string
+  modelSpecsByThread: Record<string, string>
+  manuallyRenamedThreads: Record<string, boolean>
   askPage: boolean
   askFile: boolean
   isLoading: boolean
@@ -65,6 +68,7 @@ type ChatState = {
 }
 
 const DRAFT_THREAD_KEY = '__draft__'
+const DEFAULT_THREAD_TITLE = '来文咨询'
 
 function createThreadRuntime(): ThreadRuntime {
   return {
@@ -95,6 +99,17 @@ function requestIdFromMessage(message: ChatMessage) {
   return typeof requestId === 'string' ? requestId : ''
 }
 
+function modelSpecFromHistory(messages: ChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role !== 'user') continue
+    const extraMetadata = message.raw?.extra_metadata as Record<string, unknown> | undefined
+    const modelSpec = extraMetadata?.model_spec
+    if (typeof modelSpec === 'string' && modelSpec) return modelSpec
+  }
+  return ''
+}
+
 function tmpAttachmentPayload(uploaded: Record<string, unknown>) {
   return {
     file_name: uploaded.file_name,
@@ -114,6 +129,8 @@ export const useChatStore = defineStore('chat', {
     contextSummaryMessage: null,
     modelOptions: [],
     selectedModelSpec: '',
+    modelSpecsByThread: {},
+    manuallyRenamedThreads: {},
     askPage: true,
     askFile: true,
     isLoading: false,
@@ -145,6 +162,18 @@ export const useChatStore = defineStore('chat', {
       const runtimeKey = threadId || this.currentThreadId || DRAFT_THREAD_KEY
       if (!this.threadRuntimes[runtimeKey]) this.threadRuntimes[runtimeKey] = createThreadRuntime()
       return this.threadRuntimes[runtimeKey]
+    },
+    setSelectedModelSpec(modelSpec: string) {
+      if (!modelSpec) return
+      const threadId = this.currentThreadId || DRAFT_THREAD_KEY
+      // 模型选择属于会话草稿，避免切换侧栏后把其他会话的下一轮请求改成当前模型。
+      this.modelSpecsByThread[threadId] = modelSpec
+      this.selectedModelSpec = modelSpec
+    },
+    restoreThreadModelSpec(threadId: string, messages: ChatMessage[]) {
+      if (this.modelSpecsByThread[threadId]) return
+      const modelSpec = modelSpecFromHistory(messages)
+      if (modelSpec) this.modelSpecsByThread[threadId] = modelSpec
     },
     consumeRunStatus(runtime: ThreadRuntime, chunk: Record<string, unknown>) {
       const status = String(chunk.status || '')
@@ -212,6 +241,9 @@ export const useChatStore = defineStore('chat', {
       const thread = await createConversation({ token, agentId, conversationScopeKey })
       this.threads = [thread, ...this.threads.filter((item) => item.id !== thread.id)]
       const draftRuntime = this.threadRuntimes[DRAFT_THREAD_KEY]
+      const draftModelSpec = this.modelSpecsByThread[DRAFT_THREAD_KEY] || this.selectedModelSpec
+      if (draftModelSpec) this.modelSpecsByThread[thread.id] = draftModelSpec
+      delete this.modelSpecsByThread[DRAFT_THREAD_KEY]
       if (draftRuntime) {
         // 首次发送先写入草稿容器，拿到真实会话 ID 后原样迁移，避免创建请求期间丢失乐观消息。
         this.threadRuntimes[thread.id] = draftRuntime
@@ -224,6 +256,7 @@ export const useChatStore = defineStore('chat', {
       return thread
     },
     async renameConversation(threadId: string, title: string, token?: string) {
+      this.manuallyRenamedThreads[threadId] = true
       const thread = await updateConversation(threadId, { title }, token)
       this.threads = this.threads.map((item) => (item.id === threadId ? { ...item, ...thread } : item))
     },
@@ -247,8 +280,25 @@ export const useChatStore = defineStore('chat', {
     async selectThread(threadId: string, token?: string) {
       if (!threadId) return
       this.currentThreadId = threadId
-      this.ensureRuntime(threadId).messages = await listMessages(threadId, token)
+      const runtime = this.ensureRuntime(threadId)
+      runtime.messages = await listMessages(threadId, token)
+      this.restoreThreadModelSpec(threadId, runtime.messages)
+      this.selectedModelSpec = this.modelSpecsByThread[threadId] || this.selectedModelSpec
       void this.resumeActiveRun(threadId, token)
+    },
+    async autoGenerateTitle(threadId: string, query: string, token?: string) {
+      try {
+        const currentThread = this.threads.find((item) => item.id === threadId)
+        if (this.manuallyRenamedThreads[threadId] || currentThread?.title !== DEFAULT_THREAD_TITLE) return
+        const generatedTitle = await generateConversationTitle(query, token)
+        const title = generatedTitle.slice(0, 30).replace(/\s+/g, ' ').trim()
+        const thread = this.threads.find((item) => item.id === threadId)
+        if (!title || this.manuallyRenamedThreads[threadId] || thread?.title !== DEFAULT_THREAD_TITLE) return
+        const updated = await updateConversation(threadId, { title }, token)
+        this.threads = this.threads.map((item) => (item.id === threadId ? { ...item, ...updated } : item))
+      } catch {
+        // 标题仅是辅助体验，快速模型不可用时不能影响正式问答结果。
+      }
     },
     async syncThreadHistory(threadId: string, token?: string, requestId = '') {
       const runtime = this.ensureRuntime(threadId)
@@ -443,6 +493,8 @@ export const useChatStore = defineStore('chat', {
       const text = options.text.trim()
       const runtime = this.ensureRuntime()
       if (!text || runtime.isSending) return null
+      const isFirstTurn = !runtime.messages.some((message) => message.role === 'user')
+      const selectedModelSpec = this.modelSpecsByThread[this.currentThreadId || DRAFT_THREAD_KEY] || this.selectedModelSpec
       this.error = ''
       runtime.isSending = true
       runtime.isStreaming = true
@@ -560,6 +612,7 @@ export const useChatStore = defineStore('chat', {
       }
       try {
         const threadId = await this.ensureThread(token, agentId, conversationScopeKey)
+        if (selectedModelSpec) this.modelSpecsByThread[threadId] = selectedModelSpec
         const uploadedAttachments = await this.attachFiles(threadId, options.files || [], token)
         const imageContent = options.imageFile ? (await uploadImage(options.imageFile, token)).image_content || null : null
         let runId = ''
@@ -571,7 +624,7 @@ export const useChatStore = defineStore('chat', {
               token,
               threadId,
               agentId,
-              modelSpec: this.selectedModelSpec,
+              modelSpec: selectedModelSpec,
               includePage: this.askPage,
               includeFile: this.askFile,
               pageContent: options.pageContent,
@@ -616,6 +669,9 @@ export const useChatStore = defineStore('chat', {
         runtime.messages = [...runtime.messages]
         const persistedTurn = await this.syncThreadHistory(threadId, token, requestId).catch(() => [])
         const persistedUserMessage = persistedTurn.find((message) => message.role === 'user')
+        if (isFirstTurn && assistantMessages.every((message) => message.status === 'done')) {
+          void this.autoGenerateTitle(threadId, text, token)
+        }
         return { threadId, messageId: persistedUserMessage?.id || userMessage.id }
       } catch (error) {
         if (controller.signal.aborted) {

@@ -312,7 +312,7 @@ onUnmounted(() => {
           :selected-page-file-id="context.selectedFileId"
           @update:ask-page="chat.askPage = $event"
           @update:ask-file="chat.askFile = $event"
-          @update:selected-model-spec="chat.selectedModelSpec = $event"
+          @update:selected-model-spec="chat.setSelectedModelSpec($event)"
           @update:selected-page-file-id="context.selectFile($event)"
           @submit="sendChat"
           @stop="chat.stop(context.config.token)"
