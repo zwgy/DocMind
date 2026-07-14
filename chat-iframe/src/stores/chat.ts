@@ -29,22 +29,39 @@ type SendOptions = {
   extractionResults?: Record<string, ExtractionResult>
 }
 
+type ThreadRuntime = {
+  messages: ChatMessage[]
+  isSending: boolean
+  isStreaming: boolean
+  activeRunId: string
+  abortController: AbortController | null
+  lastUserMessageForRetry: SendOptions | null
+}
+
 type ChatState = {
   threads: ChatThread[]
   currentThreadId: string
-  messages: ChatMessage[]
+  threadRuntimes: Record<string, ThreadRuntime>
   contextSummaryMessage: ChatMessage | null
   modelOptions: ModelOption[]
   selectedModelSpec: string
   askPage: boolean
   askFile: boolean
-  isSending: boolean
-  isStreaming: boolean
   isLoading: boolean
   error: string
-  activeRunId: string
-  abortController: AbortController | null
-  lastUserMessageForRetry: SendOptions | null
+}
+
+const DRAFT_THREAD_KEY = '__draft__'
+
+function createThreadRuntime(): ThreadRuntime {
+  return {
+    messages: [],
+    isSending: false,
+    isStreaming: false,
+    activeRunId: '',
+    abortController: null,
+    lastUserMessageForRetry: null
+  }
 }
 
 function messageId(prefix: string) {
@@ -66,29 +83,39 @@ export const useChatStore = defineStore('chat', {
   state: (): ChatState => ({
     threads: [],
     currentThreadId: '',
-    messages: [],
+    threadRuntimes: {},
     contextSummaryMessage: null,
     modelOptions: [],
     selectedModelSpec: '',
     askPage: true,
     askFile: true,
-    isSending: false,
-    isStreaming: false,
     isLoading: false,
-    error: '',
-    activeRunId: '',
-    abortController: null,
-    lastUserMessageForRetry: null
+    error: ''
   }),
   getters: {
     currentThread(state) {
       return state.threads.find((thread) => thread.id === state.currentThreadId) || null
     },
+    messages(state) {
+      return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.messages || []
+    },
+    isSending(state) {
+      return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.isSending || false
+    },
+    isStreaming(state) {
+      return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.isStreaming || false
+    },
     displayMessages(state) {
-      return state.contextSummaryMessage ? [state.contextSummaryMessage, ...state.messages] : state.messages
+      const messages = state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.messages || []
+      return state.contextSummaryMessage ? [state.contextSummaryMessage, ...messages] : messages
     }
   },
   actions: {
+    ensureRuntime(threadId?: string) {
+      const runtimeKey = threadId || this.currentThreadId || DRAFT_THREAD_KEY
+      if (!this.threadRuntimes[runtimeKey]) this.threadRuntimes[runtimeKey] = createThreadRuntime()
+      return this.threadRuntimes[runtimeKey]
+    },
     setContextSummary(input: { file: IncomingPageFile | null; result: ExtractionResult | null; loading?: boolean; error?: string }) {
       this.contextSummaryMessage = buildContextSummaryMessage(input)
     },
@@ -125,13 +152,22 @@ export const useChatStore = defineStore('chat', {
       const thread = await this.createThread(token, agentId, conversationScopeKey)
       // 仅在用户主动"新建会话"时清空消息；send() 走 ensureThread 复用同一创建路径，
       // 那里的乐观消息不能在这里被抹掉，否则首条提问与回复都会在主区消失。
-      this.messages = []
+      this.threadRuntimes[thread.id] = createThreadRuntime()
       return thread
     },
     async createThread(token?: string, agentId?: string, conversationScopeKey?: string) {
       const thread = await createConversation({ token, agentId, conversationScopeKey })
       this.threads = [thread, ...this.threads.filter((item) => item.id !== thread.id)]
-      this.currentThreadId = thread.id
+      const draftRuntime = this.threadRuntimes[DRAFT_THREAD_KEY]
+      if (draftRuntime) {
+        // 首次发送先写入草稿容器，拿到真实会话 ID 后原样迁移，避免创建请求期间丢失乐观消息。
+        this.threadRuntimes[thread.id] = draftRuntime
+        delete this.threadRuntimes[DRAFT_THREAD_KEY]
+      } else {
+        this.ensureRuntime(thread.id)
+      }
+      // 创建首轮会话期间用户可能已切到其他线程；此时只完成草稿迁移，不能把可见会话强行切回旧 run。
+      if (!draftRuntime || !this.currentThreadId) this.currentThreadId = thread.id
       return thread
     },
     async renameConversation(threadId: string, title: string, token?: string) {
@@ -149,15 +185,16 @@ export const useChatStore = defineStore('chat', {
     async removeConversation(threadId: string, token?: string) {
       await deleteConversation(threadId, token)
       this.threads = this.threads.filter((item) => item.id !== threadId)
+      delete this.threadRuntimes[threadId]
       if (this.currentThreadId === threadId) {
         this.currentThreadId = this.threads[0]?.id || ''
-        this.messages = this.currentThreadId ? await listMessages(this.currentThreadId, token) : []
+        if (this.currentThreadId) this.ensureRuntime(this.currentThreadId).messages = await listMessages(this.currentThreadId, token)
       }
     },
     async selectThread(threadId: string, token?: string) {
       if (!threadId) return
       this.currentThreadId = threadId
-      this.messages = await listMessages(threadId, token)
+      this.ensureRuntime(threadId).messages = await listMessages(threadId, token)
     },
     async ensureThread(token?: string, agentId?: string, conversationScopeKey?: string) {
       if (this.currentThreadId) return this.currentThreadId
@@ -172,36 +209,39 @@ export const useChatStore = defineStore('chat', {
       return uploaded
     },
     async stop(token?: string) {
-      this.abortController?.abort()
-      if (this.activeRunId) await cancelRun(this.activeRunId, token).catch(() => null)
-      const last = [...this.messages].reverse().find((message) => message.role === 'assistant')
+      const runtime = this.ensureRuntime()
+      runtime.abortController?.abort()
+      if (runtime.activeRunId) await cancelRun(runtime.activeRunId, token).catch(() => null)
+      const last = [...runtime.messages].reverse().find((message) => message.role === 'assistant')
       if (last && last.status === 'streaming') {
         last.status = 'stopped'
         last.errorType = 'interrupted'
         last.errorMessage = '回答生成已中断'
       }
-      this.isSending = false
-      this.isStreaming = false
-      this.activeRunId = ''
-      this.abortController = null
-      this.messages = [...this.messages]
+      runtime.isSending = false
+      runtime.isStreaming = false
+      runtime.activeRunId = ''
+      runtime.abortController = null
+      runtime.messages = [...runtime.messages]
     },
     async retry(token?: string, agentId?: string, conversationScopeKey?: string) {
-      if (!this.lastUserMessageForRetry) return null
-      return this.send(this.lastUserMessageForRetry, token, agentId, conversationScopeKey)
+      const runtime = this.ensureRuntime()
+      if (!runtime.lastUserMessageForRetry) return null
+      return this.send(runtime.lastUserMessageForRetry, token, agentId, conversationScopeKey)
     },
     async feedback(payload: { messageId: string; rating: 'like' | 'dislike'; reason: string | null }, token?: string) {
       await submitMessageFeedback(payload.messageId, payload.rating, payload.reason, token)
     },
     async send(options: SendOptions, token?: string, agentId?: string, conversationScopeKey?: string) {
       const text = options.text.trim()
-      if (!text || this.isSending) return null
+      const runtime = this.ensureRuntime()
+      if (!text || runtime.isSending) return null
       this.error = ''
-      this.isSending = true
-      this.isStreaming = true
-      this.lastUserMessageForRetry = { ...options, files: options.files || [], imageFile: options.imageFile || null }
+      runtime.isSending = true
+      runtime.isStreaming = true
+      runtime.lastUserMessageForRetry = { ...options, files: options.files || [], imageFile: options.imageFile || null }
       const controller = new AbortController()
-      this.abortController = controller
+      runtime.abortController = controller
       const userMessage: ChatMessage = {
         id: messageId('user'),
         role: 'user',
@@ -239,8 +279,8 @@ export const useChatStore = defineStore('chat', {
         textTimer = null
       }
       const appendVisibleChunk = (chunk: RunStreamChunk) => {
-        assistantMessage = appendRunChunkSegment(this.messages, assistantMessage, chunk, createAssistantSegment)
-        this.messages = [...this.messages]
+        assistantMessage = appendRunChunkSegment(runtime.messages, assistantMessage, chunk, createAssistantSegment)
+        runtime.messages = [...runtime.messages]
       }
       const drainTextQueue = () => {
         const chunk = textQueue.shift()
@@ -260,7 +300,7 @@ export const useChatStore = defineStore('chat', {
         textQueue.push(...splitStreamingText(chunk.content, 5).map((content) => ({ ...chunk, content })))
         if (!textTimer) textTimer = setInterval(drainTextQueue, 28)
       }
-      this.messages = [...this.messages, userMessage, assistantMessage]
+      runtime.messages = [...runtime.messages, userMessage, assistantMessage]
       try {
         const threadId = await this.ensureThread(token, agentId, conversationScopeKey)
         const uploadedAttachments = await this.attachFiles(threadId, options.files || [], token)
@@ -286,7 +326,7 @@ export const useChatStore = defineStore('chat', {
           },
           {
             onRunStart: (runId) => {
-              this.activeRunId = runId
+              runtime.activeRunId = runId
             },
             onChunk: (chunk) => {
               if (chunk.type === 'done') {
@@ -306,11 +346,11 @@ export const useChatStore = defineStore('chat', {
                 flushTextQueue()
                 appendVisibleChunk(chunk)
               }
-              this.messages = [...this.messages]
+              runtime.messages = [...runtime.messages]
             },
             onTool: (event) => {
               assistantMessage.toolEvents = [...(assistantMessage.toolEvents || []), event]
-              this.messages = [...this.messages]
+              runtime.messages = [...runtime.messages]
             },
             onError: (message) => {
               flushTextQueue()
@@ -325,7 +365,7 @@ export const useChatStore = defineStore('chat', {
             }
           }
         )
-        this.activeRunId = result.runId
+        runtime.activeRunId = result.runId
         flushTextQueue()
         assistantMessages.forEach((message) => {
           if (message.status === 'streaming') message.status = 'done'
@@ -334,7 +374,7 @@ export const useChatStore = defineStore('chat', {
           assistantMessage.content = '已完成。'
         }
         assistantMessage.status = assistantMessage.status === 'error' ? 'error' : 'done'
-        this.messages = [...this.messages]
+        runtime.messages = [...runtime.messages]
         return { threadId, messageId: userMessage.id }
       } catch (error) {
         if (controller.signal.aborted) {
@@ -345,7 +385,7 @@ export const useChatStore = defineStore('chat', {
           })
           assistantMessage.errorType = 'interrupted'
           assistantMessage.errorMessage = '回答生成已中断'
-          this.messages = [...this.messages]
+          runtime.messages = [...runtime.messages]
           return null
         }
         flushTextQueue()
@@ -353,13 +393,13 @@ export const useChatStore = defineStore('chat', {
         assistantMessage.status = 'error'
         assistantMessage.content = message
         this.error = message
-        this.messages = [...this.messages]
+        runtime.messages = [...runtime.messages]
         return null
       } finally {
-        this.isSending = false
-        this.isStreaming = false
-        this.activeRunId = ''
-        this.abortController = null
+        runtime.isSending = false
+        runtime.isStreaming = false
+        runtime.activeRunId = ''
+        runtime.abortController = null
       }
     }
   }

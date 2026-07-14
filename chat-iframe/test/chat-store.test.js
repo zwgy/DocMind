@@ -15,6 +15,7 @@ function sseBlock(event, data) {
 }
 
 test('send() 在没有会话时保留乐观消息并产出 assistant 回复', async () => {
+  setActivePinia(createPinia())
   const calls = []
   const events = [
     sseBlock('start', { run_id: 'run-1' }),
@@ -75,7 +76,7 @@ test('newConversation 仍会清空消息（用户主动开新会话）', async (
 
   const chat = useChatStore()
   chat.currentThreadId = 'thread-old'
-  chat.messages = [
+  chat.ensureRuntime('thread-old').messages = [
     {
       id: 'm1',
       role: 'user',

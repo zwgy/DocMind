@@ -1,398 +1,588 @@
-# chat-iframe 与 web 前端聊天功能复刻分析报告
+# chat-iframe 与 web 聊天能力复刻分析报告
 
-日期：2026-07-05  
-作者：Claude（自动分析）  
-关联项目：
+更新日期：2026-07-14
 
-- 主项目聊天实现：`web/src/components/{AgentChatComponent,AgentInputArea,AgentMessageComponent,AgentPanel,...}.vue`
-- 嵌入实现：`chat-iframe/src/**` + `chat-iframe/public/docmind-chat-iframe-parent.js`
-- 关联方案：[2026-07-02-AI文档智能助手第一版开发方案.md](./2026-07-02-AI文档智能助手第一版开发方案.md)
-- 关联计划：[2026-07-02-AI文档智能助手第一版实施计划.md](./2026-07-02-AI文档智能助手第一版实施计划.md)
+审计基线：`feature/docMind-dev-v1.0`，HEAD `6b8792d1`，以当前工作区代码为准
 
----
+审计范围：web 主站智能体聊天、chat-iframe、父页面 SDK，以及两者依赖的聊天运行事件和 iframe 上下文后端契约
 
-## 1. 目的
+## 1. 结论摘要
 
-为后续迭代提供基线，回答三个问题：
+当前 `chat-iframe` 已经不是只有聊天壳层的第一版：会话管理、模型选择、附件与图片、流式文本、Markdown、推理过程、工具调用、停止生成、文档结构化摘要、外部用户换票和业务会话隔离均有真实实现，基础问答闭环可用。
 
-1. chat-iframe 第一版复刻了 web 前端聊天能力的百分之多少？
-2. 还有哪些功能没有复刻，需要开发？
-3. 哪些能力是 chat-iframe 独有（web 主站没有的）？
+但它还不能视为 web 主站聊天体验的完整复刻。主要差距不在按钮数量，而在运行生命周期和复杂智能体能力：
 
-输出三份结构化清单：**web 前端功能总览**、**chat-iframe 已实现**、**chat-iframe 待开发**。
-
----
-
-## 2. 现状概述
-
-### 2.0 2026-07-05 实施更新
-
-本报告初版分析后，`chat-iframe` 已按“核心聊天优先”补齐一轮 web 聊天能力轻量复刻：
-
-- 已完成：Markdown 表格/代码/KaTeX 渲染、推理过程折叠、结构化 SSE 解析、工具调用摘要、停止生成、重试、复制、点赞/点踩反馈、图片上传、附件预览、会话重命名/删除/置顶。
-- 仍暂缓：完整 @ 提及、状态面板、AgentPanel 文件工作区、HumanApproval、SubagentThread、Artifact 面板、主站 Ant Design 弹窗体系。
-- 取舍原因：`chat-iframe` 需要独立 Docker 构建并无感嵌入生产系统，本轮不直接依赖 `web/src`，也不引入 Ant Design Vue。
-
-### 2.1 定位差异
-
-`chat-iframe/README.md:20` 明确写了第一版的取舍：
-
-> 第一版已接入聊天会话、流式回答、模型选择、输入框附件、问网页和问文件开关。**复杂能力如中断恢复、子智能体详情、artifact 面板和聊天记录富渲染仍复用主站后续能力，不在 iframe 第一版里重复实现。**
-
-因此 chat-iframe **不是要把 web 主站全量复刻**，而是"**来文场景的轻量嵌入**"——来文抽取结果展示是核心场景独有，主体功能刻意做了减法。
-
-### 2.2 总体复刻度
-
-| 维度 | 已复刻 | 待开发 | 复刻率 |
-|------|--------|--------|--------|
-| 聊天核心体验 | 会话 CRUD + 流式 + 模型选择 + 附件 + Markdown/代码/公式 + 推理过程 + 停止/重试/复制 + 图片 + 轻量工具/反馈 | 完整 @ 提及 / 主站级引用详情 / 流式续连 / 自动标题 | **约 65%** |
-| 状态/调试 | 无 | 全部 6 个状态面板区块 | 0% |
-| 智能体/任务 | 无 | HumanApproval / SubagentThread / Artifacts | 0% |
-| iframe 特有能力 | 全部已实现 | 无 | 100% |
-| 来文特有能力 | 全部已实现 | 无 | 100% |
-
-### 2.3 技术栈对比
-
-| 维度 | web 前端 | chat-iframe |
-|------|---------|-------------|
-| 语言 | JavaScript + Vue 3 | TypeScript + Vue 3 |
-| 状态管理 | Pinia | Pinia |
-| UI 库 | Ant Design Vue（部分） | 原生 CSS（base.css/app.css） |
-| Markdown | MarkdownPreview（自研） | 已接入轻量 `MarkdownPreview` |
-| 代码高亮 | 自研组件 | 已接入 highlight.js core 常用语言 |
-| 流式实现 | EventSource / fetch SSE（Smoothed） | fetch + ReadableStream |
-| 路由 | Vue Router（HomeView / WorkspaceView） | 无（单页应用） |
-| 构建 | Vite | Vite |
-| 测试 | Vitest | node:test（仅父脚本） |
-
----
-
-## 3. web 前端聊天功能清单
-
-### 3.1 会话（Thread）
-
-| # | 功能 | 实现位置 |
-|---|------|---------|
-| 1.1 | 新建会话（chatThreadsStore.createThread） | `web/src/stores/chatThreads.js` |
-| 1.2 | 切换会话（selectChat） | `web/src/components/AgentChatComponent.vue:2191-2252` |
-| 1.3 | 删除/重命名/置顶会话 | chatThreadsStore（CRUD 接口） |
-| 1.4 | 多智能体下会话按 agent 分组 | `singleMode` prop 切换 |
-| 1.5 | 会话列表加载（loadThreads / loadChatsList） | `AgentChatComponent.vue:2664-2695` |
-| 1.6 | 自动滚动到底部（ScrollController） | `web/src/utils/scrollController.js` |
-| 1.7 | 自动生成会话标题（agentApi.generateTitle） | `AgentChatComponent.vue:2341-2358`（fast_model） |
-| 1.8 | 跨会话还原模型选择 | `AgentChatComponent.vue:1998-2009` |
-| 1.9 | 运行中切换配置的提示条（CONFIG_CHANGE_NOTICE） | `AgentChatComponent.vue:1710-1831` |
-| 1.10 | 启动屏幕随机问候语 | `AgentChatComponent.vue:636-645` |
-
-### 3.2 输入区
-
-| # | 功能 | 实现位置 |
-|---|------|---------|
-| 2.1 | 多行文本（textarea + Enter 发送 / Shift+Enter 换行） | `web/src/components/MessageInputComponent.vue` |
-| 2.2 | 图片粘贴 / 图片选择（currentImage / ImagePreviewComponent） | `web/src/components/AgentInputArea.vue:102-130` |
-| 2.3 | 附件上传（AttachmentOptionsComponent → uploadAttachment） | `web/src/components/AttachmentOptionsComponent.vue` |
-| 2.4 | 临时附件弹窗（AttachmentTmpUploadModal） | `web/src/components/AttachmentTmpUploadModal.vue` |
-| 2.5 | 附件预览卡 + 移除按钮 | `AgentInputArea.vue:24-46` |
-| 2.6 | @ 提及（useAgentMentionConfig + MentionTextRenderer） | `web/src/composables/useAgentMentionConfig.ts` + `web/src/components/common/MentionTextRenderer.vue` |
-| 2.7 | 智能体能力感知（capabilities.includes('file_upload')） | `AgentChatComponent.vue:984-994` |
-| 2.8 | 发送冷却（startSendCooldown 2s） | `AgentChatComponent.vue:1639-1648` |
-| 2.9 | 占位文案"问点什么？使用 @ 可以提及哦~" | `AgentInputArea.vue:104` |
-| 2.10 | 加载/禁用状态反馈 | `is-loading` / `:disabled` |
-| 2.11 | 草稿态模型选择迁移到新建线程 | `AgentChatComponent.vue:2308-2317` |
-| 2.12 | `defineExpose: focus / closeOptions` | `AgentInputArea.vue:154-157` |
-
-### 3.3 模型与智能体
-
-| # | 功能 | 实现位置 |
-|---|------|---------|
-| 3.1 | ModelSelectorComponent 按线程记忆选择 | `web/src/components/ModelSelectorComponent.vue` |
-| 3.2 | 单/多智能体模式（singleMode） | `AgentChatComponent.vue:935-940` |
-| 3.3 | 切换智能体时清空全部线程状态 | `AgentChatComponent.vue:2747-2765` |
-| 3.4 | 智能体默认模型回退链 | `AgentChatComponent.vue:957-963` |
-| 3.5 | 模型 spec 写入消息 meta 与发送请求 | `AgentChatComponent.vue:2385` |
-| 3.6 | 自动选择首个非置顶会话 | `getFirstNonPinnedChat:2186-2189` |
-
-### 3.4 消息渲染（AgentMessageComponent）
-
-| # | 功能 | 实现位置 |
-|---|------|---------|
-| 4.1 | 三种角色：human / ai / system（独立样式 + 边框/背景/对齐） | `AgentMessageComponent.vue:14-37` |
-| 4.2 | Markdown 渲染（MarkdownPreview） | `web/src/components/common/MarkdownPreview.vue` |
-| 4.3 | 代码高亮 | MarkdownPreview 内部 |
-| 4.4 | 数学公式 / Mermaid 图表 | MarkdownPreview 内部 |
-| 4.5 | **reasoning_content** 折叠面板（"推理过程"/"正在思考…"） | `AgentMessageComponent.vue:40-53` |
-| 4.6 | **ToolCallsGroupComponent** 工具调用可视化 | `web/src/components/ToolCallsGroupComponent.vue` |
-| 4.7 | **RefsComponent** 知识库引用 / 网络来源 / 复制 / 模型切换 | `web/src/components/RefsComponent.vue` |
-| 4.8 | 多模态图片（image_content + 全屏预览 + ESC 关闭） | `AgentMessageComponent.vue:2-13, 134-145, 208-230` |
-| 4.9 | 附件卡片列表（normalizeAttachmentPreviews） | `AgentMessageComponent.vue:113-132, 301-303` |
-| 4.10 | 错误提示（interrupted / unexpect / content_guard_blocked / agent_error） | `AgentMessageComponent.vue:266-295` |
-| 4.11 | 用户消息复制按钮 + 复制完成反馈（Check 图标 2s） | `AgentMessageComponent.vue:23-31, 232-260` |
-| 4.12 | 重试链接（retryStoppedMessage） | `AgentMessageComponent.vue:81-86` |
-| 4.13 | 调试模式状态信息（infoStore.debugMode） | `AgentMessageComponent.vue:107, 507-518` |
-| 4.14 | @ 提及渲染（标签化显示） | `AgentMessageComponent.vue:32-34, 308` |
-| 4.15 | 富文本 fallback（white-space: pre-line） | `AgentMessageComponent.vue:367-371` |
-
-### 3.5 流式与生命周期
-
-| # | 功能 | 实现位置 |
-|---|------|---------|
-| 5.1 | useAgentRunStream（建立 SSE 订阅） | `web/src/composables/useAgentRunStream.ts` |
-| 5.2 | useAgentStreamHandler（解析 chunk） | `web/src/composables/useAgentStreamHandler.ts` |
-| 5.3 | useStreamSmoother（流式平滑） | `web/src/composables/useStreamSmoother.ts` |
-| 5.4 | 主动取消 run（agentApi.cancelAgentRun） | `AgentChatComponent.vue:2410-2422` |
-| 5.5 | 用户停止后保留"重新编辑问题"入口 | `AgentMessageComponent.vue:81-86` |
-| 5.6 | 恢复运行（resumeActiveRunForThread） | `AgentChatComponent.vue:2166-2177, 2453-2471` |
-| 5.7 | 切回标签页自动续流（visibilitychange） | `AgentChatComponent.vue:1908-1921, 2179-2182` |
-| 5.8 | 切换会话前 stopThreadStream + stopRunStreamSubscription | `AgentChatComponent.vue:2204-2209` |
-| 5.9 | 乐观插入用户消息（避免空白等待） | `AgentChatComponent.vue:1657-1693` |
-| 5.10 | 取消后回滚附件标记 | `rollbackAttachments:1705-1708` |
-| 5.11 | 错误处理（handleChatError / handleValidationError） | `web/src/utils/errorHandler.js` |
-
-### 3.6 侧边面板（AgentPanel）
-
-| # | 功能 | 实现位置 |
-|---|------|---------|
-| 6.1 | 可拖拽调整宽度（panelRatio + rAF 防抖） | `web/src/components/AgentPanel.vue:544-602` |
-| 6.2 | 文件树懒加载（loadData） | `AgentPanel.vue:383-392` |
-| 6.3 | 多 Tab 文件预览（previewTabs + activePreviewPath） | `AgentPanel.vue:6-34, 880-900` |
-| 6.4 | 文件下载（Content-Disposition 解析中文文件名） | `AgentPanel.vue:316-334, 513-533` |
-| 6.5 | 文件删除（含删除目录 + 确认弹窗） | `AgentPanel.vue:482-511` |
-| 6.6 | 工作区切换视图（tree / preview） | `AgentPanel.vue:472-474, 868-872` |
-| 6.7 | 文件系统 viewer_filesystem 完整接入 | `web/src/apis/viewer_filesystem.js` |
-| 6.8 | 加载/错误/空态三类视图 | `AgentPanel.vue:86-92` |
-| 6.9 | AgentFilePreview 文件预览组件 | `web/src/components/AgentFilePreview.vue` |
-| 6.10 | AgentArtifactsCard 产物卡片 | `web/src/components/AgentArtifactsCard.vue` |
-
-### 3.7 状态面板（State Panel）
-
-| # | 功能 | 实现位置 |
-|---|------|---------|
-| 7.1 | Token 用量可视化（segment 横向条 + 摘要/系统/工具/已压缩分段） | `AgentChatComponent.vue:1018-1100` |
-| 7.2 | 当前上下文窗口（context_window / remaining） | `AgentChatComponent.vue:1108-1129, 1145-1157` |
-| 7.3 | Todo 列表（completed / in_progress / pending / cancelled 图标） | `AgentChatComponent.vue:1179-1190, 320-340` |
-| 7.4 | 附件/文件清单 | `AgentChatComponent.vue:1236-1261` |
-| 7.5 | 产物清单（artifacts，可点击进入预览） | `AgentChatComponent.vue:1165-1178, 411-435` |
-| 7.6 | 子智能体运行列表（合并 running + completed） | `AgentChatComponent.vue:1191-1215, 1438-1463` |
-| 7.7 | 流式期间定时刷新（5s） | `AgentChatComponent.vue:1874-1880` |
-| 7.8 | 自适应浮窗/停靠模式（docked / floating） | `AgentChatComponent.vue:780-786` |
-| 7.9 | 折叠/展开 section | `AgentChatComponent.vue:1232-1235` |
-| 7.10 | 状态摘要（stateSummaryLabel） | `AgentChatComponent.vue:1272-1288` |
-
-### 3.8 智能体/任务相关
-
-| # | 功能 | 实现位置 |
-|---|------|---------|
-| 8.1 | HumanApprovalModal（人工审批） | `web/src/components/HumanApprovalModal.vue` |
-| 8.2 | SubagentThreadModal（子智能体详情弹窗） | `web/src/components/SubagentThreadModal.vue` |
-| 8.3 | AgentArtifactsCard（产物卡片） | `web/src/components/AgentArtifactsCard.vue` |
-| 8.4 | ToolCallingResult/toolRegistry（任务工具注册） | `web/src/components/ToolCallingResult/toolRegistry.js` |
-| 8.5 | makeChildThreadId（前端推算子线程 ID） | `web/src/utils/subagentThread.js` |
-| 8.6 | activeSubagentToolCallIds（活跃 task 判定） | `AgentChatComponent.vue:1405-1413` |
-| 8.7 | FallbackAvatar 像素头像生成 | `web/src/components/common/FallbackAvatar.vue` + `web/src/utils/pixelAvatar.js` |
-
-### 3.9 API（agent_api.js）
-
-| # | 接口 | 用途 |
-|---|------|------|
-| 9.1 | createAgentRun（query/agent_id/thread_id/meta/image_content/model_spec/resume/parent_run_id） | 启动 run |
-| 9.2 | cancelAgentRun | 取消 run |
-| 9.3 | getAgentHistory | 加载会话历史 |
-| 9.4 | getAgentState（agent_state: token_usage / todos / files / artifacts / subagent_runs） | 状态面板数据源 |
-| 9.5 | generateTitle（fast_model） | 自动生成会话标题 |
-| 9.6 | listThreadFiles | 工作区文件清单 |
-| 9.7 | deleteThreadAttachment | 删除附件 |
-| 9.8 | getThreadAttachments | 加载附件 |
-| 9.9 | selectAgent | 切换智能体 |
-
-### 3.10 通用 UI 行为
-
-| # | 功能 | 实现位置 |
-|---|------|---------|
-| 10.1 | 路由进入选择线程（selectThreadFromRoute） | `AgentChatComponent.vue:2254-2285` |
-| 10.2 | 配置变更检测（agentStore 切换 / agentConfig JSON 变更） | `AgentChatComponent.vue:2778-2789` |
-| 10.3 | 单/多智能体模式（singleMode prop） | `AgentChatComponent.vue:935-940` |
-| 10.4 | 国际化（i18n 占位） | 整个 web/src/locales |
-| 10.5 | 暗色模式（CSS 变量） | `web/src/assets/css/base.css` |
-| 10.6 | Page Visibility 续流 | `AgentChatComponent.vue:2179-2182` |
-| 10.7 | ResizeObserver 自适应布局 | `AgentChatComponent.vue:1882-1906` |
-| 10.8 | 移动端断点（mobilePanelBreakpoint = 768） | `AgentChatComponent.vue:717` |
-
-### 3.11 导出与调试
-
-| # | 功能 | 实现位置 |
-|---|------|---------|
-| 11.1 | buildExportPayload（导出 agent 名/描述/消息全量 JSON） | `AgentChatComponent.vue:2491-2510` |
-| 11.2 | defineExpose: selectThreadFromRoute + getExportPayload | `AgentChatComponent.vue:2512-2515` |
-| 11.3 | 调试模式（status-info 区） | `AgentMessageComponent.vue:107, 507-518` |
-
-**合计：60+ 项功能**。
-
----
-
-## 4. chat-iframe 已实现清单（11 项）
-
-| # | 功能 | 实现位置 |
-|---|------|---------|
-| ① | 会话列表 + 新建 + 选择 | `chat-iframe/src/stores/chat.ts` bootstrap / newConversation / selectThread |
-| ② | 消息历史加载 | `chat-iframe/src/apis/chat.ts:199` listMessages |
-| ③ | 流式响应（SSE via fetch + ReadableStream） | `chat-iframe/src/apis/chat.ts:157-177` readRunEventStream |
-| ④ | 模型下拉选择（API: listChatModels） | `chat-iframe/src/components/ChatInput.vue:72-82` + `chat-iframe/src/apis/models.ts` |
-| ⑤ | 输入框附件上传（uploadAttachment + confirmThreadAttachments） | `chat-iframe/src/components/ChatInput.vue:83-86` + `chat-iframe/src/stores/chat.ts:100` attachFiles |
-| ⑥ | 问网页 / 问文件开关（query 拼接） | `chat-iframe/src/components/ChatInput.vue:65-71` + `chat-iframe/src/apis/chat.ts:78-97` buildChatQuery |
-| ⑦ | 助手消息工具事件提示（toolEvents 文本行） | `chat-iframe/src/components/ChatMessages.vue:30-32` |
-| ⑧ | 来文抽取结果展示（matchStatus / extractionStatus） | `chat-iframe/src/components/IncomingDocumentPanel.vue` + `chat-iframe/src/apis/incoming-documents.ts` |
-| ⑨ | 页面附件选择（多附件默认首项） | `chat-iframe/src/components/PageFileSelector.vue` + `chat-iframe/src/stores/iframe-context.ts:13-31` normalizeFiles |
-| ⑩ | iframe ↔ 父页面 postMessage 桥（INIT_CONFIG / PAGE_CONTENT / FILE_LIST / WINDOW_STATE / IFRAME_READY / REQUEST_PAGE_CONTENT / REQUEST_FILE_LIST） | `chat-iframe/src/composables/useIframeBridge.ts` |
-| ⑪ | 父页面 SDK（悬浮按钮 / 拖拽 / 最大化 / 最小化 / 关闭 / 事件订阅） | `chat-iframe/public/docmind-chat-iframe-parent.js` |
-
-> 简单说：**会话 CRUD + 流式 + 模型选择 + 附件 + 来文场景的 4 个 iframe-only 能力**。
-
----
-
-## 5. chat-iframe 待开发清单（按优先级）
-
-### 🔴 P0 — 聊天核心体验（强烈建议下个迭代补齐）
-
-实施更新：P0-1、P0-2、P0-3、P0-4、P0-5、P0-7、P0-8、P0-9、P0-10、P0-12 已完成轻量版；P0-6 已完成基础反馈/复制/模型展示但未完整复刻主站来源详情；P0-11 和 P0-13 暂缓。
-
-| # | 缺失项 | web 端实现位置 | 备注 |
-|---|--------|---------------|------|
-| P0-1 | **Markdown 渲染** | `web/src/components/common/MarkdownPreview.vue` | chat-iframe 仅渲染纯文本 [ChatMessages.vue:28](chat-iframe/src/components/ChatMessages.vue)，代码块、列表、加粗、表格全部不可读 |
-| P0-2 | **代码高亮** | MarkdownPreview 内部 | 来文场景里经常返回代码与表格 |
-| P0-3 | **数学公式 / Mermaid 图表** | MarkdownPreview 内部 | 决策报告经常含流程图与公式 |
-| P0-4 | **思考过程折叠（reasoning_content）** | `AgentMessageComponent.vue:40-53` | 不展示推理过程，用户看不到 AI 在做什么 |
-| P0-5 | **工具调用可视化** | `ToolCallsGroupComponent.vue` | 当前仅显示文本行 "工具调用：xxx"，看不到完整过程 |
-| P0-6 | **知识库 / 网络来源引用** | `RefsComponent.vue` | 来文场景依赖知识库，但没有引用与原文链接展示 |
-| P0-7 | **停止/中断生成按钮** | `handleSendOrStop + cancelAgentRun` | 用户无法中断长回答 |
-| P0-8 | **重试 / 重新生成** | `retryMessage` | 失败或回答不理想时无法重新提问 |
-| P0-9 | **用户消息复制按钮** | `AgentMessageComponent.vue:23-31` | 复制回答需要手动选中 |
-| P0-10 | **多模态图片消息** | `message.image_content` 渲染 | 用户发送图片 / 助手识别图片能力缺失 |
-| P0-11 | **@ 提及（智能体/文件/工具）** | `MentionTextRenderer + useAgentMentionConfig` | 无法在输入时引用特定智能体或知识库 |
-| P0-12 | **错误提示分类**（interrupted / guard_blocked / unexpect） | `AgentMessageComponent.vue` 错误块 | 当前仅显示 assistantMessage.content 文字，无法定位错误类型 |
-| P0-13 | **流式平滑（useStreamSmoother）** | `web/src/composables/useStreamSmoother.ts` | 当前事件逐块直接拼接，渲染抖动明显 |
-
-### 🟡 P1 — 状态 / 调试能力（按需补齐）
-
-| # | 缺失项 | web 端实现位置 | 备注 |
-|---|--------|---------------|------|
-| P1-1 | Token 用量可视化 | `AgentChatComponent.vue:1018-1100` tokenUsageSegments | 与来文场景关联度低，但用户关心回答成本 |
-| P1-2 | Todo / 任务进度展示 | `AgentChatComponent.vue:1179-1190` | 来文场景几乎用不到 task 工具调用 |
-| P1-3 | 产物 / Artifacts 列表 | `state-panel + AgentArtifactsCard` | 与 file_panel 重复，迁移成本高 |
-| P1-4 | 子智能体运行详情 | `state-panel + SubagentThreadModal` | 来文场景几乎不用 subagent |
-| P1-5 | 附件 / 文件状态 | state-panel files | 与 IncomingDocumentPanel 部分重叠 |
-| P1-6 | 文件树 / 文件预览面板 | `AgentPanel + AgentFilePreview + FileTreeComponent` | 需要后端 viewer_filesystem 接口配合 |
-| P1-7 | 工作区产物下载 | viewer_filesystem downloadViewerFile | 来文场景几乎不用 |
-| P1-8 | 自动生成会话标题 | `generateTitle + fast_model` | 用户多次开窗时方便定位 |
-| P1-9 | 流式指示器（"正在生成回复"动态） | chat-iframe 当前只有 toolEvents 文本 | 用户感知不到后端在做什么 |
-| P1-10 | 切回标签页续流（visibilitychange） | `AgentChatComponent.vue:2179-2182` | 防止 iframe 在切回时被切流 |
-
-### 🟢 P2 — 体验优化（按业务诉求评估）
-
-| # | 缺失项 |
-|---|--------|
-| P2-1 | 智能体切换（多智能体场景） |
-| P2-2 | 会话重命名 / 删除 / 置顶 |
-| P2-3 | 会话搜索 |
-| P2-4 | 消息编辑 |
-| P2-5 | 消息反馈（点赞 / 点踩） |
-| P2-6 | 快捷键（除 Enter 发送外） |
-| P2-7 | 加载 / 错误边界提示（isLoadingMessages / chat-loading） |
-| P2-8 | 移动端响应式布局 |
-| P2-9 | 暗色模式适配 |
-| P2-10 | 国际化文案（i18n） |
-| P2-11 | 发送冷却（防双击重复发送） |
-| P2-12 | 草稿态模型选择迁移 |
-| P2-13 | 自适应窗口尺寸（响应式布局） |
-
-### 🔵 P3 — 文档 / 测试补充
-
-| # | 缺失项 | 备注 |
-|---|--------|------|
-| P3-1 | E2E 测试覆盖 | chat-iframe 当前仅有父页面脚本 DOM 识别 + chat 链路最小契约（`chat-iframe/test/parent-script.test.js`、`chat-iframe/test/chat-api.test.js`、`chat-iframe/test/incoming-documents-api.test.js`），缺 UI 测试 |
-| P3-2 | 更新 [docs/develop-guides/changelog.md](../develop-guides/changelog.md) | 登记 chat-iframe 复刻进度 |
-| P3-3 | 同步 [docs/.vitepress/config.mts](../../.vitepress/config.mts) 导航 | 若新增面向用户的正式文档 |
-| P3-4 | API 契约文档（OpenAPI） | chat-iframe 依赖的 8 个后端接口（chat/thread(s)、chat/attachments/tmp、chat/thread/{id}/attachments/confirm、agent/runs、agent/runs/{id}/events、system/model-providers/models/v2、incoming-documents/extractions/query）需要明确契约 |
-
----
-
-## 6. chat-iframe 差异化能力（web 主站没有）
-
-| 能力 | 实现 | 价值 |
-|------|------|------|
-| 来文匹配状态（matched / multiple / pending_sync / not_found） | `IncomingDocumentPanel.vue` | 来文场景核心 |
-| 结构化抽取结果（按类别展示 + 原文依据 + reason） | `IncomingDocumentPanel.vue` | 来文场景核心 |
-| 页面上下文作为问题上下文（"问网页"开关） | `buildChatQuery` + `pageContent` | 把当前页面内容带入问答 |
-| 选中文档 + 抽取结果作为上下文（"问文件"开关） | `buildChatQuery` + `selectedFile + extractionResult` | 来文场景核心 |
-| 父页面无感嵌入（DOM 扫描附件 + 悬浮按钮 + 拖拽） | `parent SDK _html + _bindEvents` | 嵌入生产系统的核心入口 |
-| iframe ↔ 父页面双向 postMessage（10 种消息类型） | `useIframeBridge.ts` | 完整双向通信 |
-| 父页面事件订阅（conversationCreated / messageSent / stateChange） | `parent SDK on / _emit` | 上层应用接入 |
-| 父页面来源白名单（originAllowlist） | `useIframeBridge.ts:25-26` | 安全控制 |
-| 悬浮窗口四态（minimized / normal / maximized / closed） | `parent SDK _setWindowState` | 桌面级 UX |
-| 多附件默认选中第一项 | `iframe-context.ts:26-30` | 零点击闭环 |
-
----
-
-## 7. 建议与下一步
-
-### 7.1 推荐优先级
-
-1. **P0 全部 13 项**应当作为下一个迭代的主目标，对应"聊天核心体验"。
-   - 其中 P0-1 ~ P0-3（Markdown + 代码高亮 + 公式/Mermaid）建议通过把 `web/src/components/common/MarkdownPreview.vue` 抽出来复用，而不是在 chat-iframe 重新实现一套。
-   - P0-4 ~ P0-6（reasoning / tool_calls / refs）需要重新评估：当前 chat-iframe 后端返回的是简化事件结构，可能需要扩展 `runEventHandlers` 的接口。
-   - P0-7（停止生成）需要扩展 `sendMessageStream` 支持 `signal`（当前已实现 AbortSignal 透传），并在 ChatInput 加上停止按钮切换。
-2. **P1 中**只挑对来文场景有价值的：P1-8（自动标题）、P1-9（流式指示）、P1-10（visibilitychange 续流）建议一起做。
-3. **P2 全部**建议暂缓，与 web 主站行为对齐需要等主站稳定后再说。
-4. **P3 中**的 changelog 同步与 API 契约文档应在下个迭代开始前先做，避免接口再次变更。
-
-### 7.2 代码复用策略
-
-- **直接复用 web 主站的 Markdown 渲染组件**：把 `MarkdownPreview.vue` + 依赖抽成独立包或 monorepo workspace，避免双份维护。
-- **共用类型定义**：web 主站的 agent 相关 type（如 ChatMessage、ChatThread）可考虑同步到 chat-iframe，避免 `chat-iframe/src/types.ts` 与 `web/src/types/**` 漂移。
-- **共用 SSE 解析器**：`useAgentStreamHandler` 与 `chat.ts:readRunEventStream` 都在做相同的事，建议抽取。
-
-### 7.3 架构决策待定
-
-| 议题 | 选项 A | 选项 B |
-|------|--------|--------|
-| Markdown 渲染 | 把 web 主站 MarkdownPreview 抽出来复用 | chat-iframe 重新实现一套轻量版 |
-| 工具调用可视化 | 复用 ToolCallsGroupComponent | 简化为"工具名称 + 时间戳"列表 |
-| 引用展示 | 复用 RefsComponent | 只展示文字摘要 |
-| 停止生成 | 扩展 sendMessageStream 支持 AbortSignal | 在 iframe 层加超时与手动取消 |
-| 流式事件扩展 | 扩展 runEventHandlers（onReasoning / onToolCall / onRef） | 维持当前 onText/onTool 两通道 |
-
-建议在下一个迭代开始前开一次评审会决定。
-
-### 7.4 验收标准
-
-- P0 全部完成后，chat-iframe 与 web 主站聊天核心体验应**至少 90% 一致**。
-- P1 全部完成后，chat-iframe 应能完整支撑生产系统嵌入场景。
-- P2 全部完成后，chat-iframe 应当作为独立的轻量客户端长期运行（不再依赖 web 主站）。
-
----
-
-## 8. 附录
-
-### 8.1 参考链接
-
-- [chat-iframe README.md](../../chat-iframe/README.md)
-- [web/src/components/AgentChatComponent.vue](../../web/src/components/AgentChatComponent.vue)
-- [web/src/components/AgentMessageComponent.vue](../../web/src/components/AgentMessageComponent.vue)
-- [web/src/components/AgentInputArea.vue](../../web/src/components/AgentInputArea.vue)
-- [web/src/components/AgentPanel.vue](../../web/src/components/AgentPanel.vue)
-- [web/src/stores/chatThreads.js](../../web/src/stores/chatThreads.js)
-- [web/src/stores/chatUI.js](../../web/src/stores/chatUI.js)
-- [web/src/apis/agent_api.js](../../web/src/apis/agent_api.js)
-- [chat-iframe/src/App.vue](../../chat-iframe/src/App.vue)
-- [chat-iframe/src/stores/chat.ts](../../chat-iframe/src/stores/chat.ts)
-- [chat-iframe/src/apis/chat.ts](../../chat-iframe/src/apis/chat.ts)
-- [chat-iframe/src/components/ChatMessages.vue](../../chat-iframe/src/components/ChatMessages.vue)
-- [chat-iframe/src/components/ChatInput.vue](../../chat-iframe/src/components/ChatInput.vue)
-- [chat-iframe/src/components/ChatSidebar.vue](../../chat-iframe/src/components/ChatSidebar.vue)
-- [chat-iframe/src/composables/useIframeBridge.ts](../../chat-iframe/src/composables/useIframeBridge.ts)
-- [chat-iframe/public/docmind-chat-iframe-parent.js](../../chat-iframe/public/docmind-chat-iframe-parent.js)
-
-### 8.2 文档维护
-
-- 本次更新作者：Claude（自动分析）
-- 文档维护路径：`docs/vibe/2026-07-05-chat-iframe复刻分析报告.md`
-- 下次复审时机：P0 全部完成后
+1. **基础聊天已可用**：新建/切换/重命名/删除/置顶会话，历史消息，文本/图片/附件输入，模型选择，流式正文、推理和工具调用，停止生成，复制和基础反馈均已接入。
+2. **稳定性仍未达到主站水平**：没有按线程隔离正在运行的消息状态；切换会话时不会停止或迁移当前流；断流、切回页面和刷新后不能续接活动 run；完成后也没有用后端历史重新校准本地消息。
+3. **部分“已实现”只是接线完成**：store 有 `retry()`，但当前消息操作区没有重试按钮；新流式回复使用前端临时消息 ID，反馈接口未拿到后端正式消息 ID；`toolEvents` 有写入但没有渲染。
+4. **高级智能体能力基本未复刻**：`agent_state`、人工审批、问用户、Todo、Token 使用、文件/产物、子智能体详情和工作区预览均未进入 iframe UI。
+5. **iframe 在嵌入场景已经优于 web**：外部用户换票、业务 scope 会话隔离、悬浮窗控制、显式页面/多附件上下文、来文自动同步和正式业务抽取结果展示，是主站聊天页没有的完整嵌入能力。
+
+因此，下一阶段不应继续优先补零散 UI，而应先补齐“按线程运行态 + SSE 续接 + 后端消息 ID 校准 + 中断/审批协议”。这组能力决定 chat-iframe 是生产聊天客户端，还是只能完成顺利路径的轻量窗口。
+
+## 2. 审计口径
+
+本报告采用以下判定规则：
+
+- **完整实现**：当前活动组件已渲染，用户可操作，API/状态/结果形成闭环。
+- **部分实现**：只有轻量版本，或接口、store、组件之间仍缺一段，不能按主站语义完成闭环。
+- **未实现**：主站已有，而 iframe 当前活动链路没有消费或展示。
+- **iframe 特有**：不要求从主站复刻，属于嵌入和来文场景的独立优势。
+
+只存在文件不算已实现。例如 [IncomingDocumentPanel.vue](../../chat-iframe/src/components/IncomingDocumentPanel.vue) 和 [PageFileSelector.vue](../../chat-iframe/src/components/PageFileSelector.vue) 当前没有挂到 [App.vue](../../chat-iframe/src/App.vue) 的活动模板；真实文档摘要入口是 [ChatMessages.vue](../../chat-iframe/src/components/ChatMessages.vue) 顶部的 `context_summary` 卡片，真实附件选择入口在 [ChatInput.vue](../../chat-iframe/src/components/ChatInput.vue)。
+
+本报告也不再给单一“复刻率”。状态面板、人工审批、文件工作区与普通 Markdown 的权重显然不同，简单按功能条目计数会高估可用性。后续验收应按用户任务链路判断。
+
+## 3. 两套聊天链路的当前边界
+
+### 3.1 web 主站
+
+web 主站以 [AgentChatComponent.vue](../../web/src/components/AgentChatComponent.vue) 为编排中心：
+
+1. `AgentInputArea` 收集文本、@ 提及、附件、图片与模型。
+2. `useAgentRunStream` 建立 run 事件流，保存事件序号，处理断流检查和活动 run 续接。
+3. `useAgentStreamHandler` 消费正文、推理、工具、人工审批和 `agent_state`。
+4. 消息区渲染 Markdown、工具、引用来源、反馈和错误。
+5. 状态面板渲染 Token、Todo、文件、产物和子智能体。
+6. `AgentPanel` 提供工作区文件树、多 Tab 预览、下载和删除。
+
+它是完整智能体工作台，代价是组件和状态编排较重。
+
+### 3.2 chat-iframe
+
+chat-iframe 以 [App.vue](../../chat-iframe/src/App.vue) 和 [stores/chat.ts](../../chat-iframe/src/stores/chat.ts) 为中心：
+
+1. 父页面 SDK 换取外部用户 token，并发送页面、附件和业务 scope。
+2. `iframe-context` 保存配置，默认选择首个页面附件。
+3. `App.vue` 查询来文抽取结果，必要时自动 ingest，再生成顶部只读文档摘要卡片。
+4. `ChatInput` 收集文本、页面/多附件上下文、普通附件、图片和模型。
+5. `chat.ts` 创建 run，读取精简 SSE，并把正文、推理、工具调用写入一个全局消息数组。
+6. `ChatMessages` 渲染轻量聊天流。
+
+它是嵌入式文档助手，当前结构更轻，但尚未完整消费后端已经提供的运行协议。
+
+## 4. 当前能力对比
+
+### 4.1 会话与模型
+
+| 能力 | web | chat-iframe | 结论 |
+| --- | --- | --- | --- |
+| 新建、列表、选择、历史消息 | 完整 | 完整 | 已复刻 |
+| 重命名、删除、置顶 | 完整 | 完整 | 已复刻 |
+| 会话分页 | 100 条分页并支持继续加载 | 固定拉取前 50 条 | 部分实现 |
+| 自动生成标题 | 首条消息后调用 `generateTitle` | 固定初始标题“来文咨询” | 未实现 |
+| 每会话模型记忆 | 按线程保存，并可从历史消息恢复 | 全局单一 `selectedModelSpec` | 未实现 |
+| 草稿模型迁移到新会话 | 有 | 无 | 未实现 |
+| 智能体切换 | 主站可切换，并重置线程状态 | 由宿主配置固定 `agentId` | 嵌入场景可接受，不建议照搬主站切换器 |
+| 业务页面会话隔离 | 无此场景 | `conversationScopeKey` 过滤列表和创建会话 | iframe 特有 |
+
+chat-iframe 的会话 CRUD 已真实调用与 web 兼容的 `/api/chat/thread(s)` 接口。需要注意，`conversationScopeKey` 当前是列表分组键，不是 thread/run 的强权限边界，不能把它描述为完整授权隔离。
+
+### 4.2 输入区
+
+| 能力 | web | chat-iframe | 结论 |
+| --- | --- | --- | --- |
+| 多行文本、Enter 发送、Shift+Enter 换行 | 有 | 有 | 已复刻 |
+| 文本框自适应高度 | 有 | 有，限制最大高度后内部滚动 | 已复刻 |
+| 普通附件上传 | 临时上传、确认、线程附件管理 | 临时上传、确认并随本轮发送 | 核心链路已复刻 |
+| 图片上传 | 有类型/大小校验并显示预览 | 可选择并上传，只有文件名提示 | 部分实现 |
+| 附件前端校验 | 有后端能力感知和图片校验 | UI 写“≤ 5 MB”，实际未在选择时校验大小/类型 | 部分实现 |
+| @ 提及文件、知识库、MCP、Skill、子智能体 | 完整 | 无 | 未实现 |
+| 模型搜索与选择 | 有 | 有，按 provider 分组搜索 | 已复刻 |
+| 防重复发送 | 2 秒冷却 + 运行态约束 | 只有全局 `isSending` | 部分实现 |
+| 问网页 | 无嵌入页概念 | 显式开关，内容走 `meta.iframe_context` | iframe 特有 |
+| 问文件 | 主站线程附件和 @ 文件 | 可多选宿主页面附件，并切换顶部摘要 | iframe 特有且体验较好 |
+
+chat-iframe 的普通附件与“页面附件”是两条不同链路：普通附件写入当前线程附件；页面附件用于来文匹配和 `iframe_context`。报告和 UI 文案应继续明确区分，避免用户误以为两者生命周期相同。
+
+### 4.3 消息内容与操作
+
+| 能力 | web | chat-iframe | 结论 |
+| --- | --- | --- | --- |
+| 用户/助手/系统/工具角色 | 完整 | 可归一化和显示 | 已复刻 |
+| Markdown 表格、列表、代码、公式 | MarkdownIt + Shiki + KaTeX | MarkdownIt + highlight.js + KaTeX | 核心已复刻 |
+| Markdown 安全 | DOMPurify 白名单清洗 | `html: false`，链接和生成 HTML 由 MarkdownIt 输出 | 基础安全可用，策略不同 |
+| 高级 Markdown | 动态语言高亮、前置元数据卡片、深浅主题、SVG 渲染与复制 | 固定少量语言；SVG 仅按源码展示 | 部分实现 |
+| Mermaid | 当前主站也没有 Mermaid 渲染链路 | 无 | 旧报告的“主站支持 Mermaid”结论不准确 |
+| 推理过程 | 折叠显示 | 折叠显示 | 已复刻 |
+| 图片消息 | 原图展示、全屏预览、ESC 关闭 | 行内图片，无全屏预览 | 部分实现 |
+| 附件消息 | 文件图标、名称、元信息 | 文件名标签 | 部分实现 |
+| 用户消息复制 | 有 | 无 | 未实现 |
+| 助手消息复制 | 有 | 仅最后一条完成消息显示 | 轻量复刻，符合小窗降噪目标 |
+| 点赞/点踩 | 保存状态，点踩可填写原因，防重复提交 | 直接提交 like/dislike，reason 固定为空，无历史状态 | 部分实现 |
+| 重试 | 主站消息操作可触发 | store 和 emit 已接线，但 `MessageRefs` 没有重试按钮 | **未形成用户闭环** |
+| 错误类型 | 显式区分 interrupted、guard、unexpect、agent_error | 保存 `errorType`，主要显示后端 `errorMessage` | 部分实现 |
+| 模型名称 | 最终回答下方展示 | 已归一化 `modelName`，但组件未渲染 | 接口已接，UI 未完成 |
+| 知识库/网络来源 | 最终回答有独立来源区 | `query_kb` 工具卡可看分块，最终回答无统一来源区 | 部分实现 |
+
+Markdown 不建议为了“代码复用”直接让 iframe 依赖 `web/src`。两个应用独立构建，现有轻量 renderer 已满足正文主路径；真正需要补的是用户可见能力，如主题、更多语言和 SVG，而不是先建立共享包。
+
+### 4.4 工具调用
+
+chat-iframe 已实现结构化工具调用，不再只是“工具调用：xxx”文本：
+
+- 工具调用按消息顺序分段，避免最终正文把工具过程挤到末尾。
+- 相邻工具型消息会合并为一个折叠组。
+- `list_kbs`、`query_kb`、部分知识库工具、Skill 文件和通用工具有专门摘要。
+- `query_kb` 能按来源文件分组展示分块，并显示图谱实体/关系/引用数量。
+- 普通工具可以展开查看参数和带行号结果。
+
+它仍是主站工具体系的轻量子集。主站通过工具注册表覆盖计算器、搜索、文件编辑/读取、数据库、图片、Todo、Task/Subagent 等专用视图；iframe 对大多数工具使用通用 JSON/文本结果，也没有 Task 与子智能体联动。
+
+另有一个需要清理的兼容分支：`onTool` 会把无法归一化的旧工具事件写入 `message.toolEvents`，但 [ChatMessages.vue](../../chat-iframe/src/components/ChatMessages.vue) 不渲染 `toolEvents`。这类事件当前会静默消失，不能算工具提示兜底已经完成。
+
+### 4.5 流式运行与生命周期
+
+这是当前最关键的差距。
+
+| 能力 | web | chat-iframe | 结论 |
+| --- | --- | --- | --- |
+| 文本/推理增量 | 完整 | 完整 | 已复刻 |
+| 工具调用/结果增量 | 完整 | 支持精简协议主要形态 | 基础已复刻 |
+| 流式平滑 | `requestAnimationFrame` smoother，按线程管理 | 正文按 5 字符、28 ms 小步输出 | 轻量实现 |
+| 主动停止 | 取消后端 run + 停止本地订阅 | AbortController + cancel API | 已复刻 |
+| 线程级运行状态 | 每个 thread 独立保存消息、run、controller、序号 | 全局只有一份消息、run、controller | 未实现 |
+| 切换会话安全 | 切换前停止当前订阅，目标会话可恢复活动 run | 直接覆盖 `messages`，原流仍可能继续写当前数组 | **存在串会话风险** |
+| 断流重连 | 检查 run 状态并从最后序号重连 | 无 | 未实现 |
+| 页面重新可见后续流 | `visibilitychange` 恢复 | 无 | 未实现 |
+| 刷新后恢复活动 run | 查询 thread active run | 无 | 未实现 |
+| 终态历史校准 | 完成后重新获取后端历史与 state | 只保留本地拼接消息 | 未实现 |
+| worker 可重试错误 | 识别 retryable，等待 worker 重试 | 当普通 error 结束 | 未实现 |
+| `agent_state` | 持续消费并渲染 | 后端会发送，iframe 忽略 | 未实现 |
+| 人工审批/问用户 | 弹窗回答并 resume | 后端事件未消费 | 未实现 |
+
+当前 [stores/chat.ts](../../chat-iframe/src/stores/chat.ts) 在 `send()` 闭包里持续写 `this.messages`。同时 `selectThread()` 可以在生成期间把 `this.messages` 替换成另一个会话历史，且不会停止当前 run。用户在流式期间打开侧栏切换会话时，后续 chunk 可能写入新会话的可见数组。这是比“缺少动画”更高优先级的正确性问题。
+
+后端 [agent_run_service.py](../../backend/package/yuxi/services/agent_run_service.py) 已支持 SSE `id`、`after_seq`/`Last-Event-ID`、活动 run 查询、`agent_state`、retryable error 和 interrupt 类事件；iframe 目前没有消费这些能力，不需要新增后端协议。
+
+### 4.6 状态、审批、产物与工作区
+
+以下主站能力在 chat-iframe 中尚未实现：
+
+- Token/上下文窗口使用情况。
+- Todo 进度。
+- 当前线程文件与附件状态。
+- 产物卡片、下载、保存到工作区。
+- 文件树、多 Tab 预览、下载和删除。
+- 子智能体运行列表和子线程详情。
+- HumanApproval/AskUserQuestion 交互。
+- 调试消息原始数据和聊天导出。
+
+这些能力不应一次性照搬完整 `AgentPanel`。460×680 的默认窗口不适合常驻多面板。建议先做一个统一的右侧/底部抽屉，只在后端事件出现相应内容时显示入口；文件深度预览在最大化状态下再开放。
+
+### 4.7 嵌入与来文能力
+
+这部分是 chat-iframe 当前最完整、也最有产品差异的能力。
+
+| 能力 | 当前状态 |
+| --- | --- |
+| 悬浮入口、普通/最小化/最大化/关闭 | 已实现，关闭后仍保留恢复入口 |
+| 悬浮入口和普通窗口拖动 | 已实现，并处理 iframe 抢占 pointer 事件 |
+| 视口边界纠偏 | 已实现，从拖动位置恢复时保证窗口完整可见 |
+| 外部用户自动换票 | 已实现可信后端和内网自助两种模式 |
+| 业务会话 scope | 已实现 `{source_system}:{function_id}:{business_id}` |
+| 页面上下文 | `query` 保持用户原问题，页面内容写入 `meta.iframe_context` |
+| 多附件上下文 | 所有选中附件进入 `iframe_context.files`，顶部只展示当前附件摘要 |
+| 长网页 | 后端落线程沙箱文件，并提示模型使用 `read_file` |
+| 已入库附件全文 | 提供 `open_kb_document(kb_id, file_id)` |
+| 未入库附件 | 可按 `source_url` 下载并自动调用来文 ingest |
+| 解析未完成防编造 | 系统提示明确说明等待解析，不要求模型猜测 |
+| 正式业务结构化结果 | 后端返回 `items/schemaIds/display`，前端按 schema 分组展示全部明细 |
+| 后端业务 label | 前端消费 `display`，没有硬编码业务字段中文映射 |
+| 宿主附件输入 | 当前只认显式 `setFiles()`，不再扫描宿主 DOM |
+
+这里需要继续坚持两个已经正确的边界：
+
+1. 用户可见 `query` 只包含用户问题，页面和文件上下文放在专用运行契约中。
+2. 顶部卡片是当前附件的 UI 摘要；模型上下文可以包含所有选中附件，两者不能混为一谈。
+
+## 5. 需要纠正的旧报告结论
+
+旧版报告中的以下内容已经过时或不准确：
+
+1. Markdown、代码高亮、KaTeX、推理折叠、结构化工具调用、停止生成、会话重命名/删除/置顶已实现，不能继续列为缺失。
+2. 父页面脚本不再扫描宿主 DOM；接入方必须显式调用 `setFiles()`。
+3. 页面/附件上下文不再拼进可见 query，而是通过 `meta.iframe_context` 注入后端系统提示。
+4. 多附件会全部进入模型上下文，不是只取第一个；第一个附件只用于顶部摘要卡片。
+5. 文档卡片展示的是正式业务抽取 items，摘要阶段 `structuredResult` 不能再被描述为正式结果。
+6. 结构化明细不再只展示前三条，后端 prompt 也不再按每附件固定只取前五条；统一受总上下文长度限制。
+7. 主站当前没有 Mermaid 渲染，不应把 Mermaid 作为 iframe 相对主站的缺口。
+8. “重试已实现”不成立：代码有 action 和 emit，但没有用户入口。
+9. “反馈已实现”只能算部分：新流式消息 ID、反馈状态和点踩原因尚未闭环。
+10. `IncomingDocumentPanel`、`PageFileSelector` 等未挂载组件不能作为当前 UI 能力证据。
+
+## 6. 已确认的关键问题
+
+### P0-1：流式期间切换会话可能串写消息
+
+根因是 iframe chat store 使用全局 `messages/isStreaming/activeRunId/abortController`，而不是主站的每线程运行态。切换会话不会取消或迁移旧 run。
+
+验收标准：
+
+- A 会话生成期间切到 B，会继续在 A 的线程状态中运行或被明确停止，B 不出现 A 的任何 chunk。
+- 再切回 A，能够看到正确的进行中或已完成状态。
+
+### P0-2：断流、切后台、刷新后不能恢复
+
+iframe 没有保存 SSE event id，也不查询活动 run。网络波动或页面生命周期变化会丢失后续回答。
+
+验收标准：
+
+- 断开一次 SSE 后按最后 `seq` 续接，不重复正文和工具结果。
+- 页面从 hidden 回到 visible、iframe 刷新或重新打开时，能恢复当前线程活动 run。
+
+### P0-3：终态消息未与后端历史校准
+
+新回复全程使用本地临时消息对象。完成后不拉历史，导致正式消息 ID、反馈状态、完整 response metadata 和服务端归一化内容缺失。
+
+验收标准：
+
+- run 结束后以 request id 合并后端历史，不闪烁、不重复。
+- 最终助手消息使用后端 ID，反馈接口提交成功。
+- 模型名、附件、错误元数据与刷新后的历史一致。
+
+### P0-4：中断与审批协议未消费
+
+后端已有 `ask_user_question_required`、`human_approval_required`、`agent_state`、retryable error 等事件；iframe 只处理正文、工具、普通 error 和 done。
+
+验收标准：
+
+- 需要用户回答或审批时，停止“正在生成”并展示可提交的交互卡片。
+- 提交后基于原 parent run resume，不另起一条无关提问。
+- retryable worker error 不立即显示为最终失败。
+
+### P0-5：重试与反馈只是部分接线
+
+`MessageRefs` 没有重试按钮；点赞/点踩没有反馈状态，点踩无原因；流式消息 ID 还是本地 ID。
+
+验收标准：
+
+- 最后一条完成或失败回答有清晰重试入口。
+- 重试语义明确：重新发送原问题前，先确定是追加一轮还是替换失败轮，不能重复堆积相同用户消息。
+- 点赞/点踩使用后端消息 ID；点踩可选原因；提交后不可重复误点。
+
+### P0-6：postMessage 初始化信任边界需要收紧
+
+iframe 在配置到达前必须接收 `INIT_CONFIG`，但当前任何来源的后续 `INIT_CONFIG` 也会被无条件接受；父页面也主要校验 origin，没有同时校验 `event.source === iframe.contentWindow`。
+
+验收标准：
+
+- 首次绑定父页面后，后续消息同时校验 source 和 origin。
+- 第二次来自其他 window/origin 的 `INIT_CONFIG` 不能覆盖 token、API 地址或 allowlist。
+- 生产示例不再使用 `targetOrigin: '*'`。
+
+## 7. 建议路线图
+
+### 第一阶段：先补生产可靠性
+
+目标：让 iframe 在切会话、断流、刷新、审批和失败场景下仍保持正确。
+
+- 将运行态改为按 thread 保存，至少包含消息、active run、AbortController、最后事件序号、loading 和 pending interrupt。
+- 复用现有后端活动 run 与 `after_seq` 协议，补续接和 `visibilitychange` 恢复。
+- run 终态重新拉历史并按 request id 合并，取得后端正式消息 ID。
+- 消费 `agent_state`、interrupt、approval 和 retryable error。
+- 补齐重试、反馈与 postMessage 信任边界。
+
+这一步完成前，不建议优先开发暗色主题、动画或更多工具皮肤。
+
+### 第二阶段：补齐高频聊天体验
+
+目标：日常问答体验接近或超过 web。
+
+- 最终回答显示模型名称和统一来源区；知识库工具卡保留为过程详情。
+- 每会话记忆模型，并从历史恢复；首问后自动生成标题。
+- 会话列表支持分页/继续加载。
+- 补用户消息复制、图片全屏预览、附件图标/大小/状态。
+- 上传选择阶段执行真实大小和类型校验，不只写提示文案。
+- Markdown 按实际需求补更多语言、深浅主题和安全 SVG；不为“复刻”增加 Mermaid，除非 web 与产品都决定支持。
+
+### 第三阶段：按需引入智能体高级能力
+
+目标：支持长任务和多智能体，而不是把完整主站硬塞进小窗。
+
+- 先实现 HumanApproval/AskUserQuestion，这是会阻塞运行的必要能力。
+- 增加按需状态抽屉：Todo、文件、产物、子智能体、Token。
+- 增加产物下载和预览；文件树只在 agent 声明 `files` 能力时出现。
+- Task 工具与子线程详情联动。
+- @ 提及按使用频率分批实现，建议先文件/知识库，再 Skill/MCP/Subagent。
+
+### 第四阶段：做出 iframe 自己的优势
+
+目标：不只是缩小版 web，而是更可信的嵌入助手。
+
+- 增加“本轮上下文”检查器，明确展示启用的网页、附件数量、当前摘要文件和解析状态。
+- 当总上下文被截断时给用户可见提示，避免 UI 看起来完整而模型实际只收到部分内容。
+- 对页面内容提供宿主侧脱敏/摘要钩子，并在 iframe 中显示数据来源和更新时间。
+- 对解析中的附件提供可刷新进度；ready 后无需重新发送问题即可明确提示“现可读取全文”。
+- 最大化时提供文件/来源深度查看，小窗保持单列简洁。
+
+## 8. 不建议直接复刻的内容
+
+以下能力存在于 web，但不应为了形式一致直接搬到 iframe：
+
+- Ant Design Vue 弹窗和完整主站布局依赖。
+- 默认常驻的文件树、状态面板和多列工作台。
+- 面向开发者的原始消息调试区和导出入口。
+- 在 iframe 内再做一个完整智能体管理/切换中心；宿主配置 `agentId` 更符合嵌入职责。
+- 复制主站 3900 行编排组件或维护第二套后端协议。
+
+正确方向是复用后端协议、API 和纯数据转换规则，UI 按小窗重新组织。只有当同一段纯逻辑已经在两端稳定重复时，才值得抽共享模块。
+
+## 9. 测试现状与补测建议
+
+本次执行 `chat-iframe` 现有测试：**70 项，67 通过，3 项历史 query 拼接测试跳过，0 失败**。
+
+已有覆盖较好的部分：
+
+- 父页面换票、scope、窗口控制、拖动和 `setFiles()` 契约。
+- query 保持用户原文，`iframe_context` 携带页面和全部附件。
+- 精简 SSE 的正文、推理、工具调用和工具结果解析。
+- Markdown、上下文摘要、工具结果分组和首条消息乐观显示。
+
+当前测试主要是纯函数、API mock 和静态模板检查，缺少真实 Vue 交互与端到端运行。下一轮最少补以下场景：
+
+1. 流式期间 A → B → A 切换，不串消息。
+2. SSE 中断后按 event id 续接，不重复 chunk。
+3. run 完成后历史校准，反馈使用后端消息 ID。
+4. 人工审批事件展示、提交和 resume。
+5. retryable worker error 等待重试，最终成功不先报失败。
+6. 非父窗口或错误 origin 的 `INIT_CONFIG` 被拒绝。
+7. Playwright/浏览器 E2E 覆盖普通窗、最大化、附件上下文和真实聊天一条主路径。
+
+当前环境没有可用的 `docker` 命令，因此本次只能运行本地已安装依赖下的前端测试，未执行 Docker 内 E2E。
+
+## 10. 建议的阶段验收标准
+
+### 生产可靠性达标
+
+- 切会话、切后台、断网重连、刷新 iframe 均不丢失或串写回答。
+- 后端正式消息 ID、反馈、模型、来源和错误状态在刷新前后保持一致。
+- 人工审批和问用户不会让会话永久卡在“正在生成”。
+
+### 核心聊天体验达标
+
+- 文本、图片、附件、模型、Markdown、推理、工具、来源、停止、重试、反馈均可从 UI 完成。
+- 首问自动命名；每会话恢复自己的模型；长会话列表可继续加载。
+- 上传限制和错误信息与真实后端约束一致。
+
+### 高级智能体体验达标
+
+- Todo、文件、产物、子智能体和 Token 状态按需可见。
+- 文件和产物可预览/下载；审批可以在 iframe 内闭环。
+- 默认小窗仍保持单列简洁，高级内容通过抽屉或最大化查看。
+
+## 11. 关键代码索引
+
+### web
+
+- [AgentChatComponent.vue](../../web/src/components/AgentChatComponent.vue)：主聊天编排、线程运行态、状态面板、审批、文件与产物入口
+- [AgentMessageComponent.vue](../../web/src/components/AgentMessageComponent.vue)：消息、推理、错误、图片、附件与工具展示
+- [RefsComponent.vue](../../web/src/components/RefsComponent.vue)：模型、复制、反馈与来源
+- [useAgentRunStream.js](../../web/src/composables/useAgentRunStream.js)：SSE、序号、断流检查和活动 run 恢复
+- [useAgentStreamHandler.js](../../web/src/composables/useAgentStreamHandler.js)：正文、工具、审批和 agent state 事件处理
+- [AgentPanel.vue](../../web/src/components/AgentPanel.vue)：文件树和预览
+
+### chat-iframe
+
+- [App.vue](../../chat-iframe/src/App.vue)：嵌入页编排、来文查询和上下文摘要
+- [stores/chat.ts](../../chat-iframe/src/stores/chat.ts)：会话、消息、发送、停止和当前全局运行态
+- [apis/chat.ts](../../chat-iframe/src/apis/chat.ts)：聊天 API、iframe context 和精简 SSE 解析
+- [ChatInput.vue](../../chat-iframe/src/components/ChatInput.vue)：输入、模型、普通附件、图片和页面附件
+- [ChatMessages.vue](../../chat-iframe/src/components/ChatMessages.vue)：消息、文档摘要、推理、工具和末条操作区
+- [ToolCallsPanel.vue](../../chat-iframe/src/components/ToolCallsPanel.vue)：轻量工具调用视图
+- [docmind-chat-iframe-parent.js](../../chat-iframe/public/docmind-chat-iframe-parent.js)：父页面 SDK、换票、窗口和 postMessage
+
+### 后端契约
+
+- [agent_run_service.py](../../backend/package/yuxi/services/agent_run_service.py)：run 事件流、精简事件、序号与活动 run
+- [iframe_context_service.py](../../backend/package/yuxi/services/iframe_context_service.py)：页面/附件上下文、总长度闸门和全文读取提示
+- [incoming_document_service.py](../../backend/package/yuxi/services/incoming_document_service.py)：来文匹配、正式业务抽取与 display metadata
+
+## 12. 实施 TODO 与状态台账
+
+本节是后续 chat-iframe 复刻工作的唯一任务台账。当前状态更新于 2026-07-14。
+
+### 12.1 状态维护规则
+
+- 状态使用：`待办`、`进行中`、`已完成`、`阻塞`。任务开始时先把状态改为“进行中”，不要等开发结束后补记。
+- 只有代码、对应测试和必要文档全部完成，且验证通过后，才能勾选 `[x]` 并标记“已完成”。
+- 完成任务时必须在“完成记录”中填写日期、commit（尚未提交时写工作区）、验证命令和结果。
+- 任务范围调整时保留原 ID，在任务下补充变更原因；不要删除旧任务或重新编号，避免提交和讨论失去引用。
+- 每次修改本列表对应代码时，同一提交必须同步更新本节状态。阶段门禁没有通过时，不得把阶段状态标为已完成。
+- 实施顺序默认按依赖执行；没有依赖的任务可以并行，但 P1/P2/P3 不应阻塞 P0 生产可靠性修复。
+
+### 12.2 阶段总览
+
+| 阶段 | 优先级 | 当前状态 | 目标 | 阶段门禁 |
+| --- | --- | --- | --- | --- |
+| 阶段一：生产可靠性 | P0 | 进行中 | 解决串会话、断流、消息 ID、审批和通信安全 | P0-1～P0-9 全部完成 |
+| 阶段二：高频聊天体验 | P1 | 待办 | 日常聊天操作接近 web | P1-1～P1-8 全部完成 |
+| 阶段三：高级智能体能力 | P2 | 待办 | 支持状态、文件、产物、子智能体和提及 | P2-1～P2-7 全部完成 |
+| 阶段四：嵌入体验增强 | P3 | 待办 | 形成比 web 更透明的上下文与文档体验 | P3-1～P3-6 全部完成 |
+
+### 12.3 阶段一：生产可靠性（P0）
+
+- [x] `P0-1` 按 thread 隔离运行态 — 状态：已完成
+  - 实现：已将 `messages/isStreaming/isSending/activeRunId/abortController/lastUserMessageForRetry` 从全局单例改为按 `threadId` 保存；保留当前线程 getter。`lastEventSeq/pendingInterrupt` 由后续 P0-3/P0-6 在同一容器中扩展。
+  - 验证：`chat-iframe` store 回归测试覆盖首次发送草稿容器迁移，以及 A/B 会话各自的消息与运行态。
+  - 依赖：无。
+
+- [x] `P0-2` 修复流式期间切换会话串写 — 状态：已完成
+  - 实现：stream 回调捕获发起 run 的 thread runtime；切换会话只切换可见 getter，不覆盖其他线程消息。旧 run 在后台继续，用户切回原会话可查看其完成结果。
+  - 验证：新增回归测试覆盖 A 生成期间切到 B 的场景，B 保持原历史，A 接收完整流式正文。
+  - 依赖：P0-1。
+
+- [ ] `P0-3` 接入 SSE event id 与断流续接 — 状态：待办
+  - 实现：解析并保存 SSE `id`，重连时通过 `after_seq` 或 `Last-Event-ID` 继续；终态前连接关闭时先查询 run 状态，再决定重连或结束。
+  - 验证：测试中途断开一次事件流，重连后不丢正文、不重复正文或工具结果。
+  - 依赖：P0-1。
+
+- [ ] `P0-4` 恢复活动 run — 状态：待办
+  - 实现：切回页面、重新打开 iframe、刷新历史或选择线程时查询该线程 active run；使用已保存事件序号恢复订阅；增加 `visibilitychange` 恢复入口。
+  - 验证：iframe 切后台再回来、刷新后重新打开、会话 A→B→A 三种场景都能恢复正确 run。
+  - 依赖：P0-1、P0-3。
+
+- [ ] `P0-5` run 终态历史校准与正式消息 ID — 状态：待办
+  - 实现：run 结束后重新拉取线程历史，按 `request_id/message_id` 合并乐观消息；以后端消息为最终数据源，保留不闪烁的本地展示。
+  - 验证：完成前后不重复消息；刷新页面内容一致；最终助手消息含后端 ID、模型、附件、错误和反馈元数据。
+  - 依赖：P0-1。
+
+- [ ] `P0-6` 消费完整运行事件与人工交互 — 状态：待办
+  - 实现：处理 `agent_state`、`ask_user_question_required`、`human_approval_required`、`interrupted` 和 retryable worker error；审批/问用户提交后 resume 原 parent run。
+  - 验证：审批和问用户不会永久停在“正在生成”；retryable error 不提前显示最终失败；resume 后继续原会话。
+  - 依赖：P0-1、P0-4。
+
+- [ ] `P0-7` 闭环重试与反馈 — 状态：待办
+  - 实现：在最后一条可操作回答显示重试；明确采用“追加新一轮”或“替换失败轮”语义；反馈使用后端消息 ID，保存已提交状态，点踩支持原因。
+  - 验证：新流式回答和历史回答均可反馈；重复点击不会重复提交；重试不会产生两条相同的乐观用户消息。
+  - 依赖：P0-5。
+
+- [ ] `P0-8` 收紧 postMessage 信任边界 — 状态：待办
+  - 实现：首次 `INIT_CONFIG` 绑定父窗口和 origin；后续消息同时校验 `event.source` 与 origin；父页面只接受 `iframe.contentWindow`；生产示例使用明确 `targetOrigin`。
+  - 验证：其他 window、错误 origin、第二次恶意 `INIT_CONFIG` 均无法覆盖 token、API 地址或 allowlist。
+  - 依赖：无。
+
+- [ ] `P0-9` 建立生产可靠性测试门禁 — 状态：待办
+  - 实现：为 P0-1～P0-8 增加 store/API/component 回归测试，并增加至少一条真实浏览器主链路 E2E。
+  - 验证：测试覆盖串会话、断流续接、活动 run、历史校准、审批、retryable error、反馈 ID 和 postMessage 来源校验；Docker 环境中执行测试、Lint 和 E2E。
+  - 依赖：P0-1～P0-8。
+
+### 12.4 阶段二：高频聊天体验（P1）
+
+- [ ] `P1-1` 每会话保存并恢复模型 — 状态：待办
+  - 实现：模型选择写入 thread 状态；从历史消息 `model_spec` 恢复；新会话继承当前草稿模型一次。
+  - 验证：A/B 会话选择不同模型后反复切换，显示和实际请求均保持各自模型。
+  - 依赖：P0-1、P0-5。
+
+- [ ] `P1-2` 首问自动生成会话标题 — 状态：待办
+  - 实现：复用现有 `generateTitle` API 和 fast model；只在默认标题且首轮成功后生成，失败不影响聊天。
+  - 验证：首轮完成后标题更新；用户已重命名的会话不会被自动覆盖。
+  - 依赖：P0-5。
+
+- [ ] `P1-3` 会话列表分页与继续加载 — 状态：待办
+  - 实现：维护 `offset/hasMore/loadingMore`，追加时按 thread ID 去重并保留置顶排序。
+  - 验证：超过 50 条会话可以加载完整，重复置顶项不会重复出现，当前会话不会被刷新操作切换。
+  - 依赖：无。
+
+- [ ] `P1-4` 最终回答模型与统一来源区 — 状态：待办
+  - 实现：渲染已归一化的 `modelName`；从历史/工具结果归一化知识库与网络来源；工具卡保留过程，来源区只展示最终引用。
+  - 验证：有来源时可查看文件、分块或网页信息；无来源时不显示空入口；刷新前后来源一致。
+  - 依赖：P0-5。
+
+- [ ] `P1-5` 上传限制与错误提示对齐后端 — 状态：待办
+  - 实现：选择文件时校验真实大小、图片类型和数量；提示文案复用统一常量；上传失败保留草稿并允许重试。
+  - 验证：超限文件不会发起上传；合法文件不被误拦；后端拒绝时用户能看到可操作错误。
+  - 依赖：无。
+
+- [ ] `P1-6` 补齐高频消息操作 — 状态：待办
+  - 实现：用户消息复制、图片全屏预览与 ESC 关闭、附件图标/大小/状态；继续只在最后一条助手消息显示操作区，避免小窗噪声。
+  - 验证：键盘与鼠标均可关闭图片；复制有成功反馈；长附件名不会撑破小窗。
+  - 依赖：P0-5。
+
+- [ ] `P1-7` 按实际需求增强 Markdown — 状态：待办
+  - 实现：补常用语言高亮、深浅主题和经过清洗的 SVG 展示；不默认增加 Mermaid，也不先抽共享包。
+  - 验证：危险 HTML/SVG 被阻止；代码和公式在普通/最大化窗口不溢出；主题切换可读。
+  - 依赖：无。
+
+- [ ] `P1-8` 建立核心体验测试门禁 — 状态：待办
+  - 实现：补模型记忆、自动标题、分页、来源、上传校验、复制、图片预览和 Markdown 安全测试。
+  - 验证：P1 主路径在 Docker 中通过测试、Lint、构建和浏览器 E2E。
+  - 依赖：P1-1～P1-7。
+
+### 12.5 阶段三：高级智能体能力（P2）
+
+- [ ] `P2-1` 建立按需状态抽屉框架 — 状态：待办
+  - 实现：小窗使用单一抽屉承载高级内容，只有存在状态数据时显示入口；最大化时允许更宽布局，不复制主站常驻多面板。
+  - 验证：无状态时不占空间；普通窗和最大化均可打开、关闭并保持聊天滚动位置。
+  - 依赖：P0-6。
+
+- [ ] `P2-2` 展示 Token、Todo 与运行状态 — 状态：待办
+  - 实现：消费 `agent_state` 中的 Token、Todo 和状态摘要；流式期间增量更新，终态由后端 state 校准。
+  - 验证：Todo 状态转换和 Token 统计刷新正确；切换线程不串状态。
+  - 依赖：P0-1、P0-6、P2-1。
+
+- [ ] `P2-3` 文件与产物预览闭环 — 状态：待办
+  - 实现：按 agent `files` 能力显示文件/产物；先支持列表、预览、下载，再评估删除和保存工作区；深度预览优先放在最大化窗口。
+  - 验证：文本、图片、PDF/Office 支持情况与现有后端预览契约一致；无权限文件不能读取。
+  - 依赖：P2-1。
+
+- [ ] `P2-4` Task/Subagent 状态与子线程详情 — 状态：待办
+  - 实现：识别 task 工具调用，关联 `child_thread_id` 和 subagent run；展示运行中/完成/失败与子线程消息。
+  - 验证：多个并行子智能体不会互相覆盖；父子线程切换不影响主会话 run。
+  - 依赖：P0-1、P0-6、P2-1。
+
+- [ ] `P2-5` 第一批 @ 提及：文件与知识库 — 状态：待办
+  - 实现：复用后端 mention 搜索契约和稳定引用格式；支持键盘选择、删除完整 token 和历史消息标签化显示。
+  - 验证：同名文件/知识库可区分；输入框原始值与可见 label 不混淆；发送后模型收到正确引用。
+  - 依赖：P0-5。
+
+- [ ] `P2-6` 第二批 @ 提及：Skill、MCP 与 Subagent — 状态：待办
+  - 实现：在第一批提及稳定后扩展资源类型，不在 iframe 维护另一套资源权限和业务映射。
+  - 验证：仅展示当前 agent 可用资源；不可用资源不能通过手写 token 绕过后端权限。
+  - 依赖：P2-4、P2-5。
+
+- [ ] `P2-7` 建立高级能力测试门禁 — 状态：待办
+  - 实现：补状态抽屉、Todo、Token、文件/产物、Subagent 和两批 mention 的组件与 E2E 测试。
+  - 验证：至少覆盖一次长任务、一次人工审批、一个产物和一个子智能体完整链路。
+  - 依赖：P2-1～P2-6。
+
+### 12.6 阶段四：嵌入体验增强（P3）
+
+- [ ] `P3-1` 增加“本轮上下文”检查器 — 状态：待办
+  - 实现：展示本轮是否携带网页、选中附件数量、当前摘要文件、各附件解析/匹配状态；不把上下文重新拼进可见问题。
+  - 验证：UI 摘要与实际 `meta.iframe_context` 一致，多附件时不再让用户误以为模型只看到顶部文件。
+  - 依赖：P0-5。
+
+- [ ] `P3-2` 显示上下文截断与完整性状态 — 状态：待办
+  - 实现：后端返回可消费的总预算/截断元数据，前端明确提示哪些页面或附件被截断；继续保留单一总预算，不恢复每文件静默硬截断。
+  - 验证：超过总预算时提示可见且与实际 prompt 一致；未截断时不显示误导警告。
+  - 依赖：P3-1。
+
+- [ ] `P3-3` 提供宿主页面脱敏与摘要钩子 — 状态：待办
+  - 实现：父 SDK 允许接入方显式传递脱敏文本、摘要和更新时间；默认 HTML 采集行为在文档中明确安全风险。
+  - 验证：宿主可关闭原始 HTML，仅发送脱敏文本；检查器能显示来源和更新时间但不泄露 token。
+  - 依赖：P0-8、P3-1。
+
+- [ ] `P3-4` 来文解析状态自动刷新 — 状态：待办
+  - 实现：只对 `pending_sync/running` 附件进行有上限的轮询或事件刷新；ready 后更新摘要并提示现可读取全文，终态立即停止刷新。
+  - 验证：多附件分别更新，不重复 ingest；关闭 iframe 或切换业务页面后没有遗留轮询。
+  - 依赖：P0-1、P3-1。
+
+- [ ] `P3-5` 最大化文件与来源深度查看 — 状态：待办
+  - 实现：普通窗保持摘要；最大化时允许查看完整来源、结构化明细和文件预览，并复用已有后端预览接口。
+  - 验证：普通窗不拥挤；最大化/还原不丢失当前会话、滚动位置和已展开内容。
+  - 依赖：P1-4、P2-3。
+
+- [ ] `P3-6` 建立嵌入体验发布门禁 — 状态：待办
+  - 实现：覆盖上下文检查、截断、脱敏、解析刷新、最大化预览、移动端、键盘可访问性和性能。
+  - 验证：真实父页面 + iframe + 后端 E2E 通过；长网页、多附件和慢解析场景无误导、无泄漏、无失控轮询。
+  - 依赖：P3-1～P3-5。
+
+### 12.7 完成记录
+
+任务完成后按时间追加，不覆盖旧记录。
+
+| 任务 ID | 完成日期 | Commit/工作区 | 验证结果 | 备注 |
+| --- | --- | --- | --- | --- |
+| P0-1 | 2026-07-14 | 当前工作区 | `corepack pnpm test`：68 通过、3 跳过；`corepack pnpm typecheck` 通过 | 运行态按会话隔离，首次发送草稿容器迁移至真实会话。 |
+| P0-2 | 2026-07-14 | 当前工作区 | 新增“切换会话后流式分片保留在原会话”回归用例，通过 | 旧 run 后台继续，切换只影响可见会话。 |
