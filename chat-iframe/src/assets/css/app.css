@@ -965,9 +965,17 @@
 .message-image {
   max-width: 220px;
   max-height: 180px;
-  margin-bottom: 8px;
   border-radius: 8px;
   object-fit: contain;
+}
+
+.message-image-button {
+  display: block;
+  margin-bottom: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
 }
 
 .message-attachments {
@@ -977,11 +985,101 @@
   margin-bottom: 8px;
 }
 
-.message-attachments span,
+.message-attachment {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 220px;
+  padding: 6px 8px;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  color: var(--main-700);
+  background: var(--gray-25);
+}
+
+.message-attachment > div {
+  min-width: 0;
+}
+
+.message-attachment strong,
+.message-attachment small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-attachment strong {
+  color: var(--gray-800);
+  font-size: 12px;
+}
+
+.message-attachment small {
+  margin-top: 2px;
+  color: var(--gray-500);
+  font-size: 11px;
+}
+
 .attached-files span {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.user-message-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--gray-500);
+  background: transparent;
+  cursor: pointer;
+}
+
+.user-message-copy:hover {
+  color: var(--main-700);
+  background: var(--main-50);
+}
+
+.message-image-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 75%);
+}
+
+.message-image-preview-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.message-image-preview-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--gray-0);
+  background: rgb(255 255 255 / 18%);
+  cursor: pointer;
+  font-size: 22px;
+}
+
+.input-attachment-error {
+  margin: 6px 0 0;
+  color: var(--color-error-700);
+  font-size: 12px;
 }
 
 .attached-files button {

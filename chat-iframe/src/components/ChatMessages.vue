@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { Check, Copy, FileText, Image as ImageIcon } from 'lucide-vue-next'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import MessageRefs from '@/components/MessageRefs.vue'
 import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
@@ -29,6 +30,8 @@ defineEmits<{
 
 const openReasoning = ref<Record<string, boolean>>({})
 const messagesEl = ref<HTMLElement | null>(null)
+const copiedUserMessageId = ref('')
+const imagePreview = ref({ src: '', alt: '' })
 const displayItems = computed(() => groupMessageDisplayItems(props.messages))
 const showGeneratingStatus = computed(() => props.streaming && props.messages.some((message) => message.role === 'user'))
 const lastAssistantMessageId = computed(() => {
@@ -49,6 +52,46 @@ function imageSrc(content?: string) {
   if (!content) return ''
   if (content.startsWith('data:') || content.startsWith('blob:')) return content
   return `data:image/jpeg;base64,${content}`
+}
+
+function formatFileSize(size?: number) {
+  if (!Number.isFinite(size) || !size) return ''
+  return size >= 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MB` : `${(size / 1024).toFixed(1)} KB`
+}
+
+function attachmentStatus(status?: string) {
+  if (status === 'uploading') return '上传中'
+  if (status === 'error') return '上传失败'
+  if (status === 'parsed') return '已解析'
+  return '已上传'
+}
+
+function isImageAttachment(type?: string) {
+  return Boolean(type?.startsWith('image/'))
+}
+
+async function copyUserMessage(message: ChatMessage) {
+  await navigator.clipboard?.writeText(message.content)
+  copiedUserMessageId.value = message.id
+  window.setTimeout(() => {
+    if (copiedUserMessageId.value === message.id) copiedUserMessageId.value = ''
+  }, 1500)
+}
+
+function openImagePreview(content?: string) {
+  const src = imageSrc(content)
+  if (!src) return
+  imagePreview.value = { src, alt: '用户上传图片' }
+  window.addEventListener('keydown', closeImagePreviewOnEscape)
+}
+
+function closeImagePreview() {
+  imagePreview.value = { src: '', alt: '' }
+  window.removeEventListener('keydown', closeImagePreviewOnEscape)
+}
+
+function closeImagePreviewOnEscape(event: KeyboardEvent) {
+  if (event.key === 'Escape') closeImagePreview()
 }
 
 function displayValue(value: unknown) {
@@ -136,6 +179,7 @@ async function scrollToBottom() {
 }
 
 watch([displayItems, showGeneratingStatus], scrollToBottom, { flush: 'post', deep: true })
+onUnmounted(closeImagePreview)
 </script>
 
 <template>
@@ -208,12 +252,29 @@ watch([displayItems, showGeneratingStatus], scrollToBottom, { flush: 'post', dee
           {{ item.message.role === 'tool' ? '工具' : '系统' }}
         </div>
         <div class="message-content">
-          <img v-if="item.message.imageContent" class="message-image" :src="imageSrc(item.message.imageContent)" alt="用户上传图片" />
+          <button
+            v-if="item.message.imageContent"
+            type="button"
+            class="message-image-button"
+            title="查看大图"
+            @click="openImagePreview(item.message.imageContent)"
+          >
+            <img class="message-image" :src="imageSrc(item.message.imageContent)" alt="用户上传图片" />
+          </button>
           <div v-if="item.message.attachments?.length" class="message-attachments">
-            <span v-for="attachment in item.message.attachments" :key="String(attachment.file_id || attachment.file_name || attachment.name)">
-              {{ attachment.file_name || attachment.name }}
-            </span>
+            <article v-for="attachment in item.message.attachments" :key="String(attachment.file_id || attachment.file_name || attachment.name)" class="message-attachment">
+              <ImageIcon v-if="isImageAttachment(attachment.file_type)" :size="16" />
+              <FileText v-else :size="16" />
+              <div>
+                <strong :title="String(attachment.file_name || attachment.name || '')">{{ attachment.file_name || attachment.name }}</strong>
+                <small>{{ [formatFileSize(attachment.file_size), attachmentStatus(attachment.status)].filter(Boolean).join(' · ') }}</small>
+              </div>
+            </article>
           </div>
+          <button v-if="item.message.role === 'user' && item.message.content" type="button" class="user-message-copy" title="复制消息" @click="copyUserMessage(item.message)">
+            <Check v-if="copiedUserMessageId === item.message.id" :size="13" />
+            <Copy v-else :size="13" />
+          </button>
           <details v-if="item.message.reasoningContent" class="reasoning-box" :open="openReasoning[item.message.id]">
             <summary @click.prevent="openReasoning[item.message.id] = !openReasoning[item.message.id]">
               {{ item.message.status === 'streaming' ? '正在思考...' : '推理过程' }}
@@ -243,6 +304,12 @@ watch([displayItems, showGeneratingStatus], scrollToBottom, { flush: 'post', dee
         <span class="generating-text">正在生成回复...</span>
       </div>
     </div>
+    <Teleport to="body">
+      <div v-if="imagePreview.src" class="message-image-preview-overlay" role="dialog" aria-modal="true" aria-label="图片预览" @click="closeImagePreview">
+        <button type="button" class="message-image-preview-close" title="关闭" @click.stop="closeImagePreview">×</button>
+        <img :src="imagePreview.src" :alt="imagePreview.alt" class="message-image-preview-img" @click.stop />
+      </div>
+    </Teleport>
     </template>
   </section>
 </template>

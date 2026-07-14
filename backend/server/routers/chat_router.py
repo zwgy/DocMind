@@ -253,6 +253,7 @@ class AttachmentResponse(BaseModel):
 class AttachmentLimits(BaseModel):
     allowed_extensions: list[str]
     max_size_bytes: int
+    max_files: int
 
 
 class AttachmentListResponse(BaseModel):

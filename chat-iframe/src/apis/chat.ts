@@ -1,4 +1,5 @@
 import { normalizeChatMessage } from '../utils/chat-message.ts'
+import { attachmentValidationError, imageValidationError } from '../utils/attachment-limits.ts'
 import { apiUrl } from './api-url.ts'
 import type {
   ChatMessage,
@@ -494,6 +495,8 @@ export async function submitMessageFeedback(
 }
 
 export async function uploadImage(file: File, token?: string) {
+  const error = imageValidationError(file)
+  if (error) throw new Error(error)
   const body = new FormData()
   body.append('file', file)
   const response = await fetch(apiUrl('/api/chat/image/upload'), {
@@ -512,6 +515,8 @@ export async function getThreadAttachments(threadId: string, token?: string) {
 }
 
 export async function uploadAttachment(file: File, token?: string) {
+  const error = attachmentValidationError([file])
+  if (error) throw new Error(error)
   const body = new FormData()
   body.append('file', file)
   const response = await fetch(apiUrl('/api/chat/attachments/tmp'), {

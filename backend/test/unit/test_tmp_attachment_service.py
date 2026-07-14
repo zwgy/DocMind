@@ -203,6 +203,19 @@ async def test_confirm_tmp_thread_attachments_materializes_original_and_parsed_f
 
 
 @pytest.mark.asyncio
+async def test_confirm_tmp_thread_attachments_rejects_too_many_files():
+    with pytest.raises(service.HTTPException, match="一次最多添加") as exc_info:
+        await service.confirm_tmp_thread_attachments_view(
+            thread_id="thread-1",
+            attachments=[{}] * (service.MAX_ATTACHMENT_COUNT + 1),
+            db=None,
+            current_uid="user-1",
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_parse_tmp_attachment_uses_object_name_for_type_validation(monkeypatch):
     fake_minio = FakeMinioClient()
     object_name = "tmp/chat_attachments/user-1/tmp-1/original/demo.docx"

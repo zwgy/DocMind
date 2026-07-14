@@ -14,6 +14,13 @@ import {
 } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { IncomingPageFile, ModelOption } from '@/types'
+import {
+  ATTACHMENT_LIMIT_TEXT,
+  IMAGE_ACCEPT,
+  IMAGE_LIMIT_TEXT,
+  attachmentValidationError,
+  imageValidationError
+} from '@/utils/attachment-limits'
 import { autosizeTextarea } from '@/utils/textarea-autosize'
 
 const props = withDefaults(
@@ -40,7 +47,15 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  submit: [payload: { text: string; files: File[]; imageFile?: File | null; selectedPageFiles: IncomingPageFile[] }]
+  submit: [
+    payload: {
+      text: string
+      files: File[]
+      imageFile?: File | null
+      selectedPageFiles: IncomingPageFile[]
+      restoreUploadDraft: (retry: { files: boolean; image: boolean; message: string }) => void
+    }
+  ]
   stop: []
   'update:askPage': [value: boolean]
   'update:askFile': [value: boolean]
@@ -58,6 +73,7 @@ const showModelMenu = ref(false)
 const showAttachmentMenu = ref(false)
 const showAttachmentModal = ref(false)
 const dragActive = ref(false)
+const attachmentError = ref('')
 const modelSearch = ref('')
 const fileMenuRef = ref<HTMLElement | null>(null)
 const modelMenuRef = ref<HTMLElement | null>(null)
@@ -116,10 +132,30 @@ function resizeTextarea() {
 function submit() {
   const content = text.value.trim()
   if (!content) return
-  emit('submit', { text: content, files: files.value, imageFile: imageFile.value, selectedPageFiles: selectedPageFiles.value })
+  const fileError = attachmentValidationError(files.value)
+  const imageError = imageValidationError(imageFile.value)
+  if (fileError || imageError) {
+    attachmentError.value = fileError || imageError
+    return
+  }
+  const draft = { text: content, files: [...files.value], imageFile: imageFile.value }
+  emit('submit', {
+    text: content,
+    files: draft.files,
+    imageFile: draft.imageFile,
+    selectedPageFiles: selectedPageFiles.value,
+    restoreUploadDraft: (retry) => {
+      text.value = draft.text
+      if (retry.files) files.value = draft.files
+      if (retry.image) imageFile.value = draft.imageFile
+      attachmentError.value = retry.message
+      resizeTextarea()
+    }
+  })
   text.value = ''
   files.value = []
   imageFile.value = null
+  attachmentError.value = ''
   resizeTextarea()
 }
 
@@ -127,7 +163,13 @@ function appendDraftFiles(fileList?: FileList | File[]) {
   const incoming = Array.from(fileList || [])
   const existing = new Set(draftAttachmentFiles.value.map((file) => `${file.name}:${file.size}:${file.lastModified}`))
   const next = incoming.filter((file) => !existing.has(`${file.name}:${file.size}:${file.lastModified}`))
+  const error = attachmentValidationError(next, draftAttachmentFiles.value.length)
+  if (error) {
+    attachmentError.value = error
+    return
+  }
   draftAttachmentFiles.value = [...draftAttachmentFiles.value, ...next]
+  attachmentError.value = ''
 }
 
 function onFileChange(event: Event) {
@@ -139,7 +181,13 @@ function onFileChange(event: Event) {
 
 function onImageChange(event: Event) {
   const input = event.target as HTMLInputElement
-  imageFile.value = Array.from(input.files || [])[0] || null
+  const file = Array.from(input.files || [])[0] || null
+  const error = imageValidationError(file)
+  if (error) attachmentError.value = error
+  else if (file) {
+    imageFile.value = file
+    attachmentError.value = ''
+  }
   input.value = ''
 }
 
@@ -282,6 +330,7 @@ watch(text, resizeTextarea)
         <button type="button" title="移除附件" @click="removeFile(index)"><X :size="12" /></button>
       </span>
     </div>
+    <p v-if="attachmentError" class="input-attachment-error" role="alert">{{ attachmentError }}</p>
 
     <div class="input-row">
       <textarea
@@ -308,7 +357,7 @@ watch(text, resizeTextarea)
               <button
                 type="button"
                 class="attachment-option"
-                data-tooltip="支持任意文件格式 ≤ 5 MB"
+                :data-tooltip="ATTACHMENT_LIMIT_TEXT"
                 @click="openAttachmentModal"
               >
                 <FileText :size="15" />
@@ -317,7 +366,7 @@ watch(text, resizeTextarea)
               <button
                 type="button"
                 class="attachment-option"
-                data-tooltip="支持 jpg、jpeg、png、gif，≤ 5 MB"
+                :data-tooltip="IMAGE_LIMIT_TEXT"
                 @click="triggerImageInput"
               >
                 <Image :size="15" />
@@ -325,7 +374,7 @@ watch(text, resizeTextarea)
               </button>
             </div>
             <input class="hidden-file-input" type="file" multiple @change="onFileChange" />
-            <input ref="imageInputRef" class="hidden-file-input" type="file" accept="image/*" @change="onImageChange" />
+            <input ref="imageInputRef" class="hidden-file-input" type="file" :accept="IMAGE_ACCEPT" @change="onImageChange" />
           </div>
         </div>
         <div class="send-tools">
@@ -388,7 +437,7 @@ watch(text, resizeTextarea)
         >
           <input class="dropzone-file-input" type="file" multiple @change="onFileChange" />
           <strong>点击或拖拽文件到此处上传</strong>
-          <span>支持任意文件格式 ≤ 5 MB；PDF 和图片可选解析为 Markdown。</span>
+          <span>{{ ATTACHMENT_LIMIT_TEXT }}；PDF 和图片可选解析为 Markdown。</span>
         </label>
         <div v-if="draftAttachmentFiles.length" class="attachment-draft-list">
           <div v-for="(file, index) in draftAttachmentFiles" :key="`${file.name}-${file.size}-${index}`" class="attachment-draft-item">

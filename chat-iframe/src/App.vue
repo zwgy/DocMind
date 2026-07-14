@@ -138,6 +138,7 @@ async function sendChat(payload: {
   files: File[]
   imageFile?: File | null
   selectedPageFiles?: IncomingPageFile[]
+  restoreUploadDraft: (retry: { files: boolean; image: boolean; message: string }) => void
 }) {
   const selectedContextFile = payload.selectedPageFiles?.[0] || null
   const selectedContextResult = selectedContextFile ? results.value[selectedContextFile.id] || null : null
@@ -156,7 +157,8 @@ async function sendChat(payload: {
     context.config.agentId,
     context.config.conversationScopeKey
   )
-  if (result) notifyMessageSent({ conversationId: result.threadId, messageId: result.messageId })
+  if (result && 'retryUpload' in result) payload.restoreUploadDraft(result.retryUpload)
+  else if (result) notifyMessageSent({ conversationId: result.threadId, messageId: result.messageId })
 }
 
 function windowDragPayload(event: PointerEvent) {

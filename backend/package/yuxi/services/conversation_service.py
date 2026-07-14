@@ -25,6 +25,7 @@ from yuxi.utils.upload_utils import read_upload_with_limit, write_upload_to_path
 
 ATTACHMENT_ALLOWED_EXTENSIONS: tuple[str, ...] = ()
 MAX_ATTACHMENT_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+MAX_ATTACHMENT_COUNT = 10
 MAX_ATTACHMENT_MARKDOWN_CHARS = 32_000  # TODO: 转 MARKDOWN的时候，不应该裁剪
 TMP_ATTACHMENT_PREFIX = "tmp/chat_attachments"
 TMP_ATTACHMENT_PARSE_EXTENSIONS = (".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif")
@@ -626,6 +627,9 @@ async def confirm_tmp_thread_attachments_view(
     """将选中的 tmp 附件正式关联到对话线程。"""
     if not attachments:
         raise HTTPException(status_code=400, detail="请选择要添加的附件")
+    # 一次确认过多附件会放大 MinIO 下载和线程状态同步开销，前端也使用相同上限提前拦截。
+    if len(attachments) > MAX_ATTACHMENT_COUNT:
+        raise HTTPException(status_code=400, detail=f"一次最多添加 {MAX_ATTACHMENT_COUNT} 个附件")
 
     conv_repo = ConversationRepository(db)
     conversation = await require_user_conversation(conv_repo, thread_id, str(current_uid))
@@ -795,6 +799,7 @@ async def list_thread_attachments_view(
         "limits": {
             "allowed_extensions": sorted(ATTACHMENT_ALLOWED_EXTENSIONS),
             "max_size_bytes": MAX_ATTACHMENT_SIZE_BYTES,
+            "max_files": MAX_ATTACHMENT_COUNT,
         },
     }
 

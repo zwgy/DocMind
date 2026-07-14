@@ -159,6 +159,7 @@ export type ChatAttachmentPreview = {
   name?: string
   file_size?: number
   file_type?: string
+  status?: string
   [key: string]: unknown
 }
 

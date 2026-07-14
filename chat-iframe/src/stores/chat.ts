@@ -21,6 +21,7 @@ import { listChatModels } from '@/apis/models'
 import { appendRunChunkSegment } from '@/utils/chat-message'
 import { buildContextSummaryMessage } from '@/utils/context-summary'
 import { splitStreamingText } from '@/utils/streaming-text'
+import { attachmentValidationError } from '@/utils/attachment-limits'
 import type { ChatMessage, ChatThread, ExtractionResult, IncomingPageFile, ModelOption, PageContent, RunStreamChunk } from '@/types'
 
 type SendOptions = {
@@ -33,6 +34,11 @@ type SendOptions = {
   selectedPageFiles?: IncomingPageFile[]
   extractionResults?: Record<string, ExtractionResult>
 }
+
+type SendResult =
+  | { threadId: string; messageId: string }
+  | { retryUpload: { files: boolean; image: boolean; message: string } }
+  | null
 
 type PendingInterrupt = {
   status: string
@@ -480,6 +486,8 @@ export const useChatStore = defineStore('chat', {
     },
     async attachFiles(threadId: string, files: File[] = [], token?: string) {
       if (!files.length) return []
+      const validationError = attachmentValidationError(files)
+      if (validationError) throw new Error(validationError)
       // 复用主站已有附件链路，避免 iframe 自己维护一套上传目录和权限模型。
       const uploaded = await Promise.all(files.map((file) => uploadAttachment(file, token)))
       await confirmThreadAttachments(threadId, uploaded.map(tmpAttachmentPayload), token)
@@ -523,7 +531,7 @@ export const useChatStore = defineStore('chat', {
         runtime.messages = [...runtime.messages]
       }
     },
-    async send(options: SendOptions, token?: string, agentId?: string, conversationScopeKey?: string) {
+    async send(options: SendOptions, token?: string, agentId?: string, conversationScopeKey?: string): Promise<SendResult> {
       const text = options.text.trim()
       const runtime = this.ensureRuntime()
       if (!text || runtime.isSending) return null
@@ -536,13 +544,20 @@ export const useChatStore = defineStore('chat', {
       runtime.lastEventSeq = '0-0'
       const controller = new AbortController()
       runtime.abortController = controller
+      let pendingFileUpload = Boolean(options.files?.length)
+      let pendingImageUpload = Boolean(options.imageFile)
       const userMessage: ChatMessage = {
         id: messageId('user'),
         role: 'user',
         content: text,
         status: 'done',
         imageContent: options.imageFile ? URL.createObjectURL(options.imageFile) : undefined,
-        attachments: (options.files || []).map((file) => ({ file_name: file.name, file_size: file.size, file_type: file.type })),
+        attachments: (options.files || []).map((file) => ({
+          file_name: file.name,
+          file_size: file.size,
+          file_type: file.type,
+          status: 'uploading'
+        })),
         createdAt: new Date().toISOString()
       }
       let assistantMessage: ChatMessage = {
@@ -648,7 +663,13 @@ export const useChatStore = defineStore('chat', {
         const threadId = await this.ensureThread(token, agentId, conversationScopeKey)
         if (selectedModelSpec) this.modelSpecsByThread[threadId] = selectedModelSpec
         const uploadedAttachments = await this.attachFiles(threadId, options.files || [], token)
+        pendingFileUpload = false
+        if (userMessage.attachments?.length) {
+          userMessage.attachments = uploadedAttachments.map((item) => ({ ...item, status: 'uploaded' }))
+          runtime.messages = [...runtime.messages]
+        }
         const imageContent = options.imageFile ? (await uploadImage(options.imageFile, token)).image_content || null : null
+        pendingImageUpload = false
         let runId = ''
         let requestId = ''
         try {
@@ -721,10 +742,18 @@ export const useChatStore = defineStore('chat', {
         }
         flushTextQueue()
         const message = error instanceof Error ? error.message : '发送失败'
+        if (pendingFileUpload && userMessage.attachments) {
+          userMessage.attachments.forEach((attachment) => {
+            attachment.status = 'error'
+          })
+        }
         assistantMessage.status = 'error'
         assistantMessage.content = message
         this.error = message
         runtime.messages = [...runtime.messages]
+        if (pendingFileUpload || pendingImageUpload) {
+          return { retryUpload: { files: pendingFileUpload, image: pendingImageUpload, message } }
+        }
         return null
       } finally {
         runtime.isSending = false
