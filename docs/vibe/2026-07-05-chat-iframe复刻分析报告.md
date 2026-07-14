@@ -447,9 +447,9 @@ iframe 在配置到达前必须接收 `INIT_CONFIG`，但当前任何来源的�
   - 验证：新增回归测试确认终态后 user/assistant 使用后端正式 ID、显示服务端正文和模型名，且 host 消息回调返回正式 user ID。
   - 依赖：P0-1。
 
-- [ ] `P0-6` 消费完整运行事件与人工交互 — 状态：待办
-  - 实现：处理 `agent_state`、`ask_user_question_required`、`human_approval_required`、`interrupted` 和 retryable worker error；审批/问用户提交后 resume 原 parent run。
-  - 验证：审批和问用户不会永久停在“正在生成”；retryable error 不提前显示最终失败；resume 后继续原会话。
+- [x] `P0-6` 消费完整运行事件与人工交互 — 状态：已完成
+  - 实现：运行态保存 `agentState/pendingInterrupt`；追问或审批到达时停止加载并显示交互卡。提交选项或文本后创建携带 `parent_run_id` 的 resume run，再复用活动 run 订阅；retryable worker error 只作为状态事件，不显示最终失败。
+  - 验证：新增回归测试确认回答只恢复原 parent run，且 retryable error 不生成最终错误消息。
   - 依赖：P0-1、P0-4。
 
 - [ ] `P0-7` 闭环重试与反馈 — 状态：待办
@@ -589,3 +589,4 @@ iframe 在配置到达前必须接收 `INIT_CONFIG`，但当前任何来源的�
 | P0-3 | 2026-07-14 | 当前工作区 | `corepack pnpm test`：69 通过、3 跳过 | SSE cursor 续接，断流后不重复已显示的文本。 |
 | P0-4 | 2026-07-14 | 当前工作区 | `corepack pnpm test`：70 通过、3 跳过 | 选择线程、启动恢复和页面重新可见时恢复活动 run。 |
 | P0-5 | 2026-07-14 | 当前工作区 | `corepack pnpm test`：71 通过、3 跳过；`corepack pnpm typecheck` 通过 | 终态按 request ID 以服务端消息校准本轮乐观消息。 |
+| P0-6 | 2026-07-14 | 当前工作区 | `corepack pnpm test`：73 通过、3 跳过；`corepack pnpm typecheck` 通过 | 追问/审批恢复原 parent run，retryable worker error 不提前显示最终失败。 |

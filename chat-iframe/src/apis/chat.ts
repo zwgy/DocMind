@@ -25,6 +25,7 @@ type CreateConversationOptions = RequestOptions & {
 type RunEventHandlers = {
   onRunStart?: (runId: string, requestId: string) => void
   onEventId?: (eventId: string) => void
+  onStatus?: (chunk: Record<string, unknown>) => void
   onChunk?: (chunk: RunStreamChunk) => void
   onText?: (text: string) => void
   onTool?: (text: string) => void
@@ -225,6 +226,7 @@ function handleRunPayload(payload: Record<string, unknown>, handlers: RunEventHa
   const chunk = body.chunk && typeof body.chunk === 'object' ? (body.chunk as Record<string, unknown>) : null
   const current = chunk || body
   const status = String(current.status || body.status || '')
+  if (status) handlers.onStatus?.(current)
   const streamEvent =
     (current.stream_event as Record<string, unknown> | undefined) ||
     ((current.chunk as Record<string, unknown> | undefined)?.stream_event as Record<string, unknown> | undefined)
@@ -240,14 +242,14 @@ function handleRunPayload(payload: Record<string, unknown>, handlers: RunEventHa
     const tool = extractToolEvent(current)
     if (tool) handlers.onTool?.(tool)
   }
-  if (status === 'error') {
+  if (status === 'error' && current.retryable !== true) {
     emitChunk(handlers, {
       type: 'error',
       message: String(current.error_message || current.message || '对话失败'),
       errorType: typeof current.error_type === 'string' ? current.error_type : undefined
     })
   }
-  if (status === 'interrupted') {
+  if (status === 'interrupted' && !Array.isArray(current.questions)) {
     emitChunk(handlers, { type: 'error', message: String(current.message || '回答生成已中断'), errorType: 'interrupted' })
   }
   if (status === 'finished' || status === 'completed' || status === 'cancelled') emitChunk(handlers, { type: 'done' })
@@ -332,6 +334,33 @@ export async function getThreadActiveRun(threadId: string, token?: string) {
     headers: authHeaders(token, false)
   })
   return parseResponse<{ run?: { id?: string; status?: string } }>(response, '获取会话活动任务失败')
+}
+
+export async function createResumeRun(input: {
+  threadId: string
+  agentId?: string
+  parentRunId: string
+  answer: unknown
+  token?: string
+}) {
+  const requestId = crypto.randomUUID()
+  const response = await fetch(apiUrl('/api/agent/runs'), {
+    method: 'POST',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({
+      query: null,
+      agent_id: input.agentId || DEFAULT_AGENT_ID,
+      thread_id: input.threadId,
+      meta: { request_id: requestId, source: 'chat-iframe' },
+      resume: input.answer,
+      parent_run_id: input.parentRunId,
+      resume_request_id: requestId
+    })
+  })
+  const run = await parseResponse<{ id?: string; run_id?: string }>(response, '恢复运行失败')
+  const runId = run.id || run.run_id
+  if (!runId) throw new Error('恢复运行失败：缺少运行任务 ID')
+  return { runId, requestId }
 }
 
 export async function listConversations(token?: string, agentId?: string, conversationScopeKey?: string): Promise<ChatThread[]> {

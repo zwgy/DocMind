@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import {
   cancelRun,
   confirmThreadAttachments,
+  createResumeRun,
   createConversation,
   deleteConversation,
   getRun,
@@ -32,6 +33,12 @@ type SendOptions = {
   extractionResults?: Record<string, ExtractionResult>
 }
 
+type PendingInterrupt = {
+  status: string
+  questions: Record<string, unknown>[]
+  parentRunId: string
+}
+
 type ThreadRuntime = {
   messages: ChatMessage[]
   isSending: boolean
@@ -40,6 +47,8 @@ type ThreadRuntime = {
   lastEventSeq: string
   abortController: AbortController | null
   lastUserMessageForRetry: SendOptions | null
+  pendingInterrupt: PendingInterrupt | null
+  agentState: Record<string, unknown> | null
 }
 
 type ChatState = {
@@ -65,7 +74,9 @@ function createThreadRuntime(): ThreadRuntime {
     activeRunId: '',
     lastEventSeq: '0-0',
     abortController: null,
-    lastUserMessageForRetry: null
+    lastUserMessageForRetry: null,
+    pendingInterrupt: null,
+    agentState: null
   }
 }
 
@@ -121,6 +132,9 @@ export const useChatStore = defineStore('chat', {
     isStreaming(state) {
       return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.isStreaming || false
     },
+    pendingInterrupt(state) {
+      return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.pendingInterrupt || null
+    },
     displayMessages(state) {
       const messages = state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.messages || []
       return state.contextSummaryMessage ? [state.contextSummaryMessage, ...messages] : messages
@@ -131,6 +145,29 @@ export const useChatStore = defineStore('chat', {
       const runtimeKey = threadId || this.currentThreadId || DRAFT_THREAD_KEY
       if (!this.threadRuntimes[runtimeKey]) this.threadRuntimes[runtimeKey] = createThreadRuntime()
       return this.threadRuntimes[runtimeKey]
+    },
+    consumeRunStatus(runtime: ThreadRuntime, chunk: Record<string, unknown>) {
+      const status = String(chunk.status || '')
+      if (status === 'agent_state' && chunk.agent_state && typeof chunk.agent_state === 'object') {
+        runtime.agentState = chunk.agent_state as Record<string, unknown>
+        return
+      }
+      if (status !== 'ask_user_question_required' && status !== 'human_approval_required') return
+
+      const interruptInfo = chunk.interrupt_info as Record<string, unknown> | undefined
+      const questions = Array.isArray(chunk.questions)
+        ? chunk.questions
+        : Array.isArray(interruptInfo?.questions)
+          ? interruptInfo.questions
+          : []
+      if (!questions.length) return
+      runtime.pendingInterrupt = {
+        status,
+        questions: questions.filter((question): question is Record<string, unknown> => Boolean(question && typeof question === 'object')),
+        parentRunId: String(chunk.run_id || chunk.parent_run_id || runtime.activeRunId)
+      }
+      runtime.isSending = false
+      runtime.isStreaming = false
     },
     setContextSummary(input: { file: IncomingPageFile | null; result: ExtractionResult | null; loading?: boolean; error?: string }) {
       this.contextSummaryMessage = buildContextSummaryMessage(input)
@@ -233,6 +270,20 @@ export const useChatStore = defineStore('chat', {
       ]
       return persistedTurn
     },
+    async submitInterrupt(threadId: string, answer: unknown, token?: string, agentId?: string) {
+      const runtime = this.ensureRuntime(threadId)
+      const pending = runtime.pendingInterrupt
+      if (!pending?.parentRunId) return null
+      runtime.pendingInterrupt = null
+      try {
+        const result = await createResumeRun({ threadId, agentId, parentRunId: pending.parentRunId, answer, token })
+        await this.resumeActiveRun(threadId, token)
+        return result
+      } catch (error) {
+        runtime.pendingInterrupt = pending
+        throw error
+      }
+    },
     async resumeActiveRun(threadId: string, token?: string) {
       if (!threadId) return
       const runtime = this.ensureRuntime(threadId)
@@ -275,6 +326,9 @@ export const useChatStore = defineStore('chat', {
       const streamHandlers = {
         onEventId: (eventId: string) => {
           runtime.lastEventSeq = eventId
+        },
+        onStatus: (chunk: Record<string, unknown>) => {
+          this.consumeRunStatus(runtime, chunk)
         },
         onChunk: (chunk: RunStreamChunk) => {
           if (chunk.type === 'done') {
@@ -450,6 +504,9 @@ export const useChatStore = defineStore('chat', {
         },
         onEventId: (eventId: string) => {
           runtime.lastEventSeq = eventId
+        },
+        onStatus: (chunk: Record<string, unknown>) => {
+          this.consumeRunStatus(runtime, chunk)
         },
         onChunk: (chunk: RunStreamChunk) => {
           if (chunk.type === 'done') {

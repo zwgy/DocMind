@@ -5,6 +5,7 @@ import { ingestIncomingDocument, queryIncomingDocumentExtractions } from '@/apis
 import ChatInput from '@/components/ChatInput.vue'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatSidebar from '@/components/ChatSidebar.vue'
+import RunInterruptCard from '@/components/RunInterruptCard.vue'
 import { useIframeBridge } from '@/composables/useIframeBridge'
 import { useChatStore } from '@/stores/chat'
 import { useIframeContextStore } from '@/stores/iframe-context'
@@ -109,6 +110,14 @@ async function createChat() {
 async function selectThread(threadId: string) {
   await chat.selectThread(threadId, context.config.token)
   showSidebar.value = false
+}
+
+async function submitInterrupt(answer: unknown) {
+  try {
+    await chat.submitInterrupt(chat.currentThreadId, answer, context.config.token, context.config.agentId)
+  } catch (err) {
+    chat.error = err instanceof Error ? err.message : '恢复运行失败'
+  }
 }
 
 function resumeVisibleThread() {
@@ -276,6 +285,13 @@ onUnmounted(() => {
           :streaming="chat.isStreaming"
           @retry="chat.retry(context.config.token, context.config.agentId, context.config.conversationScopeKey)"
           @feedback="(event) => chat.feedback(event, context.config.token)"
+        />
+        <RunInterruptCard
+          v-if="chat.pendingInterrupt"
+          :interrupt="chat.pendingInterrupt"
+          :disabled="chat.isSending"
+          @submit="submitInterrupt"
+          @cancel="submitInterrupt('reject')"
         />
         <ChatInput
           :disabled="chat.isSending || Boolean(context.config.authError) || !context.config.token"
