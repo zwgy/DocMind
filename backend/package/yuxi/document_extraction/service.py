@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 from yuxi.document_extraction.llm import JsonLLM, ModelJsonLLM
 from yuxi.document_extraction.prompts import build_category_prompt, build_extraction_prompt
 from yuxi.document_extraction.schemas import (
+    CategoryDecision,
     DocumentCategoryResult,
     category_result_for_classification_label,
     category_result_to_mapping,
@@ -17,6 +18,7 @@ from yuxi.document_extraction.schemas import (
     get_extraction_schema,
 )
 from yuxi.knowledge.chunking.ragflow_like.dispatcher import chunk_markdown
+from yuxi.knowledge.chunking.ragflow_like.nlp import count_tokens
 from yuxi.knowledge.utils import is_minio_url, parse_minio_url
 from yuxi.repositories.document_business_extraction_repository import DocumentBusinessExtractionRepository
 from yuxi.storage.minio import get_minio_client
@@ -24,14 +26,7 @@ from yuxi.utils import hashstr, logger
 from yuxi.utils.datetime_utils import utc_isoformat
 
 MarkdownReader = Callable[[str], str | Awaitable[str]]
-SHORT_MARKDOWN_EXTRACTION_LIMIT = 12_000
-ITEM_MERGE_KEY_FIELDS = {
-    "risk_item": ("risk_name", "department", "role"),
-    "task_item": ("task_name", "department", "deadline"),
-    "assessment_item": ("target", "project", "result"),
-    "reward_punishment_item": ("target", "action_type", "result"),
-    "management_requirement_item": ("requirement", "department", "role"),
-}
+SHORT_MARKDOWN_EXTRACTION_TOKEN_LIMIT = 12_000
 
 
 @dataclass(slots=True)
@@ -103,6 +98,9 @@ class BusinessExtractionService:
         if category_result is None:
             category_result = await self._classify_chunks(llm, normalized_chunks)
         category_mapping = category_result_to_mapping(category_result)
+        # 通用类只做兜底；即使模型或调用方同时判真，也不能和专业 schema 重复抽取。
+        if any(matched for name, matched in category_mapping.items() if name != "general"):
+            category_mapping["general"] = False
         schema_ids = extraction_schema_ids_for_categories(category_mapping)
         if not schema_ids:
             return BusinessExtractionDraft(
@@ -290,7 +288,7 @@ class BusinessExtractionService:
         text = markdown.strip()
         if not text:
             return []
-        if len(text) <= SHORT_MARKDOWN_EXTRACTION_LIMIT:
+        if count_tokens(text) <= SHORT_MARKDOWN_EXTRACTION_TOKEN_LIMIT:
             return [{"chunk_id": None, "content": text, "chunk_index": 0}]
         chunks = chunk_markdown(text, document_key, filename, processing_params)
         return [
@@ -309,6 +307,14 @@ class BusinessExtractionService:
                 candidate = getattr(result, name)
                 if candidate.matched and not current.matched:
                     setattr(merged, name, candidate)
+        specific_matched = any(
+            getattr(merged, name).matched for name in DocumentCategoryResult.model_fields if name != "general"
+        )
+        # 分块可能分别命中通用类和专业类，最终统一在文档级保证兜底互斥。
+        if specific_matched:
+            merged.general = CategoryDecision()
+        elif not merged.general.matched:
+            merged.general = CategoryDecision(matched=True)
         return merged
 
     async def _extract_schema_items(
@@ -363,7 +369,7 @@ class BusinessExtractionService:
 
 def _merge_obvious_duplicate_items(items: list[ExtractedBusinessItem]) -> list[ExtractedBusinessItem]:
     merged: list[ExtractedBusinessItem] = []
-    index_by_key: dict[tuple[str, tuple[str, ...]], int] = {}
+    index_by_key: dict[tuple[str, tuple[tuple[str, str], ...]], int] = {}
     for item in items:
         key = _item_merge_key(item)
         if key is None:
@@ -374,16 +380,24 @@ def _merge_obvious_duplicate_items(items: list[ExtractedBusinessItem]) -> list[E
             index_by_key[key] = len(merged)
             merged.append(item)
             continue
-        _merge_item_into(merged[existing_index], item)
+        target = merged[existing_index]
+        # 业务字段完全一致时才合并；原文依据允许来自不同分块并应全部保留。
+        quotes = [quote for quote in (target.source_quote, item.source_quote) if quote]
+        target.source_quote = "\n".join(dict.fromkeys(quotes))
+        target.data["source_quote"] = target.source_quote
     return merged
 
 
-def _item_merge_key(item: ExtractedBusinessItem) -> tuple[str, tuple[str, ...]] | None:
-    fields = ITEM_MERGE_KEY_FIELDS.get(item.item_type)
-    if not fields:
-        return None
-    values = tuple(_normalize_merge_value(item.data.get(field)) for field in fields)
-    if not any(values):
+def _item_merge_key(item: ExtractedBusinessItem) -> tuple[str, tuple[tuple[str, str], ...]] | None:
+    # source_quote 是证据而非业务身份；其余字段任一不同都表示不能确认是同一事项。
+    values = tuple(
+        sorted(
+            (name, _normalize_merge_value(value))
+            for name, value in item.data.items()
+            if name != "source_quote"
+        )
+    )
+    if not values:
         return None
     return item.item_type, values
 
@@ -392,18 +406,3 @@ def _normalize_merge_value(value: Any) -> str:
     if value is None:
         return ""
     return " ".join(str(value).strip().lower().split())
-
-
-def _merge_item_into(target: ExtractedBusinessItem, source: ExtractedBusinessItem) -> None:
-    # 保守合并：只补空字段和追加依据，避免把不确定的跨块信息揉成新事实。
-    for key, value in source.data.items():
-        if _is_empty_value(target.data.get(key)) and not _is_empty_value(value):
-            target.data[key] = value
-    quotes = [quote for quote in [target.source_quote, source.source_quote] if quote]
-    unique_quotes = list(dict.fromkeys(quotes))
-    target.source_quote = "\n".join(unique_quotes)
-    target.data["source_quote"] = target.source_quote
-
-
-def _is_empty_value(value: Any) -> bool:
-    return value is None or value == "" or value == []

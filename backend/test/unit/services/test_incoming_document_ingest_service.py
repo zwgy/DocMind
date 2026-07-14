@@ -122,10 +122,51 @@ async def test_summarize_prompt_declares_categories_and_avoids_iframe_wording(mo
     )
 
     assert result["classification"] == "安全管理类"
-    assert "通报类、考评类、奖惩处置类" in captured["prompt"]
-    assert "其他" in captured["prompt"]
-    assert "不是正式业务结构化抽取结果" in captured["prompt"]
-    assert "chat-iframe" not in captured["prompt"]
+    prompt = captured["prompt"]
+    assert "- 通报类：" in prompt
+    assert "- 奖惩处置类：包含奖励、表彰、处罚" in prompt
+    assert "- 通用类：" in prompt
+    assert "只能填写“分类说明”中每行冒号前的名称" in prompt
+    assert "按照来文的主要目的" in prompt
+    assert "无法归入上述专业类别时填“通用类”" not in prompt
+    assert "不要复制 summary" in prompt
+    assert "--- 文件名 ---" in prompt
+    assert "--- 外部元数据 ---" in prompt
+    assert "--- 来文正文 ---" in prompt
+    assert "- 其他：" not in prompt
+    assert "chat-iframe" not in prompt
+
+
+async def test_summarize_prompt_marks_truncated_markdown(monkeypatch):
+    captured = {}
+
+    class FakeModelJsonLLM:
+        def __init__(self, model_spec):
+            captured["model_spec"] = model_spec
+
+        async def complete_json(self, prompt, schema):
+            captured["prompt"] = prompt
+            return {
+                "classification": "通用类",
+                "classification_confidence": 0.7,
+                "summary": "摘要",
+                "structured_result": {},
+            }
+
+    monkeypatch.setattr(ingest_module, "ModelJsonLLM", FakeModelJsonLLM)
+    monkeypatch.setattr(ingest_module, "INCOMING_SUMMARY_MARKDOWN_LIMIT", 5)
+
+    await ingest_module._summarize_incoming_document(
+        filename="incoming.pdf",
+        markdown="123456",
+        metadata={},
+    )
+
+    prompt = captured["prompt"]
+    assert "--- 来文正文（已截断） ---" in prompt
+    assert "不能声称覆盖全文" in prompt
+    assert "12345" in prompt
+    assert "123456" not in prompt
 
 
 async def test_ingest_direct_file_reuses_existing_source_file_id():

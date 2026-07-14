@@ -12,13 +12,14 @@
 - 修正 MinerU 独立部署验证命令：补齐 `return_images=true` 及高精度 hybrid 解析参数，避免手工验证 ZIP 缺少图片资产；补充扫描件强制 OCR、调试 JSON 和 MinerU 语义清理导致“正文缺失”的排查说明。
 - 修复旧版 Office 文档解析：将 `.doc` 纳入允许上传格式，`.doc/.xls` 先通过 API 镜像内的 LibreOffice 转换为 `.docx/.xlsx`，再复用 Docling 解析；补装 `libreoffice-calc-nogui` 以支持旧版 Excel。
 - 优化来文管理详情页结构化结果展示：`GET /api/incoming-documents/{incomingId}` 透出最新成功的正式业务结构化抽取 `businessExtraction` 与后端 display label，Web 详情抽屉默认展示分类完成后的业务抽取明细；摘要阶段 `structuredResult` 保留为「摘要阶段关键事实」折叠辅助信息，避免把分类/摘要阶段轻量结果误当成正式结构化结果。
-- 优化来文业务结构化抽取提示词与结果展示：`build_extraction_prompt` 明确每个 item 表示一个独立业务事项，同一事项的背景、依据、责任对象和要求合并到同一个 item，只有多个并列且可独立执行或确认的事项才拆成多个 items；分块抽取完成后按同一 schema 的关键字段保守合并明显重复的 items，并追加保留多段 `source_quote` 依据；Web 来文详情按 schema 分组展示正式业务抽取明细，减少同一 schema 下结果过度分散和平铺卡片噪声。
+- 优化来文业务结构化抽取提示词与结果展示：`build_extraction_prompt` 明确每个 item 表示一个独立业务事项，同一事项的背景、依据、责任对象和要求合并到同一个 item，只有多个并列且可独立执行或确认的事项才拆成多个 items；分块抽取完成后仅在同一 schema 除 `source_quote` 外的全部业务字段一致时合并 items，并追加保留多段原文依据，避免新增 schema 时维护去重字段枚举或误合并不同事项；Web 来文详情按 schema 分组展示正式业务抽取明细，减少同一 schema 下结果过度分散和平铺卡片噪声。
 - 修复 chat-iframe 文档摘要卡片只展示前 3 条结构化明细的问题：小助手改为按 schema 分组展示全部正式业务抽取 items，并使用可折叠分组承载同类结果，和 Web 来文详情的结构化结果观感保持一致；注入模型系统提示词的附件结构化信息不再按每个附件固定截断前 5 条，统一交给 iframe 上下文总长度上限控制。
 - 修复删除用户后同名重建账号登录误报已注销：登录查询改为优先匹配未删除账号的 `uid/phone_number/username`，只有没有活跃账号时才返回旧注销账号提示，并同步登录框文案。
 - 修复超级管理员创建用户时部门下拉可能为空：打开「添加用户」弹窗前补拉部门列表，避免用户角色状态晚于组件挂载恢复时跳过部门加载。
 - 修复 chat-iframe 问文件摘要卡片在后端已有来文摘要但业务结构化明细为空时误显示“暂无结构化摘要明细”的问题：前端会展示后端摘要；当业务结构化明细存在时，同时保留摘要、分类命中和结构化依据传入 iframe 上下文。
 - 优化 chat-iframe 来文结构化结果展示：后端从 `document_extraction.schemas` 导出分类、抽取对象和字段的 display label，`/api/incoming-documents/extractions/query` 随结构化结果返回，前端按后端 label 渲染文件名分类标记、抽取对象和字段名，并隐藏空字段及重复的 `source_quote` 字段。
 - 修复来文结构化抽取重复分类导致 schema 选择为空的问题：来文摘要阶段已产生分类时，正式业务结构化抽取直接复用该分类选择抽取 schema，不再重复调用 `_classify_chunks`。
+- 扩展来文通用分类与正式抽取：原“其他”分类收敛为 `DocumentCategoryResult` 中的“通用类”，仅在所有专业类别均未命中时启用，并通过新增 `general_item` 抽取核心事实、结论、说明或请求；通用类与专业类别在文档级保持互斥，避免重复结构化结果。摘要分类提示会动态注入全部类别的名称和描述，按来文主要目的判断，并明确区分 `summary` 与轻量 `structured_result`；短文档是否直接整篇抽取改为按近似 token 数判断，摘要正文发生截断时会在提示中显式标注输入边界。
 - 来文管理的“重新处理”入口支持已完成来文，便于摘要成功但业务结构化抽取为空时由管理员重跑解析、摘要和结构化抽取流程。
 - 修复来文与业务结构化抽取表启动建表失败：移除 SQLAlchemy 模型中与 `Column(index=True)` 重名的显式单列索引，避免 `metadata.create_all` 在 PostgreSQL 上重复创建 `ix_incoming_documents_*` 等索引导致启动事务回滚、`incoming_documents` 表缺失。
 - 独立业务结构化抽取模块：将原知识库下的业务抽取迁移为 `document_extraction`，数据表统一为 `document_business_extraction_runs/results/items`；移除旧 `incoming_document_extraction_runs` 与 `knowledge_business_extraction_*` 表语义，来文解析 Markdown 后触发业务抽取，知识库普通上传不再触发业务抽取，从来文存入知识库时仅关联既有抽取结果并补齐 `kb_id/file_id`。

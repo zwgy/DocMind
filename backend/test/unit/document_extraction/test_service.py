@@ -1,3 +1,4 @@
+from yuxi.document_extraction import service as service_module
 from yuxi.document_extraction.schemas import category_result_for_classification_label
 from yuxi.document_extraction.service import BusinessExtractionService
 
@@ -18,6 +19,7 @@ class FakeLLM:
                 "safety_management": {"matched": False, "evidence": None},
                 "staged_work": {"matched": False, "evidence": None},
                 "long_term_requirement": {"matched": False, "evidence": None},
+                "general": {"matched": True, "evidence": "模型误判为通用类"},
             }
         return {
             "items": [
@@ -75,6 +77,65 @@ class FakeDuplicateManagementLLM(FakeLLM):
         }
 
 
+class FakeGeneralLLM(FakeLLM):
+    def __init__(self):
+        super().__init__()
+        self.extraction_calls = 0
+
+    async def complete_json(self, prompt, schema):
+        self.prompts.append(prompt)
+        if "DocumentCategoryResult" in prompt:
+            return {}
+        self.extraction_calls += 1
+        return {
+            "items": [
+                {
+                    "content": "供应商申请变更结算账户",
+                    "subject": "供应商",
+                    "time": None,
+                    "source_quote": f"第 {self.extraction_calls} 段：供应商申请变更结算账户",
+                }
+            ]
+        }
+
+
+class FakeDifferentPeriodManagementLLM(FakeDuplicateManagementLLM):
+    async def complete_json(self, prompt, schema):
+        self.prompts.append(prompt)
+        if "DocumentCategoryResult" in prompt:
+            raise AssertionError("should not classify when category_result is provided")
+        self.extraction_calls += 1
+        return {
+            "items": [
+                {
+                    "requirement": "建立问题整改台账",
+                    "department": "各单位",
+                    "role": None,
+                    "period_type": "阶段性" if self.extraction_calls == 1 else "长期性",
+                    "source_quote": f"第 {self.extraction_calls} 段要求建立问题整改台账",
+                }
+            ]
+        }
+
+
+def test_short_markdown_limit_uses_token_count(monkeypatch):
+    monkeypatch.setattr(service_module, "SHORT_MARKDOWN_EXTRACTION_TOKEN_LIMIT", 2)
+
+    def fail_chunk_markdown(*_args, **_kwargs):
+        raise AssertionError("两个 token 的短文档不应进入分块")
+
+    monkeypatch.setattr(service_module, "chunk_markdown", fail_chunk_markdown)
+
+    segments = BusinessExtractionService._markdown_segments(
+        markdown="alpha beta",
+        document_key="doc",
+        filename="doc.md",
+        processing_params={},
+    )
+
+    assert segments == [{"chunk_id": None, "content": "alpha beta", "chunk_index": 0}]
+
+
 async def test_extract_file_runs_category_first_then_matching_schemas():
     service = BusinessExtractionService(llm=FakeLLM())
 
@@ -93,10 +154,31 @@ async def test_extract_file_runs_category_first_then_matching_schemas():
     )
 
     assert result.categories.risk_management.matched is True
+    assert result.categories.general.matched is False
     assert result.schema_ids == ["risk_item", "task_item", "management_requirement_item"]
     assert result.items[0].item_type == "risk_item"
     assert result.items[0].chunk_id == "file_1_chunk_0"
     assert result.items[0].data["risk_name"] == "现场作业监护不到位"
+
+
+async def test_extract_chunks_falls_back_to_general_and_merges_duplicates():
+    service = BusinessExtractionService(llm=FakeGeneralLLM())
+
+    result = await service.extract_chunks(
+        document_scope="incoming",
+        incoming_id="inc_general",
+        chunks=[
+            {"chunk_id": "chunk_1", "content": "供应商申请变更结算账户。", "chunk_index": 0},
+            {"chunk_id": "chunk_2", "content": "供应商申请变更结算账户。", "chunk_index": 1},
+        ],
+    )
+
+    assert result.categories.general.matched is True
+    assert result.schema_ids == ["general_item"]
+    assert len(result.items) == 1
+    assert result.items[0].item_type == "general_item"
+    assert "第 1 段" in result.items[0].source_quote
+    assert "第 2 段" in result.items[0].source_quote
 
 
 async def test_extract_chunks_uses_known_category_without_reclassifying():
@@ -130,6 +212,23 @@ async def test_extract_chunks_merges_obvious_duplicate_items_from_chunks():
     assert result.items[0].data["requirement"] == "建立问题整改台账"
     assert "第 1 段要求建立问题整改台账" in result.items[0].source_quote
     assert "第 2 段要求建立问题整改台账" in result.items[0].source_quote
+
+
+async def test_extract_chunks_keeps_items_when_any_business_field_differs():
+    service = BusinessExtractionService(llm=FakeDifferentPeriodManagementLLM())
+
+    result = await service.extract_chunks(
+        document_scope="incoming",
+        incoming_id="inc_1",
+        chunks=[
+            {"chunk_id": "chunk_1", "content": "阶段性建立问题整改台账。", "chunk_index": 0},
+            {"chunk_id": "chunk_2", "content": "长期建立问题整改台账。", "chunk_index": 1},
+        ],
+        category_result=category_result_for_classification_label("规章制度类"),
+    )
+
+    assert len(result.items) == 2
+    assert {item.data["period_type"] for item in result.items} == {"阶段性", "长期性"}
 
 
 class FakeExtractionRepo:

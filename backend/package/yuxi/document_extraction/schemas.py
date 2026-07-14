@@ -56,6 +56,11 @@ class DocumentCategoryResult(BaseModel):
         description="长期性、持续性管理要求类：长期执行、周期性管理要求、持续整改要求等内容",
         json_schema_extra={"label": "长期管理要求类", "extraction_schemas": ["task_item", "management_requirement_item"]},
     )
+    general: CategoryDecision = Field(
+        default_factory=CategoryDecision,
+        description="通用类：仅当文档不符合任何其他业务类别时命中，用于提取核心事实、结论、说明或请求",
+        json_schema_extra={"label": "通用类", "extraction_schemas": ["general_item"]},
+    )
 
 
 PeriodType = Literal["阶段性", "长期性", "周期性", "未明确"]
@@ -220,12 +225,36 @@ class ManagementRequirementItem(BaseModel):
     )
 
 
+class GeneralItem(BaseModel):
+    model_config = {"json_schema_extra": {"label": "通用事项"}}
+
+    content: str = Field(
+        description="可独立理解的核心事实、结论、说明或请求；不要抽取背景套话",
+        json_schema_extra={"label": "事项内容"},
+    )
+    subject: str | None = Field(
+        default=None,
+        description="事项涉及的单位、人员或对象；没有则为 null",
+        json_schema_extra={"label": "涉及对象"},
+    )
+    time: str | None = Field(
+        default=None,
+        description="原文明示的时间、日期或期限；没有则为 null",
+        json_schema_extra={"label": "相关时间"},
+    )
+    source_quote: str = Field(
+        description="支持该通用事项的原文片段，必须逐字摘录",
+        json_schema_extra={"label": "原文依据"},
+    )
+
+
 EXTRACTION_SCHEMAS: dict[str, type[BaseModel]] = {
     "risk_item": RiskItem,
     "task_item": TaskItem,
     "assessment_item": AssessmentItem,
     "reward_punishment_item": RewardPunishmentItem,
     "management_requirement_item": ManagementRequirementItem,
+    "general_item": GeneralItem,
 }
 
 
@@ -242,16 +271,6 @@ def field_description_lines(model: type[BaseModel]) -> list[str]:
         description = field.description or ""
         lines.append(f"- {name}: {description}")
     return lines
-
-
-def document_category_labels() -> list[str]:
-    labels: list[str] = []
-    for field in DocumentCategoryResult.model_fields.values():
-        extra = field.json_schema_extra or {}
-        label = str(extra.get("label") or "").strip()
-        if label:
-            labels.append(label)
-    return labels + ["其他"]
 
 
 def document_category_label_mapping() -> dict[str, str]:
