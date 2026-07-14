@@ -5,6 +5,7 @@ import {
   createConversation,
   deleteConversation,
   getRun,
+  getThreadActiveRun,
   listConversations,
   listMessages,
   sendMessageStream,
@@ -70,6 +71,10 @@ function createThreadRuntime(): ThreadRuntime {
 
 function messageId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function waitForStreamReconnect() {
+  return new Promise((resolve) => setTimeout(resolve, 500))
 }
 
 function tmpAttachmentPayload(uploaded: Record<string, unknown>) {
@@ -199,6 +204,108 @@ export const useChatStore = defineStore('chat', {
       if (!threadId) return
       this.currentThreadId = threadId
       this.ensureRuntime(threadId).messages = await listMessages(threadId, token)
+      void this.resumeActiveRun(threadId, token)
+    },
+    async resumeActiveRun(threadId: string, token?: string) {
+      if (!threadId) return
+      const runtime = this.ensureRuntime(threadId)
+      if (runtime.abortController) return
+      const run = (await getThreadActiveRun(threadId, token)).run
+      if (!run?.id) return
+
+      if (runtime.activeRunId !== run.id) runtime.lastEventSeq = '0-0'
+      runtime.activeRunId = run.id
+      runtime.isSending = true
+      runtime.isStreaming = true
+      const controller = new AbortController()
+      runtime.abortController = controller
+      let reachedTerminalEvent = false
+      let assistantMessage = [...runtime.messages].reverse().find((message) => message.role === 'assistant' && message.status === 'streaming')
+      if (!assistantMessage) {
+        assistantMessage = {
+          id: messageId('assistant'),
+          role: 'assistant',
+          content: '',
+          status: 'streaming',
+          toolEvents: [],
+          createdAt: new Date().toISOString()
+        }
+        runtime.messages = [...runtime.messages, assistantMessage]
+      }
+      const assistantMessages = [assistantMessage]
+      const createAssistantSegment = () => {
+        const segment: ChatMessage = {
+          id: messageId('assistant'),
+          role: 'assistant',
+          content: '',
+          status: 'streaming',
+          toolEvents: [],
+          createdAt: new Date().toISOString()
+        }
+        assistantMessages.push(segment)
+        return segment
+      }
+      const streamHandlers = {
+        onEventId: (eventId: string) => {
+          runtime.lastEventSeq = eventId
+        },
+        onChunk: (chunk: RunStreamChunk) => {
+          if (chunk.type === 'done') {
+            reachedTerminalEvent = true
+            assistantMessages.forEach((message) => {
+              if (message.status === 'streaming') message.status = 'done'
+            })
+          } else if (chunk.type === 'error') {
+            assistantMessage!.status = 'error'
+            assistantMessage!.errorType = chunk.errorType
+            assistantMessage!.errorMessage = chunk.message
+            if (!assistantMessage!.content) assistantMessage!.content = chunk.message
+          } else {
+            assistantMessage = appendRunChunkSegment(runtime.messages, assistantMessage!, chunk, createAssistantSegment)
+          }
+          runtime.messages = [...runtime.messages]
+        },
+        onTool: (event: string) => {
+          assistantMessage!.toolEvents = [...(assistantMessage!.toolEvents || []), event]
+          runtime.messages = [...runtime.messages]
+        },
+        onError: (message: string) => {
+          assistantMessage!.status = 'error'
+          if (!assistantMessage!.content) assistantMessage!.content = message
+          this.error = message
+        },
+        onDone: () => {
+          reachedTerminalEvent = true
+          assistantMessages.forEach((message) => {
+            if (message.status === 'streaming') message.status = 'done'
+          })
+        }
+      }
+      try {
+        while (!reachedTerminalEvent && !controller.signal.aborted) {
+          const status = (await getRun(run.id, token)).run?.status
+          if (status === 'completed') break
+          if (status === 'failed' || status === 'cancelled') throw new Error(`运行已${status === 'failed' ? '失败' : '取消'}`)
+          const resumed = await streamRunEvents(run.id, token, runtime.lastEventSeq, streamHandlers, controller.signal)
+          reachedTerminalEvent = reachedTerminalEvent || resumed.reachedTerminalEvent
+          if (!reachedTerminalEvent) await waitForStreamReconnect()
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          const message = error instanceof Error ? error.message : '恢复运行失败'
+          assistantMessage.status = 'error'
+          assistantMessage.content = assistantMessage.content || message
+          this.error = message
+          runtime.messages = [...runtime.messages]
+        }
+      } finally {
+        if (runtime.abortController === controller) {
+          runtime.isSending = false
+          runtime.isStreaming = false
+          runtime.activeRunId = ''
+          runtime.abortController = null
+        }
+      }
     },
     async ensureThread(token?: string, agentId?: string, conversationScopeKey?: string) {
       if (this.currentThreadId) return this.currentThreadId
@@ -394,7 +501,7 @@ export const useChatStore = defineStore('chat', {
             reachedTerminalEvent = reachedTerminalEvent || resumed.reachedTerminalEvent
           } catch {
             // SSE 连接可能在 worker 仍运行时瞬断；保留 cursor 后短暂等待再检查 run，不能直接把回答判成失败。
-            await new Promise((resolve) => setTimeout(resolve, 500))
+            await waitForStreamReconnect()
           }
         }
         flushTextQueue()

@@ -327,6 +327,13 @@ export async function getRun(runId: string, token?: string) {
   return parseResponse<{ run?: { status?: string } }>(response, '获取运行状态失败')
 }
 
+export async function getThreadActiveRun(threadId: string, token?: string) {
+  const response = await fetch(apiUrl(`/api/agent/thread/${encodeURIComponent(threadId)}/active_run`), {
+    headers: authHeaders(token, false)
+  })
+  return parseResponse<{ run?: { id?: string; status?: string } }>(response, '获取会话活动任务失败')
+}
+
 export async function listConversations(token?: string, agentId?: string, conversationScopeKey?: string): Promise<ChatThread[]> {
   const params = new URLSearchParams({ limit: '50', offset: '0' })
   if (agentId) params.set('agent_id', agentId)

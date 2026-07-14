@@ -111,6 +111,11 @@ async function selectThread(threadId: string) {
   showSidebar.value = false
 }
 
+function resumeVisibleThread() {
+  if (document.visibilityState !== 'visible' || !context.config.token) return
+  void chat.resumeActiveRun(chat.currentThreadId, context.config.token)
+}
+
 async function sendChat(payload: {
   text: string
   files: File[]
@@ -210,10 +215,13 @@ watch(
 
 onMounted(() => {
   if (!context.files.length) refreshExtraction()
+  document.addEventListener('visibilitychange', resumeVisibleThread)
+  resumeVisibleThread()
 })
 
 onUnmounted(() => {
   endWindowDrag()
+  document.removeEventListener('visibilitychange', resumeVisibleThread)
 })
 </script>
 
