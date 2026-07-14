@@ -4,10 +4,12 @@ import {
   confirmThreadAttachments,
   createConversation,
   deleteConversation,
+  getRun,
   listConversations,
   listMessages,
   sendMessageStream,
   submitMessageFeedback,
+  streamRunEvents,
   updateConversation,
   uploadImage,
   uploadAttachment
@@ -34,6 +36,7 @@ type ThreadRuntime = {
   isSending: boolean
   isStreaming: boolean
   activeRunId: string
+  lastEventSeq: string
   abortController: AbortController | null
   lastUserMessageForRetry: SendOptions | null
 }
@@ -59,6 +62,7 @@ function createThreadRuntime(): ThreadRuntime {
     isSending: false,
     isStreaming: false,
     activeRunId: '',
+    lastEventSeq: '0-0',
     abortController: null,
     lastUserMessageForRetry: null
   }
@@ -221,6 +225,7 @@ export const useChatStore = defineStore('chat', {
       runtime.isSending = false
       runtime.isStreaming = false
       runtime.activeRunId = ''
+      runtime.lastEventSeq = '0-0'
       runtime.abortController = null
       runtime.messages = [...runtime.messages]
     },
@@ -240,6 +245,7 @@ export const useChatStore = defineStore('chat', {
       runtime.isSending = true
       runtime.isStreaming = true
       runtime.lastUserMessageForRetry = { ...options, files: options.files || [], imageFile: options.imageFile || null }
+      runtime.lastEventSeq = '0-0'
       const controller = new AbortController()
       runtime.abortController = controller
       const userMessage: ChatMessage = {
@@ -301,71 +307,96 @@ export const useChatStore = defineStore('chat', {
         if (!textTimer) textTimer = setInterval(drainTextQueue, 28)
       }
       runtime.messages = [...runtime.messages, userMessage, assistantMessage]
+      let reachedTerminalEvent = false
+      const streamHandlers = {
+        onRunStart: (runId: string) => {
+          runtime.activeRunId = runId
+          runtime.lastEventSeq = '0-0'
+        },
+        onEventId: (eventId: string) => {
+          runtime.lastEventSeq = eventId
+        },
+        onChunk: (chunk: RunStreamChunk) => {
+          if (chunk.type === 'done') {
+            flushTextQueue()
+            assistantMessages.forEach((message) => {
+              if (message.status === 'streaming') message.status = 'done'
+            })
+          } else if (chunk.type === 'error') {
+            flushTextQueue()
+            assistantMessage.status = 'error'
+            assistantMessage.errorType = chunk.errorType
+            assistantMessage.errorMessage = chunk.message
+            if (!assistantMessage.content) assistantMessage.content = chunk.message
+          } else if (chunk.type === 'text') {
+            enqueueTextChunk(chunk)
+          } else {
+            flushTextQueue()
+            appendVisibleChunk(chunk)
+          }
+          runtime.messages = [...runtime.messages]
+        },
+        onTool: (event: string) => {
+          assistantMessage.toolEvents = [...(assistantMessage.toolEvents || []), event]
+          runtime.messages = [...runtime.messages]
+        },
+        onError: (message: string) => {
+          flushTextQueue()
+          assistantMessage.status = 'error'
+          this.error = message
+        },
+        onDone: () => {
+          reachedTerminalEvent = true
+          flushTextQueue()
+          assistantMessages.forEach((message) => {
+            if (message.status === 'streaming') message.status = 'done'
+          })
+        }
+      }
       try {
         const threadId = await this.ensureThread(token, agentId, conversationScopeKey)
         const uploadedAttachments = await this.attachFiles(threadId, options.files || [], token)
         const imageContent = options.imageFile ? (await uploadImage(options.imageFile, token)).image_content || null : null
-        const result = await sendMessageStream(
-          {
-            text,
-            token,
-            threadId,
-            agentId,
-            modelSpec: this.selectedModelSpec,
-            includePage: this.askPage,
-            includeFile: this.askFile,
-            pageContent: options.pageContent,
-            selectedFile: options.selectedFile,
-            extractionResult: options.extractionResult,
-            selectedPageFiles: options.selectedPageFiles,
-            extractionResults: options.extractionResults,
-            attachmentNames: uploadedAttachments.map((item) => String(item.file_name || '')).filter(Boolean),
-            attachments: uploadedAttachments,
-            imageContent,
-            signal: controller.signal
-          },
-          {
-            onRunStart: (runId) => {
-              runtime.activeRunId = runId
+        let runId = ''
+        try {
+          const result = await sendMessageStream(
+            {
+              text,
+              token,
+              threadId,
+              agentId,
+              modelSpec: this.selectedModelSpec,
+              includePage: this.askPage,
+              includeFile: this.askFile,
+              pageContent: options.pageContent,
+              selectedFile: options.selectedFile,
+              extractionResult: options.extractionResult,
+              selectedPageFiles: options.selectedPageFiles,
+              extractionResults: options.extractionResults,
+              attachmentNames: uploadedAttachments.map((item) => String(item.file_name || '')).filter(Boolean),
+              attachments: uploadedAttachments,
+              imageContent,
+              signal: controller.signal
             },
-            onChunk: (chunk) => {
-              if (chunk.type === 'done') {
-                flushTextQueue()
-                assistantMessages.forEach((message) => {
-                  if (message.status === 'streaming') message.status = 'done'
-                })
-              } else if (chunk.type === 'error') {
-                flushTextQueue()
-                assistantMessage.status = 'error'
-                assistantMessage.errorType = chunk.errorType
-                assistantMessage.errorMessage = chunk.message
-                if (!assistantMessage.content) assistantMessage.content = chunk.message
-              } else if (chunk.type === 'text') {
-                enqueueTextChunk(chunk)
-              } else {
-                flushTextQueue()
-                appendVisibleChunk(chunk)
-              }
-              runtime.messages = [...runtime.messages]
-            },
-            onTool: (event) => {
-              assistantMessage.toolEvents = [...(assistantMessage.toolEvents || []), event]
-              runtime.messages = [...runtime.messages]
-            },
-            onError: (message) => {
-              flushTextQueue()
-              assistantMessage.status = 'error'
-              this.error = message
-            },
-            onDone: () => {
-              flushTextQueue()
-              assistantMessages.forEach((message) => {
-                if (message.status === 'streaming') message.status = 'done'
-              })
-            }
+            streamHandlers
+          )
+          runId = result.runId
+        } catch (error) {
+          if (!runtime.activeRunId || controller.signal.aborted) throw error
+          runId = runtime.activeRunId
+        }
+        while (!reachedTerminalEvent && !controller.signal.aborted) {
+          const status = (await getRun(runId, token)).run?.status
+          if (status === 'completed') break
+          if (status === 'failed' || status === 'cancelled') throw new Error(`运行已${status === 'failed' ? '失败' : '取消'}`)
+          try {
+            const resumed = await streamRunEvents(runId, token, runtime.lastEventSeq, streamHandlers, controller.signal)
+            reachedTerminalEvent = reachedTerminalEvent || resumed.reachedTerminalEvent
+          } catch {
+            // SSE 连接可能在 worker 仍运行时瞬断；保留 cursor 后短暂等待再检查 run，不能直接把回答判成失败。
+            await new Promise((resolve) => setTimeout(resolve, 500))
           }
-        )
-        runtime.activeRunId = result.runId
+        }
         flushTextQueue()
         assistantMessages.forEach((message) => {
           if (message.status === 'streaming') message.status = 'done'

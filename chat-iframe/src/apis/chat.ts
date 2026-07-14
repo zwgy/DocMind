@@ -24,6 +24,7 @@ type CreateConversationOptions = RequestOptions & {
 
 type RunEventHandlers = {
   onRunStart?: (runId: string, requestId: string) => void
+  onEventId?: (eventId: string) => void
   onChunk?: (chunk: RunStreamChunk) => void
   onText?: (text: string) => void
   onTool?: (text: string) => void
@@ -263,6 +264,11 @@ function handleSseBlock(block: string, handlers: RunEventHandlers) {
     .filter((line) => line.startsWith('data:'))
     .map((line) => line.slice(5).trim())
     .join('\n')
+  const eventId = block
+    .split(/\r?\n/)
+    .find((line) => line.startsWith('id:'))
+    ?.slice(3)
+    .trim()
   if (!dataLine) return
   let payload: Record<string, unknown>
   try {
@@ -271,8 +277,10 @@ function handleSseBlock(block: string, handlers: RunEventHandlers) {
     handlers.onError?.('流式响应解析失败')
     return
   }
+  if (eventId) handlers.onEventId?.(eventId)
   handleRunPayload(payload, handlers)
   if (eventType === 'end') handlers.onDone?.()
+  return eventType === 'end'
 }
 
 export async function readRunEventStream(response: Response, handlers: RunEventHandlers = {}) {
@@ -282,6 +290,7 @@ export async function readRunEventStream(response: Response, handlers: RunEventH
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let reachedTerminalEvent = false
   try {
     while (true) {
       const { done, value } = await reader.read()
@@ -289,12 +298,33 @@ export async function readRunEventStream(response: Response, handlers: RunEventH
       buffer += decoder.decode(value, { stream: true })
       const blocks = buffer.split(/\r?\n\r?\n/)
       buffer = blocks.pop() || ''
-      blocks.forEach((block) => handleSseBlock(block, handlers))
+      blocks.forEach((block) => {
+        reachedTerminalEvent ||= Boolean(handleSseBlock(block, handlers))
+      })
     }
-    if (buffer.trim()) handleSseBlock(buffer, handlers)
+    if (buffer.trim()) reachedTerminalEvent ||= Boolean(handleSseBlock(buffer, handlers))
   } finally {
     reader.releaseLock()
   }
+  return { reachedTerminalEvent }
+}
+
+export async function streamRunEvents(
+  runId: string,
+  token: string | undefined,
+  afterSeq: string,
+  handlers: RunEventHandlers,
+  signal?: AbortSignal
+) {
+  const headers = authHeaders(token, false)
+  if (afterSeq && afterSeq !== '0-0') headers['Last-Event-ID'] = afterSeq
+  const response = await fetch(apiUrl(`/api/agent/runs/${encodeURIComponent(runId)}/events?verbose=false`), { headers, signal })
+  return readRunEventStream(response, handlers)
+}
+
+export async function getRun(runId: string, token?: string) {
+  const response = await fetch(apiUrl(`/api/agent/runs/${encodeURIComponent(runId)}`), { headers: authHeaders(token, false) })
+  return parseResponse<{ run?: { status?: string } }>(response, '获取运行状态失败')
 }
 
 export async function listConversations(token?: string, agentId?: string, conversationScopeKey?: string): Promise<ChatThread[]> {
@@ -360,11 +390,7 @@ export async function sendMessageStream(payload: SendMessagePayload, handlers: R
   const runId = run.id || run.run_id
   if (!runId) throw new Error('发送消息失败：缺少运行任务 ID')
   handlers.onRunStart?.(runId, requestId)
-  const streamResponse = await fetch(apiUrl(`/api/agent/runs/${encodeURIComponent(runId)}/events?verbose=false`), {
-    headers: authHeaders(payload.token, false),
-    signal: payload.signal
-  })
-  await readRunEventStream(streamResponse, handlers)
+  await streamRunEvents(runId, payload.token, '0-0', handlers, payload.signal)
   return { runId, requestId }
 }
 
