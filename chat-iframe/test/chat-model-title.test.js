@@ -75,7 +75,7 @@ test('first successful reply generates a fast-model title without replacing a ma
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(titleCalls, [
     {
-      query: '根据以下对话内容生成一个简短的标题（最多30个字符，中英文均可），不要包含 markdown 标记：\n\n请总结这份合同',
+      query: '根据以下对话内容生成一个简短的标题（最多20个字符，中英文均可），不要包含 markdown 标记：\n\n请总结这份合同',
       meta: { use_fast_model: true }
     }
   ])
