@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import {
   cancelRun,
-  confirmThreadAttachments,
   createResumeRun,
   createConversation,
   deleteConversation,
@@ -16,7 +15,7 @@ import {
   streamRunEvents,
   updateConversation,
   uploadImage,
-  uploadAttachment
+  uploadThreadAttachment
 } from '@/apis/chat'
 import { listChatModels } from '@/apis/models'
 import { appendRunChunkSegment, normalizeChatArtifacts } from '@/utils/chat-message'
@@ -153,17 +152,6 @@ function modelSpecFromHistory(messages: ChatMessage[]) {
 
 function nonPinnedThreadCount(threads: ChatThread[]) {
   return threads.filter((thread) => !thread.is_pinned).length
-}
-
-function tmpAttachmentPayload(uploaded: Record<string, unknown>) {
-  return {
-    file_name: uploaded.file_name,
-    file_type: uploaded.file_type,
-    bucket_name: uploaded.bucket_name,
-    object_name: uploaded.object_name,
-    parsed_object_name: uploaded.parsed_object_name || null,
-    truncated: Boolean(uploaded.truncated)
-  }
 }
 
 export const useChatStore = defineStore('chat', {
@@ -560,10 +548,8 @@ export const useChatStore = defineStore('chat', {
       if (!files.length) return []
       const validationError = attachmentValidationError(files)
       if (validationError) throw new Error(validationError)
-      // 复用主站已有附件链路，避免 iframe 自己维护一套上传目录和权限模型。
-      const uploaded = await Promise.all(files.map((file) => uploadAttachment(file, token)))
-      await confirmThreadAttachments(threadId, uploaded.map(tmpAttachmentPayload), token)
-      return uploaded
+      // 直接写入当前线程，后端会先把可解析文档转为 Markdown，避免模型重复转写二进制附件。
+      return Promise.all(files.map((file) => uploadThreadAttachment(threadId, file, token)))
     },
     async stop(token?: string) {
       const runtime = this.ensureRuntime()

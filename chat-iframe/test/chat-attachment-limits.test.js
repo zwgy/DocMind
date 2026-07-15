@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { uploadAttachment, uploadImage } from '../src/apis/chat.ts'
+import { uploadImage, uploadThreadAttachment } from '../src/apis/chat.ts'
 import {
   MAX_ATTACHMENT_FILES,
   MAX_ATTACHMENT_SIZE_BYTES,
@@ -16,12 +16,20 @@ test('attachment limits reject oversize and over-count selections before upload'
   assert.match(attachmentValidationError([new File([new Uint8Array(MAX_ATTACHMENT_SIZE_BYTES + 1)], 'large.pdf')]), /超过 5 MB/)
 
   let fetchCalled = false
+  let requestUrl = ''
   globalThis.fetch = async () => {
     fetchCalled = true
     return Response.json({})
   }
-  await assert.rejects(uploadAttachment(new File([new Uint8Array(MAX_ATTACHMENT_SIZE_BYTES + 1)], 'large.pdf')))
+  await assert.rejects(uploadThreadAttachment('thread-1', new File([new Uint8Array(MAX_ATTACHMENT_SIZE_BYTES + 1)], 'large.pdf')))
   assert.equal(fetchCalled, false)
+
+  globalThis.fetch = async (url) => {
+    requestUrl = String(url)
+    return Response.json({ file_id: 'file-1' })
+  }
+  await uploadThreadAttachment('thread-1', new File(['content'], 'report.docx'))
+  assert.equal(requestUrl, '/api/chat/thread/thread-1/attachments')
 })
 
 test('image limits allow supported images only and block invalid uploads before fetch', async () => {

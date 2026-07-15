@@ -520,7 +520,7 @@ watch(text, resizeTextarea)
         >
           <input class="dropzone-file-input" type="file" multiple @change="onFileChange" />
           <strong>点击或拖拽文件到此处上传</strong>
-          <span>{{ ATTACHMENT_LIMIT_TEXT }}；PDF 和图片可选解析为 Markdown。</span>
+          <span>{{ ATTACHMENT_LIMIT_TEXT }}；Word、PDF 和图片等可解析文档会在发送时转为 Markdown。</span>
         </label>
         <div v-if="draftAttachmentFiles.length" class="attachment-draft-list">
           <div v-for="(file, index) in draftAttachmentFiles" :key="`${file.name}-${file.size}-${index}`" class="attachment-draft-item">

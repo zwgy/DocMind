@@ -535,28 +535,15 @@ export async function getThreadAttachments(threadId: string, token?: string) {
   return parseResponse<Record<string, unknown>>(response, '获取附件失败')
 }
 
-export async function uploadAttachment(file: File, token?: string) {
+export async function uploadThreadAttachment(threadId: string, file: File, token?: string) {
   const error = attachmentValidationError([file])
   if (error) throw new Error(error)
   const body = new FormData()
   body.append('file', file)
-  const response = await fetch(apiUrl('/api/chat/attachments/tmp'), {
+  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/attachments`), {
     method: 'POST',
     headers: authHeaders(token, false),
     body
   })
   return parseResponse<Record<string, unknown>>(response, '上传附件失败')
-}
-
-export async function confirmThreadAttachments(
-  threadId: string,
-  attachments: Record<string, unknown>[],
-  token?: string
-) {
-  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/attachments/confirm`), {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: JSON.stringify({ attachments })
-  })
-  return parseResponse<Record<string, unknown>>(response, '确认附件失败')
 }
