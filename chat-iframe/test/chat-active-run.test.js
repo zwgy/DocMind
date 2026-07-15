@@ -15,7 +15,12 @@ test('active run resumes into its own thread runtime', async () => {
     calls.push({ url, options })
     if (url === '/api/agent/thread/thread-a/active_run') return Response.json({ run: { id: 'run-a', status: 'running' } })
     if (url === '/api/chat/thread/thread-a/state') {
-      return Response.json({ agent_state: { todos: [{ content: '恢复任务', status: 'in_progress' }] } })
+      return Response.json({
+        agent_state: {
+          todos: [{ content: '恢复任务', status: 'in_progress' }],
+          artifacts: ['/home/gem/user-data/outputs/resumed.md']
+        }
+      })
     }
     if (url === '/api/agent/runs/run-a') return Response.json({ run: { status: 'running' } })
     if (url.startsWith('/api/agent/runs/run-a/events')) {
@@ -40,6 +45,7 @@ test('active run resumes into its own thread runtime', async () => {
   assert.equal(runtime.isStreaming, false)
   assert.equal(runtime.activeRunId, '')
   assert.deepEqual(runtime.agentState?.todos, [{ content: '恢复任务', status: 'in_progress' }])
+  assert.deepEqual(runtime.messages[0].artifacts, [{ path: '/home/gem/user-data/outputs/resumed.md', name: 'resumed.md' }])
   assert.equal(chat.messages.length, 0, '当前线程 B 不应显示 A 的恢复内容')
   assert.equal(calls.some((call) => call.url === '/api/chat/thread'), false)
 })

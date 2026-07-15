@@ -20,6 +20,8 @@ test('context usage is an optional input control next to model selection', () =>
   assert.match(inputSource, /v-if="contextUsage" ref="contextUsageRef" class="context-usage-wrapper"/)
   assert.match(inputSource, /llm_input_tokens/)
   assert.match(inputSource, /context_window/)
+  assert.match(inputSource, /if \(used === null\) return null/)
+  assert.match(inputSource, /总上下文未配置/)
   assert.match(styles, /\.context-usage-popover \{/)
 })
 
@@ -27,4 +29,8 @@ test('artifacts stay attached to the final assistant message and use authenticat
   assert.match(source, /item\.message\.artifacts\?\.length/)
   assert.match(source, /fetchThreadArtifact\(props\.threadId, artifact\.path, props\.token/)
   assert.match(source, /artifact-preview-overlay/)
+  assert.ok(
+    source.indexOf('<section v-if="item.message.artifacts?.length"') < source.indexOf('<MessageRefs'),
+    '交付物应紧随回答正文显示，不能落在反馈操作之后'
+  )
 })

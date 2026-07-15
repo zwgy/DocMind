@@ -69,9 +69,12 @@ test('terminal run keeps a complete streamed answer until delayed history catche
 
   const chat = useChatStore()
   chat.currentThreadId = 'thread-2'
+  chat.modelOptions = [{ value: 'model-qwen', label: 'Qwen3.6' }]
+  chat.selectedModelSpec = 'model-qwen'
   chat.ensureRuntime('thread-2')
 
   await chat.send({ text: 'question' }, 'token-1')
 
   assert.equal(chat.messages[1].content, 'complete streamed answer')
+  assert.equal(chat.messages[1].modelName, 'Qwen3.6')
 })
