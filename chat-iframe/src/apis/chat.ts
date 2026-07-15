@@ -337,6 +337,27 @@ export async function getThreadActiveRun(threadId: string, token?: string) {
   return parseResponse<{ run?: { id?: string; status?: string } }>(response, '获取会话活动任务失败')
 }
 
+export async function getThreadState(threadId: string, token?: string) {
+  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/state`), {
+    headers: authHeaders(token, false)
+  })
+  return parseResponse<{ agent_state?: Record<string, unknown> }>(response, '获取会话运行状态失败')
+}
+
+export async function fetchThreadArtifact(threadId: string, path: string, token?: string, download = false) {
+  const encodedPath = path
+    .split('/')
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join('/')
+  const suffix = download ? '?download=true' : ''
+  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/artifacts/${encodedPath}${suffix}`), {
+    headers: authHeaders(token, false)
+  })
+  if (!response.ok) await parseResponse<never>(response, '获取交付物失败')
+  return response
+}
+
 export async function createResumeRun(input: {
   threadId: string
   agentId?: string

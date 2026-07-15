@@ -8,6 +8,7 @@ import {
   generateConversationTitle,
   getRun,
   getThreadActiveRun,
+  getThreadState,
   listConversations,
   listMessages,
   sendMessageStream,
@@ -177,6 +178,9 @@ export const useChatStore = defineStore('chat', {
     },
     pendingInterrupt(state) {
       return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.pendingInterrupt || null
+    },
+    agentState(state) {
+      return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.agentState || null
     },
     displayMessages(state) {
       const messages = state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.messages || []
@@ -404,6 +408,8 @@ export const useChatStore = defineStore('chat', {
       const run = (await getThreadActiveRun(threadId, token)).run
       if (!run?.id) return
 
+      const state = await getThreadState(threadId, token).catch(() => null)
+      runtime.agentState = state?.agent_state || null
       if (runtime.activeRunId !== run.id) runtime.lastEventSeq = '0-0'
       runtime.activeRunId = run.id
       runtime.isSending = true
@@ -558,6 +564,7 @@ export const useChatStore = defineStore('chat', {
       this.error = ''
       runtime.isSending = true
       runtime.isStreaming = true
+      runtime.agentState = null
       runtime.lastEventSeq = '0-0'
       const controller = new AbortController()
       runtime.abortController = controller

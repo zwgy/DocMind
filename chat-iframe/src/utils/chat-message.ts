@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatMessageRole, RunStreamChunk } from '../types'
+import type { ChatArtifact, ChatMessage, ChatMessageRole, RunStreamChunk } from '../types'
 import { normalizeToolCalls } from './tool-calls.ts'
 
 function roleFromType(type: string): ChatMessageRole {
@@ -26,6 +26,20 @@ function parseReasoning(content: string, explicit?: unknown) {
     content: content.replace(match[0], '').trim(),
     reasoningContent: (match[1] || match[2] || '').trim()
   }
+}
+
+function presentedArtifacts(value: unknown): ChatArtifact[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  return value
+    .filter((path): path is string => typeof path === 'string' && Boolean(path.trim()))
+    .map((path) => path.trim())
+    .filter((path) => {
+      if (seen.has(path)) return false
+      seen.add(path)
+      return true
+    })
+    .map((path) => ({ path, name: path.split('/').filter(Boolean).pop() || '未命名交付物' }))
 }
 
 export function normalizeChatMessage(item: Record<string, unknown>): ChatMessage {
@@ -59,6 +73,7 @@ export function normalizeChatMessage(item: Record<string, unknown>): ChatMessage
     toolCalls: normalizeToolCalls(item.tool_calls),
     imageContent: typeof item.image_content === 'string' ? item.image_content : undefined,
     attachments: Array.isArray(extra.attachments) ? extra.attachments : [],
+    artifacts: presentedArtifacts(extra.presented_artifacts),
     errorType: errorType || undefined,
     errorMessage: errorMessage || undefined,
     modelName: typeof responseMetadata.model_name === 'string' ? responseMetadata.model_name : undefined,

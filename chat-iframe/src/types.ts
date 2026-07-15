@@ -163,6 +163,11 @@ export type ChatAttachmentPreview = {
   [key: string]: unknown
 }
 
+export type ChatArtifact = {
+  path: string
+  name: string
+}
+
 export type ChatMessage = {
   id: string
   role: ChatMessageRole
@@ -174,6 +179,7 @@ export type ChatMessage = {
   reasoningContent?: string
   imageContent?: string
   attachments?: ChatAttachmentPreview[]
+  artifacts?: ChatArtifact[]
   errorType?: string
   errorMessage?: string
   modelName?: string
