@@ -355,14 +355,22 @@ export const useChatStore = defineStore('chat', {
       delete this.threadRuntimes[threadId]
       if (this.currentThreadId === threadId) {
         this.currentThreadId = this.threads[0]?.id || ''
-        if (this.currentThreadId) this.ensureRuntime(this.currentThreadId).messages = await listMessages(this.currentThreadId, token)
+        if (this.currentThreadId) await this.selectThread(this.currentThreadId, token)
       }
     },
     async selectThread(threadId: string, token?: string) {
       if (!threadId) return
       this.currentThreadId = threadId
       const runtime = this.ensureRuntime(threadId)
-      runtime.messages = await listMessages(threadId, token)
+      const [messages, state] = await Promise.all([
+        listMessages(threadId, token),
+        getThreadState(threadId, token).catch(() => null)
+      ])
+      runtime.messages = messages
+      if (state?.agent_state) {
+        runtime.agentState = state.agent_state
+        refreshRunArtifacts(runtime)
+      }
       this.restoreThreadModelSpec(threadId, runtime.messages)
       this.selectedModelSpec = this.modelSpecsByThread[threadId] || this.selectedModelSpec
       void this.resumeActiveRun(threadId, token)
@@ -402,6 +410,9 @@ export const useChatStore = defineStore('chat', {
       const localTurn = runtime.messages.slice(start, nextUser < 0 ? runtime.messages.length : nextUser)
       // run 刚结束时历史写库可能尚未完成；不能用较短的持久化片段覆盖已经展示的完整回答。
       if (assistantTextLength(persistedTurn) < assistantTextLength(localTurn)) return []
+      const localModelName = [...localTurn].reverse().find((message) => message.role === 'assistant')?.modelName
+      const persistedAnswer = [...persistedTurn].reverse().find((message) => message.role === 'assistant')
+      if (localModelName && persistedAnswer && !persistedAnswer.modelName) persistedAnswer.modelName = localModelName
       runtime.messages = [
         ...runtime.messages.slice(0, start),
         ...persistedTurn,
@@ -531,6 +542,8 @@ export const useChatStore = defineStore('chat', {
           runtime.abortController = null
         }
         if (reachedTerminalEvent && !controller.signal.aborted) {
+          const state = await getThreadState(threadId, token).catch(() => null)
+          if (state?.agent_state) runtime.agentState = state.agent_state
           attachRunArtifacts(runtime)
           await this.syncThreadHistory(threadId, token).catch(() => null)
           attachRunArtifacts(runtime)
@@ -777,6 +790,8 @@ export const useChatStore = defineStore('chat', {
           if (message.status === 'streaming') message.status = 'done'
         })
         attachRunArtifacts(runtime)
+        const state = await getThreadState(threadId, token).catch(() => null)
+        if (state?.agent_state) runtime.agentState = state.agent_state
         if (!assistantMessages.some((message) => message.content) && assistantMessage.status !== 'error') {
           assistantMessage.content = '已完成。'
         }
