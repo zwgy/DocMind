@@ -13,9 +13,10 @@ const emit = defineEmits<{
 }>()
 
 const copied = ref(false)
-const dislikeOpen = ref(false)
-const dislikeReason = ref('')
-const dislikeReasonRef = ref<HTMLTextAreaElement | null>(null)
+const feedbackOpen = ref(false)
+const feedbackRating = ref<'like' | 'dislike' | null>(null)
+const feedbackReason = ref('')
+const feedbackReasonRef = ref<HTMLTextAreaElement | null>(null)
 const sourcesOpen = ref(false)
 const feedbackLocked = computed(() => Boolean(props.message.feedback || props.message.feedbackSubmitting))
 const sourceCount = computed(() => props.sources.knowledgeChunks.length + props.sources.webSources.length)
@@ -28,23 +29,20 @@ async function copyText(text: string) {
   }, 1500)
 }
 
-function submitLike() {
+function openFeedback(rating: 'like' | 'dislike') {
   if (feedbackLocked.value) return
-  emit('feedback', { messageId: props.message.id, rating: 'like', reason: null })
+  feedbackRating.value = rating
+  feedbackOpen.value = true
+  // 反馈表单可能刚好落在消息列表可视区外，聚焦 textarea 会让浏览器滚动到可输入的位置。
+  void nextTick(() => feedbackReasonRef.value?.focus())
 }
 
-function openDislike() {
-  if (feedbackLocked.value) return
-  dislikeOpen.value = true
-  // 点踩表单可能刚好落在消息列表可视区外，聚焦 textarea 会让浏览器滚动到可输入的位置。
-  void nextTick(() => dislikeReasonRef.value?.focus())
-}
-
-function submitDislike() {
-  if (feedbackLocked.value) return
-  emit('feedback', { messageId: props.message.id, rating: 'dislike', reason: dislikeReason.value.trim() || null })
-  dislikeReason.value = ''
-  dislikeOpen.value = false
+function submitFeedback() {
+  if (feedbackLocked.value || !feedbackRating.value) return
+  emit('feedback', { messageId: props.message.id, rating: feedbackRating.value, reason: feedbackReason.value.trim() || null })
+  feedbackReason.value = ''
+  feedbackRating.value = null
+  feedbackOpen.value = false
 }
 </script>
 
@@ -54,8 +52,8 @@ function submitDislike() {
       type="button"
       :class="{ selected: message.feedback?.rating === 'like' }"
       :disabled="feedbackLocked"
-      :title="message.feedback?.rating === 'like' ? '已点赞' : '点赞'"
-      @click="submitLike"
+      :title="message.feedback?.rating === 'like' ? '已点赞' : '点赞并填写反馈'"
+      @click="openFeedback('like')"
     >
       <ThumbsUp :size="13" :fill="message.feedback?.rating === 'like' ? 'currentColor' : 'none'" />
     </button>
@@ -63,9 +61,9 @@ function submitDislike() {
       type="button"
       :class="{ selected: message.feedback?.rating === 'dislike' }"
       :disabled="feedbackLocked"
-      :aria-expanded="dislikeOpen"
-      :title="message.feedback?.rating === 'dislike' ? '已点踩' : '点踩'"
-      @click="openDislike"
+      :aria-expanded="feedbackOpen && feedbackRating === 'dislike'"
+      :title="message.feedback?.rating === 'dislike' ? '已点踩' : '点踩并填写反馈'"
+      @click="openFeedback('dislike')"
     >
       <ThumbsDown :size="13" :fill="message.feedback?.rating === 'dislike' ? 'currentColor' : 'none'" />
     </button>
@@ -98,14 +96,14 @@ function submitDislike() {
         </a>
       </div>
     </section>
-    <form v-if="dislikeOpen" class="feedback-reason" @submit.prevent="submitDislike">
+    <form v-if="feedbackOpen" class="feedback-reason" @submit.prevent="submitFeedback">
       <label>
-        点踩原因（可选）
-        <textarea ref="dislikeReasonRef" v-model="dislikeReason" maxlength="500" rows="2" placeholder="告诉我们哪里需要改进" />
+        请告诉我们您的反馈（可选）
+        <textarea ref="feedbackReasonRef" v-model="feedbackReason" maxlength="500" rows="2" placeholder="您的反馈将帮助我们持续改进" />
       </label>
       <div>
         <button type="submit">提交</button>
-        <button type="button" @click="dislikeOpen = false; dislikeReason = ''">取消</button>
+        <button type="button" @click="feedbackOpen = false; feedbackRating = null; feedbackReason = ''">取消</button>
       </div>
     </form>
   </footer>
