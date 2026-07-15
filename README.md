@@ -81,7 +81,7 @@ docker compose up --build
 
 **3. 访问平台**
 
-等待启动完成后，浏览器打开 `http://localhost:5173`，使用初始化时生成的管理员账户登录即可。
+等待启动完成后，浏览器打开 `http://localhost:5173`，使用初始化时生成的管理员账户登录即可。嵌入式助手开发服务位于 `http://localhost:5174/chat-iframe/`。
 
 > 💡 不需要知识库 / 知识图谱等重依赖时，可使用 `make up-lite` 以 LITE 轻量模式启动，加快冷启动速度。更多部署说明见 [项目文档](https://xerrors.github.io/Yuxi)。
 

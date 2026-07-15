@@ -45,6 +45,8 @@ docker compose -f docker-compose.prod.yml --profile all up -d --build
 ### 3. 验证部署
 
 - Web 访问：http://localhost（直接通过 80 端口）
+- Chat Iframe：http://localhost/chat-iframe/
+- Chat Iframe 父页面脚本：http://localhost/chat-iframe/docmind-chat-iframe-parent.js
 - API 健康检查：`curl http://localhost/api/system/health`
 
 ## 维护与更新
@@ -67,4 +69,7 @@ docker logs -f api-prod
 
 # Nginx 访问日志
 docker logs -f web-prod
+
+# Chat Iframe 静态服务日志
+docker logs -f chat-iframe-prod
 ```

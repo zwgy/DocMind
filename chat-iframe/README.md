@@ -129,8 +129,9 @@ corepack pnpm build
 ## 5. 项目结构
 
 ```text
+docker/
+  chat-iframe.Dockerfile
 chat-iframe/
-  Dockerfile
   nginx.conf
   package.json
   pnpm-lock.yaml
@@ -388,18 +389,49 @@ https://docmind.example.com/chat-iframe/
 https://docmind.example.com/chat-iframe/docmind-chat-iframe-parent.js
 ```
 
-### 12.1 Docker 部署
+### 12.1 随 docMind 一起部署
 
-构建镜像：
+开发环境执行：
 
 ```bash
-docker build -t docmind-chat-iframe ./chat-iframe
+docker compose up -d --build
 ```
 
-运行：
+开发服务使用独立 Vite 端口，支持热更新：
+
+```text
+http://localhost:5174/chat-iframe/
+```
+
+生产环境执行：
 
 ```bash
-docker run -d --name docmind-chat-iframe -p 10002:80 docmind-chat-iframe
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+生产环境只由 `web-prod` 暴露 80 端口；主站 Nginx 将 `/chat-iframe/` 转发给 Compose 内网中的 `chat-iframe-prod`：
+
+```text
+http://localhost/
+http://localhost/chat-iframe/
+http://localhost/chat-iframe/docmind-chat-iframe-parent.js
+```
+
+### 12.2 独立 Docker 部署
+
+独立镜像与主项目共用同一个多阶段 Dockerfile：
+
+```bash
+docker build -f docker/chat-iframe.Dockerfile --target production -t yuxi-chat-iframe .
+```
+
+chat-iframe 仍依赖 docMind API。若 API 已由本机 Compose 启动，可把独立容器接入同一 Docker 网络：
+
+```bash
+docker run -d --name docmind-chat-iframe \
+  --network yuxi-know_app-network \
+  -p 10002:80 \
+  yuxi-chat-iframe
 ```
 
 访问：
@@ -409,40 +441,17 @@ http://localhost:10002/chat-iframe/
 http://localhost:10002/chat-iframe/docmind-chat-iframe-parent.js
 ```
 
-### 12.2 Nginx 代理
+独立容器中的 `/api/` 默认代理到 `http://api:5050/api/`，因此目标网络必须能解析 `api`；跨主机独立部署时，需要把现有 `chat-iframe/nginx.conf` 的 API 上游改为实际 docMind 后端地址。SSE 代理保持关闭缓冲，并与主站使用相同的 600 秒超时。
 
-`nginx.conf` 默认把 `/api/` 代理到 `http://api:5050/api/`。如果独立部署在生产系统网络中，需要改成真实 docMind 后端地址：
-
-```nginx
-location /api/ {
-    proxy_pass http://docmind-api.example.com/api/;
-}
-```
-
-保留 `proxy_buffering off` 是为了让 `/api/agent/runs/{runId}/events` 的 SSE 流式聊天不要被 Nginx 缓冲。
-
-#### 角色与拓扑
-
-Nginx 在 chat-iframe 里同时充当**静态服务器**（托管 Vue 应用）和**反向代理**（把 `/api/` 转发到 docMind 后端）。三者关系如下：
+#### 生产拓扑
 
 ```text
-┌─────────────────────┐       ┌──────────────────────┐       ┌──────────────────────┐
-│   生产系统（OA/办公） │       │      chat-iframe     │       │   docMind 后端 api   │
-│                     │       │                      │       │                      │
-│  浏览器：用户访问     │  ①    │  Nginx（容器内 80）    │  ③    │  FastAPI（5050）      │
-│  引入一行 <script>  │───────▶│   ├─ /chat-iframe/   │───────▶│  /api/incoming-docs/ │
-│  → 出现悬浮按钮      │       │   │   Vue SPA 静态   │       │      extractions/    │
-│                     │  ②    │   └─ /api/ 反向代理   │  HTTP │      query           │
-│  postMessage ───────┼───────▶│       到 docmind 后端 │       │                      │
-│                     │       │                      │       │                      │
-└─────────────────────┘       └──────────────────────┘       └──────────────────────┘
+生产系统页面
+  -> web-prod:80/chat-iframe/
+  -> chat-iframe-prod:80（Compose 内网静态服务）
+  -> 浏览器请求 web-prod:80/api/
+  -> api:5050
 ```
-
-| 实体 | 角色 | 端口 |
-| --- | --- | --- |
-| 生产系统（OA） | 被嵌入方，提供用户上下文和附件 | — |
-| chat-iframe | 嵌入桥梁，自带 Nginx 静态 + 反代 | 80 |
-| docMind 后端 api | 真正处理来文抽取查询 | 5050 |
 
 #### 数据流
 
@@ -459,7 +468,7 @@ Nginx 在 chat-iframe 里同时充当**静态服务器**（托管 Vue 应用）�
      body: { files: [...] }
    })
    ```
-5. Nginx 匹配 `location /api/`，把请求 `proxy_pass` 到 docMind 后端，并补上 `X-Real-IP` / `X-Forwarded-For` 头。
+5. 随主项目部署时由 `web-prod`、独立部署时由 chat-iframe Nginx 匹配 `location /api/`，把请求代理到 docMind 后端。
 6. docMind 后端处理 `/api/incoming-documents/extractions/query`，查询数据库、匹配来文，返回 `{ status, extraction }`。
 7. 结果原路返回，iframe 渲染面板，展示匹配状态和结构化抽取结果。
 
