@@ -11,8 +11,13 @@ __pycache__/
 venv/
 env/
 
-# 忽略 node_modules 文件夹（前端项目）
+# 忽略 node_modules 和前端本地产物
 web/node_modules/
+chat-iframe/node_modules/
+chat-iframe/dist/
+chat-iframe/.env.local
+chat-iframe/public/test1/
+chat-iframe/public/test2/
 
 # 忽略日志和临时文件
 *.log

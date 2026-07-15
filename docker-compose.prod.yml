@@ -156,12 +156,27 @@ services:
       - "80:80"
     depends_on:
       - api
+      - chat-iframe
     networks:
       - app-network
     environment:
       - NODE_ENV=production
       - VITE_LITE_MODE=${LITE_MODE:-}
-    command: nginx -g "daemon off;"
+    restart: unless-stopped
+
+  chat-iframe:
+    build:
+      context: .
+      dockerfile: docker/chat-iframe.Dockerfile
+      target: production
+    image: yuxi-chat-iframe:${YUXI_VERSION:-0.7.1.dev0}
+    container_name: chat-iframe-prod
+    expose:
+      - "80"
+    depends_on:
+      - api
+    networks:
+      - app-network
     restart: unless-stopped
 
   graph:

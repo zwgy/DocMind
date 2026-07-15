@@ -211,6 +211,30 @@ services:
     command: pnpm run server
     restart: unless-stopped
 
+  chat-iframe:
+    build:
+      context: .
+      dockerfile: docker/chat-iframe.Dockerfile
+      target: development
+    image: yuxi-chat-iframe:${YUXI_VERSION:-0.7.1.dev0}
+    container_name: chat-iframe-dev
+    volumes:
+      - ./chat-iframe/src:/app/src
+      - ./chat-iframe/public:/app/public
+      - ./chat-iframe/index.html:/app/index.html
+      - ./chat-iframe/vite.config.ts:/app/vite.config.ts
+    ports:
+      - "${CHAT_IFRAME_DEV_HOST_PORT:-5174}:5174"
+    depends_on:
+      - api
+    networks:
+      - app-network
+    environment:
+      - NODE_ENV=development
+      - VITE_API_URL=http://api:5050
+    command: corepack pnpm exec vite --host 0.0.0.0 --port 5174
+    restart: unless-stopped
+
   # region neo4j
   graph:
     image: neo4j:5.26
