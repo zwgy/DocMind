@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -202,6 +203,53 @@ async def test_save_messages_persists_presented_artifacts_on_final_answer() -> N
 
 
 @pytest.mark.asyncio
+async def test_save_messages_backfills_new_outputs_when_model_omits_presentation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    (tmp_path / "report.docx").write_bytes(b"docx")
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "tmp" / "draft.md").write_text("draft", encoding="utf-8")
+    monkeypatch.setattr(svc, "sandbox_outputs_dir", lambda _thread_id: tmp_path)
+
+    class FakeDB:
+        async def commit(self):
+            return None
+
+    class FakeRunRepo:
+        def __init__(self, _db):
+            pass
+
+        async def get_run(self, _run_id):
+            return SimpleNamespace(started_at=datetime.now(UTC) - timedelta(seconds=1))
+
+        async def set_output_message(self, _run_id, _message_id):
+            return None
+
+    class FakeGraph:
+        async def aget_state(self, _config):
+            return SimpleNamespace(values={"messages": [{"id": "ai-final", "type": "ai", "content": "已完成"}]})
+
+    class FakeAgent:
+        async def get_graph(self):
+            return FakeGraph()
+
+    monkeypatch.setattr(svc, "AgentRunRepository", FakeRunRepo)
+    conv_repo = _FakeConvRepo(FakeDB())
+    await svc.save_messages_from_langgraph_state(
+        agent_instance=FakeAgent(),
+        thread_id="thread-1",
+        conv_repo=conv_repo,
+        config_dict={"configurable": {"thread_id": "thread-1", "uid": "user-1"}},
+        trace_info=None,
+        run_id="run-1",
+    )
+
+    assert conv_repo.saved_messages[0]["extra_metadata"]["presented_artifacts"] == [
+        "/home/gem/user-data/outputs/report.docx"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_save_messages_accepts_openai_function_style_presented_artifacts() -> None:
     class FakeGraph:
         async def aget_state(self, _config):
@@ -269,6 +317,9 @@ async def test_save_messages_from_langgraph_state_backfills_run_output_message(m
     class FakeRunRepo:
         def __init__(self, db):
             assert db is fake_db
+
+        async def get_run(self, _run_id: str):
+            return None
 
         async def set_output_message(self, run_id: str, message_id: int):
             captured["run_id"] = run_id
