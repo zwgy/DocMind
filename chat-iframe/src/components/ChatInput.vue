@@ -383,11 +383,11 @@ watch(text, resizeTextarea)
     <div v-if="files.length || imageFile" class="attached-files">
       <span v-if="imageFile">
         图片：{{ imageFile.name }}
-        <button type="button" title="移除图片" @click="imageFile = null"><X :size="12" /></button>
+        <button type="button" title="移除图片" @click="imageFile = null"><X :size="16" /></button>
       </span>
       <span v-for="(file, index) in files" :key="`${file.name}-${index}`">
         {{ file.name }}
-        <button type="button" title="移除附件" @click="removeFile(index)"><X :size="12" /></button>
+        <button type="button" title="移除附件" @click="removeFile(index)"><X :size="16" /></button>
       </span>
     </div>
     <p v-if="attachmentError" class="input-attachment-error" role="alert">{{ attachmentError }}</p>

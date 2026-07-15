@@ -1369,13 +1369,19 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   border: 0;
   border-radius: 50%;
-  color: var(--gray-500);
+  color: var(--gray-700);
   background: transparent;
   cursor: pointer;
+}
+
+.attached-files button:hover,
+.attached-files button:focus-visible {
+  color: var(--gray-1000);
+  background: var(--gray-0);
 }
 
 .tool-calls-panel {
