@@ -630,6 +630,7 @@
 }
 
 .chat-message.user {
+  position: relative;
   align-self: flex-end;
   max-width: 92%;
 }
@@ -1096,18 +1097,29 @@
 }
 
 .user-message-copy {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 8px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
-  margin-top: 5px;
+  margin: 0;
   padding: 0;
   border: 0;
   border-radius: 50%;
   color: var(--gray-500);
   background: transparent;
   cursor: pointer;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 0.15s ease;
+}
+
+.chat-message.user:hover .user-message-copy,
+.user-message-copy:focus-visible {
+  opacity: 1;
 }
 
 .user-message-copy:hover {
@@ -1751,6 +1763,7 @@
   padding: 4px 2px;
   color: var(--gray-1000);
   font: inherit;
+  font-size: 14px;
   line-height: 1.5;
   overflow-y: hidden;
 }

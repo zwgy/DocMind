@@ -24,7 +24,6 @@ const props = withDefaults(
 )
 
 defineEmits<{
-  retry: []
   feedback: [payload: { messageId: string; rating: 'like' | 'dislike'; reason: string | null }]
 }>()
 
@@ -251,6 +250,16 @@ onUnmounted(closeImagePreview)
         <div v-if="item.message.role !== 'assistant' && item.message.role !== 'user'" class="message-role">
           {{ item.message.role === 'tool' ? '工具' : '系统' }}
         </div>
+        <button
+          v-if="item.message.role === 'user' && item.message.content"
+          type="button"
+          class="user-message-copy"
+          title="复制消息"
+          @click="copyUserMessage(item.message)"
+        >
+          <Check v-if="copiedUserMessageId === item.message.id" :size="13" />
+          <Copy v-else :size="13" />
+        </button>
         <div class="message-content">
           <button
             v-if="item.message.imageContent"
@@ -271,10 +280,6 @@ onUnmounted(closeImagePreview)
               </div>
             </article>
           </div>
-          <button v-if="item.message.role === 'user' && item.message.content" type="button" class="user-message-copy" title="复制消息" @click="copyUserMessage(item.message)">
-            <Check v-if="copiedUserMessageId === item.message.id" :size="13" />
-            <Copy v-else :size="13" />
-          </button>
           <details v-if="item.message.reasoningContent" class="reasoning-box" :open="openReasoning[item.message.id]">
             <summary @click.prevent="openReasoning[item.message.id] = !openReasoning[item.message.id]">
               {{ item.message.status === 'streaming' ? '正在思考...' : '推理过程' }}
@@ -288,7 +293,6 @@ onUnmounted(closeImagePreview)
             v-if="showAssistantRefs(item.message)"
             :message="item.message"
             :sources="assistantSources(item.message)"
-            @retry="$emit('retry')"
             @feedback="$emit('feedback', $event)"
           />
         </div>

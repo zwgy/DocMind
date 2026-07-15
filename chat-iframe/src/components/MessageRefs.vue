@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BookOpen, Check, ChevronDown, Copy, RotateCcw, ThumbsDown, ThumbsUp } from 'lucide-vue-next'
+import { BookOpen, Check, ChevronDown, Copy, ThumbsDown, ThumbsUp } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import type { ChatMessage } from '@/types'
 import KbResultGroupedList from '@/components/KbResultGroupedList.vue'
@@ -9,7 +9,6 @@ const props = withDefaults(defineProps<{ message: ChatMessage; sources?: ChatSou
   sources: () => ({ knowledgeChunks: [], webSources: [] })
 })
 const emit = defineEmits<{
-  retry: []
   feedback: [payload: { messageId: string; rating: 'like' | 'dislike'; reason: string | null }]
 }>()
 
@@ -43,9 +42,6 @@ function submitDislike() {
 
 <template>
   <footer class="message-refs">
-    <button type="button" title="重新生成（追加新一轮）" @click="emit('retry')">
-      <RotateCcw :size="13" />
-    </button>
     <button
       type="button"
       :class="{ selected: message.feedback?.rating === 'like' }"
