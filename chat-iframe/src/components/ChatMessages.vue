@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { Check, Copy, FileText, Image as ImageIcon } from 'lucide-vue-next'
+import { Check, Circle, CircleCheck, Copy, Download, Eye, FileText, Image as ImageIcon, LoaderCircle, X } from 'lucide-vue-next'
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import MessageRefs from '@/components/MessageRefs.vue'
 import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
-import type { ChatMessage, ExtractionItem } from '@/types'
+import { fetchThreadArtifact } from '@/apis/chat'
+import type { ChatArtifact, ChatMessage, ExtractionItem } from '@/types'
 import {
   displayExtractionDataEntries,
   extractionClassificationText,
@@ -19,8 +20,11 @@ const props = withDefaults(
     messages?: ChatMessage[]
     loading?: boolean
     streaming?: boolean
+    agentState?: Record<string, unknown> | null
+    threadId?: string
+    token?: string
   }>(),
-  { messages: () => [], loading: false, streaming: false }
+  { messages: () => [], loading: false, streaming: false, agentState: null, threadId: '', token: '' }
 )
 
 defineEmits<{
@@ -31,8 +35,28 @@ const openReasoning = ref<Record<string, boolean>>({})
 const messagesEl = ref<HTMLElement | null>(null)
 const copiedUserMessageId = ref('')
 const imagePreview = ref({ src: '', alt: '' })
+const artifactPreview = ref<{ name: string; kind: 'image' | 'pdf' | 'text'; url?: string; text?: string } | null>(null)
+const artifactBusyPath = ref('')
+const artifactError = ref('')
 const displayItems = computed(() => groupMessageDisplayItems(props.messages))
 const showGeneratingStatus = computed(() => props.streaming && props.messages.some((message) => message.role === 'user'))
+const runTodos = computed(() => {
+  const todos = props.agentState?.todos
+  if (!Array.isArray(todos)) return []
+  return todos
+    .map((todo, index) => {
+      const item = todo && typeof todo === 'object' ? (todo as Record<string, unknown>) : {}
+      const status = String(item.status || 'pending').toLowerCase()
+      return {
+        id: String(item.id || index),
+        content: String(item.content || item.title || item.task || '').trim(),
+        status: status === 'completed' || status === 'done' ? 'done' : status === 'in_progress' || status === 'running' ? 'running' : 'pending'
+      }
+    })
+    .filter((todo) => todo.content)
+})
+const completedTodoCount = computed(() => runTodos.value.filter((todo) => todo.status === 'done').length)
+const showRunProgress = computed(() => props.streaming && runTodos.value.length > 0)
 const lastAssistantMessageId = computed(() => {
   for (let index = props.messages.length - 1; index >= 0; index -= 1) {
     const message = props.messages[index]
@@ -91,6 +115,57 @@ function closeImagePreview() {
 
 function closeImagePreviewOnEscape(event: KeyboardEvent) {
   if (event.key === 'Escape') closeImagePreview()
+}
+
+function artifactKind(path: string): 'image' | 'pdf' | 'text' | null {
+  const extension = path.split('.').pop()?.toLowerCase() || ''
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extension)) return 'image'
+  if (extension === 'pdf') return 'pdf'
+  if (['txt', 'md', 'json', 'csv', 'yaml', 'yml', 'xml', 'html', 'log'].includes(extension)) return 'text'
+  return null
+}
+
+function closeArtifactPreview() {
+  if (artifactPreview.value?.url) URL.revokeObjectURL(artifactPreview.value.url)
+  artifactPreview.value = null
+}
+
+async function previewArtifact(artifact: ChatArtifact) {
+  const kind = artifactKind(artifact.path)
+  if (!kind || !props.threadId || artifactBusyPath.value) return
+  artifactBusyPath.value = artifact.path
+  artifactError.value = ''
+  try {
+    const response = await fetchThreadArtifact(props.threadId, artifact.path, props.token)
+    if (kind === 'text') {
+      artifactPreview.value = { name: artifact.name, kind, text: await response.text() }
+    } else {
+      artifactPreview.value = { name: artifact.name, kind, url: URL.createObjectURL(await response.blob()) }
+    }
+  } catch (error) {
+    artifactError.value = error instanceof Error ? error.message : '交付物预览失败'
+  } finally {
+    artifactBusyPath.value = ''
+  }
+}
+
+async function downloadArtifact(artifact: ChatArtifact) {
+  if (!props.threadId || artifactBusyPath.value) return
+  artifactBusyPath.value = artifact.path
+  artifactError.value = ''
+  try {
+    const response = await fetchThreadArtifact(props.threadId, artifact.path, props.token, true)
+    const url = URL.createObjectURL(await response.blob())
+    const link = document.createElement('a')
+    link.href = url
+    link.download = artifact.name
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  } catch (error) {
+    artifactError.value = error instanceof Error ? error.message : '交付物下载失败'
+  } finally {
+    artifactBusyPath.value = ''
+  }
 }
 
 function displayValue(value: unknown) {
@@ -177,8 +252,11 @@ async function scrollToBottom() {
   })
 }
 
-watch([displayItems, showGeneratingStatus], scrollToBottom, { flush: 'post', deep: true })
-onUnmounted(closeImagePreview)
+watch([displayItems, showGeneratingStatus, showRunProgress], scrollToBottom, { flush: 'post', deep: true })
+onUnmounted(() => {
+  closeImagePreview()
+  closeArtifactPreview()
+})
 </script>
 
 <template>
@@ -295,6 +373,26 @@ onUnmounted(closeImagePreview)
             :sources="assistantSources(item.message)"
             @feedback="$emit('feedback', $event)"
           />
+          <section v-if="item.message.artifacts?.length" class="message-artifacts">
+            <header><strong>本轮交付物（{{ item.message.artifacts.length }}）</strong></header>
+            <article v-for="artifact in item.message.artifacts" :key="artifact.path">
+              <FileText :size="16" />
+              <span :title="artifact.name">{{ artifact.name }}</span>
+              <button
+                v-if="artifactKind(artifact.path)"
+                type="button"
+                :disabled="Boolean(artifactBusyPath)"
+                title="预览交付物"
+                @click="previewArtifact(artifact)"
+              >
+                <Eye :size="14" />
+              </button>
+              <button type="button" :disabled="Boolean(artifactBusyPath)" title="下载交付物" @click="downloadArtifact(artifact)">
+                <Download :size="14" />
+              </button>
+            </article>
+            <p v-if="artifactError" class="error-hint">{{ artifactError }}</p>
+          </section>
         </div>
       </template>
     </article>
@@ -308,10 +406,35 @@ onUnmounted(closeImagePreview)
         <span class="generating-text">正在生成回复...</span>
       </div>
     </div>
+    <section v-if="showRunProgress" class="run-progress-card" aria-live="polite">
+      <header>
+        <LoaderCircle :size="15" class="run-progress-spinner" />
+        <strong>本轮进度</strong>
+        <span>已完成 {{ completedTodoCount }}/{{ runTodos.length }}</span>
+      </header>
+      <ol>
+        <li v-for="todo in runTodos" :key="todo.id" :class="`is-${todo.status}`">
+          <CircleCheck v-if="todo.status === 'done'" :size="15" />
+          <LoaderCircle v-else-if="todo.status === 'running'" :size="15" class="run-progress-spinner" />
+          <Circle v-else :size="15" />
+          <span>{{ todo.content }}</span>
+        </li>
+      </ol>
+    </section>
     <Teleport to="body">
       <div v-if="imagePreview.src" class="message-image-preview-overlay" role="dialog" aria-modal="true" aria-label="图片预览" @click="closeImagePreview">
         <button type="button" class="message-image-preview-close" title="关闭" @click.stop="closeImagePreview">×</button>
         <img :src="imagePreview.src" :alt="imagePreview.alt" class="message-image-preview-img" @click.stop />
+      </div>
+    </Teleport>
+    <Teleport to="body">
+      <div v-if="artifactPreview" class="artifact-preview-overlay" role="dialog" aria-modal="true" :aria-label="`${artifactPreview.name} 预览`" @click="closeArtifactPreview">
+        <section class="artifact-preview-dialog" @click.stop>
+          <header><strong>{{ artifactPreview.name }}</strong><button type="button" title="关闭预览" @click="closeArtifactPreview"><X :size="17" /></button></header>
+          <img v-if="artifactPreview.kind === 'image'" :src="artifactPreview.url" :alt="artifactPreview.name" />
+          <iframe v-else-if="artifactPreview.kind === 'pdf'" :src="artifactPreview.url" :title="artifactPreview.name" />
+          <pre v-else>{{ artifactPreview.text }}</pre>
+        </section>
       </div>
     </Teleport>
     </template>

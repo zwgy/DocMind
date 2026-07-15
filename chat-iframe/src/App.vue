@@ -32,6 +32,10 @@ const draggingWindow = ref(false)
 const ingestingFileIds = new Set<string>()
 
 const selectedFile = computed(() => context.selectedFile)
+const currentTokenUsage = computed(() => {
+  const usage = chat.agentState?.token_usage
+  return usage && typeof usage === 'object' && !Array.isArray(usage) ? (usage as Record<string, unknown>) : null
+})
 
 function openSidebar() {
   showSidebar.value = true
@@ -296,6 +300,9 @@ onUnmounted(() => {
           :messages="chat.displayMessages"
           :loading="chat.isLoading"
           :streaming="chat.isStreaming"
+          :agent-state="chat.agentState"
+          :thread-id="chat.currentThreadId"
+          :token="context.config.token"
           @feedback="submitFeedback"
         />
         <RunInterruptCard
@@ -312,6 +319,7 @@ onUnmounted(() => {
           :ask-file="chat.askFile"
           :models="chat.modelOptions"
           :selected-model-spec="chat.selectedModelSpec"
+          :token-usage="currentTokenUsage"
           :page-files="context.files"
           :selected-page-file-id="context.selectedFileId"
           @update:ask-page="chat.askPage = $event"

@@ -3,6 +3,7 @@ import {
   CheckSquare,
   ChevronDown,
   FileText,
+  Gauge,
   Globe2,
   Image,
   Paperclip,
@@ -33,6 +34,7 @@ const props = withDefaults(
     selectedModelSpec?: string
     pageFiles?: IncomingPageFile[]
     selectedPageFileId?: string
+    tokenUsage?: Record<string, unknown> | null
   }>(),
   {
     disabled: false,
@@ -42,7 +44,8 @@ const props = withDefaults(
     models: () => [],
     selectedModelSpec: '',
     pageFiles: () => [],
-    selectedPageFileId: ''
+    selectedPageFileId: '',
+    tokenUsage: null
   }
 )
 
@@ -72,12 +75,14 @@ const showFileMenu = ref(false)
 const showModelMenu = ref(false)
 const showAttachmentMenu = ref(false)
 const showAttachmentModal = ref(false)
+const showContextUsage = ref(false)
 const dragActive = ref(false)
 const attachmentError = ref('')
 const modelSearch = ref('')
 const fileMenuRef = ref<HTMLElement | null>(null)
 const modelMenuRef = ref<HTMLElement | null>(null)
 const attachmentMenuRef = ref<HTMLElement | null>(null)
+const contextUsageRef = ref<HTMLElement | null>(null)
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const hasPageFiles = computed(() => props.pageFiles.length > 0)
@@ -104,6 +109,29 @@ const filteredModelGroups = computed(() => {
 const fileButtonText = computed(() => {
   if (!hasPageFiles.value || !selectedPageFiles.value.length) return '问文件'
   return `问文件(${selectedPageFiles.value.length})`
+})
+function tokenNumber(value: unknown) {
+  const number = Number(value)
+  return Number.isFinite(number) && number >= 0 ? number : null
+}
+
+function formatTokenCount(value: number) {
+  return value >= 1000 ? `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}k` : String(value)
+}
+
+const contextUsage = computed(() => {
+  const usage = props.tokenUsage
+  if (!usage) return null
+  const limit = tokenNumber(usage.context_window)
+  const used = tokenNumber(usage.llm_input_tokens)
+  if (!limit || used === null) return null
+  const remaining = tokenNumber(usage.remaining_context_tokens) ?? Math.max(limit - used, 0)
+  return {
+    used,
+    limit,
+    remaining,
+    percent: Math.min(Math.round((used / limit) * 100), 100)
+  }
 })
 
 watch(
@@ -265,6 +293,7 @@ function handleOutsideClick(event: MouseEvent) {
   if (fileMenuRef.value && !fileMenuRef.value.contains(event.target as Node)) showFileMenu.value = false
   if (modelMenuRef.value && !modelMenuRef.value.contains(event.target as Node)) showModelMenu.value = false
   if (attachmentMenuRef.value && !attachmentMenuRef.value.contains(event.target as Node)) showAttachmentMenu.value = false
+  if (contextUsageRef.value && !contextUsageRef.value.contains(event.target as Node)) showContextUsage.value = false
 }
 
 onMounted(() => {
@@ -378,6 +407,24 @@ watch(text, resizeTextarea)
           </div>
         </div>
         <div class="send-tools">
+          <div v-if="contextUsage" ref="contextUsageRef" class="context-usage-wrapper">
+            <button
+              type="button"
+              class="context-usage-button"
+              :class="{ warning: contextUsage.percent >= 80 }"
+              :aria-expanded="showContextUsage"
+              title="查看本次模型调用的上下文用量"
+              @click="showContextUsage = !showContextUsage"
+            >
+              <Gauge :size="16" />
+            </button>
+            <section v-if="showContextUsage" class="context-usage-popover" aria-label="上下文用量">
+              <strong>上下文用量</strong>
+              <span>{{ formatTokenCount(contextUsage.used) }} / {{ formatTokenCount(contextUsage.limit) }}</span>
+              <div class="context-usage-bar" aria-hidden="true"><i :style="{ width: `${contextUsage.percent}%` }"></i></div>
+              <small>剩余 {{ formatTokenCount(contextUsage.remaining) }} · 本次模型调用快照</small>
+            </section>
+          </div>
           <div ref="modelMenuRef" class="model-menu-wrapper">
             <button
               type="button"
