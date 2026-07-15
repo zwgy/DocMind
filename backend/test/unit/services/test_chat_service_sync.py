@@ -159,6 +159,47 @@ async def test_save_messages_from_langgraph_state_handles_dict_tool_call_blocks(
 
 
 @pytest.mark.asyncio
+async def test_save_messages_persists_presented_artifacts_on_final_answer() -> None:
+    class FakeGraph:
+        async def aget_state(self, _config):
+            return SimpleNamespace(
+                values={
+                    "messages": [
+                        {
+                            "id": "ai-artifacts",
+                            "type": "ai",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "present-1",
+                                    "name": "present_artifacts",
+                                    "args": {"filepaths": ["/user-data/outputs/report.pdf", "/user-data/outputs/report.pdf"]},
+                                }
+                            ],
+                        },
+                        {"id": "ai-final", "type": "ai", "content": "报告已生成"},
+                    ]
+                }
+            )
+
+    class FakeAgent:
+        async def get_graph(self):
+            return FakeGraph()
+
+    conv_repo = _FakeConvRepo(None)
+    await svc.save_messages_from_langgraph_state(
+        agent_instance=FakeAgent(),
+        thread_id="thread-1",
+        conv_repo=conv_repo,
+        config_dict={"configurable": {"thread_id": "thread-1", "uid": "user-1"}},
+        trace_info=None,
+    )
+
+    assert "presented_artifacts" not in conv_repo.saved_messages[0]["extra_metadata"]
+    assert conv_repo.saved_messages[1]["extra_metadata"]["presented_artifacts"] == ["/user-data/outputs/report.pdf"]
+
+
+@pytest.mark.asyncio
 async def test_save_messages_from_langgraph_state_backfills_run_output_message(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeDB:
         def __init__(self):

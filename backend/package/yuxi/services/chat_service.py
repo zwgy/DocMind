@@ -452,6 +452,30 @@ async def _save_tool_message(conv_repo: ConversationRepository, msg_dict: dict) 
     )
 
 
+def _presented_artifacts_from_message(msg_dict: dict) -> list[str]:
+    """提取本轮明确交付给用户的产物，避免把线程工作目录当作回答附件。"""
+    tool_calls = msg_dict.get("tool_calls")
+    if not isinstance(tool_calls, list) and isinstance(msg_dict.get("content"), list):
+        tool_calls = [item for item in msg_dict["content"] if isinstance(item, dict) and item.get("type") == "tool_call"]
+    if not isinstance(tool_calls, list):
+        return []
+
+    paths: list[str] = []
+    for tool_call in tool_calls:
+        if not isinstance(tool_call, dict) or tool_call.get("name") != "present_artifacts":
+            continue
+        args = tool_call.get("args") or {}
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(args, dict):
+            continue
+        paths.extend(path.strip() for path in args.get("filepaths", []) if isinstance(path, str) and path.strip())
+    return list(dict.fromkeys(paths))
+
+
 async def save_partial_message(
     conv_repo: ConversationRepository,
     thread_id: str,
@@ -508,7 +532,7 @@ async def save_messages_from_langgraph_state(
 
     existing_ids = await _get_existing_message_ids(conv_repo, thread_id)
 
-    last_ai_message = None
+    pending_messages: list[tuple[str, dict]] = []
     for msg in messages:
         if hasattr(msg, "model_dump"):
             msg_dict = msg.model_dump()
@@ -531,6 +555,21 @@ async def save_messages_from_langgraph_state(
         if msg_type == "human" or msg_id in existing_ids:
             continue
 
+        pending_messages.append((msg_type, msg_dict))
+
+    presented_artifacts: list[str] = []
+    for msg_type, msg_dict in pending_messages:
+        if msg_type == "ai":
+            presented_artifacts.extend(_presented_artifacts_from_message(msg_dict))
+    if presented_artifacts:
+        for msg_type, msg_dict in reversed(pending_messages):
+            if msg_type == "ai":
+                # 产物属于最终回答，刷新历史时无需依赖前端按相邻工具调用猜测归属。
+                msg_dict["presented_artifacts"] = list(dict.fromkeys(presented_artifacts))
+                break
+
+    last_ai_message = None
+    for msg_type, msg_dict in pending_messages:
         if msg_type == "ai":
             last_ai_message = await _save_ai_message(
                 conv_repo,
