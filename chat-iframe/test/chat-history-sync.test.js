@@ -4,6 +4,25 @@ import test from 'node:test'
 const { setActivePinia, createPinia } = await import('pinia')
 const { useChatStore } = await import('../src/stores/chat.ts')
 
+test('selectThread restores persisted token usage with message history', async () => {
+  setActivePinia(createPinia())
+  globalThis.fetch = async (url) => {
+    if (url === '/api/chat/thread/thread-history/history') {
+      return Response.json({ history: [{ id: 'answer', type: 'ai', content: 'answer' }] })
+    }
+    if (url === '/api/chat/thread/thread-history/state') {
+      return Response.json({ agent_state: { token_usage: { llm_input_tokens: 1200, summary_trigger_tokens: 102400 } } })
+    }
+    return Response.json({})
+  }
+
+  const chat = useChatStore()
+  await chat.selectThread('thread-history', 'token-1')
+
+  assert.equal(chat.messages[0].content, 'answer')
+  assert.deepEqual(chat.agentState?.token_usage, { llm_input_tokens: 1200, summary_trigger_tokens: 102400 })
+})
+
 test('terminal run replaces its optimistic turn with server history ids', async () => {
   setActivePinia(createPinia())
   let requestId = ''
@@ -23,16 +42,21 @@ test('terminal run replaces its optimistic turn with server history ids', async 
             id: 'server-assistant',
             type: 'ai',
             content: 'official answer',
-            extra_metadata: { request_id: requestId, response_metadata: { model_name: 'Qwen' } }
+            extra_metadata: { request_id: requestId }
           }
         ]
       })
+    }
+    if (url === '/api/chat/thread/thread-1/state') {
+      return Response.json({ agent_state: { token_usage: { llm_input_tokens: 1200, summary_trigger_tokens: 102400 } } })
     }
     return Response.json({})
   }
 
   const chat = useChatStore()
   chat.currentThreadId = 'thread-1'
+  chat.modelOptions = [{ value: 'model-qwen', label: 'Qwen3.6' }]
+  chat.selectedModelSpec = 'model-qwen'
   chat.ensureRuntime('thread-1')
 
   const result = await chat.send({ text: 'question', files: [], imageFile: null }, 'token-1')
@@ -40,7 +64,8 @@ test('terminal run replaces its optimistic turn with server history ids', async 
   assert.equal(result?.messageId, 'server-user')
   assert.deepEqual(chat.messages.map((message) => message.id), ['server-user', 'server-assistant'])
   assert.equal(chat.messages[1].content, 'official answer')
-  assert.equal(chat.messages[1].modelName, 'Qwen')
+  assert.equal(chat.messages[1].modelName, 'Qwen3.6')
+  assert.deepEqual(chat.agentState?.token_usage, { llm_input_tokens: 1200, summary_trigger_tokens: 102400 })
 })
 
 test('terminal run keeps a complete streamed answer until delayed history catches up', async () => {

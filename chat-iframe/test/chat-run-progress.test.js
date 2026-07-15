@@ -19,10 +19,21 @@ test('context usage is an optional input control next to model selection', () =>
   assert.match(appSource, /:token-usage="currentTokenUsage"/)
   assert.match(inputSource, /v-if="contextUsage" ref="contextUsageRef" class="context-usage-wrapper"/)
   assert.match(inputSource, /llm_input_tokens/)
-  assert.match(inputSource, /context_window/)
+  assert.match(inputSource, /llm_message_count/)
+  assert.match(inputSource, /summary_trigger_tokens/)
+  assert.match(inputSource, /const TOKEN_COUNT_K_UNIT = 1024/)
+  assert.match(inputSource, /toFixed\(digits\)\.replace\(\/\\\.0\+\$\//)
+  assert.match(inputSource, /label: '系统'/)
+  assert.match(inputSource, /label: `工具 \(\$\{tokenNumber\(usage\.tool_count\) \|\| 0\}\)`/)
   assert.match(inputSource, /if \(used === null\) return null/)
-  assert.match(inputSource, /总上下文未配置/)
+  assert.match(inputSource, /context-usage-legend/)
+  assert.match(inputSource, /v-if="segment\.messageCount"> \(\{\{ segment\.messageCount \}\}\)<\/template>/)
   assert.match(styles, /\.context-usage-popover \{/)
+  assert.match(styles, /\.context-usage-legend i\.is-tools \{\s*background: var\(--color-warning-500\)/)
+})
+
+test('tool call icons use an explicit high-contrast color on white backgrounds', () => {
+  assert.match(styles, /\.tool-card-summary > svg:first-child \{\s*color: var\(--main-700\)/)
 })
 
 test('artifacts stay attached to the final assistant message and use authenticated retrieval', () => {

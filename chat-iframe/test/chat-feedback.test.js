@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const { setActivePinia, createPinia } = await import('pinia')
 const { listMessages } = await import('../src/apis/chat.ts')
 const { useChatStore } = await import('../src/stores/chat.ts')
+const messageRefsSource = readFileSync(new URL('../src/components/MessageRefs.vue', import.meta.url), 'utf8')
+
+test('dislike opens and focuses the optional reason field', () => {
+  assert.match(messageRefsSource, /@click="openDislike"/)
+  assert.match(messageRefsSource, /nextTick\(\(\) => dislikeReasonRef\.value\?\.focus\(\)\)/)
+  assert.match(messageRefsSource, /ref="dislikeReasonRef"/)
+})
 
 test('history feedback is normalized and a second click does not submit again', async () => {
   let feedbackPosts = 0
