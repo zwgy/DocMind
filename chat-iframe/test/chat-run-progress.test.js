@@ -19,6 +19,8 @@ test('context usage is an optional input control next to model selection', () =>
   assert.match(appSource, /:token-usage="currentTokenUsage"/)
   assert.match(inputSource, /v-if="contextUsage" ref="contextUsageRef" class="context-usage-wrapper"/)
   assert.match(inputSource, /llm_input_tokens/)
+  assert.match(inputSource, /model_usage/)
+  assert.match(inputSource, /input_tokens/)
   assert.match(inputSource, /llm_message_count/)
   assert.match(inputSource, /summary_trigger_tokens/)
   assert.match(inputSource, /const TOKEN_COUNT_K_UNIT = 1024/)
