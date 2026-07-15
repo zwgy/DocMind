@@ -94,7 +94,7 @@ corepack pnpm typecheck
 corepack pnpm test
 ```
 
-运行父页面脚本的附件 DOM 识别测试。
+运行 chat-iframe 全量回归测试。
 
 ```bash
 corepack pnpm lint
@@ -109,6 +109,16 @@ corepack pnpm test:reliability
 ```
 
 该命令只运行 P0-1 至 P0-8 的回归测试，再执行类型检查和 lint。真实浏览器 E2E 必须在内网部署机执行：需要该机器的部署 URL、可用的测试业务身份，以及已安装的浏览器自动化运行器；不要在无 URL 或无测试身份的开发机上把它伪装成已通过。
+
+### P1 核心体验门禁
+
+```bash
+corepack pnpm test:p1
+```
+
+该命令运行全部 chat-iframe 回归测试、类型检查、lint 和生产构建，覆盖模型、会话分页、来源、上传限制、消息操作和 Markdown。
+
+内网部署机的浏览器验收不由该命令伪造：使用真实父页面、独立测试业务身份和部署 URL，依次验证 iframe 握手、普通窗/最大化、选择附件后的一次真实问答、复制与图片预览，以及代码/公式/SVG 消息不溢出。
 
 ```bash
 corepack pnpm build
