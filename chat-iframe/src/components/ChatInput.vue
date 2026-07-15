@@ -115,22 +115,47 @@ function tokenNumber(value: unknown) {
   return Number.isFinite(number) && number >= 0 ? number : null
 }
 
+const TOKEN_COUNT_K_UNIT = 1024
+
 function formatTokenCount(value: number) {
-  return value >= 1000 ? `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}k` : String(value)
+  if (value < TOKEN_COUNT_K_UNIT) return String(Math.round(value))
+  const digits = value >= TOKEN_COUNT_K_UNIT * 10 ? 1 : 2
+  return `${(value / TOKEN_COUNT_K_UNIT).toFixed(digits).replace(/\.0+$/, '')}k`
 }
 
 const contextUsage = computed(() => {
   const usage = props.tokenUsage
   if (!usage) return null
-  const limit = tokenNumber(usage.context_window)
   const used = tokenNumber(usage.llm_input_tokens)
   if (used === null) return null
-  const remaining = limit ? tokenNumber(usage.remaining_context_tokens) ?? Math.max(limit - used, 0) : null
+  const summaryTrigger = tokenNumber(usage.summary_trigger_tokens)
+  const contextWindow = tokenNumber(usage.context_window)
+  const limit = summaryTrigger || contextWindow || Math.max(used, 1)
+  const summaryTokens = usage.summary_active ? tokenNumber(usage.summary_message_tokens) || 0 : 0
+  const llmMessageTokens = tokenNumber(usage.llm_messages_tokens) || 0
+  const messageCount = Math.max((tokenNumber(usage.llm_message_count) || 0) - (usage.summary_active ? 1 : 0), 0)
+  const segments = [
+    { key: 'messages', label: '消息', value: Math.max(llmMessageTokens - summaryTokens, 0), messageCount },
+    { key: 'summary', label: '摘要', value: summaryTokens, messageCount: 0 },
+    { key: 'system', label: '系统', value: tokenNumber(usage.system_tokens) || 0, messageCount: 0 },
+    { key: 'tools', label: `工具 (${tokenNumber(usage.tool_count) || 0})`, value: tokenNumber(usage.tools_tokens) || 0, messageCount: 0 }
+  ].filter((segment) => segment.value > 0)
+  const accounted = segments.reduce((total, segment) => total + segment.value, 0)
+  if (used > accounted) segments.push({ key: 'other', label: '其他', value: used - accounted, messageCount: 0 })
+  let available = limit
   return {
     used,
     limit,
-    remaining,
-    percent: limit ? Math.min(Math.round((used / limit) * 100), 100) : 0
+    percent: Math.min(Math.round((used / limit) * 100), 100),
+    limitLabel: summaryTrigger ? '摘要阈值' : contextWindow ? '模型窗口' : '本次输入',
+    remaining: summaryTrigger || contextWindow ? Math.max(limit - used, 0) : null,
+    segments: segments
+      .map((segment) => {
+        const value = Math.min(segment.value, Math.max(available, 0))
+        available -= value
+        return { ...segment, value, percent: `${Math.min((value / limit) * 100, 100)}%` }
+      })
+      .filter((segment) => segment.value > 0)
   }
 })
 
@@ -419,11 +444,14 @@ watch(text, resizeTextarea)
             </button>
             <section v-if="showContextUsage" class="context-usage-popover" aria-label="上下文用量">
               <strong>上下文用量</strong>
-              <span v-if="contextUsage.limit">{{ formatTokenCount(contextUsage.used) }} / {{ formatTokenCount(contextUsage.limit) }}</span>
-              <span v-else>{{ formatTokenCount(contextUsage.used) }} 已用</span>
-              <div v-if="contextUsage.limit" class="context-usage-bar" aria-hidden="true"><i :style="{ width: `${contextUsage.percent}%` }"></i></div>
-              <small v-if="contextUsage.limit">剩余 {{ formatTokenCount(contextUsage.remaining!) }} · 本次模型调用快照</small>
-              <small v-else>总上下文未配置 · 本次模型调用快照</small>
+              <span>{{ formatTokenCount(contextUsage.used) }} / {{ formatTokenCount(contextUsage.limit) }} Token（{{ contextUsage.percent }}%）</span>
+              <div class="context-usage-bar" aria-label="上下文 Token 构成">
+                <i v-for="segment in contextUsage.segments" :key="segment.key" :class="`is-${segment.key}`" :style="{ width: segment.percent }"></i>
+              </div>
+              <div class="context-usage-legend">
+                <span v-for="segment in contextUsage.segments" :key="segment.key"><i :class="`is-${segment.key}`"></i>{{ segment.label }}<template v-if="segment.messageCount"> ({{ segment.messageCount }})</template> {{ formatTokenCount(segment.value) }}</span>
+              </div>
+              <small>{{ contextUsage.limitLabel }}{{ contextUsage.remaining === null ? '' : ` · 剩余 ${formatTokenCount(contextUsage.remaining)}` }}</small>
             </section>
           </div>
           <div ref="modelMenuRef" class="model-menu-wrapper">

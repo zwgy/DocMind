@@ -1461,7 +1461,14 @@
 
 .tool-card-summary svg {
   flex: 0 0 auto;
-  color: var(--gray-600);
+}
+
+.tool-card-summary > svg:first-child {
+  color: var(--main-700);
+}
+
+.tool-card-summary > svg:last-child {
+  color: var(--gray-700);
 }
 
 .tool-card-spinner {
@@ -2328,17 +2335,69 @@
 }
 
 .context-usage-bar {
-  height: 6px;
+  display: flex;
+  height: 10px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--gray-100);
 }
 
 .context-usage-bar i {
-  display: block;
   height: 100%;
-  border-radius: inherit;
-  background: var(--main-700);
+  min-width: 2px;
+  flex: none;
+  transition: width 0.2s ease;
+}
+
+.context-usage-bar i.is-messages,
+.context-usage-legend i.is-messages {
+  background: var(--main-500);
+}
+
+.context-usage-bar i.is-summary,
+.context-usage-legend i.is-summary {
+  background: var(--color-info-500);
+}
+
+.context-usage-bar i.is-system,
+.context-usage-legend i.is-system {
+  background: var(--color-success-500);
+}
+
+.context-usage-bar i.is-tools,
+.context-usage-legend i.is-tools {
+  background: var(--color-warning-500);
+}
+
+.context-usage-bar i.is-other,
+.context-usage-legend i.is-other {
+  background: var(--gray-300);
+}
+
+.context-usage-legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  color: var(--gray-500);
+  font-size: 11px;
+}
+
+.context-usage-legend span {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-usage-legend i {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: var(--gray-300);
 }
 
 .model-trigger {
