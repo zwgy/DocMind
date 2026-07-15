@@ -456,6 +456,9 @@ export async function sendMessageStream(payload: SendMessagePayload, handlers: R
         source: 'chat-iframe',
         attachment_names: payload.attachmentNames || [],
         attachments: payload.attachments || [],
+        attachment_file_ids: (payload.attachments || [])
+          .map((attachment) => String(attachment.file_id || '').trim())
+          .filter(Boolean),
         iframe_context: iframeContext,
         page_content: payload.includePage ? payload.pageContent || null : null,
         selected_file: payload.includeFile ? payload.selectedFile || null : null,

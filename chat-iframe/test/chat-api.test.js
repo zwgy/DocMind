@@ -365,7 +365,7 @@ test('readRunEventStream matches tool results by tool_call_id before output id',
   ])
 })
 
-test('sendMessageStream posts image content and attachment metadata', async () => {
+test('sendMessageStream posts image content and attachment metadata with attachment IDs', async () => {
   const calls = []
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, options })
@@ -386,6 +386,7 @@ test('sendMessageStream posts image content and attachment metadata', async () =
   const body = JSON.parse(calls[0].options.body)
   assert.equal(body.image_content, 'base64-image')
   assert.deepEqual(body.meta.attachments, [{ file_id: 'file-1', file_name: 'demo.pdf' }])
+  assert.deepEqual(body.meta.attachment_file_ids, ['file-1'])
 })
 
 test('sendMessageStream posts iframe context separately from the query', async () => {
