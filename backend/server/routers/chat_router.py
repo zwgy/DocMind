@@ -1,6 +1,7 @@
 import traceback
 import uuid
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
@@ -556,7 +557,8 @@ async def get_thread_artifact(
     )
 
     media_type = detect_media_type(file_path.name, file_path.read_bytes())
-    headers = {"Content-Disposition": f'attachment; filename="{file_path.name}"'} if download else None
+    # HTTP 头只能使用 Latin-1；按 RFC 5987 编码后中文产物才能下载，预览不受此头影响。
+    headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(file_path.name)}"} if download else None
     return FileResponse(path=file_path, media_type=media_type, headers=headers)
 
 

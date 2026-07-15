@@ -455,16 +455,23 @@ async def _save_tool_message(conv_repo: ConversationRepository, msg_dict: dict) 
 def _presented_artifacts_from_message(msg_dict: dict) -> list[str]:
     """提取本轮明确交付给用户的产物，避免把线程工作目录当作回答附件。"""
     tool_calls = msg_dict.get("tool_calls")
+    if not isinstance(tool_calls, list) and isinstance(msg_dict.get("additional_kwargs"), dict):
+        tool_calls = msg_dict["additional_kwargs"].get("tool_calls")
     if not isinstance(tool_calls, list) and isinstance(msg_dict.get("content"), list):
-        tool_calls = [item for item in msg_dict["content"] if isinstance(item, dict) and item.get("type") == "tool_call"]
+        tool_calls = [
+            item for item in msg_dict["content"] if isinstance(item, dict) and item.get("type") == "tool_call"
+        ]
     if not isinstance(tool_calls, list):
         return []
 
     paths: list[str] = []
     for tool_call in tool_calls:
-        if not isinstance(tool_call, dict) or tool_call.get("name") != "present_artifacts":
+        if not isinstance(tool_call, dict):
             continue
-        args = tool_call.get("args") or {}
+        function = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+        if tool_call.get("name") != "present_artifacts" and function.get("name") != "present_artifacts":
+            continue
+        args = tool_call.get("args") or function.get("arguments") or {}
         if isinstance(args, str):
             try:
                 args = json.loads(args)
