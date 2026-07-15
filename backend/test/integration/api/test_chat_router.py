@@ -72,6 +72,28 @@ async def test_thread_artifact_uses_image_signature_for_content_type(test_client
     assert artifact_response.content.startswith(b"\x89PNG\r\n\x1a\n")
 
 
+async def test_thread_artifact_download_encodes_chinese_filename(test_client, standard_user):
+    headers = standard_user["headers"]
+    uid = str(standard_user["user"]["uid"])
+    thread_id = await _create_thread_for_user(test_client, headers)
+    filename = "车辆使用流程.md"
+
+    ensure_thread_dirs(thread_id, uid)
+    source_path = sandbox_user_data_dir(thread_id) / "outputs" / filename
+    source_path.write_text("# 流程\n", encoding="utf-8")
+
+    response = await test_client.get(
+        f"/api/chat/thread/{thread_id}/artifacts/home/gem/user-data/outputs/{filename}",
+        params={"download": "true"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert "attachment;" in response.headers["content-disposition"]
+    assert "filename*=UTF-8''" in response.headers["content-disposition"]
+    assert response.text == "# 流程\n"
+
+
 async def _create_thread_for_user(test_client, headers: dict[str, str]) -> str:
     agents_resp = await test_client.get("/api/agent", headers=headers)
     assert agents_resp.status_code == 200, agents_resp.text
