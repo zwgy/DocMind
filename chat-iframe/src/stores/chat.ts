@@ -19,11 +19,11 @@ import {
   uploadAttachment
 } from '@/apis/chat'
 import { listChatModels } from '@/apis/models'
-import { appendRunChunkSegment } from '@/utils/chat-message'
+import { appendRunChunkSegment, normalizeChatArtifacts } from '@/utils/chat-message'
 import { buildContextSummaryMessage } from '@/utils/context-summary'
 import { splitStreamingText } from '@/utils/streaming-text'
 import { attachmentValidationError } from '@/utils/attachment-limits'
-import type { ChatMessage, ChatThread, ExtractionResult, IncomingPageFile, ModelOption, PageContent, RunStreamChunk } from '@/types'
+import type { ChatArtifact, ChatMessage, ChatThread, ExtractionResult, IncomingPageFile, ModelOption, PageContent, RunStreamChunk } from '@/types'
 
 type SendOptions = {
   text: string
@@ -56,6 +56,8 @@ type ThreadRuntime = {
   abortController: AbortController | null
   pendingInterrupt: PendingInterrupt | null
   agentState: Record<string, unknown> | null
+  artifactBaseline: string[]
+  runArtifacts: ChatArtifact[]
 }
 
 type ChatState = {
@@ -89,7 +91,9 @@ function createThreadRuntime(): ThreadRuntime {
     lastEventSeq: '0-0',
     abortController: null,
     pendingInterrupt: null,
-    agentState: null
+    agentState: null,
+    artifactBaseline: [],
+    runArtifacts: []
   }
 }
 
@@ -117,6 +121,23 @@ function assistantTextLength(messages: ChatMessage[]) {
     (length, message) => (message.role === 'assistant' ? length + message.content.length + (message.reasoningContent || '').length : length),
     0
   )
+}
+
+function artifactPaths(messages: ChatMessage[]) {
+  return messages.flatMap((message) => message.artifacts?.map((artifact) => artifact.path) || [])
+}
+
+function refreshRunArtifacts(runtime: ThreadRuntime) {
+  const artifacts = normalizeChatArtifacts(runtime.agentState?.artifacts)
+  const baseline = new Set(runtime.artifactBaseline)
+  runtime.runArtifacts = artifacts.filter((artifact) => !baseline.has(artifact.path))
+}
+
+function attachRunArtifacts(runtime: ThreadRuntime) {
+  if (!runtime.runArtifacts.length) return
+  const finalAnswer = [...runtime.messages].reverse().find((message) => message.role === 'assistant' && message.content.trim())
+  if (!finalAnswer) return
+  finalAnswer.artifacts = normalizeChatArtifacts([...(finalAnswer.artifacts || []).map((artifact) => artifact.path), ...runtime.runArtifacts.map((artifact) => artifact.path)])
 }
 
 function modelSpecFromHistory(messages: ChatMessage[]) {
@@ -209,6 +230,7 @@ export const useChatStore = defineStore('chat', {
       const status = String(chunk.status || '')
       if (status === 'agent_state' && chunk.agent_state && typeof chunk.agent_state === 'object') {
         runtime.agentState = chunk.agent_state as Record<string, unknown>
+        refreshRunArtifacts(runtime)
         return
       }
       if (status !== 'ask_user_question_required' && status !== 'human_approval_required') return
@@ -408,8 +430,11 @@ export const useChatStore = defineStore('chat', {
       const run = (await getThreadActiveRun(threadId, token)).run
       if (!run?.id) return
 
+      runtime.artifactBaseline = artifactPaths(runtime.messages)
+      runtime.runArtifacts = []
       const state = await getThreadState(threadId, token).catch(() => null)
       runtime.agentState = state?.agent_state || null
+      refreshRunArtifacts(runtime)
       if (runtime.activeRunId !== run.id) runtime.lastEventSeq = '0-0'
       runtime.activeRunId = run.id
       runtime.isSending = true
@@ -505,7 +530,12 @@ export const useChatStore = defineStore('chat', {
           runtime.activeRunId = ''
           runtime.abortController = null
         }
-        if (reachedTerminalEvent && !controller.signal.aborted) await this.syncThreadHistory(threadId, token).catch(() => null)
+        if (reachedTerminalEvent && !controller.signal.aborted) {
+          attachRunArtifacts(runtime)
+          await this.syncThreadHistory(threadId, token).catch(() => null)
+          attachRunArtifacts(runtime)
+          runtime.messages = [...runtime.messages]
+        }
       }
     },
     async ensureThread(token?: string, agentId?: string, conversationScopeKey?: string) {
@@ -561,10 +591,13 @@ export const useChatStore = defineStore('chat', {
       if (!text || runtime.isSending) return null
       const isFirstTurn = !runtime.messages.some((message) => message.role === 'user')
       const selectedModelSpec = this.modelSpecsByThread[this.currentThreadId || DRAFT_THREAD_KEY] || this.selectedModelSpec
+      const selectedModelName = this.modelOptions.find((model) => model.value === selectedModelSpec)?.label || selectedModelSpec
       this.error = ''
       runtime.isSending = true
       runtime.isStreaming = true
       runtime.agentState = null
+      runtime.artifactBaseline = artifactPaths(runtime.messages)
+      runtime.runArtifacts = []
       runtime.lastEventSeq = '0-0'
       const controller = new AbortController()
       runtime.abortController = controller
@@ -590,6 +623,7 @@ export const useChatStore = defineStore('chat', {
         content: '',
         status: 'streaming',
         toolEvents: [],
+        modelName: selectedModelName || undefined,
         createdAt: new Date().toISOString()
       }
       const assistantMessages = [assistantMessage]
@@ -600,6 +634,7 @@ export const useChatStore = defineStore('chat', {
           content: '',
           status: 'streaming',
           toolEvents: [],
+          modelName: selectedModelName || undefined,
           createdAt: new Date().toISOString()
         }
         assistantMessages.push(segment)
@@ -741,12 +776,15 @@ export const useChatStore = defineStore('chat', {
         assistantMessages.forEach((message) => {
           if (message.status === 'streaming') message.status = 'done'
         })
+        attachRunArtifacts(runtime)
         if (!assistantMessages.some((message) => message.content) && assistantMessage.status !== 'error') {
           assistantMessage.content = '已完成。'
         }
         assistantMessage.status = assistantMessage.status === 'error' ? 'error' : 'done'
         runtime.messages = [...runtime.messages]
         const persistedTurn = await this.syncThreadHistory(threadId, token, requestId).catch(() => [])
+        attachRunArtifacts(runtime)
+        runtime.messages = [...runtime.messages]
         const persistedUserMessage = persistedTurn.find((message) => message.role === 'user')
         if (isFirstTurn && assistantMessages.every((message) => message.status === 'done')) {
           void this.autoGenerateTitle(threadId, text, token)

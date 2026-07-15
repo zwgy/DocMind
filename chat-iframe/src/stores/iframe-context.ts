@@ -26,10 +26,6 @@ function normalizeFiles(files: IncomingPageFile[] = [], selectedIds: string[] = 
       selected: Boolean(file.selected || selected.has(id) || (sourceFileId && selected.has(sourceFileId)))
     }
   })
-  if (normalized.length && !normalized.some((file) => file.selected)) {
-    // 页面打开后要自动查询，默认首个附件能保持零点击闭环。
-    normalized[0].selected = true
-  }
   return normalized
 }
 

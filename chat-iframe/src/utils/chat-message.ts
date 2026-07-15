@@ -28,7 +28,7 @@ function parseReasoning(content: string, explicit?: unknown) {
   }
 }
 
-function presentedArtifacts(value: unknown): ChatArtifact[] {
+export function normalizeChatArtifacts(value: unknown): ChatArtifact[] {
   if (!Array.isArray(value)) return []
   const seen = new Set<string>()
   return value
@@ -73,7 +73,7 @@ export function normalizeChatMessage(item: Record<string, unknown>): ChatMessage
     toolCalls: normalizeToolCalls(item.tool_calls),
     imageContent: typeof item.image_content === 'string' ? item.image_content : undefined,
     attachments: Array.isArray(extra.attachments) ? extra.attachments : [],
-    artifacts: presentedArtifacts(extra.presented_artifacts),
+    artifacts: normalizeChatArtifacts(extra.presented_artifacts),
     errorType: errorType || undefined,
     errorMessage: errorMessage || undefined,
     modelName: typeof responseMetadata.model_name === 'string' ? responseMetadata.model_name : undefined,
