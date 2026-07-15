@@ -33,32 +33,3 @@ test('history feedback is normalized and a second click does not submit again', 
   assert.equal(feedbackPosts, 1)
   assert.deepEqual(chat.messages[0].feedback, { rating: 'like', reason: null })
 })
-
-test('a concurrent retry creates one optimistic user message', async () => {
-  let runPosts = 0
-  globalThis.fetch = async (url) => {
-    if (url === '/api/agent/runs') {
-      runPosts += 1
-      return Response.json({ id: 'run-1' })
-    }
-    if (url.startsWith('/api/agent/runs/run-1/events')) {
-      return new Response('event: end\ndata: {"payload":{"status":"completed"}}\n\n')
-    }
-    if (url === '/api/chat/thread/thread-1/history') return Response.json({ history: [] })
-    return Response.json({})
-  }
-
-  setActivePinia(createPinia())
-  const chat = useChatStore()
-  chat.currentThreadId = 'thread-1'
-  const runtime = chat.ensureRuntime('thread-1')
-  runtime.lastUserMessageForRetry = { text: 'try again', files: [], imageFile: null }
-
-  const first = chat.retry('token-1')
-  const second = await chat.retry('token-1')
-  await first
-
-  assert.equal(second, null)
-  assert.equal(runPosts, 1)
-  assert.equal(chat.messages.filter((message) => message.role === 'user').length, 1)
-})

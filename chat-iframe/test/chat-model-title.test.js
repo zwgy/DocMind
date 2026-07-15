@@ -86,3 +86,43 @@ test('first successful reply generates a fast-model title without replacing a ma
   await chat.autoGenerateTitle('thread-title', '不应覆盖', 'token-1')
   assert.equal(titleCalls.length, 1)
 })
+
+test('title falls back to the first question when the fast model is unavailable', async () => {
+  setActivePinia(createPinia())
+  globalThis.fetch = async (url, options = {}) => {
+    if (url === '/api/chat/call') return Response.json({ detail: 'unavailable' }, { status: 503 })
+    if (url === '/api/chat/thread/thread-title' && options.method === 'PUT') {
+      return Response.json({ id: 'thread-title', title: 'first question for title' })
+    }
+    return Response.json({})
+  }
+
+  const chat = useChatStore()
+  chat.threads = [{ id: 'thread-title', title: '来文咨询' }]
+
+  await chat.autoGenerateTitle('thread-title', 'first question for title', 'token-1')
+
+  assert.equal(chat.threads[0].title, 'first question for title')
+})
+
+test('stale sidebar data does not reset an auto-generated title', async () => {
+  setActivePinia(createPinia())
+  globalThis.fetch = async (url, options = {}) => {
+    if (url === '/api/chat/call') return Response.json({ response: '自动标题' })
+    if (url === '/api/chat/thread/thread-title' && options.method === 'PUT') {
+      return Response.json({ id: 'thread-title', title: '来文咨询' })
+    }
+    if (String(url).startsWith('/api/chat/threads?')) {
+      return Response.json([{ id: 'thread-title', title: '来文咨询' }])
+    }
+    return Response.json({})
+  }
+
+  const chat = useChatStore()
+  chat.threads = [{ id: 'thread-title', title: '来文咨询' }]
+
+  await chat.autoGenerateTitle('thread-title', 'first question', 'token-1')
+  await chat.refreshThreads('token-1')
+
+  assert.equal(chat.threads[0].title, '自动标题')
+})

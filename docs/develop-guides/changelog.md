@@ -7,6 +7,7 @@
 ## v0.7.1 (current)
 
 ### 开发记录
+- 修复 chat-iframe 高频聊天体验：用户消息左侧复制按钮在隐藏时仍可被鼠标命中，输入文字统一为 14px；移除会重复持久化历史的“重新生成（追加新一轮）”入口；快速模型生成标题失败时退回首条问题标题，并防止侧栏旧刷新结果覆盖刚生成的标题；run 结束时服务端历史尚未写全不会覆盖已显示的完整流式回答。
 - 整理 MinerU 独立部署：将官方镜像构建文件、独立 Compose、`.env` 和部署说明集中到可直接复制的 `docker/mineru` 目录；主 Compose 与生产 Compose 同步引用新 Dockerfile 路径。支持通过 `MINERU_GPU_DEVICE_ID` 和 `MINERU_GPU_MEMORY_UTILIZATION` 选择 GPU、限制显存，默认后端同步为 MinerU 3.4 的 `hybrid-engine`，同时修复 Windows 下 MinerU 响应 ZIP 尚未关闭便删除导致的解析失败。
 - MinerU 独立部署增加 Nginx 网关：MinerU 仅在 Compose 内网监听，宿主机只开放一个固定端口；现有 `/health`、`/file_parse` 地址不变，后续应用可按路径复用该端口。
 - 修正 MinerU 独立部署验证命令：补齐 `return_images=true` 及高精度 hybrid 解析参数，避免手工验证 ZIP 缺少图片资产；补充扫描件强制 OCR、调试 JSON 和 MinerU 语义清理导致“正文缺失”的排查说明。
