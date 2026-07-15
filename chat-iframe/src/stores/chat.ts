@@ -53,7 +53,6 @@ type ThreadRuntime = {
   activeRunId: string
   lastEventSeq: string
   abortController: AbortController | null
-  lastUserMessageForRetry: SendOptions | null
   pendingInterrupt: PendingInterrupt | null
   agentState: Record<string, unknown> | null
 }
@@ -88,7 +87,6 @@ function createThreadRuntime(): ThreadRuntime {
     activeRunId: '',
     lastEventSeq: '0-0',
     abortController: null,
-    lastUserMessageForRetry: null,
     pendingInterrupt: null,
     agentState: null
   }
@@ -107,6 +105,17 @@ function requestIdFromMessage(message: ChatMessage) {
   const extra = raw.extra_metadata as Record<string, unknown> | undefined
   const requestId = extra?.request_id || raw.request_id
   return typeof requestId === 'string' ? requestId : ''
+}
+
+function titleFromQuery(query: string) {
+  return query.replace(/\s+/g, ' ').trim().slice(0, 30)
+}
+
+function assistantTextLength(messages: ChatMessage[]) {
+  return messages.reduce(
+    (length, message) => (message.role === 'assistant' ? length + message.content.length + (message.reasoningContent || '').length : length),
+    0
+  )
 }
 
 function modelSpecFromHistory(messages: ChatMessage[]) {
@@ -243,7 +252,13 @@ export const useChatStore = defineStore('chat', {
       this.isLoading = true
       try {
         const threads = await listConversations(token, agentId, conversationScopeKey, 0, THREAD_PAGE_SIZE)
-        this.threads = threads
+        this.threads = threads.map((thread) => {
+          const current = this.threads.find((item) => item.id === thread.id)
+          // 标题异步写入时，侧栏早发出的旧列表不能把已确认的本地标题覆盖回默认值。
+          return current?.title && current.title !== DEFAULT_THREAD_TITLE && thread.title === DEFAULT_THREAD_TITLE
+            ? { ...thread, title: current.title }
+            : thread
+        })
         this.threadOffset = nonPinnedThreadCount(threads)
         this.hasMoreThreads = this.threadOffset === THREAD_PAGE_SIZE
       } catch (error) {
@@ -327,15 +342,20 @@ export const useChatStore = defineStore('chat', {
       void this.resumeActiveRun(threadId, token)
     },
     async autoGenerateTitle(threadId: string, query: string, token?: string) {
+      const fallbackTitle = titleFromQuery(query)
       try {
         const currentThread = this.threads.find((item) => item.id === threadId)
         if (this.manuallyRenamedThreads[threadId] || currentThread?.title !== DEFAULT_THREAD_TITLE) return
-        const generatedTitle = await generateConversationTitle(query, token)
-        const title = generatedTitle.slice(0, 30).replace(/\s+/g, ' ').trim()
+        let title = fallbackTitle
+        try {
+          title = titleFromQuery(await generateConversationTitle(query, token)) || fallbackTitle
+        } catch {
+          // 快速模型故障不影响问答，但首条消息必须仍能脱离默认标题，方便用户辨识会话。
+        }
         const thread = this.threads.find((item) => item.id === threadId)
         if (!title || this.manuallyRenamedThreads[threadId] || thread?.title !== DEFAULT_THREAD_TITLE) return
         const updated = await updateConversation(threadId, { title }, token)
-        this.threads = this.threads.map((item) => (item.id === threadId ? { ...item, ...updated } : item))
+        this.threads = this.threads.map((item) => (item.id === threadId ? { ...item, ...updated, title } : item))
       } catch {
         // 标题仅是辅助体验，快速模型不可用时不能影响正式问答结果。
       }
@@ -353,6 +373,9 @@ export const useChatStore = defineStore('chat', {
       if (!persistedTurn.length || start < 0) return []
 
       const nextUser = runtime.messages.findIndex((message, index) => index > start && message.role === 'user')
+      const localTurn = runtime.messages.slice(start, nextUser < 0 ? runtime.messages.length : nextUser)
+      // run 刚结束时历史写库可能尚未完成；不能用较短的持久化片段覆盖已经展示的完整回答。
+      if (assistantTextLength(persistedTurn) < assistantTextLength(localTurn)) return []
       runtime.messages = [
         ...runtime.messages.slice(0, start),
         ...persistedTurn,
@@ -510,11 +533,6 @@ export const useChatStore = defineStore('chat', {
       runtime.abortController = null
       runtime.messages = [...runtime.messages]
     },
-    async retry(token?: string, agentId?: string, conversationScopeKey?: string) {
-      const runtime = this.ensureRuntime()
-      if (!runtime.lastUserMessageForRetry) return null
-      return this.send(runtime.lastUserMessageForRetry, token, agentId, conversationScopeKey)
-    },
     async feedback(payload: { messageId: string; rating: 'like' | 'dislike'; reason: string | null }, token?: string) {
       const runtime = this.ensureRuntime()
       const message = runtime.messages.find((item) => item.id === payload.messageId)
@@ -540,7 +558,6 @@ export const useChatStore = defineStore('chat', {
       this.error = ''
       runtime.isSending = true
       runtime.isStreaming = true
-      runtime.lastUserMessageForRetry = { ...options, files: options.files || [], imageFile: options.imageFile || null }
       runtime.lastEventSeq = '0-0'
       const controller = new AbortController()
       runtime.abortController = controller
