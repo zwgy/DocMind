@@ -1099,6 +1099,8 @@ const tokenUsageSegments = computed(() => {
   })
 })
 const tokenUsageStackTotal = computed(() => {
+  const reportedInputTokens = toFiniteNumber(currentTokenUsage.value?.model_usage?.input_tokens)
+  if (reportedInputTokens !== null) return Math.max(reportedInputTokens, 0)
   const inputTokens = toFiniteNumber(currentTokenUsage.value?.llm_input_tokens)
   if (inputTokens !== null) return Math.max(inputTokens, 0)
   return tokenUsageSegments.value

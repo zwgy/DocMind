@@ -115,6 +115,13 @@ function tokenNumber(value: unknown) {
   return Number.isFinite(number) && number >= 0 ? number : null
 }
 
+function reportedInputTokens(usage: Record<string, unknown>) {
+  const modelUsage = usage.model_usage
+  return modelUsage && typeof modelUsage === 'object' && !Array.isArray(modelUsage)
+    ? tokenNumber((modelUsage as Record<string, unknown>).input_tokens)
+    : null
+}
+
 const TOKEN_COUNT_K_UNIT = 1024
 
 function formatTokenCount(value: number) {
@@ -126,7 +133,7 @@ function formatTokenCount(value: number) {
 const contextUsage = computed(() => {
   const usage = props.tokenUsage
   if (!usage) return null
-  const used = tokenNumber(usage.llm_input_tokens)
+  const used = reportedInputTokens(usage) ?? tokenNumber(usage.llm_input_tokens)
   if (used === null) return null
   const summaryTrigger = tokenNumber(usage.summary_trigger_tokens)
   const contextWindow = tokenNumber(usage.context_window)
