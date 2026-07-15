@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { BookOpen, Check, ChevronDown, Copy, ThumbsDown, ThumbsUp } from 'lucide-vue-next'
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import type { ChatMessage } from '@/types'
 import KbResultGroupedList from '@/components/KbResultGroupedList.vue'
 import type { ChatSources } from '@/utils/tool-calls'
@@ -15,6 +15,7 @@ const emit = defineEmits<{
 const copied = ref(false)
 const dislikeOpen = ref(false)
 const dislikeReason = ref('')
+const dislikeReasonRef = ref<HTMLTextAreaElement | null>(null)
 const sourcesOpen = ref(false)
 const feedbackLocked = computed(() => Boolean(props.message.feedback || props.message.feedbackSubmitting))
 const sourceCount = computed(() => props.sources.knowledgeChunks.length + props.sources.webSources.length)
@@ -30,6 +31,13 @@ async function copyText(text: string) {
 function submitLike() {
   if (feedbackLocked.value) return
   emit('feedback', { messageId: props.message.id, rating: 'like', reason: null })
+}
+
+function openDislike() {
+  if (feedbackLocked.value) return
+  dislikeOpen.value = true
+  // 点踩表单可能刚好落在消息列表可视区外，聚焦 textarea 会让浏览器滚动到可输入的位置。
+  void nextTick(() => dislikeReasonRef.value?.focus())
 }
 
 function submitDislike() {
@@ -55,8 +63,9 @@ function submitDislike() {
       type="button"
       :class="{ selected: message.feedback?.rating === 'dislike' }"
       :disabled="feedbackLocked"
+      :aria-expanded="dislikeOpen"
       :title="message.feedback?.rating === 'dislike' ? '已点踩' : '点踩'"
-      @click="dislikeOpen = true"
+      @click="openDislike"
     >
       <ThumbsDown :size="13" :fill="message.feedback?.rating === 'dislike' ? 'currentColor' : 'none'" />
     </button>
@@ -92,7 +101,7 @@ function submitDislike() {
     <form v-if="dislikeOpen" class="feedback-reason" @submit.prevent="submitDislike">
       <label>
         点踩原因（可选）
-        <textarea v-model="dislikeReason" maxlength="500" rows="2" placeholder="告诉我们哪里需要改进" />
+        <textarea ref="dislikeReasonRef" v-model="dislikeReason" maxlength="500" rows="2" placeholder="告诉我们哪里需要改进" />
       </label>
       <div>
         <button type="submit">提交</button>
