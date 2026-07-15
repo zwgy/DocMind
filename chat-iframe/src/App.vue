@@ -55,12 +55,13 @@ function cacheExtractionResults(files: IncomingPageFile[], items: ExtractionResu
   results.value = next
 }
 
-async function refreshExtraction() {
+async function refreshExtraction(queryFiles: IncomingPageFile[] = selectedFile.value ? [selectedFile.value] : [], syncPending = false) {
   const file = selectedFile.value
   if (!file) {
     chat.setContextSummary({ file: null, result: null })
     return
   }
+  if (!queryFiles.length) return
   if (context.config.authError) {
     chat.setContextSummary({ file, result: results.value[file.id] || null, error: context.config.authError })
     return
@@ -70,17 +71,18 @@ async function refreshExtraction() {
     chat.setContextSummary({ file, result: results.value[file.id] || null })
     return
   }
-  const queryFiles = context.files.length ? context.files : [file]
   loading.value = true
   error.value = ''
   chat.setContextSummary({ file, result: results.value[file.id] || null, loading: true })
   try {
     let response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
     cacheExtractionResults(queryFiles, response.items || [])
-    const pendingFiles = queryFiles.filter((file) => {
-      const result = results.value[file.id]
-      return result?.matchStatus === 'pending_sync' && file.source_url && !ingestingFileIds.has(file.id)
-    })
+    const pendingFiles = syncPending
+      ? queryFiles.filter((file) => {
+          const result = results.value[file.id]
+          return result?.matchStatus === 'pending_sync' && file.source_url && !ingestingFileIds.has(file.id)
+        })
+      : []
     if (pendingFiles.length) {
       pendingFiles.forEach((file) => ingestingFileIds.add(file.id))
       await Promise.all(
@@ -144,7 +146,9 @@ async function sendChat(payload: {
   selectedPageFiles?: IncomingPageFile[]
   restoreUploadDraft: (retry: { files: boolean; image: boolean; message: string }) => void
 }) {
-  const selectedContextFile = payload.selectedPageFiles?.[0] || null
+  const selectedPageFiles = payload.selectedPageFiles || []
+  if (selectedPageFiles.length) await refreshExtraction(selectedPageFiles, true)
+  const selectedContextFile = selectedPageFiles[0] || null
   const selectedContextResult = selectedContextFile ? results.value[selectedContextFile.id] || null : null
   const result = await chat.send(
     {
@@ -154,7 +158,7 @@ async function sendChat(payload: {
       pageContent: context.pageContent,
       selectedFile: selectedContextFile,
       extractionResult: selectedContextResult,
-      selectedPageFiles: payload.selectedPageFiles || [],
+      selectedPageFiles,
       extractionResults: results.value
     },
     context.config.token,

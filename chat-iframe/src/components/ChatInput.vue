@@ -124,13 +124,13 @@ const contextUsage = computed(() => {
   if (!usage) return null
   const limit = tokenNumber(usage.context_window)
   const used = tokenNumber(usage.llm_input_tokens)
-  if (!limit || used === null) return null
-  const remaining = tokenNumber(usage.remaining_context_tokens) ?? Math.max(limit - used, 0)
+  if (used === null) return null
+  const remaining = limit ? tokenNumber(usage.remaining_context_tokens) ?? Math.max(limit - used, 0) : null
   return {
     used,
     limit,
     remaining,
-    percent: Math.min(Math.round((used / limit) * 100), 100)
+    percent: limit ? Math.min(Math.round((used / limit) * 100), 100) : 0
   }
 })
 
@@ -141,7 +141,6 @@ watch(
     const next = new Set([...selectedPageFileIds.value].filter((id) => currentIds.has(id)))
     const selected = props.pageFiles.filter((file) => file.selected).map((file) => file.id)
     if (!next.size && selected.length) selected.forEach((id) => next.add(id))
-    if (!next.size && props.selectedPageFileId) next.add(props.selectedPageFileId)
     selectedPageFileIds.value = next
     emit('update:askFile', next.size > 0)
   },
@@ -420,9 +419,11 @@ watch(text, resizeTextarea)
             </button>
             <section v-if="showContextUsage" class="context-usage-popover" aria-label="上下文用量">
               <strong>上下文用量</strong>
-              <span>{{ formatTokenCount(contextUsage.used) }} / {{ formatTokenCount(contextUsage.limit) }}</span>
-              <div class="context-usage-bar" aria-hidden="true"><i :style="{ width: `${contextUsage.percent}%` }"></i></div>
-              <small>剩余 {{ formatTokenCount(contextUsage.remaining) }} · 本次模型调用快照</small>
+              <span v-if="contextUsage.limit">{{ formatTokenCount(contextUsage.used) }} / {{ formatTokenCount(contextUsage.limit) }}</span>
+              <span v-else>{{ formatTokenCount(contextUsage.used) }} 已用</span>
+              <div v-if="contextUsage.limit" class="context-usage-bar" aria-hidden="true"><i :style="{ width: `${contextUsage.percent}%` }"></i></div>
+              <small v-if="contextUsage.limit">剩余 {{ formatTokenCount(contextUsage.remaining!) }} · 本次模型调用快照</small>
+              <small v-else>总上下文未配置 · 本次模型调用快照</small>
             </section>
           </div>
           <div ref="modelMenuRef" class="model-menu-wrapper">

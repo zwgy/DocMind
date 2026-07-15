@@ -306,7 +306,6 @@ onUnmounted(() => {
               v-for="group in contextSummaryItemGroups(item.message)"
               :key="group.itemType"
               class="context-summary-group"
-              open
             >
               <summary>{{ group.label }}（{{ group.items.length }}）</summary>
               <article v-for="(summaryItem, index) in group.items" :key="summaryItem.item_id" class="item-row">
@@ -367,12 +366,6 @@ onUnmounted(() => {
           <MarkdownPreview v-if="item.message.content" :content="item.message.content" />
           <p v-else-if="showThinkingPlaceholder(item.message)" class="muted">正在思考...</p>
           <p v-if="item.message.errorMessage" class="error-hint">{{ item.message.errorMessage }}</p>
-          <MessageRefs
-            v-if="showAssistantRefs(item.message)"
-            :message="item.message"
-            :sources="assistantSources(item.message)"
-            @feedback="$emit('feedback', $event)"
-          />
           <section v-if="item.message.artifacts?.length" class="message-artifacts">
             <header><strong>本轮交付物（{{ item.message.artifacts.length }}）</strong></header>
             <article v-for="artifact in item.message.artifacts" :key="artifact.path">
@@ -393,6 +386,12 @@ onUnmounted(() => {
             </article>
             <p v-if="artifactError" class="error-hint">{{ artifactError }}</p>
           </section>
+          <MessageRefs
+            v-if="showAssistantRefs(item.message)"
+            :message="item.message"
+            :sources="assistantSources(item.message)"
+            @feedback="$emit('feedback', $event)"
+          />
         </div>
       </template>
     </article>
