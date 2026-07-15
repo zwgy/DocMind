@@ -66,7 +66,7 @@ test('appendRunChunkSegment keeps streaming text and tool calls in event order',
   )
 })
 
-test('normalizeChatMessage keeps image, attachments, model and error metadata', () => {
+test('normalizeChatMessage keeps image, attachments, model, artifacts and error metadata', () => {
   const message = normalizeChatMessage({
     id: 'h1',
     type: 'human',
@@ -75,6 +75,7 @@ test('normalizeChatMessage keeps image, attachments, model and error metadata', 
     response_metadata: { model_name: 'qwen' },
     extra_metadata: {
       attachments: [{ file_name: 'demo.pdf' }],
+      presented_artifacts: ['/user-data/outputs/report.pdf'],
       error_type: 'interrupted',
       error_message: '用户停止'
     }
@@ -83,6 +84,7 @@ test('normalizeChatMessage keeps image, attachments, model and error metadata', 
   assert.equal(message.role, 'user')
   assert.equal(message.imageContent, 'base64')
   assert.deepEqual(message.attachments, [{ file_name: 'demo.pdf' }])
+  assert.deepEqual(message.artifacts, [{ path: '/user-data/outputs/report.pdf', name: 'report.pdf' }])
   assert.equal(message.modelName, 'qwen')
   assert.equal(message.errorType, 'interrupted')
   assert.equal(message.errorMessage, '用户停止')

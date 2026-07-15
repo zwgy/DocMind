@@ -7,6 +7,7 @@
 ## v0.7.1 (current)
 
 ### 开发记录
+- 增强 chat-iframe 高级运行体验：活动会话在消息流中实时展示工具调用和 Todo 进度，重新进入运行中的会话会恢复后端 state；输入区模型选择左侧按需显示最近一次模型调用的上下文用量；Agent 通过 `present_artifacts` 声明的交付物会持久化到最终回答元数据，刷新后仍显示在原回答下方，并支持带鉴权的图片/PDF/文本预览和下载，Office 文件明确仅支持下载。
 - 修复 chat-iframe 高频聊天体验：用户消息左侧复制按钮在隐藏时仍可被鼠标命中，输入文字统一为 14px；移除会重复持久化历史的“重新生成（追加新一轮）”入口；快速模型生成标题失败时退回首条问题标题，并防止侧栏旧刷新结果覆盖刚生成的标题；run 结束时服务端历史尚未写全不会覆盖已显示的完整流式回答。
 - 整理 MinerU 独立部署：将官方镜像构建文件、独立 Compose、`.env` 和部署说明集中到可直接复制的 `docker/mineru` 目录；主 Compose 与生产 Compose 同步引用新 Dockerfile 路径。支持通过 `MINERU_GPU_DEVICE_ID` 和 `MINERU_GPU_MEMORY_UTILIZATION` 选择 GPU、限制显存，默认后端同步为 MinerU 3.4 的 `hybrid-engine`，同时修复 Windows 下 MinerU 响应 ZIP 尚未关闭便删除导致的解析失败。
 - MinerU 独立部署增加 Nginx 网关：MinerU 仅在 Compose 内网监听，宿主机只开放一个固定端口；现有 `/health`、`/file_parse` 地址不变，后续应用可按路径复用该端口。
