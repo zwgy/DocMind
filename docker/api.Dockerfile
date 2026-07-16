@@ -1,6 +1,7 @@
 # 使用轻量级Python基础镜像
 FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.7.2 /uv /uvx /bin/
+# API 运行阶段基于 Debian/glibc，必须复制 slim 版 Node；Alpine/musl 二进制不能直接复用。
 COPY --from=node:24-slim /usr/local/bin /usr/local/bin
 COPY --from=node:24-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node:24-slim /usr/local/include /usr/local/include

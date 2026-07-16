@@ -1,3 +1,4 @@
+# 前端仅在构建阶段使用 Node，不依赖 glibc，因此使用同一 Node 24 的 Alpine 变体减小镜像体积。
 # 开发阶段
 FROM node:24-alpine AS development
 WORKDIR /app

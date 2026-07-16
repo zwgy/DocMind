@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 
-FROM node:20-alpine AS development
+# 与主 Web 对齐 Node 24；仍选 Alpine 以保持前端构建镜像轻量。
+FROM node:24-alpine AS development
 
 WORKDIR /app
 ENV TZ=Asia/Shanghai
@@ -16,7 +17,11 @@ EXPOSE 5174
 
 FROM development AS build-stage
 
-RUN corepack pnpm build
+# 开发阶段保留调试资源；只有生产构建产物需要移除示例页面和测试附件。
+RUN corepack pnpm build \
+    && rm -rf dist/test1 dist/test2 dist/example.html dist/example-files \
+    && test -f dist/index.html \
+    && test -f dist/docmind-chat-iframe-parent.js
 
 FROM nginx:alpine AS production
 
