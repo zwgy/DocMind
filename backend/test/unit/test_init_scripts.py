@@ -24,3 +24,54 @@ def test_init_scripts_keep_auto_generated_env_placeholders():
         'Read-UserInput "SILICONFLOW_API_KEY"'
     )
     assert ps1_path.read_bytes().startswith(b"\xef\xbb\xbf")
+
+
+def test_management_scripts_share_the_same_safe_compose_contract():
+    """双平台入口必须使用同一环境文件和生产发布前门禁。"""
+    bash = (ROOT / "scripts" / "manage.sh").read_text(encoding="utf-8")
+    powershell = (ROOT / "scripts" / "manage.ps1").read_text(encoding="utf-8-sig")
+
+    actions = (
+        "deploy",
+        "start",
+        "stop",
+        "restart",
+        "down",
+        "status",
+        "logs",
+        "build",
+        "config",
+    )
+    for action in actions:
+        assert f"{action})" in bash
+        assert f'"{action}"' in powershell
+    assert '[ "$action" = "init" ]' in bash
+    assert '$Action -eq "init"' in powershell
+
+    assert 'compose=(docker compose --env-file "$env_file" -f "$compose_file")' in bash
+    assert '$composeArgs = @("compose", "--env-file", $envFile, "-f", $composeFile)' in powershell
+    assert bash.index("run_compose config --quiet") < bash.index("run_compose up -d --build")
+    assert powershell.index('Invoke-Compose @("config", "--quiet")') < powershell.index(
+        'Invoke-Compose (@("up", "-d", "--build")'
+    )
+    for key in (
+        "JWT_SECRET_KEY",
+        "POSTGRES_PASSWORD",
+        "MINIO_SECRET_KEY",
+        "CHAT_IFRAME_ALLOWED_ORIGINS",
+    ):
+        assert key in bash
+        assert key in powershell
+    assert (ROOT / "scripts" / "manage.ps1").read_bytes().startswith(b"\xef\xbb\xbf")
+
+
+def test_node_images_share_version_24_and_keep_required_os_variants():
+    """API 需要 Debian/glibc 的 slim，前端构建可复用更小的 Alpine。"""
+    api = (ROOT / "docker" / "api.Dockerfile").read_text(encoding="utf-8")
+    web = (ROOT / "docker" / "web.Dockerfile").read_text(encoding="utf-8")
+    iframe = (ROOT / "docker" / "chat-iframe.Dockerfile").read_text(encoding="utf-8")
+
+    assert "node:24-slim" in api
+    assert "node:24-alpine" in web
+    assert "node:24-alpine" in iframe
+    assert "node:20-alpine" not in iframe
