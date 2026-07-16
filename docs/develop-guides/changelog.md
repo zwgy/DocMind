@@ -8,6 +8,8 @@
 
 ### 开发记录
 
+- 新增内置文档导出 MCP：支持离线生成 DOCX、PDF、XLSX；以 stdio 通过 LangChain MCP adapter 接入，启动时自动注册到 MCP 管理页，管理员添加并分配给 Agent 后即可使用。MCP 临时产物由统一拦截器转入当前线程 outputs，再复用现有交付链路。
+
 - 修复 chat-iframe 在旧版浏览器或嵌入式 WebView 中续聊历史会话时报 `crypto.randomUUID is not a function`：本地请求与缺失消息 ID 统一在不支持 `crypto.randomUUID()` 时降级为带时间戳的唯一标识，避免聊天中断。
 - 收敛 chat-iframe 父页面接入配置：iframe/API 地址和消息目标域改为从父脚本或 iframe 地址自动推导，移除失效的附件扫描、默认选中、手动初始化和前端来源白名单配置；页面信息继续自动采集，显式 `setPageContent()` 可覆盖；页面附件对象移除未使用的 `type` 字段。
 - 优化 chat-iframe 附件标签操作：移除按钮扩大为清晰的 24px 点击区域，提升图标对比度，并提供悬停与键盘聚焦反馈。

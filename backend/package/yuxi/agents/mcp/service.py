@@ -11,9 +11,13 @@ import asyncio
 import hashlib
 import json
 import re
+import shutil
+import tempfile
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, cast
 
+from langchain_core.messages import ToolMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +39,7 @@ _mcp_tools_cache: dict[str, list[Callable[..., Any]]] = {}
 # MCP tools statistics (for reporting enabled/disabled counts)
 _mcp_tools_stats: dict[str, dict[str, int]] = {}
 _UNSET = object()
+_BUILTIN_MCP_ARTIFACT_DIR = Path(tempfile.gettempdir()) / "yuxi-mcp-artifacts"
 
 # Default MCP Server configurations (Imported to DB on first run)
 _DEFAULT_MCP_SERVERS = {
@@ -46,7 +51,53 @@ _DEFAULT_MCP_SERVERS = {
         "icon": "📊",
         "tags": ["内置", "图表"],
     },
+    "document-exporter": {
+        "name": "文档导出",
+        "command": "python",
+        "args": ["/app/package/yuxi/agents/mcp/buildin/document_exporter.py"],
+        "transport": "stdio",
+        "description": "离线生成 DOCX、PDF、XLSX 文件",
+        "icon": "📄",
+        "tags": ["内置", "文档"],
+    },
 }
+
+
+async def _stage_builtin_mcp_artifact(request, handler):
+    """将内置 stdio MCP 的本地临时产物转入当前线程 outputs。"""
+    result = await handler(request)
+    payload = getattr(result, "structuredContent", None)
+    runtime = request.runtime
+    context = getattr(runtime, "context", None)
+    source_value = payload.get("artifact_path") if isinstance(payload, dict) else None
+    filename = payload.get("filename") if isinstance(payload, dict) else None
+    thread_id = getattr(context, "file_thread_id", None) or getattr(context, "thread_id", None)
+    uid = getattr(context, "uid", None)
+    tool_call_id = getattr(runtime, "tool_call_id", None)
+    if not all((source_value, filename, thread_id, uid, tool_call_id)):
+        return result
+
+    source = Path(source_value).resolve()
+    artifact_root = _BUILTIN_MCP_ARTIFACT_DIR.resolve()
+    if not source.is_file() or not source.is_relative_to(artifact_root):
+        return result
+
+    from yuxi.agents.backends.sandbox.paths import ensure_thread_dirs, sandbox_outputs_dir
+    from yuxi.utils.paths import VIRTUAL_PATH_OUTPUTS
+
+    ensure_thread_dirs(str(thread_id), str(uid))
+    destination = sandbox_outputs_dir(str(thread_id)) / Path(filename).name
+    try:
+        shutil.copy2(source, destination)
+        source.unlink()
+    except OSError as exc:
+        return ToolMessage(content=f"Error: 保存 MCP 产物失败: {exc}", tool_call_id=tool_call_id)
+
+    virtual_path = f"{VIRTUAL_PATH_OUTPUTS}/{destination.name}"
+    return ToolMessage(
+        content=f"已生成文件 {virtual_path}，请调用 present_artifacts 交付。",
+        tool_call_id=tool_call_id,
+    )
 
 _RETIRED_BUILTIN_MCP_SERVER_SLUGS = ("sequentialthinking",)
 
@@ -137,7 +188,10 @@ async def get_mcp_client(
 ) -> MultiServerMCPClient | None:
     """Initializes an MCP client with the given server configurations."""
     try:
-        client = MultiServerMCPClient(server_configs)  # pyright: ignore[reportArgumentType]
+        client = MultiServerMCPClient(  # pyright: ignore[reportArgumentType]
+            server_configs,
+            tool_interceptors=[_stage_builtin_mcp_artifact],
+        )
         logger.info(f"Initialized MCP client with servers: {list(server_configs.keys())}")
         return client
     except Exception as e:

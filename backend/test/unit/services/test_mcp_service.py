@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest_asyncio
+from mcp.types import CallToolResult, TextContent
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -67,8 +68,45 @@ async def test_ensure_builtin_mcp_servers_removes_retired_system_server(monkeypa
 
     retired = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "sequentialthinking"))
     chart = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "mcp-server-chart"))
+    document_exporter = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "document-exporter"))
     assert retired is None
     assert chart is not None
+    assert document_exporter is not None
+    assert document_exporter.command == "python"
+    assert document_exporter.enabled == 0
+
+
+async def test_stage_builtin_mcp_artifact_copies_file_to_thread_outputs(tmp_path, monkeypatch):
+    from yuxi.agents.backends.sandbox import paths as sandbox_paths
+
+    artifact_dir = tmp_path / "mcp-artifacts"
+    artifact_dir.mkdir()
+    source = artifact_dir / "source.docx"
+    source.write_bytes(b"document")
+    outputs_dir = tmp_path / "outputs"
+    outputs_dir.mkdir()
+    monkeypatch.setattr(mcp_service, "_BUILTIN_MCP_ARTIFACT_DIR", artifact_dir)
+    monkeypatch.setattr(sandbox_paths, "ensure_thread_dirs", lambda *_: None)
+    monkeypatch.setattr(sandbox_paths, "sandbox_outputs_dir", lambda _: outputs_dir)
+
+    async def handler(_):
+        return CallToolResult(
+            content=[TextContent(type="text", text="generated")],
+            structuredContent={"artifact_path": str(source), "filename": "report.docx"},
+        )
+
+    request = SimpleNamespace(
+        runtime=SimpleNamespace(
+            context=SimpleNamespace(file_thread_id="thread", uid="user"),
+            tool_call_id="call-1",
+        )
+    )
+    result = await mcp_service._stage_builtin_mcp_artifact(request, handler)
+
+    assert result.content.endswith("outputs/report.docx，请调用 present_artifacts 交付。")
+    assert result.tool_call_id == "call-1"
+    assert (outputs_dir / "report.docx").read_bytes() == b"document"
+    assert not source.exists()
 
 
 async def test_ensure_builtin_mcp_servers_preserves_user_server_with_retired_slug(monkeypatch, mcp_session):
