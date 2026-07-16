@@ -16,8 +16,6 @@ web/node_modules/
 chat-iframe/node_modules/
 chat-iframe/dist/
 chat-iframe/.env.local
-chat-iframe/public/test1/
-chat-iframe/public/test2/
 
 # 忽略日志和临时文件
 *.log
