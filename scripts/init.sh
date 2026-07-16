@@ -170,5 +170,5 @@ echo "✅ Successfully pulled enterprise-public-cn-beijing.cr.volces.com/vefaas-
 echo ""
 echo "🎉 Initialization complete!"
 echo "=========================="
-echo "You can now run: docker compose up -d --build"
+echo "You can now run: bash scripts/manage.sh dev deploy"
 echo "This will start all services in development mode with hot-reload enabled."

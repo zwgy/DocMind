@@ -216,5 +216,5 @@ if ($LASTEXITCODE -eq 0) {
 Write-Host ""
 Write-Host "🎉 Initialization complete!" -ForegroundColor Green
 Write-Host "==========================" -ForegroundColor Green
-Write-Host "You can now run: docker compose up -d --build" -ForegroundColor Cyan
+Write-Host "You can now run: .\scripts\manage.ps1 dev deploy" -ForegroundColor Cyan
 Write-Host "This will start all services in development mode with hot-reload enabled." -ForegroundColor Cyan
