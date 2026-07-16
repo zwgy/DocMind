@@ -63,6 +63,7 @@ function parentHarness(options = {}) {
       return []
     }
   }
+  if (options.scriptSrc) doc.currentScript = { src: options.scriptSrc }
   const win = {
     document: doc,
     location: { href: 'https://production.example.com/page' },
@@ -82,16 +83,13 @@ function tick() {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
-test('accepts iframe messages by targetOrigin and keeps originAllowlist for iframe side', () => {
+test('derives the message target from iframeSrc', () => {
   const { DocMindChatIframe, listeners, sentMessages } = parentHarness({
     fetch: async () => ({ ok: true, json: async () => ({ access_token: 'test-token' }) })
   })
 
   const chat = new DocMindChatIframe({
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    targetOrigin: 'https://docmind.example.com',
-    originAllowlist: ['https://production.example.com'],
-    includeFiles: false,
     source_system: 'oa',
     function_id: 'contract',
     business_id: '001',
@@ -102,7 +100,6 @@ test('accepts iframe messages by targetOrigin and keeps originAllowlist for ifra
 
   return tick().then(() => {
     assert.equal(sentMessages[0].message.type, 'INIT_CONFIG')
-    assert.deepEqual(sentMessages[0].message.payload.originAllowlist, ['https://production.example.com'])
     assert.equal(sentMessages[0].targetOrigin, 'https://docmind.example.com')
     chat.destroy()
   })
@@ -111,9 +108,7 @@ test('accepts iframe messages by targetOrigin and keeps originAllowlist for ifra
 test('rejects messages from another window or origin', () => {
   const { container, DocMindChatIframe, listeners } = parentHarness()
   const chat = new DocMindChatIframe({
-    iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    targetOrigin: 'https://docmind.example.com',
-    includeFiles: false
+    iframeSrc: 'https://docmind.example.com/chat-iframe/'
   })
 
   listeners.message({ source: {}, origin: 'https://docmind.example.com', data: { type: 'MAXIMIZE' } })
@@ -123,13 +118,43 @@ test('rejects messages from another window or origin', () => {
   chat.destroy()
 })
 
-test('derives the default target origin from iframeSrc', () => {
+test('uses the iframe origin as the default API base URL', () => {
   const { DocMindChatIframe, sentMessages } = parentHarness()
-  const chat = new DocMindChatIframe({ iframeSrc: 'https://docmind.example.com/chat-iframe/', includeFiles: false })
+  const chat = new DocMindChatIframe({ iframeSrc: 'https://docmind.example.com/chat-iframe/' })
 
   chat.setPageContent('safe content')
 
   assert.equal(sentMessages.at(-1).targetOrigin, 'https://docmind.example.com')
+  assert.equal(chat.apiBaseUrl, 'https://docmind.example.com')
+  chat.destroy()
+})
+
+test('derives the default iframe URL from the parent script URL', () => {
+  const { DocMindChatIframe, iframe } = parentHarness({
+    scriptSrc: 'https://docmind.example.com/chat-iframe/docmind-chat-iframe-parent.js'
+  })
+  const chat = new DocMindChatIframe()
+
+  assert.equal(iframe.src, 'https://docmind.example.com/chat-iframe/')
+  assert.equal(chat.apiBaseUrl, 'https://docmind.example.com')
+  assert.equal(chat.targetOrigin, 'https://docmind.example.com')
+  chat.destroy()
+})
+
+test('automatically captures page content and lets explicit content override it', () => {
+  const { DocMindChatIframe, listeners, sentMessages } = parentHarness()
+  const chat = new DocMindChatIframe({ iframeSrc: 'https://docmind.example.com/chat-iframe/' })
+
+  listeners.message({ origin: 'https://docmind.example.com', data: { type: 'REQUEST_PAGE_CONTENT' } })
+  assert.deepEqual(JSON.parse(JSON.stringify(sentMessages.at(-1).message.payload)), {
+    title: 'production page',
+    url: 'https://production.example.com/page',
+    html: '<html></html>'
+  })
+
+  chat.setPageContent('desensitized page text')
+  listeners.message({ origin: 'https://docmind.example.com', data: { type: 'REQUEST_PAGE_CONTENT' } })
+  assert.deepEqual(JSON.parse(JSON.stringify(sentMessages.at(-1).message.payload)), { text: 'desensitized page text' })
   chat.destroy()
 })
 
@@ -144,9 +169,6 @@ test('fetches docMind iframe token and sends conversation scope to iframe', asyn
 
   const chat = new DocMindChatIframe({
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    targetOrigin: 'https://docmind.example.com',
-    apiBaseUrl: 'https://docmind.example.com',
-    includeFiles: false,
     source_system: 'oa',
     function_id: 'contractApproval',
     business_id: 'contract-20260706-001',
@@ -178,9 +200,7 @@ test('uses trusted tokenExchangeUrl mode when configured', async () => {
 
   const chat = new DocMindChatIframe({
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    targetOrigin: 'https://docmind.example.com',
     tokenExchangeUrl: 'https://oa.example.com/docmind/token',
-    includeFiles: false,
     source_system: 'oa',
     function_id: 'contract',
     business_id: '001',
@@ -200,15 +220,13 @@ test('setFiles and explicit requests send compatible iframe messages', () => {
   const { DocMindChatIframe, listeners, sentMessages } = parentHarness()
   const chat = new DocMindChatIframe({
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    targetOrigin: 'https://docmind.example.com',
-    includeFiles: false,
     source_system: 'oa',
     function_id: 'incomingDocument',
     business_id: '37906'
   })
 
   chat.setPageContent('page text')
-  chat.setFiles([{ id: 'source-1', name: 'incoming.docx', source_url: 'https://oa/files/source-1' }])
+  chat.setFiles([{ id: 'source-1', name: 'incoming.docx', source_url: 'https://oa/files/source-1', type: 'image' }])
   listeners.message({ origin: 'https://docmind.example.com', data: { type: 'REQUEST_PAGE_CONTENT' } })
   listeners.message({ origin: 'https://docmind.example.com', data: { type: 'REQUEST_FILE_LIST' } })
 
@@ -219,6 +237,7 @@ test('setFiles and explicit requests send compatible iframe messages', () => {
   assert.equal(sentMessages.at(-3).message.payload[0].source_system, 'oa')
   assert.equal(sentMessages.at(-3).message.payload[0].source_function_id, 'incomingDocument')
   assert.equal(sentMessages.at(-3).message.payload[0].source_doc_id, '37906')
+  assert.equal(sentMessages.at(-3).message.payload[0].type, undefined)
   assert.equal(sentMessages.at(-2).message.type, 'PAGE_CONTENT')
   assert.equal(sentMessages.at(-1).message.type, 'FILE_LIST')
   chat.destroy()
@@ -227,9 +246,7 @@ test('setFiles and explicit requests send compatible iframe messages', () => {
 test('window control messages update state and emit optional chat callbacks', () => {
   const { container, DocMindChatIframe, listeners } = parentHarness()
   const chat = new DocMindChatIframe({
-    iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    targetOrigin: 'https://docmind.example.com',
-    includeFiles: false
+    iframeSrc: 'https://docmind.example.com/chat-iframe/'
   })
   const events = []
   chat.on('stateChange', (payload) => events.push(['state', payload.state]))
@@ -258,9 +275,7 @@ test('window control messages update state and emit optional chat callbacks', ()
 test('closed state keeps restore entry and drag cleanup releases iframe pointer events', () => {
   const { container, iframe, DocMindChatIframe } = parentHarness()
   const chat = new DocMindChatIframe({
-    iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    targetOrigin: 'https://docmind.example.com',
-    includeFiles: false
+    iframeSrc: 'https://docmind.example.com/chat-iframe/'
   })
 
   chat.close()
@@ -288,8 +303,6 @@ test('parent shell uses viewport-bounded normal size and default AI restore butt
   const { container, DocMindChatIframe } = parentHarness()
   const chat = new DocMindChatIframe({
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    targetOrigin: 'https://docmind.example.com',
-    includeFiles: false,
     width: 460,
     height: 680,
     offsetX: 24,
@@ -317,9 +330,7 @@ test('local example starts minimized so users open the assistant explicitly', ()
 test('iframe header drag messages move the parent window', () => {
   const { container, iframe, DocMindChatIframe, listeners } = parentHarness()
   const chat = new DocMindChatIframe({
-    iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    targetOrigin: 'https://docmind.example.com',
-    includeFiles: false
+    iframeSrc: 'https://docmind.example.com/chat-iframe/'
   })
 
   listeners.message({
@@ -345,8 +356,6 @@ test('restore keeps normal window inside viewport after floating button drag', (
   const { container, DocMindChatIframe } = parentHarness()
   const chat = new DocMindChatIframe({
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    targetOrigin: 'https://docmind.example.com',
-    includeFiles: false,
     width: 460,
     height: 680
   })
@@ -366,8 +375,6 @@ test('closing from normal clears inline placement for floating icon corner', () 
   const { container, DocMindChatIframe } = parentHarness()
   const chat = new DocMindChatIframe({
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    targetOrigin: 'https://docmind.example.com',
-    includeFiles: false,
     width: 460,
     height: 680
   })
