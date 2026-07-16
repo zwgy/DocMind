@@ -70,8 +70,13 @@ def test_node_images_share_version_24_and_keep_required_os_variants():
     api = (ROOT / "docker" / "api.Dockerfile").read_text(encoding="utf-8")
     web = (ROOT / "docker" / "web.Dockerfile").read_text(encoding="utf-8")
     iframe = (ROOT / "docker" / "chat-iframe.Dockerfile").read_text(encoding="utf-8")
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
     assert "node:24-slim" in api
     assert "node:24-alpine" in web
     assert "node:24-alpine" in iframe
     assert "node:20-alpine" not in iframe
+    assert "pnpm@10.11.0 --registry=https://registry.npmmirror.com" in iframe
+    assert "corepack pnpm" not in iframe
+    assert "command: pnpm exec vite --host 0.0.0.0 --port 5174" in compose
+    assert "command: corepack pnpm exec vite --host 0.0.0.0 --port 5174" not in compose
