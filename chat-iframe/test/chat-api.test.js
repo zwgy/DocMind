@@ -421,6 +421,27 @@ test('sendMessageStream posts iframe context separately from the query', async (
   assert.equal(body.meta.iframe_context.files[0].fileId, 'file1')
 })
 
+test('sendMessageStream keeps historical conversations usable without crypto.randomUUID', async () => {
+  const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
+  const calls = []
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, options })
+    if (url === '/api/agent/runs') return Response.json({ run_id: 'run-1' })
+    return new Response('event: end\ndata: {"payload":{"status":"completed"}}\n\n')
+  }
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: {} })
+
+  try {
+    await sendMessageStream({ text: 'continue', threadId: 'thread-1', includePage: false, includeFile: false })
+  } finally {
+    if (cryptoDescriptor) Object.defineProperty(globalThis, 'crypto', cryptoDescriptor)
+    else delete globalThis.crypto
+  }
+
+  const body = JSON.parse(calls[0].options.body)
+  assert.match(body.meta.request_id, /^client-\d+-[a-z0-9]+$/)
+})
+
 test('buildIframeContext keeps all selected files without changing the query', () => {
   const input = {
     text: '只看附件风险',

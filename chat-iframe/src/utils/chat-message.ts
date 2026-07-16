@@ -1,4 +1,5 @@
 import type { ChatArtifact, ChatMessage, ChatMessageRole, RunStreamChunk } from '../types'
+import { createClientId } from './client-id.ts'
 import { normalizeToolCalls } from './tool-calls.ts'
 
 function roleFromType(type: string): ChatMessageRole {
@@ -64,7 +65,7 @@ export function normalizeChatMessage(item: Record<string, unknown>): ChatMessage
   const feedback = item.feedback && typeof item.feedback === 'object' ? (item.feedback as Record<string, unknown>) : null
 
   return {
-    id: String(item.id || crypto.randomUUID()),
+    id: String(item.id || createClientId()),
     role: roleFromType(type),
     type,
     content: parsed.content,

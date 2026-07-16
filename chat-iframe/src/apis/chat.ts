@@ -1,5 +1,6 @@
 import { normalizeChatMessage } from '../utils/chat-message.ts'
 import { attachmentValidationError, imageValidationError } from '../utils/attachment-limits.ts'
+import { createClientId } from '../utils/client-id.ts'
 import { apiUrl } from './api-url.ts'
 import type {
   ChatMessage,
@@ -365,7 +366,7 @@ export async function createResumeRun(input: {
   answer: unknown
   token?: string
 }) {
-  const requestId = crypto.randomUUID()
+  const requestId = createClientId()
   const response = await fetch(apiUrl('/api/agent/runs'), {
     method: 'POST',
     headers: authHeaders(input.token),
@@ -438,7 +439,7 @@ export async function listMessages(threadId: string, token?: string): Promise<Ch
 }
 
 export async function sendMessageStream(payload: SendMessagePayload, handlers: RunEventHandlers = {}) {
-  const requestId = crypto.randomUUID()
+  const requestId = createClientId()
   const query = buildChatQuery(payload)
   const iframeContext = buildIframeContext(payload)
   const response = await fetch(apiUrl('/api/agent/runs'), {
