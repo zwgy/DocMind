@@ -5,7 +5,7 @@ import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import MessageRefs from '@/components/MessageRefs.vue'
 import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
 import { fetchThreadArtifact } from '@/apis/chat'
-import type { ChatArtifact, ChatMessage, ExtractionItem } from '@/types'
+import type { ChatArtifact, ChatMessage, ExtractionItem, IncomingPageFile } from '@/types'
 import {
   displayExtractionDataEntries,
   extractionClassificationText,
@@ -172,6 +172,15 @@ function displayValue(value: unknown) {
   return Array.isArray(value) ? value.join('、') : String(value ?? '')
 }
 
+function contextSummaryMetadata(file: IncomingPageFile) {
+  // 标签按阅读优先级排列，时间固定收尾，来源和文号暂不在小助手展示。
+  return [
+    ['incoming-type', '来文类型', file.incoming_type || '无'],
+    ['source-unit', '发文单位', file.source_unit || '无'],
+    ['incoming-date', '时间', file.incoming_date || '无']
+  ]
+}
+
 function contextSummaryItemGroups(message: ChatMessage): ContextSummaryItemGroup[] {
   const summary = message.contextSummary
   const groups = new Map<string, ContextSummaryItemGroup>()
@@ -286,12 +295,20 @@ onUnmounted(() => {
               <h2>文档摘要</h2>
             </div>
           </div>
-          <p class="context-summary-file" :title="item.message.contextSummary.file.name">
-            <span>{{ item.message.contextSummary.file.name }}</span>
+          <p class="context-summary-file" :title="item.message.contextSummary.file.title || item.message.contextSummary.file.name">
+            <span>{{ item.message.contextSummary.file.title || item.message.contextSummary.file.name }}</span>
             <span v-if="extractionClassificationText(item.message.contextSummary.result)" class="classification-badge">
               {{ extractionClassificationText(item.message.contextSummary.result) }}
             </span>
           </p>
+          <div class="context-summary-metadata">
+            <template v-for="[kind, label, value] in contextSummaryMetadata(item.message.contextSummary.file)" :key="kind">
+              <span class="context-summary-meta" :class="kind">
+                <span class="context-summary-meta-label">{{ label }}</span>
+                <span>{{ value }}</span>
+              </span>
+            </template>
+          </div>
           <div v-if="!hasSummaryDetails(item.message)" class="context-summary-empty">
             <strong>{{ item.message.contextSummary.statusText }}</strong>
             <p>{{ summaryEmptyText(item.message) }}</p>

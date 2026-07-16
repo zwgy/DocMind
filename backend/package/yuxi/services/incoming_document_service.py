@@ -83,8 +83,15 @@ class IncomingDocumentService:
             (business_extraction or {}).get("categories") or {},
             display.get("categoryLabels") or {},
         )
+        # 摘要卡片可能只收到文件定位线索，需以已匹配记录为准补全来文元数据。
         return base | {
             "incomingId": record.incoming_id,
+            "source_system": getattr(record, "source_system", None),
+            "document_number": getattr(record, "document_number", None),
+            "title": getattr(record, "title", None),
+            "incoming_type": getattr(record, "incoming_type", None),
+            "source_unit": getattr(record, "source_unit", None),
+            "incoming_date": getattr(record, "incoming_date", None),
             "matchStatus": "matched",
             "processingStatus": processing_status,
             "extractionStatus": extraction_status,

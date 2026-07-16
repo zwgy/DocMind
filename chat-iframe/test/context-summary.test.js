@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -11,6 +12,42 @@ import {
 } from '../src/utils/context-summary.ts'
 
 const file = { id: 'f1', name: '来文.docx', source_file_id: 'S001' }
+const chatMessagesSource = readFileSync(new URL('../src/components/ChatMessages.vue', import.meta.url), 'utf8')
+
+test('context summary top area shows document metadata and fills missing values', () => {
+  assert.match(chatMessagesSource, /class="context-summary-meta"/)
+  assert.match(chatMessagesSource, /\['incoming-type', '来文类型', file\.incoming_type \|\| '无'\]/)
+  assert.match(chatMessagesSource, /\['source-unit', '发文单位', file\.source_unit \|\| '无'\]/)
+  assert.match(chatMessagesSource, /\['incoming-date', '时间', file\.incoming_date \|\| '无'\]/)
+  assert.doesNotMatch(chatMessagesSource, /\['document-number', '文号'/)
+  assert.doesNotMatch(chatMessagesSource, /\['source-system', '来源'/)
+})
+
+test('buildContextSummaryMessage uses metadata returned by the matched incoming document', () => {
+  const message = buildContextSummaryMessage({
+    file,
+    result: {
+      matchStatus: 'matched',
+      extractionStatus: 'ready',
+      source_system: 'oa',
+      document_number: '上铁辆〔2020〕316号',
+      title: '路用客车检修运用管理办法',
+      incoming_type: '集团公司文件',
+      source_unit: '安全科',
+      incoming_date: '2020-10-20'
+    }
+  })
+
+  assert.deepEqual(message?.contextSummary?.file, {
+    ...file,
+    source_system: 'oa',
+    document_number: '上铁辆〔2020〕316号',
+    title: '路用客车检修运用管理办法',
+    incoming_type: '集团公司文件',
+    source_unit: '安全科',
+    incoming_date: '2020-10-20'
+  })
+})
 
 test('buildContextSummaryMessage creates ready context card payload', () => {
   const message = buildContextSummaryMessage({

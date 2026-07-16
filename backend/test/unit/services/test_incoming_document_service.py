@@ -7,6 +7,12 @@ def incoming_record(**overrides):
     data = {
         "incoming_id": "inc_1",
         "filename": "来文.docx",
+        "source_system": "oa",
+        "document_number": "上铁辆〔2020〕316号",
+        "title": "路用客车检修运用管理办法",
+        "incoming_type": "集团公司文件",
+        "source_unit": "安全科",
+        "incoming_date": "2020-10-20",
         "file_size": 125952,
         "markdown_file_url": "minio://knowledgebases/incoming/inc_1.md",
         "status": "ready",
@@ -93,6 +99,12 @@ async def test_query_returns_ready_incoming_summary_for_source_file_id_match():
     assert item["processingStatus"] == "ready"
     assert item["extractionStatus"] == "ready"
     assert item["incomingId"] == "inc_1"
+    assert item["source_system"] == "oa"
+    assert item["document_number"] == "上铁辆〔2020〕316号"
+    assert item["title"] == "路用客车检修运用管理办法"
+    assert item["incoming_type"] == "集团公司文件"
+    assert item["source_unit"] == "安全科"
+    assert item["incoming_date"] == "2020-10-20"
     assert item["classification"] == "客户审查"
     assert item["display"]["categoryLabels"]["risk_management"] == "风险管理类"
     assert item["display"]["schemaLabels"]["risk_item"] == "风险事项"

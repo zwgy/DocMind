@@ -9,7 +9,7 @@ organization:
 
 # 项目信息
 branding:
-  name: "Yuxi"
+  name: "DocMind"
   title: "让智能体可构建、可编排、可落地"     # 系统标题
   subtitle: "开源智能体平台套件，融合 RAG 与知识图谱"          # 副标题（subtitles 为空时使用）
   subtitles:

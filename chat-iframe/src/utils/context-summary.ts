@@ -7,6 +7,19 @@ type SummaryInput = {
   error?: string
 }
 
+function contextSummaryFile(file: IncomingPageFile, result: ExtractionResult | null): IncomingPageFile {
+  // 宿主页只负责文件定位，已入库来文的展示字段以查询结果为准。
+  return {
+    ...file,
+    source_system: result?.source_system || file.source_system,
+    document_number: result?.document_number || file.document_number,
+    title: result?.title || file.title,
+    incoming_type: result?.incoming_type || file.incoming_type,
+    source_unit: result?.source_unit || file.source_unit,
+    incoming_date: result?.incoming_date || file.incoming_date
+  }
+}
+
 export function extractionStatusText(input: SummaryInput) {
   if (input.loading) return '查询中'
   if (input.error) return input.error
@@ -80,16 +93,17 @@ function summaryContent(input: SummaryInput) {
 
 export function buildContextSummaryMessage(input: SummaryInput): ChatMessage | null {
   if (!input.file) return null
+  const file = contextSummaryFile(input.file, input.result)
   const matchedCategories = matchedExtractionCategories(input.result)
   // 摘要卡片是当前页面上下文，不写入后端历史；固定 id 便于切换附件时前端稳定替换。
   return {
     id: 'context-summary',
     role: 'system',
     type: 'context_summary',
-    content: summaryContent(input),
+    content: summaryContent({ ...input, file }),
     status: 'done',
     contextSummary: {
-      file: input.file,
+      file,
       result: input.result,
       loading: input.loading,
       error: input.error,

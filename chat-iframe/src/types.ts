@@ -64,6 +64,12 @@ export type ExtractionDisplay = {
 export type ExtractionResult = {
   incomingFileId?: string
   name?: string
+  source_system?: string
+  document_number?: string
+  title?: string
+  incoming_type?: string
+  source_unit?: string
+  incoming_date?: string
   matchStatus: 'matched' | 'multiple' | 'pending_sync' | 'not_found' | string
   extractionStatus: 'ready' | 'running' | 'not_found' | 'failed' | string
   reason?: string
