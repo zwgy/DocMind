@@ -132,6 +132,7 @@ corepack pnpm build
 docker/
   chat-iframe.Dockerfile
 chat-iframe/
+  DEPLOYMENT.md
   nginx.conf
   package.json
   pnpm-lock.yaml
@@ -380,122 +381,12 @@ iframe 发送给父页面：
 
 ## 12. 部署方式
 
-`chat-iframe` 需要部署到生产系统能访问的位置，推荐仍由 docMind 侧独立发布，而不是拷贝进生产系统代码仓库。生产系统只要引用脚本和 iframe 地址即可，这就是“无感嵌入”。
+完整命令、环境变量、访问地址和验收方式见 [DEPLOYMENT.md](./DEPLOYMENT.md)。当前支持：
 
-推荐访问形态：
+1. 随 DocMind 一起部署：开发环境使用独立 Vite 端口，生产环境由 `web-prod` 统一代理 `/chat-iframe/`。
+2. 单独部署 chat-iframe 镜像：静态前端独立发布，但仍通过 `/api/` 访问 DocMind 后端。
 
-```text
-https://docmind.example.com/chat-iframe/
-https://docmind.example.com/chat-iframe/docmind-chat-iframe-parent.js
-```
-
-### 12.1 随 docMind 一起部署
-
-开发环境执行：
-
-```bash
-docker compose up -d --build
-```
-
-开发服务使用独立 Vite 端口，支持热更新：
-
-```text
-http://localhost:5174/chat-iframe/
-```
-
-生产环境执行：
-
-```bash
-docker compose -f docker-compose.prod.yml up -d --build
-```
-
-生产环境只由 `web-prod` 暴露 80 端口；主站 Nginx 将 `/chat-iframe/` 转发给 Compose 内网中的 `chat-iframe-prod`：
-
-```text
-http://localhost/
-http://localhost/chat-iframe/
-http://localhost/chat-iframe/docmind-chat-iframe-parent.js
-```
-
-### 12.2 独立 Docker 部署
-
-独立镜像与主项目共用同一个多阶段 Dockerfile：
-
-```bash
-docker build -f docker/chat-iframe.Dockerfile --target production -t yuxi-chat-iframe .
-```
-
-chat-iframe 仍依赖 docMind API。若 API 已由本机 Compose 启动，可把独立容器接入同一 Docker 网络：
-
-```bash
-docker run -d --name docmind-chat-iframe \
-  --network yuxi-know_app-network \
-  -p 10002:80 \
-  yuxi-chat-iframe
-```
-
-访问：
-
-```text
-http://localhost:10002/chat-iframe/
-http://localhost:10002/chat-iframe/docmind-chat-iframe-parent.js
-```
-
-独立容器中的 `/api/` 默认代理到 `http://api:5050/api/`，因此目标网络必须能解析 `api`；跨主机独立部署时，需要把现有 `chat-iframe/nginx.conf` 的 API 上游改为实际 docMind 后端地址。SSE 代理保持关闭缓冲，并与主站使用相同的 600 秒超时。
-
-#### 生产拓扑
-
-```text
-生产系统页面
-  -> web-prod:80/chat-iframe/
-  -> chat-iframe-prod:80（Compose 内网静态服务）
-  -> 浏览器请求 web-prod:80/api/
-  -> api:5050
-```
-
-#### 数据流
-
-从用户点开悬浮按钮到看到结果，完整链路：
-
-1. 外部系统初始化 `DocMindChatIframe` 后调用 `setFiles([{ id, name, source_url, source_file_id, size_text }])`。
-2. 父脚本通过 `postMessage` 把 `INIT_CONFIG` / `PAGE_CONTENT` / `PAGE_FILES_UPDATED` 推给 iframe。
-3. iframe 内的 `useIframeBridge` 接收消息，存入 Pinia store，默认选中第一个附件。
-4. iframe 调用后端（相对路径）：
-   ```js
-   fetch('/api/incoming-documents/extractions/query', {
-     method: 'POST',
-     headers: { Authorization: 'Bearer <token>' },
-     body: { files: [...] }
-   })
-   ```
-5. 随主项目部署时由 `web-prod`、独立部署时由 chat-iframe Nginx 匹配 `location /api/`，把请求代理到 docMind 后端。
-6. docMind 后端处理 `/api/incoming-documents/extractions/query`，查询数据库、匹配来文，返回 `{ status, extraction }`。
-7. 结果原路返回，iframe 渲染面板，展示匹配状态和结构化抽取结果。
-
-生产系统浏览器视角看到的请求域名始终是 chat-iframe 自己，跨域 / CORS 都被 Nginx 在同源内消化掉了。
-
-### 12.3 手动静态部署
-
-```bash
-corepack pnpm install
-corepack pnpm build
-```
-
-将以下文件发布到同一个静态服务目录：
-
-```text
-dist/index.html
-dist/assets/*
-public/docmind-chat-iframe-parent.js
-```
-
-如果发布路径是 `/chat-iframe/`，需要保证：
-
-```text
-/chat-iframe/index.html
-/chat-iframe/assets/*
-/chat-iframe/docmind-chat-iframe-parent.js
-```
+开发环境保留 `test1/`、`test2/`、`example.html` 和 `example-files/`；生产 Docker 构建会移除这些调试资源。
 
 ## 13. 安全注意
 
