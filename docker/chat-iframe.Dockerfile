@@ -8,8 +8,10 @@ ENV TZ=Asia/Shanghai
 
 COPY ./chat-iframe/package.json ./chat-iframe/pnpm-lock.yaml ./
 
-# 按项目声明固定 pnpm 版本，避免开发与生产构建使用不同的依赖解析结果。
-RUN corepack enable && corepack pnpm install --frozen-lockfile
+# 固定 packageManager 声明的 pnpm 版本，并直接使用项目已有的镜像源。
+# Corepack 会绕过 npm 配置访问 registry.npmjs.org，内网环境容易在此超时。
+RUN npm install -g pnpm@10.11.0 --registry=https://registry.npmmirror.com \
+    && pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com
 
 COPY ./chat-iframe .
 
@@ -18,7 +20,7 @@ EXPOSE 5174
 FROM development AS build-stage
 
 # 开发阶段保留调试资源；只有生产构建产物需要移除示例页面和测试附件。
-RUN corepack pnpm build \
+RUN pnpm build \
     && rm -rf dist/test1 dist/test2 dist/example.html dist/example-files \
     && test -f dist/index.html \
     && test -f dist/docmind-chat-iframe-parent.js

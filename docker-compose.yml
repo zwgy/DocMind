@@ -232,7 +232,8 @@ services:
     environment:
       - NODE_ENV=development
       - VITE_API_URL=http://api:5050
-    command: corepack pnpm exec vite --host 0.0.0.0 --port 5174
+    # 镜像构建阶段已从镜像源安装固定 pnpm，运行时直接使用，避免 Corepack 再访问 npm 官方源。
+    command: pnpm exec vite --host 0.0.0.0 --port 5174
     restart: unless-stopped
 
   # region neo4j
