@@ -215,25 +215,22 @@ docMind backend
 
 ## 7. 父页面集成方式
 
-### 7.1 显式传入页面内容和附件
+### 7.1 页面内容覆盖与附件传入
 
 ```html
 <script src="https://docmind.example.com/chat-iframe/docmind-chat-iframe-parent.js"></script>
 <script>
   const chat = new DocMindChatIframe({
-    iframeSrc: 'https://docmind.example.com/chat-iframe/',
-    apiBaseUrl: 'https://docmind.example.com',
     source_system: 'oa',
     function_id: 'contractApproval',
     business_id: 'contract-20260706-001',
     external_user_id: '1001',
     external_user_name: '张三',
     agentId: 'default-chatbot',
-    targetOrigin: 'https://docmind.example.com',
-    originAllowlist: ['https://production.example.com'],
     initialState: 'minimized'
   })
 
+  // 未调用时，父脚本会自动采集当前页面 HTML；显式传入时以这里为准。
   chat.setPageContent({
     title: document.title,
     url: location.href,
@@ -265,8 +262,7 @@ docMind backend
     function_id: 'contractApproval',
     business_id: 'contract-20260706-001',
     external_user_id: '1001',
-    external_user_name: '张三',
-    targetOrigin: 'https://docmind.example.com'
+    external_user_name: '张三'
   })
 </script>
 ```
@@ -282,8 +278,6 @@ iframe 内部会话列表采用按需左侧抽屉展示，默认不占用聊天�
 
 ```js
 const chat = new DocMindChatIframe({
-  iframeSrc: 'https://docmind.example.com/chat-iframe/',
-  apiBaseUrl: 'https://docmind.example.com',
   tokenExchangeUrl: null,
   source_system: 'oa',
   function_id: 'contractApproval',
@@ -291,25 +285,20 @@ const chat = new DocMindChatIframe({
   external_user_id: '1001',
   external_user_name: '张三',
   agentId: 'default-chatbot',
-  targetOrigin: 'https://docmind.example.com',
-  originAllowlist: ['https://production.example.com'],
   position: 'bottom-right',
   width: 460,
   height: 680,
   offsetX: 24,
   offsetY: 24,
   initialState: 'minimized',
-  includePageContent: true,
-  includeFiles: true,
-  selectedFileIds: ['202606100417'],
   buttonHtml: null
 })
 ```
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `iframeSrc` | `/` | iframe 页面地址 |
-| `apiBaseUrl` | `null` | docMind API 基础地址；为空时使用当前 iframe 服务的 `/api` 代理 |
+| `iframeSrc` | SDK 脚本所在目录 | iframe 页面地址；仅脚本与 iframe 不在同一目录时覆盖 |
+| `apiBaseUrl` | iframe 的 origin | docMind API 基础地址；仅 iframe 与 API 不同域时覆盖 |
 | `tokenExchangeUrl` | `null` | 外部系统后端换票地址；为空时父脚本直接调用 `/api/chat-iframe/token` |
 | `source_system` | `''` | 外部系统 ID，只允许字母和数字 |
 | `function_id` | `''` | 外部系统功能 ID，用于生成业务会话 scope |
@@ -317,22 +306,17 @@ const chat = new DocMindChatIframe({
 | `external_user_id` | `''` | 外部系统用户 ID，只允许字母和数字 |
 | `external_user_name` | `''` | 外部系统用户显示名，用于 docMind 后台识别 |
 | `agentId` | `null` | 可选，聊天使用的智能体 ID；为空时 iframe 使用 `default-chatbot` |
-| `targetOrigin` | `*` | 父页面发消息给 iframe 的目标 origin；生产环境建议写死 |
-| `originAllowlist` | `[]` | 下发给 iframe 的父页面来源白名单，用于 iframe 校验生产系统来源 |
 | `position` | `bottom-right` | 悬浮入口位置 |
 | `width` / `height` | `460` / `680` | 普通窗口期望尺寸；实际显示会受当前视口约束，避免嵌入页面中显示不全 |
 | `offsetX` / `offsetY` | `24` / `24` | 距离视口边缘的偏移 |
 | `initialState` | `minimized` | `minimized`、`normal`、`maximized`、`closed` |
-| `includePageContent` | `true` | 是否自动发送页面内容 |
-| `includeFiles` | `true` | 是否自动扫描页面附件 |
-| `selectedFileIds` | `[]` | 默认选中的附件 ID |
 | `buttonHtml` | `null` | 自定义悬浮按钮 HTML；为空时使用内联 SVG AI 标识 |
 
 ## 9. 父页面函数
 
 | 方法 | 说明 |
 | --- | --- |
-| `init()` | 挂载 iframe；`autoInit` 默认为 true，一般无需手动调用 |
+| `init()` | 幂等挂载方法；构造时已自动调用，一般无需手动调用 |
 | `open()` | 打开普通窗口 |
 | `close()` | 关闭窗口 |
 | `minimize()` | 最小化为悬浮按钮 |
@@ -350,7 +334,7 @@ const chat = new DocMindChatIframe({
 
 | 消息 | 载荷 | 用途 |
 | --- | --- | --- |
-| `INIT_CONFIG` | `{ token, apiBaseUrl, agentId, conversationScopeKey, includePageContent, includeFiles, selectedFileIds, originAllowlist }` | 初始化配置；`token` 由父脚本自动换票后下发 |
+| `INIT_CONFIG` | `{ token, apiBaseUrl, agentId, conversationScopeKey }` | 初始化配置；`token` 由父脚本自动换票后下发 |
 | `PAGE_CONTENT` | `{ title?, url?, html?, text? }` | 页面内容 |
 | `PAGE_FILES_UPDATED` | `IncomingPageFile[]` | 页面附件列表 |
 | `FILE_LIST` | `IncomingPageFile[]` | 兼容旧消息名 |
@@ -390,10 +374,9 @@ iframe 发送给父页面：
 
 ## 13. 安全注意
 
-- 生产环境必须设置 `targetOrigin`，不要长期使用默认 `*`。
-- 生产环境建议设置 `originAllowlist`，限制 iframe 接收的父页面消息来源。
+- iframe 消息目标会从 iframe 地址自动推导；来源限制由后端 `CHAT_IFRAME_ALLOWED_ORIGINS` 强制执行。
 - 父脚本换取的 docMind token 会进入 iframe 并用于后端请求；生产环境优先使用 `tokenExchangeUrl`，避免把高权限凭据暴露到浏览器。
-- 默认页面内容是 `document.documentElement.outerHTML`，如页面含敏感信息，应使用 `setPageContent()` 传脱敏文本，或关闭 `includePageContent`。
+- 默认页面内容是 `document.documentElement.outerHTML`；如页面含敏感信息，应使用 `setPageContent()` 传脱敏文本覆盖自动采集结果。
 - 前端只负责携带上下文和展示结果，后端仍是最终权限边界。
 
 ## 14. 测试覆盖
@@ -436,10 +419,6 @@ corepack pnpm test
 
 ```js
 new DocMindChatIframe({
-  iframeSrc: 'https://docmind.example.com/chat-iframe/',
-  apiBaseUrl: 'https://docmind.example.com',
-  targetOrigin: 'https://docmind.example.com',
-  originAllowlist: ['https://oa.example.com'],
   source_system: 'oa',
   function_id: 'contractApproval',
   business_id: 'contract-20260706-001',
