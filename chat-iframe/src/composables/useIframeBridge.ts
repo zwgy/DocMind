@@ -26,8 +26,6 @@ export function useIframeBridge() {
   function handleMessage(event: MessageEvent) {
     const message = (event.data || {}) as ParentMessage
     if (!message.type || !isTrustedParentMessage(event, message)) return
-    const allowlist = context.config.originAllowlist || []
-    if (allowlist.length && !allowlist.includes(event.origin)) return
     switch (message.type) {
       case 'INIT_CONFIG':
         parentOrigin = event.origin

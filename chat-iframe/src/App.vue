@@ -86,9 +86,7 @@ async function refreshExtraction(queryFiles: IncomingPageFile[] = selectedFile.v
     if (pendingFiles.length) {
       pendingFiles.forEach((file) => ingestingFileIds.add(file.id))
       await Promise.all(
-        pendingFiles.map((file) =>
-          ingestIncomingDocument(file, context.config.token, { source_system: context.config.source_system }).catch(() => null)
-        )
+        pendingFiles.map((file) => ingestIncomingDocument(file, context.config.token).catch(() => null))
       )
       response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
       cacheExtractionResults(queryFiles, response.items || [])
