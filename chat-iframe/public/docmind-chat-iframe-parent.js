@@ -18,9 +18,20 @@
     return match ? match[0] : ''
   }
 
-  function resolveTargetOrigin(targetOrigin, iframeSrc) {
-    if (targetOrigin && targetOrigin !== '*') return targetOrigin
+  function defaultIframeSrc() {
+    // 父脚本与 iframe 同目录发布时可直接复用脚本地址，接入方无需重复填写部署 URL。
+    var script = global.document && global.document.currentScript
+    var source = stripText(script && script.src)
+    return source ? source.replace(/\/[^/?#]+(?:[?#].*)?$/, '/') : '/chat-iframe/'
+  }
+
+  function resolveTargetOrigin(iframeSrc) {
     return originFromUrl(iframeSrc) || originFromUrl(global.location && global.location.href) || '*'
+  }
+
+  function resolveApiBaseUrl(apiBaseUrl, iframeSrc) {
+    // 跨域嵌入默认回到 iframe 所在 DocMind 域；同源相对地址继续交给浏览器解析。
+    return stripText(apiBaseUrl) || originFromUrl(iframeSrc)
   }
 
   function isDocumentFile(name) {
@@ -28,12 +39,8 @@
     return DOCUMENT_EXTENSIONS.indexOf(ext) !== -1
   }
 
-  function normalizeFiles(files, selectedIds, options) {
-    var selectedMap = {}
+  function normalizeFiles(files, options) {
     options = options || {}
-    ;(selectedIds || []).forEach(function (id) {
-      selectedMap[id] = true
-    })
     var normalized = (files || [])
       .filter(function (file) {
         return file && isDocumentFile(file.name || file.source_url)
@@ -46,8 +53,7 @@
           name: file.name,
           source_url: sourceUrl,
           source_file_id: sourceFileId,
-          type: file.type || 'document',
-          selected: Boolean(file.selected || selectedMap[file.id] || selectedMap[sourceFileId])
+          selected: Boolean(file.selected)
         }
         if (file.source_doc_id) normalizedFile.source_doc_id = file.source_doc_id
         if (file.source_system) normalizedFile.source_system = file.source_system
@@ -73,7 +79,7 @@
   function DocMindChatIframe(options) {
     this.options = Object.assign(
       {
-        iframeSrc: '/',
+        iframeSrc: defaultIframeSrc(),
         apiBaseUrl: null,
         agentId: null,
         tokenExchangeUrl: null,
@@ -82,23 +88,18 @@
         business_id: '',
         external_user_id: '',
         external_user_name: '',
-        targetOrigin: '*',
-        originAllowlist: [],
         position: 'bottom-right',
         width: 460,
         height: 680,
         offsetX: 24,
         offsetY: 24,
         initialState: 'minimized',
-        includePageContent: true,
-        includeFiles: true,
-        selectedFileIds: [],
-        buttonHtml: null,
-        autoInit: true
+        buttonHtml: null
       },
       options || {}
     )
-    this.targetOrigin = resolveTargetOrigin(this.options.targetOrigin, this.options.iframeSrc)
+    this.targetOrigin = resolveTargetOrigin(this.options.iframeSrc)
+    this.apiBaseUrl = resolveApiBaseUrl(this.options.apiBaseUrl, this.options.iframeSrc)
     this.windowState = this.options.initialState
     this.pageContent = null
     this.pageFiles = []
@@ -114,7 +115,7 @@
     this.windowBlurHandler = null
     this.drag = null
     this.dragMoved = false
-    if (this.options.autoInit) this.init()
+    this.init()
   }
 
   DocMindChatIframe.prototype.init = function () {
@@ -138,7 +139,7 @@
   }
 
   DocMindChatIframe.prototype.setFiles = function (files) {
-    this.pageFiles = normalizeFiles(files, this.options.selectedFileIds, this.options)
+    this.pageFiles = normalizeFiles(files, this.options)
     if (this.container) this._sendToIframe('PAGE_FILES_UPDATED', this.pageFiles)
     return this
   }
@@ -375,7 +376,6 @@
   }
 
   DocMindChatIframe.prototype._pageContentFromDocument = function () {
-    if (!this.options.includePageContent) return null
     return { title: document.title, url: location.href, html: document.documentElement.outerHTML }
   }
 
@@ -424,7 +424,7 @@
       .then(function () {
         var payload = self._requiredExternalPayload()
         var trustedUrl = stripText(self.options.tokenExchangeUrl)
-        var url = trustedUrl || joinApiUrl(self.options.apiBaseUrl, '/api/chat-iframe/token')
+        var url = trustedUrl || joinApiUrl(self.apiBaseUrl, '/api/chat-iframe/token')
         return self._fetchTokenJson(url, payload, Boolean(trustedUrl))
       })
       .then(function (token) {
@@ -441,13 +441,9 @@
   DocMindChatIframe.prototype._configPayload = function (token, authError) {
     var payload = {
       token: token || null,
-      apiBaseUrl: this.options.apiBaseUrl,
+      apiBaseUrl: this.apiBaseUrl,
       agentId: this.options.agentId,
-      conversationScopeKey: this._conversationScopeKey(),
-      includePageContent: this.options.includePageContent,
-      includeFiles: this.options.includeFiles,
-      selectedFileIds: this.options.selectedFileIds,
-      originAllowlist: this.options.originAllowlist
+      conversationScopeKey: this._conversationScopeKey()
     }
     if (authError) payload.authError = authError
     return payload

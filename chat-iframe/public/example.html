@@ -146,17 +146,9 @@
       <!-- 2. DocMindChatIframe 完整调用示例（页面内可见） -->
       <section class="card">
         <h2 class="card-title"><span>💻</span> DocMindChatIframe 完整调用示例</h2>
-        <pre><code><span class="tk-com">// 1. 构造悬浮助手（autoInit: false 让初始化顺序在代码中显式呈现）</span>
-<span class="tk-com">// 当前代码运行在宿主业务页：window.location.origin 为“协议 + 域名 + 端口”，例如 https://oa.example.com，不含路径。</span>
-<span class="tk-key">const</span> hostOrigin = window.location.origin
-<span class="tk-com">// 同源部署时 iframe 与宿主相同；跨域部署请改为 iframe 服务域，例如 https://docmind.example.com。</span>
-<span class="tk-key">const</span> iframeOrigin = hostOrigin
+        <pre><code><span class="tk-com">// 1. 构造悬浮助手：SDK 会从自身脚本地址推导 iframe 与 API 地址。</span>
 
 <span class="tk-key">const</span> chat = <span class="tk-key">new</span> DocMindChatIframe({
-  <span class="tk-key">iframeSrc</span>: <span class="tk-str">'./'</span>, <span class="tk-com">// iframe 入口；跨域时改为 iframeOrigin + '/chat-iframe/'</span>
-  <span class="tk-key">targetOrigin</span>: iframeOrigin, <span class="tk-com">// 填 iframe 页面所在域：SDK 只向此域 postMessage，不能填 *</span>
-  <span class="tk-key">originAllowlist</span>: [hostOrigin], <span class="tk-com">// 填允许嵌入 iframe 的宿主页域；多个宿主可列出多个精确域</span>
-
   <span class="tk-com">// 业务身份（必填，缺失会抛错）</span>
   <span class="tk-key">source_system</span>:      <span class="tk-str">'oa'</span>,
   <span class="tk-key">function_id</span>:        <span class="tk-str">'incomingDocument'</span>,
@@ -166,17 +158,12 @@
 })
 
 <span class="tk-com">// 可选参数速查（按需启用，未列出的使用默认值；详见 docmind-chat-iframe-parent.js 构造函数）：</span>
-<span class="tk-com">//   apiBaseUrl:         'http://api.example.com'        // 后端地址；留空走同源 /api 代理</span>
+<span class="tk-com">//   apiBaseUrl:         'http://api.example.com'        // 仅 iframe 与 API 不同域时覆盖</span>
 <span class="tk-com">//   agentId:            'default-chatbot'               // 后端智能体 ID</span>
 <span class="tk-com">//   tokenExchangeUrl:   '/api/chat-iframe/token'        // 信任后端换 token 直连地址（绕过同源代理）</span>
-<span class="tk-com">//   targetOrigin:       'https://docmind.example.com'   // iframe 页面 origin，只填协议/域名/端口，不带路径，禁止 *</span>
-<span class="tk-com">//   originAllowlist:    ['https://oa.example.com']      // 宿主业务页 origin；多个可信宿主逐项列出，禁止 *</span>
-<span class="tk-com">//   iframe.contentWindow: SDK 创建的 iframe 内部 window；它用于校验消息来源，无需接入方填写</span>
 <span class="tk-com">//   position:           'bottom-right'                  // 悬浮位置：bottom-right/left、top-right/left</span>
 <span class="tk-com">//   width / height:     460 / 680                       // 普通窗口尺寸（像素）</span>
 <span class="tk-com">//   initialState:       'minimized'                     // 初始状态：minimized / normal / maximized / closed</span>
-<span class="tk-com">//   includePageContent: true                            // iframe 是否自动抓取页面 HTML</span>
-<span class="tk-com">//   includeFiles:       true                            // iframe 是否自动拉取附件列表</span>
 <span class="tk-com">//   offsetX / offsetY:  24 / 24                         // 距视口边缘偏移（像素）</span>
 <span class="tk-com">//   buttonHtml:         '<span>🤖</span>'               // 自定义悬浮按钮内容</span>
 
@@ -215,8 +202,7 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'conversationCreated'</s
 chat.<span class="tk-fn">on</span>(<span class="tk-str">'messageSent'</span>,         (data) => console.log(<span class="tk-str">'用户提问'</span>, data.query))
 chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,         (data) => console.log(<span class="tk-str">'窗口状态'</span>, data.state))
 
-<span class="tk-com">// 5. 显式初始化（autoInit: false 时必调）</span>
-chat.<span class="tk-fn">init</span>()</code></pre>
+</code></pre>
       </section>
 
       <!-- 3. AI 提示 -->
@@ -244,18 +230,7 @@ chat.<span class="tk-fn">init</span>()</code></pre>
         external_user_name: params.get('external_user_name') || '张三',
       }
 
-      // 此脚本运行在宿主业务页，window.location.origin 就是宿主页 origin（例如 https://oa.example.com）。
-      const hostOrigin = window.location.origin
-      // 同源部署：两者相同。跨域部署时改为 iframe 服务域，例如 https://docmind.example.com。
-      const iframeOrigin = hostOrigin
-      const iframeSrc = './'
-
       const chat = new DocMindChatIframe({
-        iframeSrc,
-        // 只向 iframe 所在域发消息；必须是 origin，不能包含 /chat-iframe/ 等路径。
-        targetOrigin: iframeOrigin,
-        // 只接受这些宿主页发给 iframe 的消息；多宿主时追加精确 origin，不能使用 *。
-        originAllowlist: [hostOrigin],
         ...business,
       })
 
@@ -272,20 +247,17 @@ chat.<span class="tk-fn">init</span>()</code></pre>
           id: '202010200206',
           name: '上铁辆〔2020〕316号.pdf',
           source_url: '/chat-iframe/test1/上铁辆〔2020〕316号.pdf',
-          type: 'document',
           selected: true,
         },
         {
           id: '202010200207',
           name: '附件4.xls',
           source_url: '/chat-iframe/test1/附件4.xls',
-          type: 'document',
         },
         {
           id: '202010200209',
           name: '附件1～3.doc',
           source_url: '/chat-iframe/test1/附件1～3.doc',
-          type: 'document',
         },
       ])
 
