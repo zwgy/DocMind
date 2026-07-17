@@ -4,6 +4,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+class IncomingDocumentClassificationResult(BaseModel):
+    """来文摘要阶段的模型输出。"""
+
+    classification: str = Field(default="通用类")
+    classification_confidence: float | None = Field(default=None, ge=0, le=1)
+    summary: str = Field(default="")
+    structured_result: dict[str, Any] = Field(default_factory=dict)
 
 class CategoryDecision(BaseModel):
     matched: bool = Field(default=False, description="该类别是否命中文档或片段内容")

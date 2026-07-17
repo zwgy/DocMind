@@ -1,6 +1,77 @@
+import pytest
+
 from yuxi.document_extraction import service as service_module
 from yuxi.document_extraction.schemas import category_result_for_classification_label
-from yuxi.document_extraction.service import BusinessExtractionService
+from yuxi.document_extraction.service import BusinessExtractionService, classify_incoming_document
+
+
+async def test_classify_incoming_document_declares_categories(monkeypatch):
+    captured = {}
+
+    class FakeModelJsonLLM:
+        def __init__(self, model_spec):
+            captured["model_spec"] = model_spec
+
+        async def complete_json(self, prompt, schema):
+            captured["prompt"] = prompt
+            return {
+                "classification": "安全管理类",
+                "classification_confidence": 0.8,
+                "summary": "摘要",
+                "structured_result": {"requirements": ["按期整改"]},
+            }
+
+    monkeypatch.setattr(service_module, "ModelJsonLLM", FakeModelJsonLLM)
+
+    result = await classify_incoming_document(
+        filename="incoming.pdf",
+        markdown="请按期完成安全整改。",
+        metadata={"title": "安全整改通知"},
+        model_spec="model-a",
+    )
+
+    assert result["classification"] == "安全管理类"
+    prompt = captured["prompt"]
+    assert "- 通报类：" in prompt
+    assert "- 奖惩处置类：包含奖励、表彰、处罚" in prompt
+    assert "- 通用类：" in prompt
+    assert "只能填写“分类说明”中每行冒号前的名称" in prompt
+    assert "按照来文的主要目的" in prompt
+    assert "无法归入上述专业类别时填“通用类”" not in prompt
+    assert "不要复制 summary" in prompt
+    assert "--- 文件名 ---" in prompt
+    assert "--- 外部元数据 ---" in prompt
+    assert "--- 来文正文 ---" in prompt
+    assert "- 其他：" not in prompt
+    assert "chat-iframe" not in prompt
+
+
+async def test_classify_incoming_document_marks_truncated_markdown(monkeypatch):
+    captured = {}
+
+    class FakeModelJsonLLM:
+        def __init__(self, model_spec):
+            captured["model_spec"] = model_spec
+
+        async def complete_json(self, prompt, schema):
+            captured["prompt"] = prompt
+            return {
+                "classification": "通用类",
+                "classification_confidence": 0.7,
+                "summary": "摘要",
+                "structured_result": {},
+            }
+
+    monkeypatch.setattr(service_module, "ModelJsonLLM", FakeModelJsonLLM)
+    monkeypatch.setattr(service_module, "INCOMING_CLASSIFICATION_MARKDOWN_LIMIT", 5)
+
+    await classify_incoming_document(filename="incoming.pdf", markdown="123456", metadata={}, model_spec="model-a")
+
+    prompt = captured["prompt"]
+    assert "--- 来文正文（已截断） ---" in prompt
+    assert "不能声称覆盖全文" in prompt
+    assert "12345" in prompt
+    assert "123456" not in prompt
 
 
 class FakeLLM:
@@ -136,7 +207,7 @@ def test_short_markdown_limit_uses_token_count(monkeypatch):
     assert segments == [{"chunk_id": None, "content": "alpha beta", "chunk_index": 0}]
 
 
-async def test_extract_file_runs_category_first_then_matching_schemas():
+async def test_extract_chunks_uses_known_risk_category():
     service = BusinessExtractionService(llm=FakeLLM())
 
     result = await service.extract_chunks(
@@ -144,6 +215,7 @@ async def test_extract_file_runs_category_first_then_matching_schemas():
         incoming_id="inc_1",
         kb_id="kb_1",
         file_id="file_1",
+        category_result=category_result_for_classification_label("风险管理类"),
         chunks=[
             {
                 "chunk_id": "file_1_chunk_0",
@@ -161,12 +233,13 @@ async def test_extract_file_runs_category_first_then_matching_schemas():
     assert result.items[0].data["risk_name"] == "现场作业监护不到位"
 
 
-async def test_extract_chunks_falls_back_to_general_and_merges_duplicates():
+async def test_extract_chunks_uses_known_general_category_and_merges_duplicates():
     service = BusinessExtractionService(llm=FakeGeneralLLM())
 
     result = await service.extract_chunks(
         document_scope="incoming",
         incoming_id="inc_general",
+        category_result=category_result_for_classification_label("通用类"),
         chunks=[
             {"chunk_id": "chunk_1", "content": "供应商申请变更结算账户。", "chunk_index": 0},
             {"chunk_id": "chunk_2", "content": "供应商申请变更结算账户。", "chunk_index": 1},
@@ -262,7 +335,7 @@ async def test_run_markdown_extraction_writes_items_without_chunk_id():
         file_id="file_1",
         markdown_file="minio://knowledgebases/kb_1/parsed/file_1.md",
         filename="来文.docx",
-        processing_params={},
+        processing_params={"classification": "风险管理类"},
         model_spec="model-a",
         markdown_reader=lambda _: "# 安全风险\n现场作业监护不到位，应加强现场监护。",
     )
@@ -275,7 +348,13 @@ async def test_run_markdown_extraction_writes_items_without_chunk_id():
 
 
 async def test_run_markdown_extraction_reuses_same_markdown_and_model():
-    repo = FakeExtractionRepo(reusable={"run_id": "ber_old", "items": []})
+    repo = FakeExtractionRepo(
+        reusable={
+            "run_id": "ber_old",
+            "schema_ids": ["risk_item", "task_item", "management_requirement_item"],
+            "items": [],
+        }
+    )
     service = BusinessExtractionService(llm=FakeLLM(), extraction_repo=repo)
 
     result = await service.run_markdown_extraction(
@@ -285,6 +364,7 @@ async def test_run_markdown_extraction_reuses_same_markdown_and_model():
         file_id="file_1",
         markdown_file="minio://knowledgebases/kb_1/parsed/file_1.md",
         model_spec="model-a",
+        processing_params={"classification": "风险管理类"},
         markdown_reader=lambda _: "# ignored",
     )
 
@@ -309,3 +389,15 @@ async def test_run_markdown_extraction_does_not_reuse_empty_result_when_classifi
     assert result["reused"] is False
     assert repo.runs
     assert repo.results[0]["result_data"]["schema_ids"] == ["management_requirement_item"]
+
+
+async def test_run_markdown_extraction_requires_known_classification():
+    service = BusinessExtractionService(llm=FakeLLM())
+
+    with pytest.raises(ValueError, match="classification"):
+        await service.run_markdown_extraction(
+            document_scope="incoming",
+            incoming_id="inc_1",
+            markdown_file="minio://knowledgebases/incoming/inc_1/parsed.md",
+            model_spec="model-a",
+        )

@@ -8,10 +8,13 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from yuxi.document_extraction.llm import JsonLLM, ModelJsonLLM
-from yuxi.document_extraction.prompts import build_category_prompt, build_extraction_prompt
+from yuxi.document_extraction.prompts import (
+    build_extraction_prompt,
+    build_category_prompt,
+)
 from yuxi.document_extraction.schemas import (
-    CategoryDecision,
     DocumentCategoryResult,
+    IncomingDocumentClassificationResult,
     category_result_for_classification_label,
     category_result_to_mapping,
     extraction_schema_ids_for_categories,
@@ -27,6 +30,7 @@ from yuxi.utils.datetime_utils import utc_isoformat
 
 MarkdownReader = Callable[[str], str | Awaitable[str]]
 SHORT_MARKDOWN_EXTRACTION_TOKEN_LIMIT = 12_000
+INCOMING_CLASSIFICATION_MARKDOWN_LIMIT = 20_000
 
 
 @dataclass(slots=True)
@@ -82,7 +86,7 @@ class BusinessExtractionService:
         file_id: str | None = None,
         chunks: list[dict[str, Any]],
         model_spec: str | None = None,
-        category_result: DocumentCategoryResult | None = None,
+        category_result: DocumentCategoryResult,
     ) -> BusinessExtractionDraft:
         llm = self._resolve_llm(model_spec)
         normalized_chunks = [
@@ -95,8 +99,6 @@ class BusinessExtractionService:
             if chunk.get("content")
         ]
 
-        if category_result is None:
-            category_result = await self._classify_chunks(llm, normalized_chunks)
         category_mapping = category_result_to_mapping(category_result)
         # 通用类只做兜底；即使模型或调用方同时判真，也不能和专业 schema 重复抽取。
         if any(matched for name, matched in category_mapping.items() if name != "general"):
@@ -164,11 +166,11 @@ class BusinessExtractionService:
         markdown_reader: MarkdownReader | None = None,
     ) -> dict[str, Any]:
         processing_params = processing_params or {}
-        category_result = category_result_for_classification_label(processing_params.get("classification"))
-        category_result = category_result if any(category_result_to_mapping(category_result).values()) else None
-        expected_schema_ids = (
-            extraction_schema_ids_for_categories(category_result_to_mapping(category_result)) if category_result else []
-        )
+        classification = str(processing_params.get("classification") or "").strip()
+        category_result = category_result_for_classification_label(classification)
+        if not any(category_result_to_mapping(category_result).values()):
+            raise ValueError("A valid classification is required for business extraction")
+        expected_schema_ids = extraction_schema_ids_for_categories(category_result_to_mapping(category_result))
         reusable = await self.extraction_repo.get_success_by_document_markdown_model(
             document_scope=document_scope,
             incoming_id=incoming_id,
@@ -296,27 +298,6 @@ class BusinessExtractionService:
             for chunk in chunks
         ]
 
-    async def _classify_chunks(self, llm: JsonLLM, chunks: list[ChunkInput]) -> DocumentCategoryResult:
-        merged = DocumentCategoryResult()
-        # 只取前几个片段做分类，控制本地模型上下文和延迟。
-        for chunk in chunks[: min(len(chunks), 8)]:
-            data = await llm.complete_json(build_category_prompt(chunk.content), DocumentCategoryResult)
-            result = DocumentCategoryResult.model_validate(data)
-            for name in DocumentCategoryResult.model_fields:
-                current = getattr(merged, name)
-                candidate = getattr(result, name)
-                if candidate.matched and not current.matched:
-                    setattr(merged, name, candidate)
-        specific_matched = any(
-            getattr(merged, name).matched for name in DocumentCategoryResult.model_fields if name != "general"
-        )
-        # 分块可能分别命中通用类和专业类，最终统一在文档级保证兜底互斥。
-        if specific_matched:
-            merged.general = CategoryDecision()
-        elif not merged.general.matched:
-            merged.general = CategoryDecision(matched=True)
-        return merged
-
     async def _extract_schema_items(
         self,
         llm: JsonLLM,
@@ -365,6 +346,23 @@ class BusinessExtractionService:
         if not model_spec:
             raise ValueError("model_spec is required when no JsonLLM is injected")
         return ModelJsonLLM(model_spec)
+
+
+async def classify_incoming_document(
+    *,
+    filename: str,
+    markdown: str,
+    metadata: dict[str, Any] | None = None,
+    model_spec: str,
+) -> dict[str, Any]:
+    prompt = build_category_prompt(
+        filename=filename,
+        markdown=markdown,
+        metadata=metadata,
+        markdown_limit=INCOMING_CLASSIFICATION_MARKDOWN_LIMIT,
+    )
+    data = await ModelJsonLLM(model_spec).complete_json(prompt, IncomingDocumentClassificationResult)
+    return IncomingDocumentClassificationResult.model_validate(data).model_dump()
 
 
 def _merge_obvious_duplicate_items(items: list[ExtractedBusinessItem]) -> list[ExtractedBusinessItem]:
