@@ -11,7 +11,7 @@ import {
   matchedExtractionCategories
 } from '../src/utils/context-summary.ts'
 
-const file = { id: 'f1', name: '来文.docx', source_file_id: 'S001' }
+const file = { name: '来文.docx', source_file_id: 'S001' }
 const chatMessagesSource = readFileSync(new URL('../src/components/ChatMessages.vue', import.meta.url), 'utf8')
 
 test('context summary top area shows document metadata and fills missing values', () => {
@@ -77,12 +77,12 @@ test('buildContextSummaryMessage creates ready context card payload', () => {
 
 test('buildContextSummaryMessage updates with switched file', () => {
   const message = buildContextSummaryMessage({
-    file: { id: 'f2', name: '补充材料.md' },
+    file: { name: '补充材料.md', source_file_id: 'S002' },
     result: null
   })
 
   assert.equal(message?.id, 'context-summary')
-  assert.equal(message?.contextSummary?.file.id, 'f2')
+  assert.equal(message?.contextSummary?.file.source_file_id, 'S002')
   assert.equal(message?.contextSummary?.statusText, '等待查询')
 })
 

@@ -2,7 +2,7 @@ import type { ExtractionQueryResponse, IncomingPageFile } from '@/types'
 import { apiUrl } from './api-url.ts'
 
 function mockExtractionItem(file: IncomingPageFile, mode: string, index: number) {
-  const incomingFileId = file.id || file.source_file_id || file.source_url || file.name
+  const incomingFileId = file.source_file_id
   const shouldReady = mode === 'ready' || (mode === 'mixed' && index === 0)
   if (!shouldReady) {
     return {
@@ -87,7 +87,7 @@ export async function ingestIncomingDocument(
   const fileResponse = await fetch(sourceUrl, { cache: 'no-store' })
   if (!fileResponse.ok) throw new Error(`附件下载失败：${fileResponse.status}`)
   const blob = await fileResponse.blob()
-  const sourceFileId = file.source_file_id || file.id || sourceUrl || file.name
+  const sourceFileId = file.source_file_id
   const sourceDocId = file.source_doc_id
   const sourceFunctionId = file.source_function_id
   if (!sourceDocId) throw new Error('附件缺少 source_doc_id')

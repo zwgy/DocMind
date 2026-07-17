@@ -129,7 +129,7 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
       ? [input.selectedFile]
       : []
   for (const file of files) {
-    const result = input.extractionResults?.[file.id] || (file.id === input.selectedFile?.id ? input.extractionResult : null)
+    const result = input.extractionResults?.[file.source_file_id] || (file.source_file_id === input.selectedFile?.source_file_id ? input.extractionResult : null)
     const summary = summarizeExtraction(result)
     context.files.push({
       ...file,

@@ -74,7 +74,7 @@ test.skip('buildChatQuery carries enabled page and file context in the query tex
       url: 'https://oa.example.test/doc/1',
       text: '页面正文'
     },
-    selectedFile: { id: 'f1', name: '来文.docx', source_file_id: 'S001' },
+    selectedFile: { name: '来文.docx', source_file_id: 'S001' },
     extractionResult: {
       matchStatus: 'matched',
       extractionStatus: 'ready',
@@ -95,7 +95,7 @@ test.skip('buildChatQuery omits file context when askFile is disabled', () => {
     text: '只看页面',
     includePage: false,
     includeFile: false,
-    selectedFile: { id: 'f1', name: '来文.docx', source_file_id: 'S001' },
+    selectedFile: { name: '来文.docx', source_file_id: 'S001' },
     extractionResult: {
       matchStatus: 'matched',
       extractionStatus: 'ready',
@@ -114,7 +114,7 @@ test.skip('buildChatQuery keeps file identity but omits unavailable extraction d
     text: '这份文件有摘要吗？',
     includePage: false,
     includeFile: true,
-    selectedFile: { id: 'f1', name: '来文.docx', source_file_id: 'S001' },
+    selectedFile: { name: '来文.docx', source_file_id: 'S001' },
     extractionResult: {
       matchStatus: 'not_found',
       extractionStatus: 'not_found',
@@ -135,7 +135,7 @@ test('buildChatQuery keeps the user query clean', () => {
     includePage: true,
     includeFile: true,
     pageContent: { title: 'Detail page', text: 'Page body' },
-    selectedFile: { id: 'f1', name: 'contract.docx', source_file_id: 'S001' },
+    selectedFile: { name: 'contract.docx', source_file_id: 'S001' },
     extractionResult: {
       matchStatus: 'matched',
       extractionStatus: 'ready',
@@ -154,12 +154,12 @@ test('buildIframeContext carries enabled page and all selected files', () => {
     includeFile: true,
     pageContent: { title: 'Detail page', url: 'https://oa.example.test/doc/1', text: 'Page body' },
     selectedPageFiles: [
-      { id: 'f1', name: 'a.docx', source_file_id: 'S001', source_url: 'https://oa.example.test/a.docx' },
-      { id: 'f2', name: 'b.pdf', source_file_id: 'S002', source_url: 'https://oa.example.test/b.pdf' }
+      { name: 'a.docx', source_file_id: 'S001', source_url: 'https://oa.example.test/a.docx' },
+      { name: 'b.pdf', source_file_id: 'S002', source_url: 'https://oa.example.test/b.pdf' }
     ],
     extractionResults: {
-      f1: {
-        incomingFileId: 'f1',
+      S001: {
+        incomingFileId: 'S001',
         matchStatus: 'matched',
         extractionStatus: 'ready',
         fileStatus: 'parsed',
@@ -169,8 +169,8 @@ test('buildIframeContext carries enabled page and all selected files', () => {
         categories: { risk: { matched: true, evidence: 'Risk evidence' } },
         items: [{ item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' }]
       },
-      f2: {
-        incomingFileId: 'f2',
+      S002: {
+        incomingFileId: 'S002',
         matchStatus: 'pending_sync',
         extractionStatus: 'not_found'
       }
@@ -190,7 +190,7 @@ test('buildIframeContext omits disabled page and files', () => {
     includePage: false,
     includeFile: false,
     pageContent: { title: 'Detail page', text: 'Page body' },
-    selectedPageFiles: [{ id: 'f1', name: 'a.docx', source_file_id: 'S001' }]
+    selectedPageFiles: [{ name: 'a.docx', source_file_id: 'S001' }]
   })
 
   assert.equal(context.page, undefined)
@@ -202,9 +202,9 @@ test('buildIframeContext uses backend summary when extraction items are empty', 
     text: 'Summarize',
     includePage: false,
     includeFile: true,
-    selectedPageFiles: [{ id: 'f1', name: 'a.docx', source_file_id: 'S001' }],
+    selectedPageFiles: [{ name: 'a.docx', source_file_id: 'S001' }],
     extractionResults: {
-      f1: {
+      S001: {
         matchStatus: 'matched',
         extractionStatus: 'ready',
         summary: 'Full document summary',
@@ -221,9 +221,9 @@ test('buildIframeContext keeps structured extraction details with backend summar
     text: 'Summarize',
     includePage: false,
     includeFile: true,
-    selectedPageFiles: [{ id: 'f1', name: 'a.docx', source_file_id: 'S001' }],
+    selectedPageFiles: [{ name: 'a.docx', source_file_id: 'S001' }],
     extractionResults: {
-      f1: {
+      S001: {
         matchStatus: 'matched',
         extractionStatus: 'ready',
         summary: 'Full document summary',
@@ -403,9 +403,9 @@ test('sendMessageStream posts iframe context separately from the query', async (
     includePage: true,
     includeFile: true,
     pageContent: { title: 'Page', text: 'Page body' },
-    selectedPageFiles: [{ id: 'f1', name: 'a.docx', source_file_id: 'S001' }],
+    selectedPageFiles: [{ name: 'a.docx', source_file_id: 'S001' }],
     extractionResults: {
-      f1: {
+      S001: {
         matchStatus: 'matched',
         extractionStatus: 'not_found',
         hasParsedMarkdown: true,
@@ -447,11 +447,11 @@ test('buildIframeContext keeps all selected files without changing the query', (
     text: '只看附件风险',
     includeFile: true,
     selectedPageFiles: [
-      { id: 'f1', name: '合同.docx', source_file_id: 'S001' },
-      { id: 'f2', name: '报价.pdf', source_file_id: 'S002' }
+      { name: '合同.docx', source_file_id: 'S001' },
+      { name: '报价.pdf', source_file_id: 'S002' }
     ],
     extractionResults: {
-      f1: {
+      S001: {
         matchStatus: 'matched',
         extractionStatus: 'ready',
         fileStatus: 'parsed',
@@ -462,7 +462,7 @@ test('buildIframeContext keeps all selected files without changing the query', (
         schemaIds: ['risk_item'],
         items: [{ source_quote: '付款超期' }]
       },
-      f2: {
+      S002: {
         matchStatus: 'not_found',
         extractionStatus: 'not_found'
       }

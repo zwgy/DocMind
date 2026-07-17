@@ -15,7 +15,7 @@ test('refreshExtraction waits for token before querying extraction api', () => {
 
 test('page attachments are synchronized only after the user selects them for a sent question', () => {
   assert.doesNotMatch(contextSource, /normalized\[0\]\.selected/)
-  assert.doesNotMatch(inputSource, /if \(!next\.size && props\.selectedPageFileId\)/)
+  assert.doesNotMatch(inputSource, /if \(!next\.size && props\.selectedPageSourceFileId\)/)
   assert.match(source, /refreshExtraction\(selectedPageFiles, true\)/)
 })
 

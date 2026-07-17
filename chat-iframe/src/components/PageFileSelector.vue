@@ -5,12 +5,12 @@ import type { IncomingPageFile } from '@/types'
 withDefaults(
   defineProps<{
     files?: IncomingPageFile[]
-    selectedFileId?: string
+    selectedSourceFileId?: string
   }>(),
-  { files: () => [], selectedFileId: '' }
+  { files: () => [], selectedSourceFileId: '' }
 )
 
-defineEmits<{ select: [fileId: string] }>()
+defineEmits<{ select: [sourceFileId: string] }>()
 </script>
 
 <template>
@@ -19,11 +19,11 @@ defineEmits<{ select: [fileId: string] }>()
     <div v-if="!files.length" class="empty">未识别到文档附件</div>
     <button
       v-for="file in files"
-      :key="file.id"
+      :key="file.source_file_id"
       type="button"
       class="file-option"
-      :class="{ active: file.id === selectedFileId }"
-      @click="$emit('select', file.id)"
+      :class="{ active: file.source_file_id === selectedSourceFileId }"
+      @click="$emit('select', file.source_file_id)"
     >
       <FileText :size="16" />
       <span>{{ file.name }}</span>

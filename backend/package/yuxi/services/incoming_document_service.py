@@ -12,12 +12,11 @@ from yuxi.repositories.incoming_document_repository import IncomingDocumentRepos
 class IncomingPageFile(BaseModel):
     """chat-iframe 从宿主页面收集到的附件线索。"""
 
-    id: str | None = None
     name: str
     size_text: str | None = None
     size_bytes: int | None = None
     source_url: str | None = None
-    source_file_id: str | None = None
+    source_file_id: str
     source_function_id: str | None = None
     source_doc_id: str | None = None
     source_system: str | None = None
@@ -48,7 +47,7 @@ class IncomingDocumentService:
         candidates, reason = await self._match(incoming)
         # 这里只做摘要查询，不触发解析；未命中但有来源线索时交给 iframe 自动同步。
         base = {
-            "incomingFileId": incoming.id or incoming.source_file_id or incoming.source_url or incoming.name,
+            "incomingFileId": incoming.source_file_id,
             "name": incoming.name,
             "source_url": incoming.source_url,
             "source_file_id": incoming.source_file_id,
@@ -63,7 +62,7 @@ class IncomingDocumentService:
             has_source_hint = bool(
                 incoming.source_function_id
                 and incoming.source_doc_id
-                and (incoming.source_file_id or incoming.source_url)
+                and incoming.source_file_id
             )
             # 有来源线索时让 iframe 去触发同步；没有任何线索则明确 not_found，避免无效上传。
             return base | {"matchStatus": "pending_sync" if has_source_hint else "not_found"}
@@ -116,36 +115,15 @@ class IncomingDocumentService:
         source_document_id = incoming.source_doc_id
         if not source_function_id or not source_document_id:
             return [], "source_function_id/source_doc_id is required"
-        # 匹配顺序从强到弱：同一来文内文件 ID 优先，最后只在同一来文内按文件名兜底。
+        # source_file_id 是来文附件的唯一身份，禁止用 URL 或文件名回退匹配到其他附件。
         source_file_id = incoming.source_file_id
-        if source_file_id:
-            candidates = await self.incoming_repo.list_by_source_file_id(
-                source_file_id,
-                source_system=source_system,
-                source_function_id=source_function_id,
-                source_document_id=source_document_id,
-            )
-            if candidates:
-                return candidates, "source_file_id matched"
-        if source_url:
-            candidates = await self.incoming_repo.list_by_source_url(
-                source_url,
-                source_system=source_system,
-                source_function_id=source_function_id,
-                source_document_id=source_document_id,
-            )
-            if candidates:
-                return candidates, "source_url matched"
-        if incoming.name:
-            candidates = await self.incoming_repo.list_by_source_doc_id_and_filename(
-                source_document_id,
-                incoming.name,
-                source_system=source_system,
-                source_function_id=source_function_id,
-            )
-            if candidates:
-                return candidates, "source_document_id + filename matched"
-        return [], "not found"
+        candidates = await self.incoming_repo.list_by_source_file_id(
+            source_file_id,
+            source_system=source_system,
+            source_function_id=source_function_id,
+            source_document_id=source_document_id,
+        )
+        return candidates, "source_file_id matched" if candidates else "source_file_id not found"
 
 
 def _first_matched_category_label(categories: dict[str, Any], category_labels: dict[str, str]) -> str | None:

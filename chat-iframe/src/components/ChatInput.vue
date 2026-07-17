@@ -33,7 +33,7 @@ const props = withDefaults(
     models?: ModelOption[]
     selectedModelSpec?: string
     pageFiles?: IncomingPageFile[]
-    selectedPageFileId?: string
+    selectedPageSourceFileId?: string
     tokenUsage?: Record<string, unknown> | null
   }>(),
   {
@@ -44,7 +44,7 @@ const props = withDefaults(
     models: () => [],
     selectedModelSpec: '',
     pageFiles: () => [],
-    selectedPageFileId: '',
+    selectedPageSourceFileId: '',
     tokenUsage: null
   }
 )
@@ -63,14 +63,14 @@ const emit = defineEmits<{
   'update:askPage': [value: boolean]
   'update:askFile': [value: boolean]
   'update:selectedModelSpec': [value: string]
-  'update:selectedPageFileId': [value: string]
+  'update:selectedPageSourceFileId': [value: string]
 }>()
 
 const text = ref('')
 const files = ref<File[]>([])
 const imageFile = ref<File | null>(null)
 const draftAttachmentFiles = ref<File[]>([])
-const selectedPageFileIds = ref<Set<string>>(new Set())
+const selectedPageSourceFileIds = ref<Set<string>>(new Set())
 const showFileMenu = ref(false)
 const showModelMenu = ref(false)
 const showAttachmentMenu = ref(false)
@@ -87,10 +87,10 @@ const imageInputRef = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const hasPageFiles = computed(() => props.pageFiles.length > 0)
 const selectedPageFiles = computed(() => {
-  const selected = props.pageFiles.filter((file) => selectedPageFileIds.value.has(file.id))
-  if (!props.selectedPageFileId) return selected
+  const selected = props.pageFiles.filter((file) => selectedPageSourceFileIds.value.has(file.source_file_id))
+  if (!props.selectedPageSourceFileId) return selected
   // 当前上下文附件要排在第一位，保证顶部摘要和发送给模型的文件上下文一致。
-  return selected.sort((a, b) => Number(b.id === props.selectedPageFileId) - Number(a.id === props.selectedPageFileId))
+  return selected.sort((a, b) => Number(b.source_file_id === props.selectedPageSourceFileId) - Number(a.source_file_id === props.selectedPageSourceFileId))
 })
 const selectedModelLabel = computed(() => {
   return props.models.find((model) => model.value === props.selectedModelSpec)?.label || props.selectedModelSpec || '默认模型'
@@ -167,20 +167,20 @@ const contextUsage = computed(() => {
 })
 
 watch(
-  () => props.pageFiles.map((file) => `${file.id}:${file.selected ? '1' : '0'}`).join('|'),
+  () => props.pageFiles.map((file) => `${file.source_file_id}:${file.selected ? '1' : '0'}`).join('|'),
   () => {
-    const currentIds = new Set(props.pageFiles.map((file) => file.id))
-    const next = new Set([...selectedPageFileIds.value].filter((id) => currentIds.has(id)))
-    const selected = props.pageFiles.filter((file) => file.selected).map((file) => file.id)
+    const currentIds = new Set(props.pageFiles.map((file) => file.source_file_id))
+    const next = new Set([...selectedPageSourceFileIds.value].filter((id) => currentIds.has(id)))
+    const selected = props.pageFiles.filter((file) => file.selected).map((file) => file.source_file_id)
     if (!next.size && selected.length) selected.forEach((id) => next.add(id))
-    selectedPageFileIds.value = next
+    selectedPageSourceFileIds.value = next
     emit('update:askFile', next.size > 0)
   },
   { immediate: true }
 )
 
 function syncAskFile() {
-  emit('update:askFile', selectedPageFileIds.value.size > 0)
+  emit('update:askFile', selectedPageSourceFileIds.value.size > 0)
 }
 
 function resizeTextarea() {
@@ -277,16 +277,16 @@ function toggleModelMenu() {
   showModelMenu.value = !showModelMenu.value
 }
 
-function togglePageFile(fileId: string) {
-  const next = new Set(selectedPageFileIds.value)
-  const isCurrent = props.selectedPageFileId === fileId
-  const isRemoving = next.has(fileId) && isCurrent
-  if (isRemoving) next.delete(fileId)
-  else next.add(fileId)
-  selectedPageFileIds.value = next
+function togglePageFile(sourceFileId: string) {
+  const next = new Set(selectedPageSourceFileIds.value)
+  const isCurrent = props.selectedPageSourceFileId === sourceFileId
+  const isRemoving = next.has(sourceFileId) && isCurrent
+  if (isRemoving) next.delete(sourceFileId)
+  else next.add(sourceFileId)
+  selectedPageSourceFileIds.value = next
   syncAskFile()
   // “问文件”选择决定当前文档上下文卡片；已选附件再次点击时先切换当前摘要，再点击当前项才取消。
-  emit('update:selectedPageFileId', isRemoving ? [...next][0] || '' : fileId)
+  emit('update:selectedPageSourceFileId', isRemoving ? [...next][0] || '' : sourceFileId)
 }
 
 function toggleFileMenu() {
@@ -364,13 +364,13 @@ watch(text, resizeTextarea)
           <div class="popover-title">选择询问附件</div>
           <button
             v-for="file in pageFiles"
-            :key="file.id"
+            :key="file.source_file_id"
             type="button"
             class="page-file-row"
-            :class="{ active: selectedPageFileIds.has(file.id) }"
-            @click="togglePageFile(file.id)"
+            :class="{ active: selectedPageSourceFileIds.has(file.source_file_id) }"
+            @click="togglePageFile(file.source_file_id)"
           >
-            <CheckSquare v-if="selectedPageFileIds.has(file.id)" :size="16" />
+            <CheckSquare v-if="selectedPageSourceFileIds.has(file.source_file_id)" :size="16" />
             <SquareIcon v-else :size="16" />
             <span :title="file.name">{{ file.name }}</span>
             <small>{{ file.size_text || file.source_file_id || '文档' }}</small>

@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+
 from yuxi.services.incoming_document_service import IncomingDocumentService
 
 
@@ -33,12 +36,6 @@ class FakeIncomingRepo:
 
     async def list_by_source_file_id(self, source_file_id, *, source_system, source_function_id, source_document_id):
         return self.responses.get(("source_file_id", source_system, source_function_id, source_document_id, source_file_id), [])
-
-    async def list_by_source_url(self, source_url, *, source_system, source_function_id, source_document_id):
-        return self.responses.get(("source_url", source_system, source_function_id, source_document_id, source_url), [])
-
-    async def list_by_source_doc_id_and_filename(self, source_doc_id, filename, *, source_system, source_function_id):
-        return self.responses.get(("source_doc_id_filename", source_system, source_function_id, source_doc_id, filename), [])
 
     async def list_by_filename_and_size(self, filename, file_size):
         return self.responses.get(("filename_size", filename, file_size), [])
@@ -82,7 +79,6 @@ async def test_query_returns_ready_incoming_summary_for_source_file_id_match():
     result = await service.query_extractions(
         [
             {
-                "id": "202606100417",
                 "name": "来文.docx",
                 "source_url": "http://example/a?202606100417",
                 "source_file_id": "202606100417",
@@ -155,7 +151,6 @@ async def test_query_returns_schema_display_metadata_for_regulation():
     result = await service.query_extractions(
         [
             {
-                "id": "202010200206",
                 "name": "上铁辆〔2020〕316号.pdf",
                 "source_file_id": "202010200206",
                 "source_function_id": "incomingDocument",
@@ -193,7 +188,6 @@ async def test_query_returns_markdown_hint_when_summary_missing():
     result = await service.query_extractions(
         [
             {
-                "id": "202606100417",
                 "name": "incoming.docx",
                 "source_file_id": "202606100417",
                 "source_function_id": "incomingDocument",
@@ -212,29 +206,22 @@ async def test_query_returns_markdown_hint_when_summary_missing():
     assert "fileId" not in item
 
 
-async def test_query_translates_match_miss_states():
-    service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo(
-            {
-                (
-                    "source_doc_id_filename",
-                    "production",
-                    "incomingDocument",
-                    "37906",
-                    "来文.docx",
-                ): [incoming_record(), incoming_record(incoming_id="inc_2")]
-            }
-        ),
-        extraction_repo=FakeExtractionRepo(),
-    )
+async def test_query_translates_source_file_id_miss_states():
+    service = IncomingDocumentService(incoming_repo=FakeIncomingRepo({}), extraction_repo=FakeExtractionRepo())
 
     result = await service.query_extractions(
         [
-            {"id": "a", "name": "缺失.docx", "source_file_id": "missing", "source_function_id": "incomingDocument", "source_doc_id": "37906"},
-            {"id": "b", "name": "只有文件名.docx"},
-            {"id": "c", "name": "来文.docx", "source_function_id": "incomingDocument", "source_doc_id": "37906"},
+            {"name": "缺失.docx", "source_file_id": "missing", "source_function_id": "incomingDocument", "source_doc_id": "37906"},
+            {"name": "缺少来文标识.docx", "source_file_id": "missing-function"},
         ]
     )
 
-    assert [item["matchStatus"] for item in result["items"]] == ["pending_sync", "not_found", "multiple"]
-    assert [item["extractionStatus"] for item in result["items"]] == ["not_found", "not_found", "not_found"]
+    assert [item["matchStatus"] for item in result["items"]] == ["pending_sync", "not_found"]
+    assert [item["extractionStatus"] for item in result["items"]] == ["not_found", "not_found"]
+
+
+async def test_query_requires_source_file_id():
+    service = IncomingDocumentService(incoming_repo=FakeIncomingRepo({}), extraction_repo=FakeExtractionRepo())
+
+    with pytest.raises(ValidationError, match="source_file_id"):
+        await service.query_extractions([{"name": "缺少来源编号.docx"}])

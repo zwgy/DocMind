@@ -5,7 +5,7 @@ type IframeContextState = {
   config: IframeConfig
   pageContent: PageContent
   files: IncomingPageFile[]
-  selectedFileId: string
+  selectedSourceFileId: string
   windowState: WindowState
   isEmbedded: boolean
 }
@@ -13,11 +13,11 @@ type IframeContextState = {
 function normalizeFiles(files: IncomingPageFile[] = []): IncomingPageFile[] {
   const normalized = (files || []).map((file) => {
     const sourceUrl = file.source_url || ''
-    const sourceFileId = file.source_file_id
-    const id = file.id || sourceFileId || sourceUrl || file.name
+    const sourceFileId = file.source_file_id.trim()
+    if (!sourceFileId) throw new Error('附件缺少 source_file_id')
     return {
       ...file,
-      id,
+      source_file_id: sourceFileId,
       source_url: sourceUrl,
       selected: Boolean(file.selected)
     }
@@ -30,13 +30,13 @@ export const useIframeContextStore = defineStore('iframe-context', {
     config: {},
     pageContent: {},
     files: [],
-    selectedFileId: '',
+    selectedSourceFileId: '',
     windowState: 'normal',
     isEmbedded: false
   }),
   getters: {
     selectedFile(state) {
-      return state.selectedFileId ? state.files.find((file) => file.id === state.selectedFileId) || null : null
+      return state.selectedSourceFileId ? state.files.find((file) => file.source_file_id === state.selectedSourceFileId) || null : null
     }
   },
   actions: {
@@ -49,10 +49,10 @@ export const useIframeContextStore = defineStore('iframe-context', {
     setFiles(files?: IncomingPageFile[]) {
       this.files = normalizeFiles(files)
       const preferred = this.files.find((file) => file.selected) || this.files[0]
-      this.selectedFileId = preferred?.id || ''
+      this.selectedSourceFileId = preferred?.source_file_id || ''
     },
-    selectFile(fileId: string) {
-      this.selectedFileId = fileId
+    selectFile(sourceFileId: string) {
+      this.selectedSourceFileId = sourceFileId
     },
     setWindowState(state: WindowState) {
       this.windowState = state

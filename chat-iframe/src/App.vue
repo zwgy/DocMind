@@ -48,9 +48,9 @@ function cacheExtractionResults(files: IncomingPageFile[], items: ExtractionResu
     const item =
       items.find((candidate) => {
         const incomingId = candidate.incomingFileId || candidate.name
-        return incomingId === file.id || incomingId === file.source_file_id || incomingId === file.source_url || incomingId === file.name
+        return incomingId === file.source_file_id
       }) || items[index]
-    if (item) next[file.id] = item
+    if (item) next[file.source_file_id] = item
   }
   results.value = next
 }
@@ -63,38 +63,38 @@ async function refreshExtraction(queryFiles: IncomingPageFile[] = selectedFile.v
   }
   if (!queryFiles.length) return
   if (context.config.authError) {
-    chat.setContextSummary({ file, result: results.value[file.id] || null, error: context.config.authError })
+    chat.setContextSummary({ file, result: results.value[file.source_file_id] || null, error: context.config.authError })
     return
   }
   if (!context.config.token) {
     // 父页面可能先响应附件列表、后完成换票；这里等待 token 到达，避免无凭证请求把摘要卡片打成 401。
-    chat.setContextSummary({ file, result: results.value[file.id] || null })
+    chat.setContextSummary({ file, result: results.value[file.source_file_id] || null })
     return
   }
   loading.value = true
   error.value = ''
-  chat.setContextSummary({ file, result: results.value[file.id] || null, loading: true })
+  chat.setContextSummary({ file, result: results.value[file.source_file_id] || null, loading: true })
   try {
     let response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
     cacheExtractionResults(queryFiles, response.items || [])
     const pendingFiles = syncPending
       ? queryFiles.filter((file) => {
-          const result = results.value[file.id]
-          return result?.matchStatus === 'pending_sync' && file.source_url && !ingestingFileIds.has(file.id)
+          const result = results.value[file.source_file_id]
+          return result?.matchStatus === 'pending_sync' && file.source_url && !ingestingFileIds.has(file.source_file_id)
         })
       : []
     if (pendingFiles.length) {
-      pendingFiles.forEach((file) => ingestingFileIds.add(file.id))
+      pendingFiles.forEach((file) => ingestingFileIds.add(file.source_file_id))
       await Promise.all(
         pendingFiles.map((file) => ingestIncomingDocument(file, context.config.token).catch(() => null))
       )
       response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
       cacheExtractionResults(queryFiles, response.items || [])
     }
-    if (selectedFile.value?.id === file.id) chat.setContextSummary({ file, result: results.value[file.id] || null, loading: false })
+    if (selectedFile.value?.source_file_id === file.source_file_id) chat.setContextSummary({ file, result: results.value[file.source_file_id] || null, loading: false })
   } catch (err) {
     error.value = err instanceof Error ? err.message : '查询失败'
-    if (selectedFile.value?.id === file.id) chat.setContextSummary({ file, result: results.value[file.id] || null, error: error.value })
+    if (selectedFile.value?.source_file_id === file.source_file_id) chat.setContextSummary({ file, result: results.value[file.source_file_id] || null, error: error.value })
   } finally {
     loading.value = false
   }
@@ -147,7 +147,7 @@ async function sendChat(payload: {
   const selectedPageFiles = payload.selectedPageFiles || []
   if (selectedPageFiles.length) await refreshExtraction(selectedPageFiles, true)
   const selectedContextFile = selectedPageFiles[0] || null
-  const selectedContextResult = selectedContextFile ? results.value[selectedContextFile.id] || null : null
+  const selectedContextResult = selectedContextFile ? results.value[selectedContextFile.source_file_id] || null : null
   const result = await chat.send(
     {
       text: payload.text,
@@ -206,11 +206,11 @@ function startWindowDrag(event: PointerEvent) {
 }
 
 watch(
-  () => selectedFile.value?.id,
+  () => selectedFile.value?.source_file_id,
   () => {
     chat.setContextSummary({
       file: selectedFile.value,
-      result: selectedFile.value ? results.value[selectedFile.value.id] || null : null
+      result: selectedFile.value ? results.value[selectedFile.value.source_file_id] || null : null
     })
     void refreshExtraction()
   },
@@ -225,7 +225,7 @@ watch(
       if (selectedFile.value) {
         chat.setContextSummary({
           file: selectedFile.value,
-          result: results.value[selectedFile.value.id] || null,
+          result: results.value[selectedFile.value.source_file_id] || null,
           error: context.config.authError
         })
       }
@@ -323,11 +323,11 @@ onUnmounted(() => {
           :selected-model-spec="chat.selectedModelSpec"
           :token-usage="currentTokenUsage"
           :page-files="context.files"
-          :selected-page-file-id="context.selectedFileId"
+          :selected-page-source-file-id="context.selectedSourceFileId"
           @update:ask-page="chat.askPage = $event"
           @update:ask-file="chat.askFile = $event"
           @update:selected-model-spec="chat.setSelectedModelSpec($event)"
-          @update:selected-page-file-id="context.selectFile($event)"
+          @update:selected-page-source-file-id="context.selectFile($event)"
           @submit="sendChat"
           @stop="chat.stop(context.config.token)"
         />

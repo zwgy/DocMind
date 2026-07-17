@@ -41,15 +41,17 @@
 
   function normalizeFiles(files, options) {
     options = options || {}
+    // 来文级公共元数据会填充到未单独声明的附件字段，供发送消息触发自动入库时提交。
+    var incomingDocumentMetadata = options.incoming_document_metadata || {}
     var normalized = (files || [])
       .filter(function (file) {
         return file && isDocumentFile(file.name || file.source_url)
       })
       .map(function (file) {
         var sourceUrl = file.source_url || ''
-        var sourceFileId = file.source_file_id || file.id
+        var sourceFileId = stripText(file.source_file_id)
+        if (!sourceFileId) throw new Error('附件缺少 source_file_id')
         var normalizedFile = {
-          id: file.id || sourceFileId || file.name,
           name: file.name,
           source_url: sourceUrl,
           source_file_id: sourceFileId,
@@ -62,7 +64,8 @@
         if (!normalizedFile.source_function_id && options.function_id) normalizedFile.source_function_id = options.function_id
         if (!normalizedFile.source_system && options.source_system) normalizedFile.source_system = options.source_system
         ;['document_number', 'title', 'incoming_type', 'source_unit', 'incoming_date'].forEach(function (key) {
-          if (file[key]) normalizedFile[key] = file[key]
+          var value = file[key] || incomingDocumentMetadata[key]
+          if (value) normalizedFile[key] = value
         })
         if (file.size_text) normalizedFile.size_text = file.size_text
         if (file.size_bytes) normalizedFile.size_bytes = file.size_bytes
@@ -86,6 +89,8 @@
         source_system: '',
         function_id: '',
         business_id: '',
+        // 同一来文全部附件共享的文号、标题、类型、发文单位和日期；附件字段可单独覆盖。
+        incoming_document_metadata: null,
         external_user_id: '',
         external_user_name: '',
         position: 'bottom-right',

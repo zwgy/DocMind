@@ -8,12 +8,11 @@ export type PageContent = {
 }
 
 export type IncomingPageFile = {
-  id: string
+  source_file_id: string
   name: string
   size_text?: string
   size_bytes?: number
   source_url?: string
-  source_file_id?: string
   source_function_id?: string
   source_doc_id?: string
   source_system?: string

@@ -10,13 +10,13 @@ test('queryIncomingDocumentExtractions posts files with bearer token', async () 
     return Response.json({ items: [{ incomingFileId: 'f1', matchStatus: 'matched' }] })
   }
 
-  const response = await queryIncomingDocumentExtractions([{ id: 'f1', name: 'incoming.pdf' }], 'token-1')
+  const response = await queryIncomingDocumentExtractions([{ source_file_id: 'S001', name: 'incoming.pdf' }], 'token-1')
 
   assert.equal(calls[0].url, '/api/incoming-documents/extractions/query')
   assert.equal(calls[0].options.method, 'POST')
   assert.equal(calls[0].options.headers.Authorization, 'Bearer token-1')
   assert.deepEqual(JSON.parse(calls[0].options.body), {
-    files: [{ id: 'f1', name: 'incoming.pdf' }]
+    files: [{ source_file_id: 'S001', name: 'incoming.pdf' }]
   })
   assert.equal(response.items[0].incomingFileId, 'f1')
 })
@@ -30,7 +30,7 @@ test('queryIncomingDocumentExtractions reports non-json http status', async () =
     })
 
   await assert.rejects(
-    () => queryIncomingDocumentExtractions([{ id: 'f1', name: 'incoming.pdf' }]),
+    () => queryIncomingDocumentExtractions([{ source_file_id: 'S001', name: 'incoming.pdf' }]),
     /502/
   )
 })
@@ -47,7 +47,6 @@ test('ingestIncomingDocument downloads file and posts multipart with bearer toke
 
   const response = await ingestIncomingDocument(
     {
-      id: 'f1',
       name: 'incoming.pdf',
       source_url: 'https://oa.example.test/incoming.pdf',
       source_doc_id: 'DOC001',
@@ -83,7 +82,7 @@ test('ingestIncomingDocument downloads file and posts multipart with bearer toke
   assert.equal(response.status, 'accepted')
 })
 
-test('ingestIncomingDocument falls back to source url as source file id', async () => {
+test('ingestIncomingDocument uses source_file_id as the source file key', async () => {
   const calls = []
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options })
@@ -93,6 +92,7 @@ test('ingestIncomingDocument falls back to source url as source file id', async 
 
   await ingestIncomingDocument({
     name: 'incoming.pdf',
+    source_file_id: 'S001',
     source_url: 'https://oa.example.test/incoming.pdf',
     source_function_id: 'incomingDocument',
     source_doc_id: 'DOC001'
@@ -103,9 +103,7 @@ test('ingestIncomingDocument falls back to source url as source file id', async 
   assert.equal(form.get('source_doc_id'), 'DOC001')
   assert.equal(form.get('source_function_id'), 'incomingDocument')
   assert.equal(form.get('source_system'), 'production')
-  assert.deepEqual(JSON.parse(form.get('file_metas')), [
-    { source_file_id: 'https://oa.example.test/incoming.pdf', filename: 'incoming.pdf' }
-  ])
+  assert.deepEqual(JSON.parse(form.get('file_metas')), [{ source_file_id: 'S001', filename: 'incoming.pdf' }])
 })
 
 test('queryIncomingDocumentExtractions returns local mock data when enabled by url', async () => {
@@ -115,8 +113,8 @@ test('queryIncomingDocumentExtractions returns local mock data when enabled by u
   }
 
   const response = await queryIncomingDocumentExtractions([
-    { id: 'f1', name: 'ready.md' },
-    { id: 'f2', name: 'missing.md' }
+    { source_file_id: 'S001', name: 'ready.md' },
+    { source_file_id: 'S002', name: 'missing.md' }
   ])
 
   assert.equal(response.items[0].matchStatus, 'matched')

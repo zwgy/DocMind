@@ -222,11 +222,24 @@ test('setFiles and explicit requests send compatible iframe messages', () => {
     iframeSrc: 'https://docmind.example.com/chat-iframe/',
     source_system: 'oa',
     function_id: 'incomingDocument',
-    business_id: '37906'
+    business_id: '37906',
+    incoming_document_metadata: {
+      document_number: '来文〔2026〕1号',
+      title: '风险整改通知',
+      incoming_type: '安全管理',
+      source_unit: '安监部',
+      incoming_date: '2026-07-09'
+    }
   })
 
   chat.setPageContent('page text')
-  chat.setFiles([{ id: 'source-1', name: 'incoming.docx', source_url: 'https://oa/files/source-1', type: 'image' }])
+  chat.setFiles([{
+    source_file_id: 'source-1',
+    name: 'incoming.docx',
+    source_url: 'https://oa/files/source-1',
+    title: '附件标题',
+    type: 'image'
+  }])
   listeners.message({ origin: 'https://docmind.example.com', data: { type: 'REQUEST_PAGE_CONTENT' } })
   listeners.message({ origin: 'https://docmind.example.com', data: { type: 'REQUEST_FILE_LIST' } })
 
@@ -237,9 +250,26 @@ test('setFiles and explicit requests send compatible iframe messages', () => {
   assert.equal(sentMessages.at(-3).message.payload[0].source_system, 'oa')
   assert.equal(sentMessages.at(-3).message.payload[0].source_function_id, 'incomingDocument')
   assert.equal(sentMessages.at(-3).message.payload[0].source_doc_id, '37906')
+  assert.equal(sentMessages.at(-3).message.payload[0].id, undefined)
+  assert.equal(sentMessages.at(-3).message.payload[0].document_number, '来文〔2026〕1号')
+  assert.equal(sentMessages.at(-3).message.payload[0].title, '附件标题')
+  assert.equal(sentMessages.at(-3).message.payload[0].incoming_type, '安全管理')
+  assert.equal(sentMessages.at(-3).message.payload[0].source_unit, '安监部')
+  assert.equal(sentMessages.at(-3).message.payload[0].incoming_date, '2026-07-09')
   assert.equal(sentMessages.at(-3).message.payload[0].type, undefined)
   assert.equal(sentMessages.at(-2).message.type, 'PAGE_CONTENT')
   assert.equal(sentMessages.at(-1).message.type, 'FILE_LIST')
+  chat.destroy()
+})
+
+test('setFiles requires source_file_id as the current attachment key', () => {
+  const { DocMindChatIframe } = parentHarness()
+  const chat = new DocMindChatIframe({ iframeSrc: 'https://docmind.example.com/chat-iframe/' })
+
+  assert.throws(
+    () => chat.setFiles([{ id: 'legacy-id', name: 'incoming.docx', source_url: 'https://oa/files/legacy-id' }]),
+    /source_file_id/
+  )
   chat.destroy()
 })
 
@@ -325,6 +355,10 @@ test('local example starts minimized so users open the assistant explicitly', ()
   // DocMindChatIframe 默认 initialState: 'minimized'，示例不应显式打开助手窗口。
   // 改为"反向断言"：只要没有显式开启就认为符合契约。
   assert.doesNotMatch(example, /initialState:\s*'(open|normal|maximized)'/)
+  assert.match(example, /<span class="tk-key">incoming_document_metadata<\/span>:\s*incomingDocumentMetadata/)
+  assert.match(example, /incoming_document_metadata:\s*incomingDocumentMetadata/)
+  assert.match(example, /<span class="tk-key">source_file_id<\/span>:\s*<span class="tk-str">'202010200206'/)
+  assert.match(example, /source_file_id:\s*'202010200206'/)
 })
 
 test('iframe header drag messages move the parent window', () => {
