@@ -355,10 +355,10 @@ test('local example starts minimized so users open the assistant explicitly', ()
   // DocMindChatIframe 默认 initialState: 'minimized'，示例不应显式打开助手窗口。
   // 改为"反向断言"：只要没有显式开启就认为符合契约。
   assert.doesNotMatch(example, /initialState:\s*'(open|normal|maximized)'/)
-  assert.match(example, /<span class="tk-key">incoming_document_metadata<\/span>:\s*\{/)
-  assert.match(example, /incoming_document_metadata:\s*\{/)
+  assert.match(example, /<span class="tk-key">incoming_document_metadata<\/span>:\s*incomingDocumentMetadata/)
+  assert.match(example, /incoming_document_metadata:\s*incomingDocumentMetadata/)
   assert.match(example, /\.\.\.businessContext,/)
-  assert.match(example, /\.\.\.incomingDocumentMetadata,/)
+  assert.doesNotMatch(example, /\.\.\.incomingDocumentMetadata,/)
   assert.match(example, /source_file_id：来源系统内该附件的稳定唯一 ID/)
   assert.match(example, /name:\s*'上铁辆〔2020〕316号\.pdf',\s*source_file_id:\s*'202010200206',\s*source_url:/)
   assert.match(example, /<span class="tk-key">source_file_id<\/span>:\s*<span class="tk-str">'202010200206'/)

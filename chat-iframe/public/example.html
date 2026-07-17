@@ -164,23 +164,21 @@
 
 <span class="tk-com">// 来文级公共元数据：同一来文的全部附件共享；未入库附件随消息自动上传时会提交这些字段。</span>
 <span class="tk-key">const</span> incomingDocumentMetadata = {
-  <span class="tk-key">incoming_document_metadata</span>: {
-    <span class="tk-com">// 来文编号。</span>
-    <span class="tk-key">document_number</span>: <span class="tk-str">'上铁辆〔2020〕316号'</span>,
-    <span class="tk-com">// 来文标题。</span>
-    <span class="tk-key">title</span>:           <span class="tk-str">'中国铁路上海局集团有限公司关于重新印发《路用客车检修运用管理办法》的通知'</span>,
-    <span class="tk-com">// 来文类别。</span>
-    <span class="tk-key">incoming_type</span>:   <span class="tk-str">'集团公司文件'</span>,
-    <span class="tk-com">// 来文单位。</span>
-    <span class="tk-key">source_unit</span>:     <span class="tk-str">'安全科'</span>,
-    <span class="tk-com">// 来文日期，格式 YYYY-MM-DD。</span>
-    <span class="tk-key">incoming_date</span>:   <span class="tk-str">'2020-10-20'</span>,
-  },
+  <span class="tk-com">// 来文编号。</span>
+  <span class="tk-key">document_number</span>: <span class="tk-str">'上铁辆〔2020〕316号'</span>,
+  <span class="tk-com">// 来文标题。</span>
+  <span class="tk-key">title</span>:           <span class="tk-str">'中国铁路上海局集团有限公司关于重新印发《路用客车检修运用管理办法》的通知'</span>,
+  <span class="tk-com">// 来文类别。</span>
+  <span class="tk-key">incoming_type</span>:   <span class="tk-str">'集团公司文件'</span>,
+  <span class="tk-com">// 来文单位。</span>
+  <span class="tk-key">source_unit</span>:     <span class="tk-str">'安全科'</span>,
+  <span class="tk-com">// 来文日期，格式 YYYY-MM-DD。</span>
+  <span class="tk-key">incoming_date</span>:   <span class="tk-str">'2020-10-20'</span>,
 }
 
 <span class="tk-key">const</span> chat = <span class="tk-key">new</span> DocMindChatIframe({
   ...businessContext,
-  ...incomingDocumentMetadata,
+  <span class="tk-key">incoming_document_metadata</span>: incomingDocumentMetadata,
 })
 
 <span class="tk-com">// 可选参数速查（按需启用，未列出的使用默认值；详见 docmind-chat-iframe-parent.js 构造函数）：</span>
@@ -266,23 +264,21 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
 
       // 来文级公共元数据：同一来文的全部附件共享；未入库附件随消息自动上传时会提交这些字段。
       const incomingDocumentMetadata = {
-        incoming_document_metadata: {
-          // 来文编号。
-          document_number: '上铁辆〔2020〕316号',
-          // 来文标题。
-          title: '中国铁路上海局集团有限公司关于重新印发《路用客车检修运用管理办法》的通知',
-          // 来文类别。
-          incoming_type: '集团公司文件',
-          // 来文单位。
-          source_unit: '安全科',
-          // 来文日期，格式 YYYY-MM-DD。
-          incoming_date: '2020-10-20',
-        },
+        // 来文编号。
+        document_number: '上铁辆〔2020〕316号',
+        // 来文标题。
+        title: '中国铁路上海局集团有限公司关于重新印发《路用客车检修运用管理办法》的通知',
+        // 来文类别。
+        incoming_type: '集团公司文件',
+        // 来文单位。
+        source_unit: '安全科',
+        // 来文日期，格式 YYYY-MM-DD。
+        incoming_date: '2020-10-20',
       }
 
       const chat = new DocMindChatIframe({
         ...businessContext,
-        ...incomingDocumentMetadata,
+        incoming_document_metadata: incomingDocumentMetadata,
       })
 
       // 设置自定义页面内容（可选，设置后不再实时获取网页HTML，且不转markdown）
