@@ -15,6 +15,8 @@ const file = { name: '来文.docx', source_file_id: 'S001' }
 const chatMessagesSource = readFileSync(new URL('../src/components/ChatMessages.vue', import.meta.url), 'utf8')
 
 test('context summary top area shows document metadata and fills missing values', () => {
+  assert.match(chatMessagesSource, /contextSummary\.file\.name/)
+  assert.doesNotMatch(chatMessagesSource, /contextSummary\.file\.title \|\| item\.message\.contextSummary\.file\.name/)
   assert.match(chatMessagesSource, /class="context-summary-meta"/)
   assert.match(chatMessagesSource, /\['incoming-type', '来文类型', file\.incoming_type \|\| '无'\]/)
   assert.match(chatMessagesSource, /\['source-unit', '发文单位', file\.source_unit \|\| '无'\]/)

@@ -148,23 +148,39 @@
         <h2 class="card-title"><span>💻</span> DocMindChatIframe 完整调用示例</h2>
         <pre><code><span class="tk-com">// 1. 构造悬浮助手：SDK 会从自身脚本地址推导 iframe 与 API 地址。</span>
 
+<span class="tk-com">// 业务上下文：用于生成当前业务的独立会话 scope。</span>
+<span class="tk-key">const</span> businessContext = {
+  <span class="tk-com">// 外部系统 ID，只允许字母和数字。</span>
+  <span class="tk-key">source_system</span>:      <span class="tk-str">'oa'</span>,
+  <span class="tk-com">// 外部系统功能 ID，用于生成业务会话 scope。</span>
+  <span class="tk-key">function_id</span>:        <span class="tk-str">'incomingDocument'</span>,
+  <span class="tk-com">// 当前业务页面 ID，用于生成业务会话 scope。</span>
+  <span class="tk-key">business_id</span>:        <span class="tk-str">'37908'</span>,
+  <span class="tk-com">// 外部系统用户 ID，只允许字母和数字。</span>
+  <span class="tk-key">external_user_id</span>:   <span class="tk-str">'1001'</span>,
+  <span class="tk-com">// 外部系统用户显示名，用于 docMind 后台识别。</span>
+  <span class="tk-key">external_user_name</span>: <span class="tk-str">'张三'</span>,
+}
+
 <span class="tk-com">// 来文级公共元数据：同一来文的全部附件共享；未入库附件随消息自动上传时会提交这些字段。</span>
 <span class="tk-key">const</span> incomingDocumentMetadata = {
-  <span class="tk-key">document_number</span>: <span class="tk-str">'上铁辆〔2020〕316号'</span>,
-  <span class="tk-key">title</span>:           <span class="tk-str">'中国铁路上海局集团有限公司关于重新印发《路用客车检修运用管理办法》的通知'</span>,
-  <span class="tk-key">incoming_type</span>:   <span class="tk-str">'集团公司文件'</span>,
-  <span class="tk-key">source_unit</span>:     <span class="tk-str">'安全科'</span>,
-  <span class="tk-key">incoming_date</span>:   <span class="tk-str">'2020-10-20'</span>,
+  <span class="tk-key">incoming_document_metadata</span>: {
+    <span class="tk-com">// 来文编号。</span>
+    <span class="tk-key">document_number</span>: <span class="tk-str">'上铁辆〔2020〕316号'</span>,
+    <span class="tk-com">// 来文标题。</span>
+    <span class="tk-key">title</span>:           <span class="tk-str">'中国铁路上海局集团有限公司关于重新印发《路用客车检修运用管理办法》的通知'</span>,
+    <span class="tk-com">// 来文类别。</span>
+    <span class="tk-key">incoming_type</span>:   <span class="tk-str">'集团公司文件'</span>,
+    <span class="tk-com">// 来文单位。</span>
+    <span class="tk-key">source_unit</span>:     <span class="tk-str">'安全科'</span>,
+    <span class="tk-com">// 来文日期，格式 YYYY-MM-DD。</span>
+    <span class="tk-key">incoming_date</span>:   <span class="tk-str">'2020-10-20'</span>,
+  },
 }
 
 <span class="tk-key">const</span> chat = <span class="tk-key">new</span> DocMindChatIframe({
-  <span class="tk-com">// 业务身份（必填，缺失会抛错）</span>
-  <span class="tk-key">source_system</span>:      <span class="tk-str">'oa'</span>,
-  <span class="tk-key">function_id</span>:        <span class="tk-str">'incomingDocument'</span>,
-  <span class="tk-key">business_id</span>:        <span class="tk-str">'37908'</span>,
-  <span class="tk-key">external_user_id</span>:   <span class="tk-str">'1001'</span>,
-  <span class="tk-key">external_user_name</span>: <span class="tk-str">'张三'</span>,
-  <span class="tk-key">incoming_document_metadata</span>: incomingDocumentMetadata,
+  ...businessContext,
+  ...incomingDocumentMetadata,
 })
 
 <span class="tk-com">// 可选参数速查（按需启用，未列出的使用默认值；详见 docmind-chat-iframe-parent.js 构造函数）：</span>
@@ -186,21 +202,25 @@ chat.<span class="tk-fn">setPageContent</span>([
 ].<span class="tk-fn">join</span>(<span class="tk-str">'\n'</span>))
 
 <span class="tk-com">// 3. 设置附件列表（被助手默认带入；selected: true 的项会被高亮选中）</span>
+<span class="tk-com">//   name：文件名，用于助手展示和上传时的文件名。</span>
+<span class="tk-com">//   source_file_id：来源系统内该附件的稳定唯一 ID，用于匹配与关联；请使用嵌入系统的文件 ID。</span>
+<span class="tk-com">//   source_url：附件下载地址；待入库时浏览器据此下载并自动上传，需可被当前页面访问（可选）。</span>
+<span class="tk-com">//   selected：是否在助手中默认选中。</span>
 chat.<span class="tk-fn">setFiles</span>([
   {
-    <span class="tk-key">source_file_id</span>: <span class="tk-str">'202010200206'</span>,
     <span class="tk-key">name</span>:       <span class="tk-str">'上铁辆〔2020〕316号.pdf'</span>,
+    <span class="tk-key">source_file_id</span>: <span class="tk-str">'202010200206'</span>,
     <span class="tk-key">source_url</span>: <span class="tk-str">'/chat-iframe/test1/上铁辆〔2020〕316号.pdf'</span>,
     <span class="tk-key">selected</span>:   <span class="tk-num">true</span>
   },
   {
-    <span class="tk-key">source_file_id</span>: <span class="tk-str">'202010200207'</span>,
     <span class="tk-key">name</span>:       <span class="tk-str">'附件4.xls'</span>,
+    <span class="tk-key">source_file_id</span>: <span class="tk-str">'202010200207'</span>,
     <span class="tk-key">source_url</span>: <span class="tk-str">'/chat-iframe/test1/附件4.xls'</span>
   },
   {
-    <span class="tk-key">source_file_id</span>: <span class="tk-str">'202010200209'</span>,
     <span class="tk-key">name</span>:       <span class="tk-str">'附件1～3.doc'</span>,
+    <span class="tk-key">source_file_id</span>: <span class="tk-str">'202010200209'</span>,
     <span class="tk-key">source_url</span>: <span class="tk-str">'/chat-iframe/test1/附件1～3.doc'</span>
   },
 ])
@@ -230,26 +250,39 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
       // 允许通过 URL 参数注入测试数据，便于 e2e 场景覆盖不同业务身份。
       // 例如：?source_system=oa&function_id=e2eIncoming&business_id=auto-sync-001
       const params = new URLSearchParams(window.location.search)
-      const business = {
+      // 业务上下文：用于生成当前业务的独立会话 scope。
+      const businessContext = {
+        // 外部系统 ID，只允许字母和数字。
         source_system:      params.get('source_system')      || 'oa',
+        // 外部系统功能 ID，用于生成业务会话 scope。
         function_id:        params.get('function_id')        || 'incomingDocument',
+        // 当前业务页面 ID，用于生成业务会话 scope。
         business_id:        params.get('business_id')        || '37908',
+        // 外部系统用户 ID，只允许字母和数字。
         external_user_id:   params.get('external_user_id')   || '1001',
+        // 外部系统用户显示名，用于 docMind 后台识别。
         external_user_name: params.get('external_user_name') || '张三',
       }
 
       // 来文级公共元数据：同一来文的全部附件共享；未入库附件随消息自动上传时会提交这些字段。
       const incomingDocumentMetadata = {
-        document_number: '上铁辆〔2020〕316号',
-        title: '中国铁路上海局集团有限公司关于重新印发《路用客车检修运用管理办法》的通知',
-        incoming_type: '集团公司文件',
-        source_unit: '安全科',
-        incoming_date: '2020-10-20',
+        incoming_document_metadata: {
+          // 来文编号。
+          document_number: '上铁辆〔2020〕316号',
+          // 来文标题。
+          title: '中国铁路上海局集团有限公司关于重新印发《路用客车检修运用管理办法》的通知',
+          // 来文类别。
+          incoming_type: '集团公司文件',
+          // 来文单位。
+          source_unit: '安全科',
+          // 来文日期，格式 YYYY-MM-DD。
+          incoming_date: '2020-10-20',
+        },
       }
 
       const chat = new DocMindChatIframe({
-        ...business,
-        incoming_document_metadata: incomingDocumentMetadata,
+        ...businessContext,
+        ...incomingDocumentMetadata,
       })
 
       // 设置自定义页面内容（可选，设置后不再实时获取网页HTML，且不转markdown）
@@ -260,21 +293,25 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
       ].join('\n'))
 
       // 设置附件列表（被助手默认带入；selected: true 的项会被高亮选中）
+      //   name：文件名，用于助手展示和上传时的文件名。
+      //   source_file_id：来源系统内该附件的稳定唯一 ID，用于匹配与关联；请使用嵌入系统的文件 ID。
+      //   source_url：附件下载地址；待入库时浏览器据此下载并自动上传，需可被当前页面访问（可选）。
+      //   selected：是否在助手中默认选中。
       chat.setFiles([
         {
-          source_file_id: '202010200206',
           name: '上铁辆〔2020〕316号.pdf',
+          source_file_id: '202010200206',
           source_url: '/chat-iframe/test1/上铁辆〔2020〕316号.pdf',
           selected: true,
         },
         {
-          source_file_id: '202010200207',
           name: '附件4.xls',
+          source_file_id: '202010200207',
           source_url: '/chat-iframe/test1/附件4.xls',
         },
         {
-          source_file_id: '202010200209',
           name: '附件1～3.doc',
+          source_file_id: '202010200209',
           source_url: '/chat-iframe/test1/附件1～3.doc',
         },
       ])

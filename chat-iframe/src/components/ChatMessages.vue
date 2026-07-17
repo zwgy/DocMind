@@ -295,8 +295,8 @@ onUnmounted(() => {
               <h2>文档摘要</h2>
             </div>
           </div>
-          <p class="context-summary-file" :title="item.message.contextSummary.file.title || item.message.contextSummary.file.name">
-            <span>{{ item.message.contextSummary.file.title || item.message.contextSummary.file.name }}</span>
+          <p class="context-summary-file" :title="item.message.contextSummary.file.name">
+            <span>{{ item.message.contextSummary.file.name }}</span>
             <span v-if="extractionClassificationText(item.message.contextSummary.result)" class="classification-badge">
               {{ extractionClassificationText(item.message.contextSummary.result) }}
             </span>
