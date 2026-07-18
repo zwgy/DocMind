@@ -163,12 +163,16 @@ class KnowledgeDocumentIngestService:
 
                 for idx, record in enumerate(parsed_files, 1):
                     await context.raise_if_cancelled()
-                    await context.set_progress(60.0 + (idx / total_parsed) * 35.0, f"[3/3] 入库文件 {idx}/{total_parsed}")
+                    await context.set_progress(
+                        60.0 + (idx / total_parsed) * 35.0, f"[3/3] 入库文件 {idx}/{total_parsed}"
+                    )
 
                     item = record["item"]
                     file_id = record["file_id"]
                     try:
-                        await self.knowledge.update_file_params(kb_id, file_id, indexing_params, operator_id=operator_id)
+                        await self.knowledge.update_file_params(
+                            kb_id, file_id, indexing_params, operator_id=operator_id
+                        )
                         result = await self.knowledge.index_file(
                             kb_id,
                             file_id,
@@ -242,6 +246,8 @@ def _params_for_item(item: str, params: dict[str, Any]) -> dict[str, Any]:
     source_paths = params.get("source_paths")
     item_params = dict(params)
     item_params.pop("source_paths", None)
+    # 来文任务恢复标记只用于 Tasker 启动对账，不能写入知识库文件参数。
+    item_params.pop("_incoming_document", None)
     if isinstance(source_paths, dict) and source_paths.get(item):
         # source_paths 是批量参数，进入单文件 add_file_record 时要转换成当前文件的 source_path。
         item_params["source_path"] = source_paths[item]

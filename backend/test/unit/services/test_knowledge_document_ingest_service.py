@@ -59,6 +59,7 @@ async def test_run_ingest_auto_indexes_and_preserves_source_path():
             "content_hashes": {item: "hash_1"},
             "file_sizes": {item: 123},
             "source_paths": {item: "incoming/customer-review/source.pdf"},
+            "_incoming_document": {"incoming_id": "inc_1", "incoming_file_ids": ["incf_1"]},
             "chunk_preset_id": "general",
             "chunk_parser_config": {"chunk_token_num": 512},
         },
@@ -70,6 +71,7 @@ async def test_run_ingest_auto_indexes_and_preserves_source_path():
     assert result["items"] == [{"file_id": "file_1", "status": "indexed"}]
     assert knowledge.add_calls[0][2]["source_path"] == "incoming/customer-review/source.pdf"
     assert "source_paths" not in knowledge.add_calls[0][2]
+    assert "_incoming_document" not in knowledge.add_calls[0][2]
     assert knowledge.update_calls == [
         ("kb_1", "file_1", {"chunk_preset_id": "general", "chunk_parser_config": {"chunk_token_num": 512}}, "u1")
     ]

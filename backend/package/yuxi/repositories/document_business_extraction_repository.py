@@ -10,7 +10,6 @@ from yuxi.storage.postgres.models_knowledge import (
     DocumentBusinessExtractionResult,
     DocumentBusinessExtractionRun,
 )
-from yuxi.utils.datetime_utils import utc_now_naive
 
 
 class DocumentBusinessExtractionRepository:
@@ -137,27 +136,6 @@ class DocumentBusinessExtractionRepository:
                 .values(kb_id=kb_id, file_id=file_id)
             )
 
-    async def confirm_item(
-        self,
-        *,
-        item_id: str,
-        confirmed_data: dict[str, Any],
-        operator_id: str | None,
-        status: str = "confirmed",
-    ) -> dict[str, Any] | None:
-        async with pg_manager.get_async_session_context() as session:
-            row = await session.execute(
-                select(DocumentBusinessExtractionItem).where(DocumentBusinessExtractionItem.item_id == item_id)
-            )
-            item = row.scalar_one_or_none()
-            if item is None:
-                return None
-            item.confirmed_data = confirmed_data
-            item.status = status
-            item.confirmed_by = operator_id
-            item.confirmed_at = utc_now_naive()
-            return self._item_to_dict(item)
-
     async def _build_view(
         self,
         session,
@@ -196,9 +174,6 @@ class DocumentBusinessExtractionRepository:
             "chunk_id": item.chunk_id,
             "item_type": item.item_type,
             "data": item.data or {},
-            "confirmed_data": item.confirmed_data,
-            "source_quote": item.source_quote,
-            "status": item.status,
-            "confirmed_by": item.confirmed_by,
-            "confirmed_at": item.confirmed_at.isoformat() if item.confirmed_at else None,
+            "evidence": item.evidence or [],
+            "source_quote": (item.data or {}).get("source_quote"),
         }

@@ -76,40 +76,59 @@ export async function queryIncomingDocumentExtractions(
 }
 
 export async function ingestIncomingDocument(
-  file: IncomingPageFile,
+  files: IncomingPageFile[],
   token?: string,
   options: { source_system?: string } = {}
 ): Promise<Record<string, unknown>> {
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
-  const sourceUrl = file.source_url
-  if (!sourceUrl) throw new Error('附件缺少下载地址')
-  const fileResponse = await fetch(sourceUrl, { cache: 'no-store' })
-  if (!fileResponse.ok) throw new Error(`附件下载失败：${fileResponse.status}`)
-  const blob = await fileResponse.blob()
-  const sourceFileId = file.source_file_id
-  const sourceDocId = file.source_doc_id
-  const sourceFunctionId = file.source_function_id
+  const first = files[0]
+  if (!first) throw new Error('附件不能为空')
+  const sourceDocId = first.source_doc_id
+  const sourceFunctionId = first.source_function_id
   if (!sourceDocId) throw new Error('附件缺少 source_doc_id')
   if (!sourceFunctionId) throw new Error('附件缺少 source_function_id')
+  if (
+    files.some(
+      (file) => file.source_doc_id !== sourceDocId || file.source_function_id !== sourceFunctionId
+    )
+  ) {
+    throw new Error('一次只能同步同一份来文的附件')
+  }
+  const downloaded = await Promise.all(
+    files.map(async (file) => {
+      if (!file.source_url) throw new Error('附件缺少下载地址')
+      const response = await fetch(file.source_url, { cache: 'no-store' })
+      if (!response.ok) throw new Error(`附件下载失败：${response.status}`)
+      return { file, blob: await response.blob() }
+    })
+  )
   const form = new FormData()
   form.append('source_doc_id', sourceDocId)
   form.append('source_function_id', sourceFunctionId)
-  form.append('source_system', file.source_system || options.source_system || 'production')
-  if (file.document_number) form.append('document_number', file.document_number)
-  if (file.title) form.append('title', file.title)
-  if (file.incoming_type) form.append('incoming_type', file.incoming_type)
-  if (file.source_unit) form.append('source_unit', file.source_unit)
-  if (file.incoming_date) form.append('incoming_date', file.incoming_date)
-  form.append('files', blob, file.name)
+  form.append('source_system', first.source_system || options.source_system || 'production')
+  form.append(
+    'document_metadata',
+    JSON.stringify(
+      first.document_metadata || {
+        document_number: first.document_number,
+        title: first.title,
+        incoming_type: first.incoming_type,
+        source_unit: first.source_unit,
+        incoming_date: first.incoming_date
+      }
+    )
+  )
+  downloaded.forEach(({ file, blob }) => form.append('files', blob, file.name))
   form.append(
     'file_metas',
-    JSON.stringify([
-      {
-        source_file_id: sourceFileId,
-        filename: file.name
-      }
-    ])
+    JSON.stringify(
+      downloaded.map(({ file }) => ({
+        source_file_id: file.source_file_id,
+        filename: file.name,
+        is_main_file: file.is_main_file === true
+      }))
+    )
   )
   const response = await fetch(apiUrl('/api/incoming-documents/ingest'), {
     method: 'POST',

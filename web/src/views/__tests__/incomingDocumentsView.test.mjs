@@ -26,8 +26,16 @@ assert.doesNotMatch(
   '详情页不应直接平铺业务抽取 item'
 )
 
+assert.doesNotMatch(component, /摘要阶段关键事实/, '不应展示后端已不再返回的 structuredResult')
+assert.match(component, /documentMetadataEntries/, '详情页应展示动态 document_metadata')
+assert.match(component, /attachmentMarkdownTruncated/, 'Markdown 预览截断时必须明确提示')
+assert.match(component, /detail\.reviewStatus === 'confirmed'/, '详情页应展示并锁定已确认状态')
 assert.match(
   component,
-  /摘要阶段关键事实/,
-  '摘要阶段 structuredResult 只能作为辅助信息展示'
+  /detail\.additionalClassifications/,
+  '详情页应展示附加分类的置信度和原文依据'
 )
+assert.match(component, /extracting: \{ label: '抽取中'/, '页面应识别当前 extracting 状态')
+assert.match(component, /partial: \{ label: '部分入库'/, '页面应识别附件部分入库状态')
+assert.match(component, /sourceFileIds: \[\]/, '知识库导入应支持选择附件')
+assert.match(component, /record\?\.linkedFileId/, '知识库预览应使用附件级 file ID')

@@ -6,11 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from yuxi.agents.backends.sandbox import ensure_thread_dirs, sandbox_uploads_dir, virtual_path_for_thread_file
-from yuxi.config import config as app_config
 from yuxi.knowledge.parser import Parser
-from yuxi.knowledge.utils.kb_utils import parse_minio_url
-from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
-from yuxi.storage.minio import get_minio_client
 
 IFRAME_PAGE_INLINE_CHARS = 8000
 IFRAME_PAGE_PREVIEW_CHARS = 2000
@@ -53,15 +49,6 @@ def _context_file_path(thread_id: str, uid: str) -> tuple[Path, str]:
     host_dir = sandbox_uploads_dir(thread_id) / "iframe-context"
     host_dir.mkdir(parents=True, exist_ok=True)
     host_path = host_dir / "page.md"
-    return host_path, virtual_path_for_thread_file(thread_id, host_path, uid=uid)
-
-
-def _incoming_context_file_path(thread_id: str, uid: str, incoming_id: str) -> tuple[Path, str]:
-    ensure_thread_dirs(thread_id, uid)
-    host_dir = sandbox_uploads_dir(thread_id) / "iframe-context" / "incoming"
-    host_dir.mkdir(parents=True, exist_ok=True)
-    safe_id = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in incoming_id) or "incoming"
-    host_path = host_dir / f"{safe_id}.md"
     return host_path, virtual_path_for_thread_file(thread_id, host_path, uid=uid)
 
 
@@ -126,24 +113,27 @@ def _business_items_text(file_info: dict[str, Any]) -> str:
         if not isinstance(item, dict):
             continue
         item_type = _clean_text(item.get("item_type")) or "unknown"
-        data = item.get("confirmed_data") or item.get("data") or {}
+        data = item.get("data") or {}
         source_quote = _clean_text(item.get("source_quote"))
+        evidence = item.get("evidence")
         parts = [f"- {item_type}"]
         if isinstance(data, dict) and data:
             parts.append(json.dumps(data, ensure_ascii=False))
         if source_quote:
             parts.append(f"依据：{source_quote}")
+        if isinstance(evidence, list):
+            sources = []
+            for entry in evidence:
+                if not isinstance(entry, dict):
+                    continue
+                file_name = _clean_text(entry.get("file_name"))
+                location = _clean_text(entry.get("source_location"))
+                quote = _clean_text(entry.get("quote"))
+                sources.append("；".join(value for value in (file_name, location, quote) if value))
+            if sources:
+                parts.append(f"来源附件：{' | '.join(sources)}")
         lines.append("；".join(parts))
     return "\n".join(lines)
-
-
-async def _read_incoming_markdown(incoming_id: str) -> str:
-    record = await IncomingDocumentRepository().get_by_incoming_id(incoming_id)
-    markdown_url = getattr(record, "markdown_file_url", None) if record is not None else None
-    if not markdown_url:
-        return ""
-    bucket_name, object_name = parse_minio_url(markdown_url)
-    return (await get_minio_client().adownload_file(bucket_name, object_name)).decode("utf-8")
 
 
 async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> str:
@@ -161,9 +151,40 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
         summary, _ = _truncate(summary, IFRAME_FILE_SUMMARY_CHARS)
         lines.extend(["  状态：已有摘要", f"  摘要：{summary}"])
 
+    classification = _clean_text(file_info.get("classification"))
+    classification_evidence = _clean_text(file_info.get("aiClassificationEvidence"))
+    if classification:
+        lines.append(f"  主分类：{classification}")
+        if classification_evidence:
+            lines.append(f"  主分类依据：{classification_evidence}")
+
+    additional_classifications = file_info.get("additionalClassifications")
+    if isinstance(additional_classifications, list) and additional_classifications:
+        lines.append("  有证据支持的附加分类：")
+        for item in additional_classifications:
+            if not isinstance(item, dict):
+                continue
+            classification = _clean_text(item.get("classification"))
+            evidence = _clean_text(item.get("evidence"))
+            confidence = item.get("confidence")
+            if classification and evidence:
+                lines.append(f"    - {classification}（置信度 {confidence}）：{evidence}")
+
     business_items = _business_items_text(file_info)
     if business_items:
         lines.extend(["  结构化信息：", business_items])
+
+    document_files = file_info.get("documentFiles")
+    if isinstance(document_files, list) and document_files:
+        lines.append("  附件清单：")
+        for document_file in document_files:
+            if not isinstance(document_file, dict):
+                continue
+            filename = _clean_text(document_file.get("filename")) or "未命名附件"
+            role = "主文件" if document_file.get("isMainFile") else "附件"
+            status = _clean_text(document_file.get("status")) or "未知"
+            source_file_id = _clean_text(document_file.get("sourceFileId"))
+            lines.append(f"    - {filename}（{role}，{status}，source_file_id={source_file_id}）")
 
     if not summary:
         if match_status == "multiple":
@@ -177,15 +198,11 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
         else:
             lines.append(f"  状态：{extraction_status or match_status or '未知'}")
 
-    # KB 文件走现有知识库工具；未入库来文只暴露当前 thread sandbox 内的临时 markdown 路径。
+    # 已入库文件可以按需读取全文；未入库来文当前只向小助手提供摘要和证据。
     if kb_id and file_id and (summary or has_parsed):
         lines.append(f'  全文读取：open_kb_document(kb_id="{kb_id}", file_id="{file_id}")')
     elif incoming_id and has_parsed:
-        markdown = await _read_incoming_markdown(incoming_id)
-        if markdown:
-            host_path, virtual_path = _incoming_context_file_path(thread_id, uid, incoming_id)
-            host_path.write_text(markdown, encoding="utf-8")
-            lines.append(f"  全文读取：请使用 read_file 读取 {virtual_path}")
+        lines.append("  原文：当前未提供未入库来文的全文读取能力；摘要和证据不足时应明确说明，不能推测原文内容。")
     return "\n".join(lines)
 
 
@@ -193,7 +210,7 @@ async def _render_files(thread_id: str, uid: str, files: list[Any]) -> str:
     file_prompts = [await _render_file(thread_id, uid, item) for item in files if isinstance(item, dict)]
     if not file_prompts:
         return ""
-    return "【选中附件】\n" + "\n".join(file_prompts)
+    return "【当前来文】\n" + "\n".join(file_prompts)
 
 
 async def render_iframe_context_prompt(thread_id: str, uid: str, iframe_context: dict[str, Any] | None) -> str:

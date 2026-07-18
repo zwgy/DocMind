@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { ingestIncomingDocument, queryIncomingDocumentExtractions } from '../src/apis/incoming-documents.ts'
+import {
+  ingestIncomingDocument,
+  queryIncomingDocumentExtractions
+} from '../src/apis/incoming-documents.ts'
 
 test('queryIncomingDocumentExtractions posts files with bearer token', async () => {
   const calls = []
@@ -10,7 +13,10 @@ test('queryIncomingDocumentExtractions posts files with bearer token', async () 
     return Response.json({ items: [{ incomingFileId: 'f1', matchStatus: 'matched' }] })
   }
 
-  const response = await queryIncomingDocumentExtractions([{ source_file_id: 'S001', name: 'incoming.pdf' }], 'token-1')
+  const response = await queryIncomingDocumentExtractions(
+    [{ source_file_id: 'S001', name: 'incoming.pdf' }],
+    'token-1'
+  )
 
   assert.equal(calls[0].url, '/api/incoming-documents/extractions/query')
   assert.equal(calls[0].options.method, 'POST')
@@ -46,18 +52,22 @@ test('ingestIncomingDocument downloads file and posts multipart with bearer toke
   }
 
   const response = await ingestIncomingDocument(
-    {
-      name: 'incoming.pdf',
-      source_url: 'https://oa.example.test/incoming.pdf',
-      source_doc_id: 'DOC001',
-      source_function_id: 'incomingDocument',
-      source_file_id: 'S001',
-      document_number: '来文〔2026〕1号',
-      title: '风险整改通知',
-      incoming_type: '安全管理',
-      source_unit: '安监部',
-      incoming_date: '2026-07-09'
-    },
+    [
+      {
+        name: 'incoming.pdf',
+        source_url: 'https://oa.example.test/incoming.pdf',
+        source_doc_id: 'DOC001',
+        source_function_id: 'incomingDocument',
+        source_file_id: 'S001',
+        document_metadata: {
+          document_number: '来文〔2026〕1号',
+          title: '风险整改通知',
+          incoming_type: '安全管理',
+          source_unit: '安监部',
+          incoming_date: '2026-07-09'
+        }
+      }
+    ],
     'token-1',
     { source_system: 'oa' }
   )
@@ -72,12 +82,16 @@ test('ingestIncomingDocument downloads file and posts multipart with bearer toke
   assert.equal(form.get('source_doc_id'), 'DOC001')
   assert.equal(form.get('source_function_id'), 'incomingDocument')
   assert.equal(form.get('source_system'), 'oa')
-  assert.equal(form.get('document_number'), '来文〔2026〕1号')
-  assert.equal(form.get('title'), '风险整改通知')
-  assert.equal(form.get('incoming_type'), '安全管理')
-  assert.equal(form.get('source_unit'), '安监部')
-  assert.equal(form.get('incoming_date'), '2026-07-09')
-  assert.deepEqual(JSON.parse(form.get('file_metas')), [{ source_file_id: 'S001', filename: 'incoming.pdf' }])
+  assert.deepEqual(JSON.parse(form.get('document_metadata')), {
+    document_number: '来文〔2026〕1号',
+    title: '风险整改通知',
+    incoming_type: '安全管理',
+    source_unit: '安监部',
+    incoming_date: '2026-07-09'
+  })
+  assert.deepEqual(JSON.parse(form.get('file_metas')), [
+    { source_file_id: 'S001', filename: 'incoming.pdf', is_main_file: false }
+  ])
   assert.equal(form.get('files').name, 'incoming.pdf')
   assert.equal(response.status, 'accepted')
 })
@@ -86,24 +100,29 @@ test('ingestIncomingDocument uses source_file_id as the source file key', async 
   const calls = []
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options })
-    if (url === 'https://oa.example.test/incoming.pdf') return new Response(new Blob(['pdf-content']))
+    if (url === 'https://oa.example.test/incoming.pdf')
+      return new Response(new Blob(['pdf-content']))
     return Response.json({ status: 'accepted' })
   }
 
-  await ingestIncomingDocument({
-    name: 'incoming.pdf',
-    source_file_id: 'S001',
-    source_url: 'https://oa.example.test/incoming.pdf',
-    source_function_id: 'incomingDocument',
-    source_doc_id: 'DOC001'
-  })
+  await ingestIncomingDocument([
+    {
+      name: 'incoming.pdf',
+      source_file_id: 'S001',
+      source_url: 'https://oa.example.test/incoming.pdf',
+      source_function_id: 'incomingDocument',
+      source_doc_id: 'DOC001'
+    }
+  ])
 
   const form = calls[1].options.body
   assert.equal(calls[0].options.cache, 'no-store')
   assert.equal(form.get('source_doc_id'), 'DOC001')
   assert.equal(form.get('source_function_id'), 'incomingDocument')
   assert.equal(form.get('source_system'), 'production')
-  assert.deepEqual(JSON.parse(form.get('file_metas')), [{ source_file_id: 'S001', filename: 'incoming.pdf' }])
+  assert.deepEqual(JSON.parse(form.get('file_metas')), [
+    { source_file_id: 'S001', filename: 'incoming.pdf', is_main_file: false }
+  ])
 })
 
 test('queryIncomingDocumentExtractions returns local mock data when enabled by url', async () => {

@@ -1,227 +1,150 @@
 from types import SimpleNamespace
 
-import pytest
-from pydantic import ValidationError
-
 from yuxi.services.incoming_document_service import IncomingDocumentService
 
 
-def incoming_record(**overrides):
-    data = {
-        "incoming_id": "inc_1",
-        "filename": "来文.docx",
-        "source_system": "oa",
-        "document_number": "上铁辆〔2020〕316号",
-        "title": "路用客车检修运用管理办法",
-        "incoming_type": "集团公司文件",
-        "source_unit": "安全科",
-        "incoming_date": "2020-10-20",
-        "file_size": 125952,
-        "markdown_file_url": "minio://knowledgebases/incoming/inc_1.md",
-        "status": "ready",
-        "classification": "客户审查",
-        "summary": "这是一份客户审查来文摘要。",
-        "structured_result": {"risks": ["资质待核验"]},
-        "knowledge_import_status": "none",
-        "linked_kb_id": None,
-        "linked_file_id": None,
-    }
-    data.update(overrides)
-    return SimpleNamespace(**data)
-
-
 class FakeIncomingRepo:
-    def __init__(self, responses):
-        self.responses = responses
+    def __init__(self, match=None, files=None):
+        self.match = match
+        self.files = files or []
 
-    async def list_by_source_file_id(self, source_file_id, *, source_system, source_function_id, source_document_id):
-        return self.responses.get(("source_file_id", source_system, source_function_id, source_document_id, source_file_id), [])
+    async def get_file_for_source(self, **_kwargs):
+        return self.match
 
-    async def list_by_filename_and_size(self, filename, file_size):
-        return self.responses.get(("filename_size", filename, file_size), [])
-
-    async def list_by_filename(self, filename):
-        return self.responses.get(("filename", filename), [])
+    async def list_files(self, _incoming_id):
+        return self.files
 
 
 class FakeExtractionRepo:
-    def __init__(self, responses=None):
-        self.responses = responses or {}
+    def __init__(self, result=None):
+        self.result = result
 
-    async def get_latest_by_incoming_id(self, incoming_id):
-        return self.responses.get(incoming_id)
+    async def get_latest_by_incoming_id(self, _incoming_id):
+        return self.result
 
 
-async def test_query_returns_ready_incoming_summary_for_source_file_id_match():
-    service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo(
-            {("source_file_id", "oa", "incomingDocument", "37906", "202606100417"): [incoming_record()]}
-        ),
-        extraction_repo=FakeExtractionRepo(
-            {
-                "inc_1": {
-                    "run_id": "ber_1",
-                    "categories": {"risk_management": {"matched": True, "evidence": "存在资质风险"}},
-                    "schema_ids": ["risk_item"],
-                    "items": [
-                        {
-                            "item_id": "bei_1",
-                            "item_type": "risk_item",
-                            "data": {"risk_name": "资质待核验"},
-                            "source_quote": "需复核 Global Finance 的资质",
-                        }
-                    ],
-                }
-            }
-        ),
+async def test_query_returns_one_document_summary_for_multiple_attachments():
+    document = SimpleNamespace(
+        incoming_id="inc_1",
+        source_system="oa",
+        status="ready",
+        summary="整份来文部署专项检查，附件包含风险清单。",
+        ai_classification="阶段性工作类",
+        confirmed_classification=None,
+        document_metadata={"title": "专项检查通知", "incoming_date": "2026-07-17"},
+        knowledge_import_status="partial",
+        linked_kb_id="kb_1",
     )
-
-    result = await service.query_extractions(
-        [
-            {
-                "name": "来文.docx",
-                "source_url": "http://example/a?202606100417",
-                "source_file_id": "202606100417",
-                "source_function_id": "incomingDocument",
-                "source_doc_id": "37906",
-                "source_system": "oa",
-            }
-        ]
+    main = SimpleNamespace(
+        source_file_id="main",
+        filename="主文件.pdf",
+        is_main_file=True,
+        status="parsed",
+        markdown_file_url="minio://parsed/main.md",
+        knowledge_import_status="indexed",
+        linked_file_id="kbf_main",
     )
-
-    item = result["items"][0]
-    assert item["matchStatus"] == "matched"
-    assert item["reason"] == "source_file_id matched"
-    assert item["processingStatus"] == "ready"
-    assert item["extractionStatus"] == "ready"
-    assert item["incomingId"] == "inc_1"
-    assert item["source_system"] == "oa"
-    assert item["document_number"] == "上铁辆〔2020〕316号"
-    assert item["title"] == "路用客车检修运用管理办法"
-    assert item["incoming_type"] == "集团公司文件"
-    assert item["source_unit"] == "安全科"
-    assert item["incoming_date"] == "2020-10-20"
-    assert item["classification"] == "客户审查"
-    assert item["display"]["categoryLabels"]["risk_management"] == "风险管理类"
-    assert item["display"]["schemaLabels"]["risk_item"] == "风险事项"
-    assert item["display"]["fieldLabels"]["risk_item"]["risk_name"] == "风险事项"
-    assert item["summary"] == "这是一份客户审查来文摘要。"
-    assert item["runId"] == "ber_1"
-    assert item["schemaIds"] == ["risk_item"]
-    assert item["items"][0]["item_type"] == "risk_item"
-    assert item["items"][0]["data"] == {"risk_name": "资质待核验"}
-    assert item["hasMarkdown"] is True
-    assert item["knowledgeImportStatus"] == "none"
-
-
-async def test_query_returns_schema_display_metadata_for_regulation():
-    service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo(
-            {
-                ("source_file_id", "oa", "incomingDocument", "37908", "202010200206"): [
-                    incoming_record(classification="规章制度类")
-                ]
-            }
-        ),
-        extraction_repo=FakeExtractionRepo(
-            {
-                "inc_1": {
-                    "run_id": "ber_1",
-                    "categories": {"regulation": {"matched": True, "evidence": "摘要阶段分类：规章制度类"}},
-                    "schema_ids": ["management_requirement_item"],
-                    "items": [
-                        {
-                            "item_id": "bei_1",
-                            "item_type": "management_requirement_item",
-                            "data": {
-                                "department": "集团公司车辆部",
-                                "role": None,
-                                "period_type": "长期性",
-                                "requirement": "制定路用客车检修运用管理办法。",
-                                "source_quote": "原文依据",
-                            },
-                            "source_quote": "原文依据",
-                        }
-                    ],
-                }
-            }
-        ),
+    attachment = SimpleNamespace(
+        source_file_id="attachment",
+        filename="风险清单.xlsx",
+        is_main_file=False,
+        status="parsed",
+        markdown_file_url="minio://parsed/attachment.md",
+        knowledge_import_status="none",
+        linked_file_id=None,
     )
-
-    result = await service.query_extractions(
-        [
-            {
-                "name": "上铁辆〔2020〕316号.pdf",
-                "source_file_id": "202010200206",
-                "source_function_id": "incomingDocument",
-                "source_doc_id": "37908",
-                "source_system": "oa",
-            }
-        ]
-    )
-
-    display = result["items"][0]["display"]
-    assert display["classificationLabel"] == "规章制度类"
-    assert display["categoryLabels"]["regulation"] == "规章制度类"
-    assert display["schemaLabels"]["management_requirement_item"] == "管理要求"
-    assert display["fieldLabels"]["management_requirement_item"] == {
-        "requirement": "管理要求",
-        "department": "涉及部门",
-        "role": "涉及岗位、角色",
-        "period_type": "要求类型",
-        "source_quote": "原文依据",
+    extraction = {
+        "run_id": "ber_1",
+        "schema_ids": ["task_item", "risk_item"],
+        "categories": {},
+        "items": [{"item_type": "risk_item", "data": {"risk_name": "延期"}, "evidence": []}],
     }
-
-
-async def test_query_returns_markdown_hint_when_summary_missing():
     service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo(
-            {
-                ("source_file_id", "production", "incomingDocument", "37906", "202606100417"): [
-                    incoming_record(summary=None)
-                ]
-            }
-        ),
-        extraction_repo=FakeExtractionRepo(),
+        incoming_repo=FakeIncomingRepo((document, main), [main, attachment]),
+        extraction_repo=FakeExtractionRepo(extraction),
     )
 
     result = await service.query_extractions(
         [
             {
-                "name": "incoming.docx",
-                "source_file_id": "202606100417",
-                "source_function_id": "incomingDocument",
-                "source_doc_id": "37906",
-            }
+                "name": "主文件.pdf",
+                "source_file_id": "main",
+                "source_system": "oa",
+                "source_function_id": "incoming",
+                "source_doc_id": "DOC-1",
+            },
+            {
+                "name": "风险清单.xlsx",
+                "source_file_id": "attachment",
+                "source_system": "oa",
+                "source_function_id": "incoming",
+                "source_doc_id": "DOC-1",
+            },
         ]
     )
 
+    assert len(result["items"]) == 1
     item = result["items"][0]
-    assert item["matchStatus"] == "matched"
-    assert item["processingStatus"] == "ready"
-    assert item["extractionStatus"] == "ready"
-    assert item["hasMarkdown"] is True
     assert item["incomingId"] == "inc_1"
-    assert "kbId" not in item
-    assert "fileId" not in item
+    assert item["summary"].startswith("整份来文")
+    assert item["classification"] == "阶段性工作类"
+    assert (item["kbId"], item["fileId"], item["fileStatus"]) == ("kb_1", "kbf_main", "indexed")
+    assert [file["filename"] for file in item["files"]] == ["主文件.pdf", "风险清单.xlsx"]
+    assert item["hasParsedMarkdown"] is True
+    assert all(file["hasParsedMarkdown"] for file in item["files"])
+    assert item["items"][0]["item_type"] == "risk_item"
 
 
-async def test_query_translates_source_file_id_miss_states():
-    service = IncomingDocumentService(incoming_repo=FakeIncomingRepo({}), extraction_repo=FakeExtractionRepo())
+async def test_query_returns_pending_sync_when_attachment_is_not_ingested():
+    service = IncomingDocumentService(incoming_repo=FakeIncomingRepo(), extraction_repo=FakeExtractionRepo())
 
     result = await service.query_extractions(
-        [
-            {"name": "缺失.docx", "source_file_id": "missing", "source_function_id": "incomingDocument", "source_doc_id": "37906"},
-            {"name": "缺少来文标识.docx", "source_file_id": "missing-function"},
-        ]
+        [{"name": "附件.pdf", "source_file_id": "file-1", "source_function_id": "incoming", "source_doc_id": "DOC-1"}]
     )
 
-    assert [item["matchStatus"] for item in result["items"]] == ["pending_sync", "not_found"]
-    assert [item["extractionStatus"] for item in result["items"]] == ["not_found", "not_found"]
+    assert result["items"] == [
+        {
+            "incomingFileId": "file-1",
+            "name": "附件.pdf",
+            "source_url": None,
+            "source_file_id": "file-1",
+            "source_function_id": "incoming",
+            "source_doc_id": "DOC-1",
+            "matchStatus": "pending_sync",
+            "processingStatus": "not_found",
+            "extractionStatus": "not_found",
+            "reason": "source_file_id not found",
+        }
+    ]
 
 
-async def test_query_requires_source_file_id():
-    service = IncomingDocumentService(incoming_repo=FakeIncomingRepo({}), extraction_repo=FakeExtractionRepo())
+async def test_query_hides_previous_extraction_while_document_is_not_ready():
+    document = SimpleNamespace(
+        incoming_id="inc_1",
+        source_system="oa",
+        status="failed",
+        summary=None,
+        ai_classification=None,
+        confirmed_classification=None,
+        document_metadata={},
+        knowledge_import_status="none",
+        linked_kb_id=None,
+    )
+    file = SimpleNamespace(
+        source_file_id="main",
+        filename="主文件.pdf",
+        is_main_file=True,
+        status="failed",
+        markdown_file_url=None,
+    )
+    service = IncomingDocumentService(
+        incoming_repo=FakeIncomingRepo((document, file), [file]),
+        extraction_repo=FakeExtractionRepo({"run_id": "old", "items": [{"item_type": "risk_item"}]}),
+    )
 
-    with pytest.raises(ValidationError, match="source_file_id"):
-        await service.query_extractions([{"name": "缺少来源编号.docx"}])
+    result = await service.query_extractions(
+        [{"name": "主文件.pdf", "source_file_id": "main", "source_function_id": "incoming", "source_doc_id": "DOC-1"}]
+    )
+
+    assert result["items"][0]["runId"] is None
+    assert result["items"][0]["items"] == []

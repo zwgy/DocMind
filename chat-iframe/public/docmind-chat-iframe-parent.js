@@ -1,4 +1,4 @@
-(function (global) {
+;(function (global) {
   'use strict'
 
   var DOCUMENT_EXTENSIONS = ['doc', 'docx', 'pdf', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'csv']
@@ -41,8 +41,8 @@
 
   function normalizeFiles(files, options) {
     options = options || {}
-    // 来文级公共元数据会填充到未单独声明的附件字段，供发送消息触发自动入库时提交。
-    var incomingDocumentMetadata = options.incoming_document_metadata || {}
+    // 同一来文的元数据只传一份；附件不再复制业务字段。
+    var documentMetadata = options.document_metadata || {}
     var normalized = (files || [])
       .filter(function (file) {
         return file && isDocumentFile(file.name || file.source_url)
@@ -59,20 +59,26 @@
         }
         if (file.source_doc_id) normalizedFile.source_doc_id = file.source_doc_id
         if (file.source_system) normalizedFile.source_system = file.source_system
-        if (!normalizedFile.source_doc_id && options.business_id) normalizedFile.source_doc_id = options.business_id
+        if (!normalizedFile.source_doc_id && options.business_id)
+          normalizedFile.source_doc_id = options.business_id
         if (file.source_function_id) normalizedFile.source_function_id = file.source_function_id
-        if (!normalizedFile.source_function_id && options.function_id) normalizedFile.source_function_id = options.function_id
-        if (!normalizedFile.source_system && options.source_system) normalizedFile.source_system = options.source_system
-        ;['document_number', 'title', 'incoming_type', 'source_unit', 'incoming_date'].forEach(function (key) {
-          var value = file[key] || incomingDocumentMetadata[key]
-          if (value) normalizedFile[key] = value
-        })
+        if (!normalizedFile.source_function_id && options.function_id)
+          normalizedFile.source_function_id = options.function_id
+        if (!normalizedFile.source_system && options.source_system)
+          normalizedFile.source_system = options.source_system
+        normalizedFile.document_metadata = file.document_metadata || documentMetadata
+        if (file.is_main_file) normalizedFile.is_main_file = true
         if (file.size_text) normalizedFile.size_text = file.size_text
         if (file.size_bytes) normalizedFile.size_bytes = file.size_bytes
         if (file.onclick) normalizedFile.onclick = file.onclick
         return normalizedFile
       })
-    if (normalized.length && !normalized.some(function (file) { return file.selected })) {
+    if (
+      normalized.length &&
+      !normalized.some(function (file) {
+        return file.selected
+      })
+    ) {
       // 多附件场景必须给 iframe 一个稳定默认项，否则初始化查询会无目标。
       normalized[0].selected = true
     }
@@ -89,8 +95,8 @@
         source_system: '',
         function_id: '',
         business_id: '',
-        // 同一来文全部附件共享的文号、标题、类型、发文单位和日期；附件字段可单独覆盖。
-        incoming_document_metadata: null,
+        // 同一来文的可选业务字段，统一作为 document_metadata 传递。
+        document_metadata: null,
         external_user_id: '',
         external_user_name: '',
         position: 'bottom-right',
@@ -126,7 +132,8 @@
   DocMindChatIframe.prototype.init = function () {
     if (this.container) return this
     this.container = document.createElement('div')
-    this.container.className = 'docmind-chat-iframe ' + this.windowState + ' ' + this.options.position
+    this.container.className =
+      'docmind-chat-iframe ' + this.windowState + ' ' + this.options.position
     this.container.innerHTML = this._html()
     document.body.appendChild(this.container)
     this.iframe = this.container.querySelector('iframe')
@@ -154,20 +161,33 @@
     return this
   }
 
-  DocMindChatIframe.prototype.open = function () { return this.restore() }
-  DocMindChatIframe.prototype.minimize = function () { return this._setWindowState('minimized') }
-  DocMindChatIframe.prototype.maximize = function () { return this._setWindowState('maximized') }
-  DocMindChatIframe.prototype.restore = function () { return this._setWindowState('normal') }
-  DocMindChatIframe.prototype.close = function () { return this._setWindowState('closed') }
+  DocMindChatIframe.prototype.open = function () {
+    return this.restore()
+  }
+  DocMindChatIframe.prototype.minimize = function () {
+    return this._setWindowState('minimized')
+  }
+  DocMindChatIframe.prototype.maximize = function () {
+    return this._setWindowState('maximized')
+  }
+  DocMindChatIframe.prototype.restore = function () {
+    return this._setWindowState('normal')
+  }
+  DocMindChatIframe.prototype.close = function () {
+    return this._setWindowState('closed')
+  }
 
   DocMindChatIframe.prototype.destroy = function () {
     if (this.messageHandler) window.removeEventListener('message', this.messageHandler)
-    if (this.pointerMoveHandler) document.removeEventListener('pointermove', this.pointerMoveHandler)
+    if (this.pointerMoveHandler)
+      document.removeEventListener('pointermove', this.pointerMoveHandler)
     if (this.pointerUpHandler) document.removeEventListener('pointerup', this.pointerUpHandler)
-    if (this.pointerCancelHandler) document.removeEventListener('pointercancel', this.pointerCancelHandler)
+    if (this.pointerCancelHandler)
+      document.removeEventListener('pointercancel', this.pointerCancelHandler)
     if (this.windowBlurHandler) window.removeEventListener('blur', this.windowBlurHandler)
     this._endDrag()
-    if (this.container && this.container.parentNode) this.container.parentNode.removeChild(this.container)
+    if (this.container && this.container.parentNode)
+      this.container.parentNode.removeChild(this.container)
     this.container = null
     this.iframe = null
     this.messageHandler = null
@@ -198,11 +218,35 @@
     return (
       '<style>' +
       '.docmind-chat-iframe{position:fixed;z-index:999999;font-family:Arial,sans-serif}' +
-      '.docmind-chat-iframe.bottom-right{right:' + this.options.offsetX + 'px;bottom:' + this.options.offsetY + 'px}' +
-      '.docmind-chat-iframe.bottom-left{left:' + this.options.offsetX + 'px;bottom:' + this.options.offsetY + 'px}' +
-      '.docmind-chat-iframe.top-right{right:' + this.options.offsetX + 'px;top:' + this.options.offsetY + 'px}' +
-      '.docmind-chat-iframe.top-left{left:' + this.options.offsetX + 'px;top:' + this.options.offsetY + 'px}' +
-      '.docmind-chat-iframe.normal{width:min(' + width + 'px,calc(100vw - ' + availableWidth + 'px));height:min(' + height + 'px,calc(100vh - ' + availableHeight + 'px))}' +
+      '.docmind-chat-iframe.bottom-right{right:' +
+      this.options.offsetX +
+      'px;bottom:' +
+      this.options.offsetY +
+      'px}' +
+      '.docmind-chat-iframe.bottom-left{left:' +
+      this.options.offsetX +
+      'px;bottom:' +
+      this.options.offsetY +
+      'px}' +
+      '.docmind-chat-iframe.top-right{right:' +
+      this.options.offsetX +
+      'px;top:' +
+      this.options.offsetY +
+      'px}' +
+      '.docmind-chat-iframe.top-left{left:' +
+      this.options.offsetX +
+      'px;top:' +
+      this.options.offsetY +
+      'px}' +
+      '.docmind-chat-iframe.normal{width:min(' +
+      width +
+      'px,calc(100vw - ' +
+      availableWidth +
+      'px));height:min(' +
+      height +
+      'px,calc(100vh - ' +
+      availableHeight +
+      'px))}' +
       '.docmind-chat-iframe.minimized{width:60px;height:60px}' +
       '.docmind-chat-iframe.closed{width:60px;height:60px}' +
       '.docmind-chat-iframe.maximized{inset:0!important;width:100vw;height:100vh}' +
@@ -219,7 +263,9 @@
       '.docmind-chat-iframe.minimized .docmind-chat-shell,.docmind-chat-iframe.closed .docmind-chat-shell{display:none}' +
       '.docmind-chat-iframe:not(.minimized):not(.closed) .docmind-chat-restore{display:none}' +
       '</style>' +
-      '<button class="docmind-chat-restore" title="打开助手">' + restoreButtonHtml + '</button>' +
+      '<button class="docmind-chat-restore" title="打开助手">' +
+      restoreButtonHtml +
+      '</button>' +
       '<div class="docmind-chat-shell"><iframe class="docmind-chat-frame" allow="clipboard-write"></iframe></div>'
     )
   }
@@ -320,7 +366,12 @@
 
   DocMindChatIframe.prototype._endDrag = function (event) {
     if (!this.drag) return
-    if (event && event.currentTarget && event.currentTarget.releasePointerCapture && this.drag.pointerId != null) {
+    if (
+      event &&
+      event.currentTarget &&
+      event.currentTarget.releasePointerCapture &&
+      this.drag.pointerId != null
+    ) {
       try {
         event.currentTarget.releasePointerCapture(this.drag.pointerId)
       } catch {
@@ -335,7 +386,11 @@
     var message = event.data || {}
     if (!message.type) return
     // WindowProxy 在 iframe 导航后仍可能不变，必须同时锁定来源窗口和初始 iframe origin。
-    if (!this.iframe || event.source !== this.iframe.contentWindow || event.origin !== this.targetOrigin) {
+    if (
+      !this.iframe ||
+      event.source !== this.iframe.contentWindow ||
+      event.origin !== this.targetOrigin
+    ) {
       return
     }
     switch (message.type) {
@@ -391,7 +446,13 @@
       external_user_name: stripText(this.options.external_user_name)
     }
     var missing = []
-    ;['source_system', 'function_id', 'business_id', 'external_user_id', 'external_user_name'].forEach(function (key) {
+    ;[
+      'source_system',
+      'function_id',
+      'business_id',
+      'external_user_id',
+      'external_user_name'
+    ].forEach(function (key) {
       if (!stripText(this.options[key])) missing.push(key)
     }, this)
     if (missing.length) throw new Error('缺少 chat-iframe 初始化参数：' + missing.join(', '))
@@ -399,25 +460,32 @@
   }
 
   DocMindChatIframe.prototype._conversationScopeKey = function () {
-    return [this.options.source_system, this.options.function_id, this.options.business_id].map(stripText).join(':')
+    return [this.options.source_system, this.options.function_id, this.options.business_id]
+      .map(stripText)
+      .join(':')
   }
 
   DocMindChatIframe.prototype._fetchTokenJson = function (url, payload, trustedBackendMode) {
     var fetchImpl = global.fetch || (typeof fetch !== 'undefined' ? fetch : null)
-    if (!fetchImpl) return Promise.reject(new Error('当前浏览器不支持 fetch，无法获取 DocMind token'))
+    if (!fetchImpl)
+      return Promise.reject(new Error('当前浏览器不支持 fetch，无法获取 DocMind token'))
     return fetchImpl(url, {
       method: 'POST',
       credentials: trustedBackendMode ? 'include' : 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     }).then(function (response) {
-      return response.json().catch(function () {
-        return {}
-      }).then(function (data) {
-        if (!response.ok) throw new Error(data.detail || data.message || '获取 DocMind token 失败')
-        if (!data.access_token) throw new Error('获取 DocMind token 失败：响应缺少 access_token')
-        return data.access_token
-      })
+      return response
+        .json()
+        .catch(function () {
+          return {}
+        })
+        .then(function (data) {
+          if (!response.ok)
+            throw new Error(data.detail || data.message || '获取 DocMind token 失败')
+          if (!data.access_token) throw new Error('获取 DocMind token 失败：响应缺少 access_token')
+          return data.access_token
+        })
     })
   }
 
@@ -461,7 +529,13 @@
         self._sendToIframe('INIT_CONFIG', self._configPayload(token))
       })
       .catch(function (error) {
-        self._sendToIframe('INIT_CONFIG', self._configPayload(null, error && error.message ? error.message : '获取 DocMind token 失败'))
+        self._sendToIframe(
+          'INIT_CONFIG',
+          self._configPayload(
+            null,
+            error && error.message ? error.message : '获取 DocMind token 失败'
+          )
+        )
       })
   }
 
@@ -476,7 +550,10 @@
 
   DocMindChatIframe.prototype._sendToIframe = function (type, payload) {
     if (!this.iframe || !this.iframe.contentWindow) return
-    this.iframe.contentWindow.postMessage({ type: type, payload: payload, timestamp: Date.now() }, this.targetOrigin)
+    this.iframe.contentWindow.postMessage(
+      { type: type, payload: payload, timestamp: Date.now() },
+      this.targetOrigin
+    )
   }
 
   DocMindChatIframe.prototype._setWindowState = function (state, notify) {
@@ -502,8 +579,10 @@
   DocMindChatIframe.prototype._ensureNormalWindowVisible = function () {
     if (!this.container || typeof window === 'undefined') return
     var margin = 12
-    var viewportWidth = window.innerWidth || document.documentElement.clientWidth || this.options.width
-    var viewportHeight = window.innerHeight || document.documentElement.clientHeight || this.options.height
+    var viewportWidth =
+      window.innerWidth || document.documentElement.clientWidth || this.options.width
+    var viewportHeight =
+      window.innerHeight || document.documentElement.clientHeight || this.options.height
     var width = Math.min(this.options.width, viewportWidth - margin * 2)
     var height = Math.min(this.options.height, viewportHeight - margin * 2)
     var left = this.container.offsetLeft
@@ -515,8 +594,10 @@
       top + height <= viewportHeight - margin
     if (fits) return
     // 从拖动后的悬浮入口展开时，优先保证完整可见；放不下就回到当前视口右下角。
-    this.container.style.left = Math.max(margin, viewportWidth - width - this.options.offsetX) + 'px'
-    this.container.style.top = Math.max(margin, viewportHeight - height - this.options.offsetY) + 'px'
+    this.container.style.left =
+      Math.max(margin, viewportWidth - width - this.options.offsetX) + 'px'
+    this.container.style.top =
+      Math.max(margin, viewportHeight - height - this.options.offsetY) + 'px'
     this.container.style.right = 'auto'
     this.container.style.bottom = 'auto'
   }

@@ -5,12 +5,19 @@ import test from 'node:test'
 import vm from 'node:vm'
 
 function loadScript(overrides = {}) {
-  const source = readFileSync(join(import.meta.dirname, '../public/docmind-chat-iframe-parent.js'), 'utf8')
+  const source = readFileSync(
+    join(import.meta.dirname, '../public/docmind-chat-iframe-parent.js'),
+    'utf8'
+  )
   const sandboxWindow = overrides.window || {}
-  const sandboxDocument = overrides.document || { title: 'test page', location: { href: 'http://page.local' } }
+  const sandboxDocument = overrides.document || {
+    title: 'test page',
+    location: { href: 'http://page.local' }
+  }
   sandboxWindow.window = sandboxWindow
   sandboxWindow.document = sandboxDocument
-  sandboxWindow.location = sandboxWindow.location || sandboxDocument.location || { href: 'http://page.local' }
+  sandboxWindow.location = sandboxWindow.location ||
+    sandboxDocument.location || { href: 'http://page.local' }
   const sandbox = {
     window: sandboxWindow,
     document: sandboxDocument,
@@ -111,7 +118,11 @@ test('rejects messages from another window or origin', () => {
     iframeSrc: 'https://docmind.example.com/chat-iframe/'
   })
 
-  listeners.message({ source: {}, origin: 'https://docmind.example.com', data: { type: 'MAXIMIZE' } })
+  listeners.message({
+    source: {},
+    origin: 'https://docmind.example.com',
+    data: { type: 'MAXIMIZE' }
+  })
   listeners.message({ origin: 'https://evil.example.com', data: { type: 'MAXIMIZE' } })
 
   assert.doesNotMatch(container.className, /maximized/)
@@ -145,7 +156,10 @@ test('automatically captures page content and lets explicit content override it'
   const { DocMindChatIframe, listeners, sentMessages } = parentHarness()
   const chat = new DocMindChatIframe({ iframeSrc: 'https://docmind.example.com/chat-iframe/' })
 
-  listeners.message({ origin: 'https://docmind.example.com', data: { type: 'REQUEST_PAGE_CONTENT' } })
+  listeners.message({
+    origin: 'https://docmind.example.com',
+    data: { type: 'REQUEST_PAGE_CONTENT' }
+  })
   assert.deepEqual(JSON.parse(JSON.stringify(sentMessages.at(-1).message.payload)), {
     title: 'production page',
     url: 'https://production.example.com/page',
@@ -153,8 +167,13 @@ test('automatically captures page content and lets explicit content override it'
   })
 
   chat.setPageContent('desensitized page text')
-  listeners.message({ origin: 'https://docmind.example.com', data: { type: 'REQUEST_PAGE_CONTENT' } })
-  assert.deepEqual(JSON.parse(JSON.stringify(sentMessages.at(-1).message.payload)), { text: 'desensitized page text' })
+  listeners.message({
+    origin: 'https://docmind.example.com',
+    data: { type: 'REQUEST_PAGE_CONTENT' }
+  })
+  assert.deepEqual(JSON.parse(JSON.stringify(sentMessages.at(-1).message.payload)), {
+    text: 'desensitized page text'
+  })
   chat.destroy()
 })
 
@@ -185,7 +204,10 @@ test('fetches docMind iframe token and sends conversation scope to iframe', asyn
     external_user_name: '张三'
   })
   assert.equal(sentMessages[0].message.payload.token, 'iframe-token')
-  assert.equal(sentMessages[0].message.payload.conversationScopeKey, 'oa:contractApproval:contract-20260706-001')
+  assert.equal(
+    sentMessages[0].message.payload.conversationScopeKey,
+    'oa:contractApproval:contract-20260706-001'
+  )
   chat.destroy()
 })
 
@@ -223,7 +245,7 @@ test('setFiles and explicit requests send compatible iframe messages', () => {
     source_system: 'oa',
     function_id: 'incomingDocument',
     business_id: '37906',
-    incoming_document_metadata: {
+    document_metadata: {
       document_number: '来文〔2026〕1号',
       title: '风险整改通知',
       incoming_type: '安全管理',
@@ -233,29 +255,42 @@ test('setFiles and explicit requests send compatible iframe messages', () => {
   })
 
   chat.setPageContent('page text')
-  chat.setFiles([{
-    source_file_id: 'source-1',
-    name: 'incoming.docx',
-    source_url: 'https://oa/files/source-1',
-    title: '附件标题',
-    type: 'image'
-  }])
-  listeners.message({ origin: 'https://docmind.example.com', data: { type: 'REQUEST_PAGE_CONTENT' } })
+  chat.setFiles([
+    {
+      source_file_id: 'source-1',
+      name: 'incoming.docx',
+      source_url: 'https://oa/files/source-1',
+      title: '附件标题',
+      type: 'image'
+    }
+  ])
+  listeners.message({
+    origin: 'https://docmind.example.com',
+    data: { type: 'REQUEST_PAGE_CONTENT' }
+  })
   listeners.message({ origin: 'https://docmind.example.com', data: { type: 'REQUEST_FILE_LIST' } })
 
   assert.equal(sentMessages.at(-4).message.type, 'PAGE_CONTENT')
-  assert.deepEqual(JSON.parse(JSON.stringify(sentMessages.at(-4).message.payload)), { text: 'page text' })
+  assert.deepEqual(JSON.parse(JSON.stringify(sentMessages.at(-4).message.payload)), {
+    text: 'page text'
+  })
   assert.equal(sentMessages.at(-3).message.type, 'PAGE_FILES_UPDATED')
   assert.equal(sentMessages.at(-3).message.payload[0].source_url, 'https://oa/files/source-1')
   assert.equal(sentMessages.at(-3).message.payload[0].source_system, 'oa')
   assert.equal(sentMessages.at(-3).message.payload[0].source_function_id, 'incomingDocument')
   assert.equal(sentMessages.at(-3).message.payload[0].source_doc_id, '37906')
   assert.equal(sentMessages.at(-3).message.payload[0].id, undefined)
-  assert.equal(sentMessages.at(-3).message.payload[0].document_number, '来文〔2026〕1号')
-  assert.equal(sentMessages.at(-3).message.payload[0].title, '附件标题')
-  assert.equal(sentMessages.at(-3).message.payload[0].incoming_type, '安全管理')
-  assert.equal(sentMessages.at(-3).message.payload[0].source_unit, '安监部')
-  assert.equal(sentMessages.at(-3).message.payload[0].incoming_date, '2026-07-09')
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(sentMessages.at(-3).message.payload[0].document_metadata)),
+    {
+      document_number: '来文〔2026〕1号',
+      title: '风险整改通知',
+      incoming_type: '安全管理',
+      source_unit: '安监部',
+      incoming_date: '2026-07-09'
+    }
+  )
+  assert.equal(sentMessages.at(-3).message.payload[0].title, undefined)
   assert.equal(sentMessages.at(-3).message.payload[0].type, undefined)
   assert.equal(sentMessages.at(-2).message.type, 'PAGE_CONTENT')
   assert.equal(sentMessages.at(-1).message.type, 'FILE_LIST')
@@ -267,7 +302,10 @@ test('setFiles requires source_file_id as the current attachment key', () => {
   const chat = new DocMindChatIframe({ iframeSrc: 'https://docmind.example.com/chat-iframe/' })
 
   assert.throws(
-    () => chat.setFiles([{ id: 'legacy-id', name: 'incoming.docx', source_url: 'https://oa/files/legacy-id' }]),
+    () =>
+      chat.setFiles([
+        { id: 'legacy-id', name: 'incoming.docx', source_url: 'https://oa/files/legacy-id' }
+      ]),
     /source_file_id/
   )
   chat.destroy()
@@ -355,13 +393,22 @@ test('local example starts minimized so users open the assistant explicitly', ()
   // DocMindChatIframe 默认 initialState: 'minimized'，示例不应显式打开助手窗口。
   // 改为"反向断言"：只要没有显式开启就认为符合契约。
   assert.doesNotMatch(example, /initialState:\s*'(open|normal|maximized)'/)
-  assert.match(example, /<span class="tk-key">incoming_document_metadata<\/span>:\s*incomingDocumentMetadata/)
+  assert.match(
+    example,
+    /<span class="tk-key">incoming_document_metadata<\/span>:\s*incomingDocumentMetadata/
+  )
   assert.match(example, /incoming_document_metadata:\s*incomingDocumentMetadata/)
   assert.match(example, /\.\.\.businessContext,/)
   assert.doesNotMatch(example, /\.\.\.incomingDocumentMetadata,/)
   assert.match(example, /source_file_id：来源系统内该附件的稳定唯一 ID/)
-  assert.match(example, /name:\s*'上铁辆〔2020〕316号\.pdf',\s*source_file_id:\s*'202010200206',\s*source_url:/)
-  assert.match(example, /<span class="tk-key">source_file_id<\/span>:\s*<span class="tk-str">'202010200206'/)
+  assert.match(
+    example,
+    /name:\s*'上铁辆〔2020〕316号\.pdf',\s*source_file_id:\s*'202010200206',\s*source_url:/
+  )
+  assert.match(
+    example,
+    /<span class="tk-key">source_file_id<\/span>:\s*<span class="tk-str">'202010200206'/
+  )
   assert.match(example, /source_file_id:\s*'202010200206'/)
 })
 
@@ -373,13 +420,19 @@ test('iframe header drag messages move the parent window', () => {
 
   listeners.message({
     origin: 'https://docmind.example.com',
-    data: { type: 'WINDOW_DRAG_START', payload: { clientX: 12, clientY: 8, screenX: 500, screenY: 400, pointerId: 9 } }
+    data: {
+      type: 'WINDOW_DRAG_START',
+      payload: { clientX: 12, clientY: 8, screenX: 500, screenY: 400, pointerId: 9 }
+    }
   })
   assert.equal(iframe.style.pointerEvents, undefined)
 
   listeners.message({
     origin: 'https://docmind.example.com',
-    data: { type: 'WINDOW_DRAG_MOVE', payload: { clientX: 32, clientY: 38, screenX: 520, screenY: 430, pointerId: 9 } }
+    data: {
+      type: 'WINDOW_DRAG_MOVE',
+      payload: { clientX: 32, clientY: 38, screenX: 520, screenY: 430, pointerId: 9 }
+    }
   })
   assert.equal(container.style.left, '30px')
   assert.equal(container.style.top, '50px')

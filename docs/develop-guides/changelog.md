@@ -8,7 +8,9 @@
 
 ### 开发记录
 
-- 收敛来文附件身份契约：`chat-iframe` 父页面、iframe 前端与来文摘要查询接口统一以必填 `source_file_id` 标识附件，移除 `id`、下载 URL 和文件名的身份回退；同一来文的文号、标题、类型、发文单位和日期通过可选 `incoming_document_metadata` 统一传入，并在未入库附件随聊天消息自动上传时提交；嵌入示例按业务上下文和来文元数据分组逐项说明，摘要卡片固定展示附件名。
+- 完善 Phase 1 来文分类与发布一致性：摘要分类新增主分类原文依据，以及逐项包含分类名、置信度和逐字原文依据的附加分类；只有置信度不低于 0.8 且证据可在原文中定位的附加分类才进入正式抽取路由。重新上传、重跑和分类纠偏不再暴露旧结构化结果，内容变化会清空旧分类、确认和失败入库状态，已入知识库的来文禁止静默替换；空 Markdown、非法主分类、无原文依据和不收敛的长文摘要会明确失败。长文结构化抽取改为在合并前逐块核验并保留每段 evidence，服务重启时同步把中断来文标记为失败以便页面重试，原文件对象路径改为按附件 ID 稳定覆盖。
+- 来文处理升级为文档级闭环：`incoming_documents` 改为一份来文一行，新增 `incoming_document_files` 保存主文件和附件，所有可选业务字段统一写入 `document_metadata`；上传接口改为一次提交一份来文及附件列表，附件并行解析完成后再生成来文级摘要、主分类和正式结构化结果。正式条目保留附件级 evidence（文件、原文引用和位置），管理页改为来文列表与附件展开查看，支持分类纠偏后重跑、整份来文确认及按附件预览原文/Markdown。修复增量附件误替换主文件、无变化上传仍重置重跑、处理期间附件竞态、长文提要丢失抽取分类、局部字符截断和部分 schema 失败仍发布完整结果的问题；分类纠偏会重新分析全附件抽取路由。文档分析预算改为模型上下文窗口的 70%，整份来文可容纳时一次完成分类摘要和正式抽取，超长时使用较大重叠块并合并无冲突的跨块信息；多分类抽取默认只有主分类，只保留有明确证据的第二主题和高置信度分块分类。chat-iframe 只注入一份来文级摘要、全部附件清单和 evidence，不注入附件全文，并在处理期间自动刷新状态；未入库附件原文读取明确留在 Phase 2，提示词不再暴露研发阶段名称。
+- 收敛来文附件身份契约：`chat-iframe` 父页面、iframe 前端与来文摘要查询接口统一以必填 `source_file_id` 标识附件，移除 `id`、下载 URL 和文件名的身份回退；同一来文的文号、标题、类型、发文单位和日期通过 `document_metadata` 统一传入，并在未入库附件随聊天消息自动上传时提交；嵌入示例按业务上下文和来文元数据分组逐项说明，摘要卡片展示来文标题，附件清单单独标明主文件、附件、状态和 `source_file_id`。
 - 新增内置文档导出 MCP：支持离线生成 DOCX、PDF、XLSX；以 stdio 通过 LangChain MCP adapter 接入，启动时自动注册到 MCP 管理页，管理员添加并分配给 Agent 后即可使用。MCP 临时产物由统一拦截器转入当前线程 outputs，再复用现有交付链路。
 
 - 修复 chat-iframe 在旧版浏览器或嵌入式 WebView 中续聊历史会话时报 `crypto.randomUUID is not a function`：本地请求与缺失消息 ID 统一在不支持 `crypto.randomUUID()` 时降级为带时间戳的唯一标识，避免聊天中断。
@@ -27,7 +29,7 @@
 - MinerU 独立部署增加 Nginx 网关：MinerU 仅在 Compose 内网监听，宿主机只开放一个固定端口；现有 `/health`、`/file_parse` 地址不变，后续应用可按路径复用该端口。
 - 修正 MinerU 独立部署验证命令：补齐 `return_images=true` 及高精度 hybrid 解析参数，避免手工验证 ZIP 缺少图片资产；补充扫描件强制 OCR、调试 JSON 和 MinerU 语义清理导致“正文缺失”的排查说明。
 - 修复旧版 Office 文档解析：将 `.doc` 纳入允许上传格式，`.doc/.xls` 先通过 API 镜像内的 LibreOffice 转换为 `.docx/.xlsx`，再复用 Docling 解析；补装 `libreoffice-calc-nogui` 以支持旧版 Excel。
-- 优化来文管理详情页结构化结果展示：`GET /api/incoming-documents/{incomingId}` 透出最新成功的正式业务结构化抽取 `businessExtraction` 与后端 display label，Web 详情抽屉默认展示分类完成后的业务抽取明细；摘要阶段 `structuredResult` 保留为「摘要阶段关键事实」折叠辅助信息，避免把分类/摘要阶段轻量结果误当成正式结构化结果。
+- 优化来文管理详情页结构化结果展示：`GET /api/incoming-documents/{incomingId}` 透出最新成功的正式业务结构化抽取 `businessExtraction` 与后端 display label，Web 详情抽屉只展示分类完成后的正式业务抽取明细；移除后端不再持久化的摘要阶段 `structuredResult` 空展示。
 - 优化来文业务结构化抽取提示词与结果展示：`build_extraction_prompt` 明确每个 item 表示一个独立业务事项，同一事项的背景、依据、责任对象和要求合并到同一个 item，只有多个并列且可独立执行或确认的事项才拆成多个 items；分块抽取完成后仅在同一 schema 除 `source_quote` 外的全部业务字段一致时合并 items，并追加保留多段原文依据，避免新增 schema 时维护去重字段枚举或误合并不同事项；Web 来文详情按 schema 分组展示正式业务抽取明细，减少同一 schema 下结果过度分散和平铺卡片噪声。
 - 修复 chat-iframe 文档摘要卡片只展示前 3 条结构化明细的问题：小助手改为按 schema 分组展示全部正式业务抽取 items，并使用可折叠分组承载同类结果，和 Web 来文详情的结构化结果观感保持一致；注入模型系统提示词的附件结构化信息不再按每个附件固定截断前 5 条，统一交给 iframe 上下文总长度上限控制。
 - 修复删除用户后同名重建账号登录误报已注销：登录查询改为优先匹配未删除账号的 `uid/phone_number/username`，只有没有活跃账号时才返回旧注销账号提示，并同步登录框文案。
@@ -36,16 +38,17 @@
 - 优化 chat-iframe 来文结构化结果展示：后端从 `document_extraction.schemas` 导出分类、抽取对象和字段的 display label，`/api/incoming-documents/extractions/query` 随结构化结果返回，前端按后端 label 渲染文件名分类标记、抽取对象和字段名，并隐藏空字段及重复的 `source_quote` 字段。
 - 修复 chat-iframe 来文摘要卡片未显示已入库元数据：`/api/incoming-documents/extractions/query` 现返回匹配来文的来源、文号、标题、类型、发文单位和时间；摘要卡片标题优先显示来文标题，仅以自动换行的分段标签展示类型、发文单位和时间，缺失值显示“无”。
 - 修复来文结构化抽取重复分类导致 schema 选择为空的问题：来文摘要阶段已产生分类时，正式业务结构化抽取直接复用该分类选择抽取 schema，不再重复调用 `_classify_chunks`。
-- 扩展来文通用分类与正式抽取：原“其他”分类收敛为 `DocumentCategoryResult` 中的“通用类”，仅在所有专业类别均未命中时启用，并通过新增 `general_item` 抽取核心事实、结论、说明或请求；通用类与专业类别在文档级保持互斥，避免重复结构化结果。摘要分类提示会动态注入全部类别的名称和描述，按来文主要目的判断，并明确区分 `summary` 与轻量 `structured_result`；短文档是否直接整篇抽取改为按近似 token 数判断，摘要正文发生截断时会在提示中显式标注输入边界。
+- 扩展来文通用分类与正式抽取：原“其他”分类收敛为 `DocumentCategoryResult` 中的“通用类”，仅在所有专业类别均未命中时启用，并通过新增 `general_item` 抽取核心事实、结论、说明或请求；通用类与专业类别在文档级保持互斥，避免重复结构化结果。摘要分类提示会动态注入全部类别的名称和描述并按来文主要目的判断；摘要阶段不再生成未被消费的轻量结构化对象，正式业务事实统一由 schema 抽取产生。短文档是否直接整篇抽取按近似 token 数判断，超过动态预算时先分块生成带抽取分类的临时提要，不再做局部字符截断。
 - 来文管理的“重新处理”入口支持已完成来文，便于摘要成功但业务结构化抽取为空时由管理员重跑解析、摘要和结构化抽取流程。
 - 修复来文与业务结构化抽取表启动建表失败：移除 SQLAlchemy 模型中与 `Column(index=True)` 重名的显式单列索引，避免 `metadata.create_all` 在 PostgreSQL 上重复创建 `ix_incoming_documents_*` 等索引导致启动事务回滚、`incoming_documents` 表缺失。
 - 独立业务结构化抽取模块：将原知识库下的业务抽取迁移为 `document_extraction`，数据表统一为 `document_business_extraction_runs/results/items`；移除旧 `incoming_document_extraction_runs` 与 `knowledge_business_extraction_*` 表语义，来文解析 Markdown 后触发业务抽取，知识库普通上传不再触发业务抽取，从来文存入知识库时仅关联既有抽取结果并补齐 `kb_id/file_id`。
-- 调整来文摘要提示和接口契约：`/api/incoming-documents/ingest` 当前仅支持 multipart 多文件上传，外部系统按 snake_case 字段传入 `source_doc_id/document_number/title/incoming_type/source_unit/incoming_date/files/file_metas`；每个文件以 `source_file_id` 独立保存和处理，未传来文文号时默认首个文件为主文件；原文与 Markdown 仍写入 MinIO，PostgreSQL 仅保存地址、元数据、摘要和状态；`chat-iframe` 自动同步改为以 `no-store` 下载附件内容后 multipart 上传，并区分文档级 `source_doc_id` 与文件级 `source_file_id`；摘要提示的分类候选从 `DocumentCategoryResult` 动态读取，系统提示词注入摘要、业务结构化抽取 items 和全文读取方式；`example.html` 默认挂载 2026 年供电 6C 系统评定真实来文附件用于端到端测试。
+- 调整来文摘要提示和接口契约：`/api/incoming-documents/ingest` 仅支持 multipart 多文件上传，固定字段传入 `source_system/source_function_id/source_doc_id/files/file_metas`，其余业务字段统一放入 `document_metadata` JSON；每个文件以 `source_file_id` 独立保存和处理，初次上传未指定主文件时由后端选择首个文件，增量上传保留已有主文件；原文与 Markdown 仍写入 MinIO，PostgreSQL 仅保存地址、元数据、摘要和状态。`chat-iframe` 自动同步以 `no-store` 下载附件内容后 multipart 上传，并区分文档级 `source_doc_id` 与文件级 `source_file_id`。
 
 - 解耦来文接入与知识库默认入库：`/api/incoming-documents/ingest` 不再依赖 `INCOMING_DEFAULT_KB_ID`，来文上传后先保存为独立 `incoming_documents` 记录并提交 `incoming_document_process` 任务；新增来文与来文抽取运行 PostgreSQL 表，查询接口改为返回 `incomingId/processingStatus/summary/hasMarkdown/knowledgeImportStatus` 等来文字段，为后续 Web「来文管理」人工存入知识库打基础。
-- 接入来文解析摘要处理任务：`incoming_document_process` 现在会读取已保存原文，复用现有 Parser 解析为 Markdown 并保存到 MinIO，随后通过默认业务抽取模型生成单一分类、置信度、完整摘要与结构化字段，状态按 `parsing/summarizing/ready/failed` 落回 `incoming_documents`，仍不触发向量化或知识库入库。
-- 打通 chat-iframe 来文全文读取上下文：iframe runtime context 现在识别 `incomingId/hasMarkdown/linkedKbId/linkedFileId` 等新来文字段；未入库但已解析的来文会在当前 thread sandbox 下生成临时 Markdown 文件，并在 prompt 中提供 `read_file` 路径，避免直接暴露 MinIO 路径。
-- 下沉知识库文档入库编排：新增 `KnowledgeDocumentIngestService` 复用“添加记录 -> 解析 -> 可选自动入库”流程，原知识库 `/documents` 入口改为调用该 service；新增管理员接口 `POST /api/incoming-documents/{incomingId}/knowledge-import`，来文手动选择目标知识库后自动提交知识库解析和索引任务，并回写 `knowledge_import_status/task_id/linked_kb_id/linked_file_id`。
+- 接入来文解析摘要处理任务：`incoming_document_process` 读取全部已保存原文，复用现有 Parser 解析为 Markdown 并保存到 MinIO，随后通过默认业务抽取模型生成单一主分类、抽取分类集合、完整摘要与正式结构化结果，状态按 `parsing/extracting/ready/failed` 落回 `incoming_documents`，仍不触发向量化或知识库入库。
+- 收敛 chat-iframe 来文上下文边界：Phase 1 只传入来文级摘要、结构化结果、附件清单和 evidence，不下载未入库附件 Markdown，也不提示模型调用尚未实现的读取工具；`read_incoming_document` 将在 Phase 2 负责按需写入 thread sandbox 并返回可供 `read_file` 使用的虚拟路径。
+- 下沉知识库文档入库编排：新增 `KnowledgeDocumentIngestService` 复用“添加记录 -> 解析 -> 可选自动入库”流程，原知识库 `/documents` 入口改为调用该 service；新增管理员接口 `POST /api/incoming-documents/{incomingId}/knowledge-import`，不传 `sourceFileIds` 时默认导入全部附件，传入时仅导入选定附件；支持同一知识库内先部分入库再补齐，按附件回写 `knowledge_import_status/linked_file_id` 并聚合来文 `partial/indexed` 状态，同名附件按提交顺序精确关联。
+- 补齐来文后台任务中断对账：服务启动时将异常中断的来文解析任务和附件入库任务同步回写为失败；已有附件成功入库时保留 `partial`，避免来文或附件永久停留在 `parsing/extracting/importing`。
 - 新增 Web「来文管理」入口：管理员侧边栏新增来文管理页面，支持分页筛选来文、查看分类/摘要/结构化结果/解析 Markdown 预览，已入库来文可复用知识库文件详情弹窗查看原文、Markdown 与下载；入库弹窗可选择目标知识库、目标文件夹 TreeSelect、OCR 引擎和分块参数后提交知识库入库任务；失败来文支持管理员手动重试处理；后端补充来文管理列表、详情和重试接口。
 - 来文详情支持原文预览：详情弹窗「原文预览」改为「原文 / Markdown」双 Tab，未入库来文也能直接预览 MinIO 上的原始文件；后端新增 `GET /api/incoming-documents/{incomingId}/file/original`，复用 `file_preview` 的 `detect_preview_type/convert_office_to_pdf/render_preview_payload` 与 `X-Yuxi-Preview-Type` 头部约定，PDF / 图片 / Markdown / 代码 / 文本等走原样预览，`.docx` / `.pptx` 自动转 PDF，超过 30 MB 或不可预览的二进制返回受支持的提示；前端复用 `AgentFilePreview` 并按 `getPreviewTypeByPath` 挑选默认 Tab，与知识库文件详情观感保持一致。
 - 优化 `chat-iframe` 页面/附件上下文注入链路：聊天 `query` 不再拼接“页面上下文/文件上下文”，改为通过 `meta.iframe_context` 传递父页面和选中附件；后端在 Agent run 执行时把上下文渲染进系统提示，短页面内联、长页面落当前线程沙箱文件并提示使用 `read_file`，已入库附件优先提供摘要和 `open_kb_document(kb_id, file_id)` 读取入口，未入库但有下载地址的附件由 iframe 下载后 multipart 调用 `/api/incoming-documents/ingest` 上传，解析未完成时只提示文件正在准备，避免模型猜测不可读内容。修复 `chat-iframe` 首条消息丢失：当用户尚无任何会话时发送问题，`send()` 先压入乐观 `user/assistant` 消息再调用 `ensureThread` 创建会话，原 `newConversation` 内部会清空 `messages`，导致主区既看不到提问也看不到回复（侧栏从后端拉历史能看到内容）。把 `newConversation` 拆成只创建 thread 的 `createThread` 和负责清空消息的 `newConversation`，让 `ensureThread` 走前者避免抹掉乐观消息，配套新增 `chat-store.test.js` 锁住该场景。

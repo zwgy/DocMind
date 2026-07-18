@@ -11,6 +11,7 @@ function contextSummaryFile(file: IncomingPageFile, result: ExtractionResult | n
   // 宿主页只负责文件定位，已入库来文的展示字段以查询结果为准。
   return {
     ...file,
+    name: result?.title || file.name,
     source_system: result?.source_system || file.source_system,
     document_number: result?.document_number || file.document_number,
     title: result?.title || file.title,
@@ -38,6 +39,9 @@ export function extractionStatusText(input: SummaryInput) {
     {
       ready: '已生成结构化结果',
       running: '抽取中',
+      uploaded: '等待处理',
+      parsing: '解析中',
+      extracting: '抽取中',
       not_found: '暂无抽取结果',
       failed: '抽取失败'
     }[input.result.extractionStatus] || input.result.extractionStatus
@@ -77,7 +81,7 @@ export function displayExtractionDataEntries(
 
 function summaryContent(input: SummaryInput) {
   const status = extractionStatusText(input)
-  const lines = [`### 文档结构化摘要`, `附件：${input.file?.name || '未选择附件'}`, `状态：${status}`]
+  const lines = [`### 文档结构化摘要`, `来文：${input.file?.name || '未选择来文'}`, `状态：${status}`]
   const categories = matchedExtractionCategories(input.result)
   if (categories.length) lines.push(`分类：${categories.map((item) => item.name).join('、')}`)
   const summary = extractionSummaryText(input.result)

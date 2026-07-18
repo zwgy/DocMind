@@ -5,8 +5,6 @@
 
 import asyncio
 
-import pytest
-
 from yuxi.services import task_service
 from yuxi.services.task_service import Tasker
 
@@ -132,21 +130,28 @@ async def test_load_state_marks_interrupted_and_prunes(monkeypatch):
     monkeypatch.setattr(task_service, "MAX_TERMINAL_TASKS", 2)
     repo = FakeRepo(
         preset=[
-            FakeRecord({"id": "a", "name": "a", "type": "demo", "status": "running",
-                        "created_at": "2026-01-01T00:00:05"}),
-            FakeRecord({"id": "b", "name": "b", "type": "demo", "status": "success",
-                        "created_at": "2026-01-01T00:00:04"}),
-            FakeRecord({"id": "c", "name": "c", "type": "demo", "status": "success",
-                        "created_at": "2026-01-01T00:00:03"}),
-            FakeRecord({"id": "d", "name": "d", "type": "demo", "status": "success",
-                        "created_at": "2026-01-01T00:00:02"}),
+            FakeRecord(
+                {"id": "a", "name": "a", "type": "demo", "status": "running", "created_at": "2026-01-01T00:00:05"}
+            ),
+            FakeRecord(
+                {"id": "b", "name": "b", "type": "demo", "status": "success", "created_at": "2026-01-01T00:00:04"}
+            ),
+            FakeRecord(
+                {"id": "c", "name": "c", "type": "demo", "status": "success", "created_at": "2026-01-01T00:00:03"}
+            ),
+            FakeRecord(
+                {"id": "d", "name": "d", "type": "demo", "status": "success", "created_at": "2026-01-01T00:00:02"}
+            ),
         ]
     )
-    tasker = await _make_tasker(repo)
+    tasker = Tasker(worker_count=1)
+    tasker._repo = repo
+    interrupted_tasks = await tasker.start()
 
     # 中断的 running 任务被标记为 failed
     interrupted = await tasker.get_task("a")
     assert interrupted["status"] == "failed"
+    assert [task.id for task in interrupted_tasks] == ["a"]
     # 仅保留最近 MAX_TERMINAL_TASKS 条终态任务，最旧的被清理
     listing = await tasker.list_tasks(limit=100)
     assert listing["summary"]["total"] == 2

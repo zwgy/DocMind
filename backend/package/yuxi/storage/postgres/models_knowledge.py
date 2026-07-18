@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from yuxi.storage.postgres.models_business import Base
@@ -78,7 +79,7 @@ class KnowledgeFile(Base):
 
 
 class IncomingDocument(Base):
-    """来文记录，外部系统推送的待入库文档"""
+    """一份来文一行，附件由 ``incoming_document_files`` 保存。"""
 
     __tablename__ = "incoming_documents"
     __table_args__ = (
@@ -87,11 +88,9 @@ class IncomingDocument(Base):
             "source_system",
             "source_function_id",
             "source_document_id",
-            "source_file_id",
-            name="uq_incoming_documents_source_file_identity",
+            name="uq_incoming_documents_source_identity",
         ),
         Index("ix_incoming_documents_source_function_id", "source_function_id"),
-        Index("ix_incoming_documents_source_file_id", "source_file_id"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -99,34 +98,63 @@ class IncomingDocument(Base):
     source_system = Column(String(64), nullable=False, index=True)
     source_function_id = Column(String(128), nullable=False)
     source_document_id = Column(String(256), nullable=False)
+    document_metadata = Column(JSON_VALUE, nullable=False, default=dict)
+    status = Column(String(32), default="uploaded", index=True)
+    ai_classification = Column(String(128))
+    classification_confidence = Column(Float)
+    classification_evidence = Column(Text)
+    additional_classifications = Column(JSON_VALUE)
+    confirmed_classification = Column(String(128))
+    review_status = Column(String(32), default="draft", index=True)
+    confirmed_by = Column(String(64))
+    confirmed_at = Column(DateTime(timezone=True))
+    summary = Column(Text)
+    processing_error = Column(Text)
+    linked_kb_id = Column(String(80))
+    knowledge_import_status = Column(String(32), default="none", index=True)
+    knowledge_import_task_id = Column(String(64))
+    knowledge_import_error = Column(Text)
+    created_by = Column(String(64))
+    updated_by = Column(String(64))
+    created_at = Column(DateTime(timezone=True), default=utc_now_naive)
+    updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class IncomingDocumentFile(Base):
+    """来文主文件或附件；不保存独立分类和正式业务结论。"""
+
+    __tablename__ = "incoming_document_files"
+    __table_args__ = (
+        UniqueConstraint("incoming_file_id", name="uq_incoming_document_files_incoming_file_id"),
+        UniqueConstraint("incoming_id", "source_file_id", name="uq_incoming_document_files_source_file_identity"),
+        Index(
+            "uq_incoming_document_files_main_file",
+            "incoming_id",
+            unique=True,
+            postgresql_where=text("is_main_file"),
+        ),
+        Index("ix_incoming_document_files_source_file_id", "source_file_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    incoming_file_id = Column(String(64), unique=True, nullable=False, index=True)
+    incoming_id = Column(
+        String(64), ForeignKey("incoming_documents.incoming_id", ondelete="CASCADE"), nullable=False, index=True
+    )
     source_file_id = Column(String(512), nullable=False)
     source_url = Column(String(2048))
     filename = Column(String(512), nullable=False)
-    document_number = Column(String(512))
-    title = Column(String(1024))
-    incoming_type = Column(String(128))
-    source_unit = Column(String(512))
-    incoming_date = Column(String(64))
-    is_main_file = Column(Boolean, default=False)
+    is_main_file = Column(Boolean, default=False, nullable=False)
     content_hash = Column(String(128), index=True)
     file_size = Column(BigInteger)
     mime_type = Column(String(255))
     original_file_url = Column(String(1024), nullable=False)
     markdown_file_url = Column(String(1024))
     status = Column(String(32), default="uploaded", index=True)
-    classification = Column(String(128))
-    classification_confidence = Column(Float)
-    summary = Column(Text)
-    structured_result = Column(JSON_VALUE)
     processing_error = Column(Text)
-    linked_kb_id = Column(String(80))
     linked_file_id = Column(String(64))
     knowledge_import_status = Column(String(32), default="none", index=True)
-    knowledge_import_task_id = Column(String(64))
     knowledge_import_error = Column(Text)
-    metadata_json = Column("metadata", JSON_VALUE)
-    created_by = Column(String(64))
-    updated_by = Column(String(64))
     created_at = Column(DateTime(timezone=True), default=utc_now_naive)
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
 
@@ -222,7 +250,7 @@ class DocumentBusinessExtractionItem(Base):
         UniqueConstraint("item_id", name="uq_document_business_extraction_items_item_id"),
         Index("ix_document_business_extraction_items_result_id", "result_id"),
         Index("ix_document_business_extraction_items_chunk_id", "chunk_id"),
-        Index("ix_document_business_extraction_items_type_status", "item_type", "status"),
+        Index("ix_document_business_extraction_items_type", "item_type"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -239,13 +267,10 @@ class DocumentBusinessExtractionItem(Base):
     chunk_id = Column(String(128), ForeignKey("knowledge_chunks.chunk_id", ondelete="SET NULL"))
     item_type = Column(String(64), nullable=False)
     data = Column(JSON_VALUE)
-    confirmed_data = Column(JSON_VALUE)
-    source_quote = Column(Text)
-    status = Column(String(32), default="draft", index=True)
+    evidence = Column(JSON_VALUE)
     created_at = Column(DateTime(timezone=True), default=utc_now_naive)
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
-    confirmed_by = Column(String(64))
-    confirmed_at = Column(DateTime(timezone=True))
+
 
 class KnowledgeGraphEntity(Base):
     """知识图谱实体"""

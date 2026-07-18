@@ -81,10 +81,16 @@ function summarizeExtraction(result?: ExtractionResult | null) {
   if (result.matchStatus !== 'matched' || result.extractionStatus !== 'ready') return ''
   const summary = String(result.summary || '').trim()
   // 后端 summary 与业务抽取 items 都可能有价值；只在没有结构化细节时返回纯摘要，避免两者互相覆盖。
-  const lines: string[] = summary ? [summary] : [`匹配状态：${result.matchStatus}`, `抽取状态：${result.extractionStatus}`]
+  const lines: string[] = summary
+    ? [summary]
+    : [`匹配状态：${result.matchStatus}`, `抽取状态：${result.extractionStatus}`]
+  if (result.classification) lines.push(`主分类：${result.classification}`)
   const categories = Object.entries(result.categories || {})
     .filter(([, value]) => value?.matched)
-    .map(([key, value]) => `${result.display?.categoryLabels?.[key] || key}：命中${value.evidence ? `，依据：${value.evidence}` : ''}`)
+    .map(
+      ([key, value]) =>
+        `${result.display?.categoryLabels?.[key] || key}：命中${value.evidence ? `，依据：${value.evidence}` : ''}`
+    )
   if (categories.length) lines.push(`分类：${categories.join('；')}`)
   const quotes = (result.items || [])
     .map((item) => item.source_quote || '')
@@ -128,11 +134,22 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
     : input.selectedFile
       ? [input.selectedFile]
       : []
+  const documents = new Map<string, IframeContextPayload['files'][number]>()
   for (const file of files) {
-    const result = input.extractionResults?.[file.source_file_id] || (file.source_file_id === input.selectedFile?.source_file_id ? input.extractionResult : null)
+    const result =
+      input.extractionResults?.[file.source_file_id] ||
+      (file.source_file_id === input.selectedFile?.source_file_id ? input.extractionResult : null)
     const summary = summarizeExtraction(result)
-    context.files.push({
+    const seenItemTypes = new Set<string>()
+    const representativeItems = (result?.items || []).filter((item) => {
+      if (seenItemTypes.has(item.item_type)) return false
+      seenItemTypes.add(item.item_type)
+      return true
+    })
+    const entry = {
       ...file,
+      name: result?.title || file.name,
+      incomingId: result?.incomingId,
       matchStatus: result?.matchStatus,
       extractionStatus: result?.extractionStatus,
       fileStatus: result?.fileStatus,
@@ -142,12 +159,19 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
       runId: result?.runId,
       summary: summary || undefined,
       summaryTruncated: Boolean(summary && summary.length >= 1200),
+      classification: result?.classification,
+      aiClassificationEvidence: result?.aiClassificationEvidence,
       categories: result?.categories,
-      items: result?.items,
+      additionalClassifications: result?.additionalClassifications,
+      items: representativeItems,
       schemaIds: result?.schemaIds,
-      display: result?.display
-    })
+      display: result?.display,
+      documentFiles: result?.files
+    }
+    // 同一来文的多个附件共享一份摘要和正式结果，不能重复注入系统提示词。
+    documents.set(result?.incomingId || file.source_file_id, entry)
   }
+  context.files = [...documents.values()]
   return context
 }
 
@@ -183,14 +207,17 @@ function streamEventChunk(streamEvent: Record<string, unknown>): RunStreamChunk 
       type: 'text',
       messageId,
       content: String(streamEvent.content || streamEvent.delta || ''),
-      reasoningContent: String(streamEvent.reasoning_content || streamEvent.additional_reasoning_content || '')
+      reasoningContent: String(
+        streamEvent.reasoning_content || streamEvent.additional_reasoning_content || ''
+      )
     }
   }
   if (eventType === 'tool_call' || eventType === 'tool_call_delta') {
     return {
       type: 'tool_call',
       messageId,
-      toolCallId: typeof streamEvent.tool_call_id === 'string' ? streamEvent.tool_call_id : undefined,
+      toolCallId:
+        typeof streamEvent.tool_call_id === 'string' ? streamEvent.tool_call_id : undefined,
       name: typeof streamEvent.name === 'string' ? streamEvent.name : undefined,
       args: streamEvent.args || streamEvent.args_delta
     }
@@ -212,7 +239,9 @@ function toolResultChunk(payload: Record<string, unknown>): RunStreamChunk | nul
 
 function extractToolEvent(payload: Record<string, unknown>) {
   const chunk = payload.chunk as Record<string, unknown> | undefined
-  const event = (payload.event as Record<string, unknown> | undefined) || (chunk?.event as Record<string, unknown>)
+  const event =
+    (payload.event as Record<string, unknown> | undefined) ||
+    (chunk?.event as Record<string, unknown>)
   const name = event?.name || event?.tool_name || event?.type
   return typeof name === 'string' && name ? `工具调用：${name}` : ''
 }
@@ -225,13 +254,15 @@ function handleRunPayload(payload: Record<string, unknown>, handlers: RunEventHa
       handleRunPayload(item as Record<string, unknown>, handlers)
     }
   }
-  const chunk = body.chunk && typeof body.chunk === 'object' ? (body.chunk as Record<string, unknown>) : null
+  const chunk =
+    body.chunk && typeof body.chunk === 'object' ? (body.chunk as Record<string, unknown>) : null
   const current = chunk || body
   const status = String(current.status || body.status || '')
   if (status) handlers.onStatus?.(current)
   const streamEvent =
     (current.stream_event as Record<string, unknown> | undefined) ||
-    ((current.chunk as Record<string, unknown> | undefined)?.stream_event as Record<string, unknown> | undefined)
+    ((current.chunk as Record<string, unknown> | undefined)?.stream_event as
+      Record<string, unknown> | undefined)
   const semanticChunk = streamEvent ? streamEventChunk(streamEvent) : null
   const toolResult = toolResultChunk(current)
   if (semanticChunk) {
@@ -252,9 +283,14 @@ function handleRunPayload(payload: Record<string, unknown>, handlers: RunEventHa
     })
   }
   if (status === 'interrupted' && !Array.isArray(current.questions)) {
-    emitChunk(handlers, { type: 'error', message: String(current.message || '回答生成已中断'), errorType: 'interrupted' })
+    emitChunk(handlers, {
+      type: 'error',
+      message: String(current.message || '回答生成已中断'),
+      errorType: 'interrupted'
+    })
   }
-  if (status === 'finished' || status === 'completed' || status === 'cancelled') emitChunk(handlers, { type: 'done' })
+  if (status === 'finished' || status === 'completed' || status === 'cancelled')
+    emitChunk(handlers, { type: 'done' })
 }
 
 function handleSseBlock(block: string, handlers: RunEventHandlers) {
@@ -322,19 +358,27 @@ export async function streamRunEvents(
 ) {
   const headers = authHeaders(token, false)
   if (afterSeq && afterSeq !== '0-0') headers['Last-Event-ID'] = afterSeq
-  const response = await fetch(apiUrl(`/api/agent/runs/${encodeURIComponent(runId)}/events?verbose=false`), { headers, signal })
+  const response = await fetch(
+    apiUrl(`/api/agent/runs/${encodeURIComponent(runId)}/events?verbose=false`),
+    { headers, signal }
+  )
   return readRunEventStream(response, handlers)
 }
 
 export async function getRun(runId: string, token?: string) {
-  const response = await fetch(apiUrl(`/api/agent/runs/${encodeURIComponent(runId)}`), { headers: authHeaders(token, false) })
+  const response = await fetch(apiUrl(`/api/agent/runs/${encodeURIComponent(runId)}`), {
+    headers: authHeaders(token, false)
+  })
   return parseResponse<{ run?: { status?: string } }>(response, '获取运行状态失败')
 }
 
 export async function getThreadActiveRun(threadId: string, token?: string) {
-  const response = await fetch(apiUrl(`/api/agent/thread/${encodeURIComponent(threadId)}/active_run`), {
-    headers: authHeaders(token, false)
-  })
+  const response = await fetch(
+    apiUrl(`/api/agent/thread/${encodeURIComponent(threadId)}/active_run`),
+    {
+      headers: authHeaders(token, false)
+    }
+  )
   return parseResponse<{ run?: { id?: string; status?: string } }>(response, '获取会话活动任务失败')
 }
 
@@ -345,16 +389,24 @@ export async function getThreadState(threadId: string, token?: string) {
   return parseResponse<{ agent_state?: Record<string, unknown> }>(response, '获取会话运行状态失败')
 }
 
-export async function fetchThreadArtifact(threadId: string, path: string, token?: string, download = false) {
+export async function fetchThreadArtifact(
+  threadId: string,
+  path: string,
+  token?: string,
+  download = false
+) {
   const encodedPath = path
     .split('/')
     .filter(Boolean)
     .map((part) => encodeURIComponent(part))
     .join('/')
   const suffix = download ? '?download=true' : ''
-  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/artifacts/${encodedPath}${suffix}`), {
-    headers: authHeaders(token, false)
-  })
+  const response = await fetch(
+    apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/artifacts/${encodedPath}${suffix}`),
+    {
+      headers: authHeaders(token, false)
+    }
+  )
   if (!response.ok) await parseResponse<never>(response, '获取交付物失败')
   return response
 }
@@ -402,7 +454,9 @@ export async function listConversations(
   return parseResponse<ChatThread[]>(response, '获取对话列表失败')
 }
 
-export async function createConversation(options: CreateConversationOptions = {}): Promise<ChatThread> {
+export async function createConversation(
+  options: CreateConversationOptions = {}
+): Promise<ChatThread> {
   const metadata: Record<string, unknown> = { source: 'chat-iframe' }
   if (options.conversationScopeKey) metadata.conversation_scope_key = options.conversationScopeKey
   const response = await fetch(apiUrl('/api/chat/thread'), {
@@ -434,11 +488,17 @@ export async function listMessages(threadId: string, token?: string): Promise<Ch
   const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/history`), {
     headers: authHeaders(token, false)
   })
-  const data = await parseResponse<{ history?: Record<string, unknown>[] }>(response, '获取聊天记录失败')
+  const data = await parseResponse<{ history?: Record<string, unknown>[] }>(
+    response,
+    '获取聊天记录失败'
+  )
   return (data.history || []).map(normalizeChatMessage)
 }
 
-export async function sendMessageStream(payload: SendMessagePayload, handlers: RunEventHandlers = {}) {
+export async function sendMessageStream(
+  payload: SendMessagePayload,
+  handlers: RunEventHandlers = {}
+) {
   const requestId = createClientId()
   const query = buildChatQuery(payload)
   const iframeContext = buildIframeContext(payload)
@@ -467,7 +527,10 @@ export async function sendMessageStream(payload: SendMessagePayload, handlers: R
       }
     })
   })
-  const run = await parseResponse<{ id?: string; run_id?: string; stream_url?: string }>(response, '发送消息失败')
+  const run = await parseResponse<{ id?: string; run_id?: string; stream_url?: string }>(
+    response,
+    '发送消息失败'
+  )
   const runId = run.id || run.run_id
   if (!runId) throw new Error('发送消息失败：缺少运行任务 ID')
   handlers.onRunStart?.(runId, requestId)
@@ -511,11 +574,14 @@ export async function submitMessageFeedback(
   reason: string | null,
   token?: string
 ) {
-  const response = await fetch(apiUrl(`/api/chat/message/${encodeURIComponent(messageId)}/feedback`), {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: JSON.stringify({ rating, reason })
-  })
+  const response = await fetch(
+    apiUrl(`/api/chat/message/${encodeURIComponent(messageId)}/feedback`),
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({ rating, reason })
+    }
+  )
   return parseResponse<Record<string, unknown>>(response, '提交反馈失败')
 }
 
@@ -529,13 +595,19 @@ export async function uploadImage(file: File, token?: string) {
     headers: authHeaders(token, false),
     body
   })
-  return parseResponse<{ image_content?: string } & Record<string, unknown>>(response, '上传图片失败')
+  return parseResponse<{ image_content?: string } & Record<string, unknown>>(
+    response,
+    '上传图片失败'
+  )
 }
 
 export async function getThreadAttachments(threadId: string, token?: string) {
-  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/attachments`), {
-    headers: authHeaders(token, false)
-  })
+  const response = await fetch(
+    apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/attachments`),
+    {
+      headers: authHeaders(token, false)
+    }
+  )
   return parseResponse<Record<string, unknown>>(response, '获取附件失败')
 }
 
@@ -544,10 +616,13 @@ export async function uploadThreadAttachment(threadId: string, file: File, token
   if (error) throw new Error(error)
   const body = new FormData()
   body.append('file', file)
-  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/attachments`), {
-    method: 'POST',
-    headers: authHeaders(token, false),
-    body
-  })
+  const response = await fetch(
+    apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/attachments`),
+    {
+      method: 'POST',
+      headers: authHeaders(token, false),
+      body
+    }
+  )
   return parseResponse<Record<string, unknown>>(response, '上传附件失败')
 }

@@ -2,29 +2,43 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 
 from yuxi.storage.postgres.manager import pg_manager
-from yuxi.storage.postgres.models_knowledge import IncomingDocument
+from yuxi.storage.postgres.models_knowledge import IncomingDocument, IncomingDocumentFile
 from yuxi.utils.datetime_utils import utc_now_naive
 
 
 class IncomingDocumentRepository:
-    """来文独立表的仓储，只管理 incoming_documents，不读写 knowledge_files。"""
+    """来文及其附件的持久化边界。"""
 
-    # 只允许服务层明确声明的字段落库，避免外部 metadata 或表单字段误写业务列。
-    _writable_fields = {
+    _document_fields = {
         "source_system",
         "source_function_id",
         "source_document_id",
+        "document_metadata",
+        "status",
+        "ai_classification",
+        "classification_confidence",
+        "classification_evidence",
+        "additional_classifications",
+        "confirmed_classification",
+        "review_status",
+        "confirmed_by",
+        "confirmed_at",
+        "summary",
+        "processing_error",
+        "linked_kb_id",
+        "knowledge_import_status",
+        "knowledge_import_task_id",
+        "knowledge_import_error",
+        "created_by",
+        "updated_by",
+    }
+    _file_fields = {
         "source_file_id",
         "source_url",
         "filename",
-        "document_number",
-        "title",
-        "incoming_type",
-        "source_unit",
-        "incoming_date",
         "is_main_file",
         "content_hash",
         "file_size",
@@ -32,54 +46,21 @@ class IncomingDocumentRepository:
         "original_file_url",
         "markdown_file_url",
         "status",
-        "classification",
-        "classification_confidence",
-        "summary",
-        "structured_result",
         "processing_error",
-        "linked_kb_id",
         "linked_file_id",
         "knowledge_import_status",
-        "knowledge_import_task_id",
         "knowledge_import_error",
-        "metadata_json",
-        "created_by",
-        "updated_by",
     }
 
-    @classmethod
-    def _sanitize_data(cls, data: dict[str, Any]) -> dict[str, Any]:
-        sanitized = {key: value for key, value in data.items() if key in cls._writable_fields}
+    @staticmethod
+    def _sanitize(data: dict[str, Any], allowed: set[str]) -> dict[str, Any]:
+        sanitized = {key: value for key, value in data.items() if key in allowed}
         if sanitized:
-            # Repository 统一刷新 updated_at，保证 upsert/update_fields 的审计时间一致。
             sanitized["updated_at"] = utc_now_naive()
         return sanitized
 
     async def get_by_source_identity(
-        self,
-        source_system: str,
-        source_function_id: str,
-        source_document_id: str,
-    ) -> IncomingDocument | None:
-        async with pg_manager.get_async_session_context() as session:
-            result = await session.execute(
-                select(IncomingDocument)
-                .where(
-                    IncomingDocument.source_system == source_system,
-                    IncomingDocument.source_function_id == source_function_id,
-                    IncomingDocument.source_document_id == source_document_id,
-                )
-                .order_by(IncomingDocument.created_at.desc())
-                .limit(1)
-            )
-            return result.scalar_one_or_none()
-
-    async def get_by_file_identity(
-        self,
-        source_system: str,
-        source_function_id: str,
-        source_document_id: str,
-        source_file_id: str,
+        self, source_system: str, source_function_id: str, source_document_id: str
     ) -> IncomingDocument | None:
         async with pg_manager.get_async_session_context() as session:
             result = await session.execute(
@@ -87,17 +68,126 @@ class IncomingDocumentRepository:
                     IncomingDocument.source_system == source_system,
                     IncomingDocument.source_function_id == source_function_id,
                     IncomingDocument.source_document_id == source_document_id,
-                    IncomingDocument.source_file_id == source_file_id,
                 )
             )
             return result.scalar_one_or_none()
 
     async def get_by_incoming_id(self, incoming_id: str) -> IncomingDocument | None:
         async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id))
+            return result.scalar_one_or_none()
+
+    async def upsert_document(self, incoming_id: str, data: dict[str, Any]) -> IncomingDocument:
+        sanitized = self._sanitize(data, self._document_fields)
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id))
+            record = result.scalar_one_or_none()
+            if record is None:
+                record = IncomingDocument(incoming_id=incoming_id, **sanitized)
+                session.add(record)
+            else:
+                for key, value in sanitized.items():
+                    setattr(record, key, value)
+            return record
+
+    async def update_document(self, incoming_id: str, data: dict[str, Any]) -> IncomingDocument:
+        sanitized = self._sanitize(data, self._document_fields)
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id))
+            record = result.scalar_one_or_none()
+            if record is None:
+                raise ValueError(f"Incoming document not found: {incoming_id}")
+            for key, value in sanitized.items():
+                setattr(record, key, value)
+            return record
+
+    async def get_file_by_identity(self, incoming_id: str, source_file_id: str) -> IncomingDocumentFile | None:
+        async with pg_manager.get_async_session_context() as session:
             result = await session.execute(
-                select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id)
+                select(IncomingDocumentFile).where(
+                    IncomingDocumentFile.incoming_id == incoming_id,
+                    IncomingDocumentFile.source_file_id == source_file_id,
+                )
             )
             return result.scalar_one_or_none()
+
+    async def upsert_file(self, incoming_id: str, incoming_file_id: str, data: dict[str, Any]) -> IncomingDocumentFile:
+        sanitized = self._sanitize(data, self._file_fields)
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
+                select(IncomingDocumentFile).where(
+                    IncomingDocumentFile.incoming_id == incoming_id,
+                    IncomingDocumentFile.source_file_id == sanitized["source_file_id"],
+                )
+            )
+            record = result.scalar_one_or_none()
+            if record is None:
+                record = IncomingDocumentFile(incoming_id=incoming_id, incoming_file_id=incoming_file_id, **sanitized)
+                session.add(record)
+            else:
+                for key, value in sanitized.items():
+                    setattr(record, key, value)
+            return record
+
+    async def update_file(self, incoming_file_id: str, data: dict[str, Any]) -> IncomingDocumentFile:
+        sanitized = self._sanitize(data, self._file_fields)
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
+                select(IncomingDocumentFile).where(IncomingDocumentFile.incoming_file_id == incoming_file_id)
+            )
+            record = result.scalar_one_or_none()
+            if record is None:
+                raise ValueError(f"Incoming document file not found: {incoming_file_id}")
+            for key, value in sanitized.items():
+                setattr(record, key, value)
+            return record
+
+    async def set_main_file(self, incoming_id: str, source_file_id: str) -> None:
+        """在同一事务内切换主文件，避免部分提交时出现无主文件。"""
+        async with pg_manager.get_async_session_context() as session:
+            target = await session.scalar(
+                select(IncomingDocumentFile.incoming_file_id).where(
+                    IncomingDocumentFile.incoming_id == incoming_id,
+                    IncomingDocumentFile.source_file_id == source_file_id,
+                )
+            )
+            if target is None:
+                raise ValueError(f"Incoming document file not found: {source_file_id}")
+            await session.execute(
+                update(IncomingDocumentFile)
+                .where(IncomingDocumentFile.incoming_id == incoming_id)
+                .values(is_main_file=False, updated_at=utc_now_naive())
+            )
+            await session.execute(
+                update(IncomingDocumentFile)
+                .where(IncomingDocumentFile.incoming_file_id == target)
+                .values(is_main_file=True, updated_at=utc_now_naive())
+            )
+
+    async def list_files(self, incoming_id: str) -> list[IncomingDocumentFile]:
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
+                select(IncomingDocumentFile)
+                .where(IncomingDocumentFile.incoming_id == incoming_id)
+                .order_by(IncomingDocumentFile.is_main_file.desc(), IncomingDocumentFile.created_at.asc())
+            )
+            return list(result.scalars().all())
+
+    async def get_file_for_source(
+        self, *, source_system: str, source_function_id: str, source_document_id: str, source_file_id: str
+    ) -> tuple[IncomingDocument, IncomingDocumentFile] | None:
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
+                select(IncomingDocument, IncomingDocumentFile)
+                .join(IncomingDocumentFile, IncomingDocumentFile.incoming_id == IncomingDocument.incoming_id)
+                .where(
+                    IncomingDocument.source_system == source_system,
+                    IncomingDocument.source_function_id == source_function_id,
+                    IncomingDocument.source_document_id == source_document_id,
+                    IncomingDocumentFile.source_file_id == source_file_id,
+                )
+            )
+            return result.one_or_none()
 
     async def list_for_management(
         self,
@@ -110,7 +200,6 @@ class IncomingDocumentRepository:
         source_system: str | None = None,
         classification: str | None = None,
     ) -> tuple[list[IncomingDocument], int]:
-        # 管理端列表只做轻量筛选；复杂全文检索应走后续专门搜索接口，避免把管理页拖成检索服务。
         filters = []
         if status:
             filters.append(IncomingDocument.status == status)
@@ -119,154 +208,32 @@ class IncomingDocumentRepository:
         if source_system:
             filters.append(IncomingDocument.source_system == source_system)
         if classification:
-            filters.append(IncomingDocument.classification == classification)
-        if keyword:
-            cleaned_keyword = keyword.strip()
-            if cleaned_keyword:
-                pattern = f"%{cleaned_keyword}%"
-                filters.append(
-                    or_(
-                        IncomingDocument.filename.ilike(pattern),
-                        IncomingDocument.source_function_id.ilike(pattern),
-                        IncomingDocument.source_document_id.ilike(pattern),
-                        IncomingDocument.source_file_id.ilike(pattern),
-                        IncomingDocument.document_number.ilike(pattern),
-                        IncomingDocument.title.ilike(pattern),
-                    )
+            filters.append(
+                func.coalesce(IncomingDocument.confirmed_classification, IncomingDocument.ai_classification)
+                == classification
+            )
+        if keyword := (keyword or "").strip():
+            pattern = f"%{keyword}%"
+            filters.append(
+                or_(
+                    IncomingDocument.source_document_id.ilike(pattern),
+                    IncomingDocument.document_metadata["title"].as_string().ilike(pattern),
+                    IncomingDocument.document_metadata["document_number"].as_string().ilike(pattern),
+                    IncomingDocument.incoming_id.in_(
+                        select(IncomingDocumentFile.incoming_id).where(IncomingDocumentFile.filename.ilike(pattern))
+                    ),
                 )
+            )
 
         page = max(int(page or 1), 1)
         page_size = min(max(int(page_size or 20), 1), 100)
         async with pg_manager.get_async_session_context() as session:
             total = await session.scalar(select(func.count()).select_from(IncomingDocument).where(*filters))
-            result = await session.execute(
+            rows = await session.execute(
                 select(IncomingDocument)
                 .where(*filters)
                 .order_by(IncomingDocument.created_at.desc())
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
-            return list(result.scalars().all()), int(total or 0)
-
-    async def upsert(self, incoming_id: str, data: dict[str, Any]) -> IncomingDocument:
-        sanitized_data = self._sanitize_data(data)
-        async with pg_manager.get_async_session_context() as session:
-            result = await session.execute(
-                select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id)
-            )
-            existing = result.scalar_one_or_none()
-            if existing is None:
-                record = IncomingDocument(incoming_id=incoming_id, **sanitized_data)
-                session.add(record)
-                return record
-            # 相同外部单号重新上传时覆盖当前态，不保留版本历史，这是来文 v1 的明确取舍。
-            for key, value in sanitized_data.items():
-                setattr(existing, key, value)
-            return existing
-
-    async def update_fields(self, incoming_id: str, data: dict[str, Any]) -> IncomingDocument:
-        sanitized_data = self._sanitize_data(data)
-        async with pg_manager.get_async_session_context() as session:
-            result = await session.execute(
-                select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id)
-            )
-            record = result.scalar_one_or_none()
-            if record is None:
-                raise ValueError(f"Incoming document not found: {incoming_id}")
-            for key, value in sanitized_data.items():
-                setattr(record, key, value)
-            return record
-
-    async def list_by_source_file_id(
-        self,
-        source_file_id: str,
-        *,
-        source_system: str,
-        source_function_id: str,
-        source_document_id: str,
-    ) -> list[IncomingDocument]:
-        if not source_file_id:
-            return []
-        filters = [
-            IncomingDocument.source_system == source_system,
-            IncomingDocument.source_function_id == source_function_id,
-            IncomingDocument.source_document_id == source_document_id,
-            IncomingDocument.source_file_id == source_file_id,
-        ]
-        async with pg_manager.get_async_session_context() as session:
-            result = await session.execute(
-                select(IncomingDocument).where(*filters).order_by(IncomingDocument.created_at.desc())
-            )
-            return list(result.scalars().all())
-
-    async def list_by_source_url(
-        self,
-        source_url: str,
-        *,
-        source_system: str,
-        source_function_id: str,
-        source_document_id: str,
-    ) -> list[IncomingDocument]:
-        if not source_url:
-            return []
-        filters = [
-            IncomingDocument.source_system == source_system,
-            IncomingDocument.source_function_id == source_function_id,
-            IncomingDocument.source_document_id == source_document_id,
-            IncomingDocument.source_url == source_url,
-        ]
-        async with pg_manager.get_async_session_context() as session:
-            result = await session.execute(
-                select(IncomingDocument).where(*filters).order_by(IncomingDocument.created_at.desc())
-            )
-            return list(result.scalars().all())
-
-    async def list_by_source_doc_id_and_filename(
-        self,
-        source_document_id: str,
-        filename: str,
-        *,
-        source_system: str,
-        source_function_id: str,
-    ) -> list[IncomingDocument]:
-        normalized = filename.strip().lower()
-        if not source_document_id or not normalized:
-            return []
-        filters = [
-            IncomingDocument.source_document_id == source_document_id,
-            IncomingDocument.source_function_id == source_function_id,
-            func.lower(IncomingDocument.filename) == normalized,
-        ]
-        filters.append(IncomingDocument.source_system == source_system)
-        async with pg_manager.get_async_session_context() as session:
-            result = await session.execute(
-                select(IncomingDocument).where(*filters).order_by(IncomingDocument.created_at.desc())
-            )
-            return list(result.scalars().all())
-
-    async def list_by_filename_and_size(self, filename: str, file_size: int) -> list[IncomingDocument]:
-        normalized = filename.strip().lower()
-        if not normalized:
-            return []
-        async with pg_manager.get_async_session_context() as session:
-            result = await session.execute(
-                select(IncomingDocument)
-                .where(
-                    func.lower(IncomingDocument.filename) == normalized,
-                    IncomingDocument.file_size == int(file_size),
-                )
-                .order_by(IncomingDocument.created_at.desc())
-            )
-            return list(result.scalars().all())
-
-    async def list_by_filename(self, filename: str) -> list[IncomingDocument]:
-        normalized = filename.strip().lower()
-        if not normalized:
-            return []
-        async with pg_manager.get_async_session_context() as session:
-            result = await session.execute(
-                select(IncomingDocument)
-                .where(func.lower(IncomingDocument.filename) == normalized)
-                .order_by(IncomingDocument.created_at.desc())
-            )
-            return list(result.scalars().all())
+            return list(rows.scalars().all()), int(total or 0)

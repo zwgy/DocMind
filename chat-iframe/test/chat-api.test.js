@@ -45,7 +45,10 @@ test('listConversations filters by configured agent id', async () => {
 
   await listConversations('token-1', 'agent-iframe', 'oa:contract:001')
 
-  assert.equal(calls[0].url, '/api/chat/threads?limit=50&offset=0&agent_id=agent-iframe&conversation_scope_key=oa%3Acontract%3A001')
+  assert.equal(
+    calls[0].url,
+    '/api/chat/threads?limit=50&offset=0&agent_id=agent-iframe&conversation_scope_key=oa%3Acontract%3A001'
+  )
   assert.equal(calls[0].options.headers.Authorization, 'Bearer token-1')
 })
 
@@ -56,7 +59,11 @@ test('createConversation stores iframe conversation scope in metadata', async ()
     return Response.json({ id: 'thread-1', title: 'scope thread' })
   }
 
-  await createConversation({ token: 'token-1', agentId: 'agent-iframe', conversationScopeKey: 'oa:contract:001' })
+  await createConversation({
+    token: 'token-1',
+    agentId: 'agent-iframe',
+    conversationScopeKey: 'oa:contract:001'
+  })
 
   assert.deepEqual(JSON.parse(calls[0].options.body).metadata, {
     source: 'chat-iframe',
@@ -166,6 +173,13 @@ test('buildIframeContext carries enabled page and all selected files', () => {
         hasParsedMarkdown: true,
         kbId: 'kb1',
         fileId: 'file1',
+        files: [
+          { sourceFileId: 'S001', filename: 'a.docx', isMainFile: true, status: 'parsed' },
+          { sourceFileId: 'S002', filename: 'b.pdf', isMainFile: false, status: 'parsed' }
+        ],
+        additionalClassifications: [
+          { classification: '风险管理类', confidence: 0.91, evidence: 'Risk evidence' }
+        ],
         categories: { risk: { matched: true, evidence: 'Risk evidence' } },
         items: [{ item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' }]
       },
@@ -180,6 +194,8 @@ test('buildIframeContext carries enabled page and all selected files', () => {
   assert.equal(context.page.title, 'Detail page')
   assert.equal(context.files.length, 2)
   assert.equal(context.files[0].kbId, 'kb1')
+  assert.equal(context.files[0].documentFiles.length, 2)
+  assert.equal(context.files[0].additionalClassifications[0].confidence, 0.91)
   assert.equal(context.files[0].summary.includes('risk'), true)
   assert.equal(context.files[1].matchStatus, 'pending_sync')
 })
@@ -227,15 +243,24 @@ test('buildIframeContext keeps structured extraction details with backend summar
         matchStatus: 'matched',
         extractionStatus: 'ready',
         summary: 'Full document summary',
+        classification: '风险管理类',
         categories: { risk: { matched: true, evidence: 'Risk evidence' } },
-        items: [{ item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' }]
+        items: [
+          { item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' },
+          { item_id: 'i2', item_type: 'risk', source_quote: 'Second risk' },
+          { item_id: 'i3', item_type: 'task', source_quote: 'Task quote' }
+        ]
       }
     }
   })
 
   assert.match(context.files[0].summary, /Full document summary/)
   assert.match(context.files[0].summary, /Source quote/)
-  assert.deepEqual(context.files[0].items, [{ item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' }])
+  assert.match(context.files[0].summary, /主分类：风险管理类/)
+  assert.deepEqual(context.files[0].items, [
+    { item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' },
+    { item_id: 'i3', item_type: 'task', source_quote: 'Task quote' }
+  ])
 })
 
 test('readRunEventStream emits text deltas from compact run SSE events', async () => {
@@ -330,7 +355,13 @@ test('readRunEventStream emits structured reasoning and tool call chunks', async
 
   assert.deepEqual(chunks, [
     { type: 'text', messageId: 'm1', content: '回答', reasoningContent: '推理' },
-    { type: 'tool_call', messageId: 'm1', toolCallId: 'tool-1', name: 'search_docs', args: { q: '来文' } },
+    {
+      type: 'tool_call',
+      messageId: 'm1',
+      toolCallId: 'tool-1',
+      name: 'search_docs',
+      args: { q: '来文' }
+    },
     { type: 'tool_result', toolCallId: 'tool-1', content: '命中' },
     { type: 'done' }
   ])
@@ -360,7 +391,13 @@ test('readRunEventStream matches tool results by tool_call_id before output id',
   })
 
   assert.deepEqual(chunks, [
-    { type: 'tool_call', messageId: 'm1', toolCallId: 'call-1', name: 'search_file', args: { kb_id: 'kb1' } },
+    {
+      type: 'tool_call',
+      messageId: 'm1',
+      toolCallId: 'call-1',
+      name: 'search_file',
+      args: { kb_id: 'kb1' }
+    },
     { type: 'tool_result', toolCallId: 'call-1', content: 'done' }
   ])
 })
@@ -432,7 +469,12 @@ test('sendMessageStream keeps historical conversations usable without crypto.ran
   Object.defineProperty(globalThis, 'crypto', { configurable: true, value: {} })
 
   try {
-    await sendMessageStream({ text: 'continue', threadId: 'thread-1', includePage: false, includeFile: false })
+    await sendMessageStream({
+      text: 'continue',
+      threadId: 'thread-1',
+      includePage: false,
+      includeFile: false
+    })
   } finally {
     if (cryptoDescriptor) Object.defineProperty(globalThis, 'crypto', cryptoDescriptor)
     else delete globalThis.crypto

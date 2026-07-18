@@ -303,13 +303,9 @@ class PostgresManager(metaclass=SingletonMeta):
                 chunk_id VARCHAR(128) REFERENCES knowledge_chunks(chunk_id) ON DELETE SET NULL,
                 item_type VARCHAR(64) NOT NULL,
                 data JSONB,
-                confirmed_data JSONB,
-                source_quote TEXT,
-                status VARCHAR(32) DEFAULT 'draft',
+                evidence JSONB,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                confirmed_by VARCHAR(64),
-                confirmed_at TIMESTAMPTZ
+                updated_at TIMESTAMPTZ DEFAULT NOW()
             )
             """,
             """
@@ -319,78 +315,74 @@ class PostgresManager(metaclass=SingletonMeta):
                 source_system VARCHAR(64) NOT NULL,
                 source_function_id VARCHAR(128) NOT NULL,
                 source_document_id VARCHAR(256) NOT NULL,
+                document_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                status VARCHAR(32) DEFAULT 'uploaded',
+                ai_classification VARCHAR(128),
+                classification_confidence DOUBLE PRECISION,
+                classification_evidence TEXT,
+                additional_classifications JSONB,
+                confirmed_classification VARCHAR(128),
+                review_status VARCHAR(32) DEFAULT 'draft',
+                confirmed_by VARCHAR(64),
+                confirmed_at TIMESTAMPTZ,
+                summary TEXT,
+                processing_error TEXT,
+                linked_kb_id VARCHAR(80),
+                knowledge_import_status VARCHAR(32) DEFAULT 'none',
+                knowledge_import_task_id VARCHAR(64),
+                knowledge_import_error TEXT,
+                created_by VARCHAR(64),
+                updated_by VARCHAR(64),
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                CONSTRAINT uq_incoming_documents_source_identity UNIQUE (
+                    source_system,
+                    source_function_id,
+                    source_document_id
+                )
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS incoming_document_files (
+                id SERIAL PRIMARY KEY,
+                incoming_file_id VARCHAR(64) NOT NULL UNIQUE,
+                incoming_id VARCHAR(64) NOT NULL REFERENCES incoming_documents(incoming_id) ON DELETE CASCADE,
                 source_file_id VARCHAR(512) NOT NULL,
                 source_url VARCHAR(2048),
                 filename VARCHAR(512) NOT NULL,
-                document_number VARCHAR(512),
-                title VARCHAR(1024),
-                incoming_type VARCHAR(128),
-                source_unit VARCHAR(512),
-                incoming_date VARCHAR(64),
-                is_main_file BOOLEAN DEFAULT FALSE,
+                is_main_file BOOLEAN NOT NULL DEFAULT FALSE,
                 content_hash VARCHAR(128),
                 file_size BIGINT,
                 mime_type VARCHAR(255),
                 original_file_url VARCHAR(1024) NOT NULL,
                 markdown_file_url VARCHAR(1024),
                 status VARCHAR(32) DEFAULT 'uploaded',
-                classification VARCHAR(128),
-                classification_confidence DOUBLE PRECISION,
-                summary TEXT,
-                structured_result JSONB,
                 processing_error TEXT,
-                linked_kb_id VARCHAR(80),
                 linked_file_id VARCHAR(64),
                 knowledge_import_status VARCHAR(32) DEFAULT 'none',
-                knowledge_import_task_id VARCHAR(64),
                 knowledge_import_error TEXT,
-                metadata JSONB,
-                created_by VARCHAR(64),
-                updated_by VARCHAR(64),
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
-                CONSTRAINT uq_incoming_documents_source_file_identity UNIQUE (
-                    source_system,
-                    source_function_id,
-                    source_document_id,
-                    source_file_id
-                )
+                CONSTRAINT uq_incoming_document_files_source_file_identity UNIQUE (incoming_id, source_file_id)
             )
             """,
-            "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS source_function_id VARCHAR(128)",
-            "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS source_file_id VARCHAR(512)",
-            "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS document_number VARCHAR(512)",
-            "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS title VARCHAR(1024)",
-            "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS incoming_type VARCHAR(128)",
-            "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS source_unit VARCHAR(512)",
-            "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS incoming_date VARCHAR(64)",
-            "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS is_main_file BOOLEAN DEFAULT FALSE",
-            "ALTER TABLE IF EXISTS incoming_documents DROP CONSTRAINT IF EXISTS uq_incoming_documents_source_identity",
-            "ALTER TABLE IF EXISTS incoming_documents DROP CONSTRAINT IF EXISTS uq_incoming_documents_source_file_identity",
-            "UPDATE incoming_documents SET source_function_id = COALESCE(NULLIF(source_function_id, ''), 'default')",
-            "UPDATE incoming_documents SET source_file_id = COALESCE(NULLIF(source_file_id, ''), source_document_id)",
-            "ALTER TABLE IF EXISTS incoming_documents DROP COLUMN IF EXISTS source_key",
-            "ALTER TABLE IF EXISTS incoming_documents ALTER COLUMN source_function_id SET NOT NULL",
-            "ALTER TABLE IF EXISTS incoming_documents ALTER COLUMN source_file_id SET NOT NULL",
-            """
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint
-                    WHERE conname = 'uq_incoming_documents_source_file_identity'
-                ) THEN
-                    ALTER TABLE incoming_documents
-                    ADD CONSTRAINT uq_incoming_documents_source_file_identity
-                    UNIQUE (source_system, source_function_id, source_document_id, source_file_id);
-                END IF;
-            END $$;
-            """,
-            "CREATE INDEX IF NOT EXISTS ix_incoming_documents_source_function_id ON incoming_documents(source_function_id)",
-            "CREATE INDEX IF NOT EXISTS ix_incoming_documents_source_file_id ON incoming_documents(source_file_id)",
+            (
+                "CREATE INDEX IF NOT EXISTS ix_incoming_documents_source_function_id "
+                "ON incoming_documents(source_function_id)"
+            ),
             "CREATE INDEX IF NOT EXISTS ix_incoming_documents_status ON incoming_documents(status)",
             (
                 "CREATE INDEX IF NOT EXISTS ix_incoming_documents_knowledge_import_status "
                 "ON incoming_documents(knowledge_import_status)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_incoming_document_files_source_file_id "
+                "ON incoming_document_files(source_file_id)"
+            ),
+            "CREATE INDEX IF NOT EXISTS ix_incoming_document_files_status ON incoming_document_files(status)",
+            (
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_incoming_document_files_main_file "
+                "ON incoming_document_files(incoming_id) WHERE is_main_file"
             ),
             (
                 "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_runs_scope "
@@ -400,8 +392,14 @@ class PostgresManager(metaclass=SingletonMeta):
                 "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_runs_incoming_id "
                 "ON document_business_extraction_runs(incoming_id)"
             ),
-            "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_runs_file_id ON document_business_extraction_runs(file_id)",
-            "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_runs_kb_id ON document_business_extraction_runs(kb_id)",
+            (
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_runs_file_id "
+                "ON document_business_extraction_runs(file_id)"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_runs_kb_id "
+                "ON document_business_extraction_runs(kb_id)"
+            ),
             (
                 "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_results_scope "
                 "ON document_business_extraction_results(document_scope)"
@@ -439,8 +437,8 @@ class PostgresManager(metaclass=SingletonMeta):
                 "ON document_business_extraction_items(chunk_id)"
             ),
             (
-                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_items_type_status "
-                "ON document_business_extraction_items(item_type, status)"
+                "CREATE INDEX IF NOT EXISTS ix_document_business_extraction_items_type "
+                "ON document_business_extraction_items(item_type)"
             ),
             """
             CREATE TABLE IF NOT EXISTS knowledge_graph_entities (

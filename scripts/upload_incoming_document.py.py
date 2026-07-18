@@ -35,10 +35,11 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import requests
 
@@ -48,9 +49,6 @@ import requests
 
 # API 地址：第三方按实际部署的网关地址替换，或通过 INGEST_API_BASE 注入。
 DEFAULT_API_BASE = "http://192.168.1.220:5050"
-
-# 访问令牌：示例值仅供本地联调，生产环境通过 INGEST_TOKEN 注入。
-DEFAULT_TOKEN = "yxkey_658c6cb0d8ae81385b89fb1bdacefc316fbcf23ae123984b"
 
 # 单次 HTTP 请求的超时秒数。
 REQUEST_TIMEOUT_SECONDS = 60
@@ -80,22 +78,24 @@ class UploadItem:
         source_file_id: 第三方系统内的文件唯一 ID，接口按此字段做幂等去重。
         filename: 文件名，作为 multipart ``files`` 字段的 filename 与
             Yuxi 详情页展示名。
+        is_main_file: 是否显式指定为主文件；增量上传普通附件时保持 False。
     """
 
     source_file_id: str
     filename: str
+    is_main_file: bool = False
 
 
 # 待上传清单：顺序即 multipart 提交时的顺序，后端按 zip(strict=True)
 # 与 file_metas 严格对齐。
+# 初次整批上传显式标记主文件；后续增量附件保持 False，后端会保留已有主文件。
 UPLOAD_ITEMS: tuple[UploadItem, ...] = (
-    UploadItem(source_file_id="202010200206", filename="上铁辆〔2020〕316号.pdf"),
+    UploadItem(source_file_id="202010200206", filename="上铁辆〔2020〕316号.pdf", is_main_file=True),
     UploadItem(source_file_id="202010200207", filename="附件4.xls"),
     UploadItem(source_file_id="202010200208", filename="附件5.doc"),
 )
 
-# 来文元数据：multipart 普通字段，仅 source_doc_id / source_function_id 必填，
-# 其他字段缺失视为 None。
+# 来文身份是固定 multipart 字段；业务元数据统一放入 document_metadata JSON。
 #
 #   source_system       系统
 #   source_function_id  功能 id
@@ -109,11 +109,18 @@ INGEST_METADATA: dict[str, str] = {
     "source_system": "oa",
     "source_function_id": "incomingDocument",
     "source_doc_id": "37908",
-    "document_number": "上铁辆〔2020〕316号",
-    "title": "中国铁路上海局集团有限公司关于重新印发《中国铁路上海局集团有限公司路用客车检修运用管理办法》的通知",
-    "incoming_type": "集团公司文件",
-    "source_unit": "安全科",
-    "incoming_date": "2020-10-20",
+    "document_metadata": json.dumps(
+        {
+            "document_number": "上铁辆〔2020〕316号",
+            "title": (
+                "中国铁路上海局集团有限公司关于重新印发《中国铁路上海局集团有限公司路用客车检修运用管理办法》的通知"
+            ),
+            "incoming_type": "集团公司文件",
+            "source_unit": "安全科",
+            "incoming_date": "2020-10-20",
+        },
+        ensure_ascii=False,
+    ),
 }
 
 # =====================================================================
@@ -121,9 +128,7 @@ INGEST_METADATA: dict[str, str] = {
 # =====================================================================
 
 
-def validate_upload_plan(
-    items: Sequence[UploadItem], base_dir: Path
-) -> list[Path]:
+def validate_upload_plan(items: Sequence[UploadItem], base_dir: Path) -> list[Path]:
     """上传前自检：清单非空、字段非空、ID/文件名不重复、文件真实存在。
 
     Returns:
@@ -151,9 +156,7 @@ def validate_upload_plan(
 
         path = base_dir / item.filename
         if not path.is_file():
-            raise FileNotFoundError(
-                f"第 {index} 条记录对应文件不存在: {path}"
-            )
+            raise FileNotFoundError(f"第 {index} 条记录对应文件不存在: {path}")
         paths.append(path)
 
     return paths
@@ -165,7 +168,11 @@ def build_file_metas(items: Sequence[UploadItem]) -> str:
     服务端会校验数组长度必须等于 ``files`` 字段数量（``zip(strict=True)``）。
     """
     payload = [
-        {"source_file_id": item.source_file_id, "filename": item.filename}
+        {
+            "source_file_id": item.source_file_id,
+            "filename": item.filename,
+            "is_main_file": item.is_main_file,
+        }
         for item in items
     ]
     return json.dumps(payload, ensure_ascii=False)
@@ -224,6 +231,9 @@ def upload(
         last_exc: requests.RequestException | None = None
         total_attempts = max_retries + 1
         for attempt in range(1, total_attempts + 1):
+            # requests 会消费文件流；重试必须从头发送同一份内容。
+            for _, (_, file_object) in files_payload:
+                file_object.seek(0)
             logger.info(
                 "提交来文 attempt=%d/%d files=%d source_doc_id=%s",
                 attempt,
@@ -264,9 +274,7 @@ def upload(
                     )
                     response.raise_for_status()
 
-                last_exc = requests.HTTPError(
-                    f"status={response.status_code}, body={response.text}"
-                )
+                last_exc = requests.HTTPError(f"status={response.status_code}, body={response.text}")
                 logger.warning(
                     "服务端异常 status=%d body=%s，准备重试",
                     response.status_code,
@@ -299,12 +307,10 @@ def main() -> int:
     )
 
     api_base = os.environ.get("INGEST_API_BASE", DEFAULT_API_BASE)
-    token = os.environ.get("INGEST_TOKEN", DEFAULT_TOKEN)
-    if token == DEFAULT_TOKEN:
-        logger.warning(
-            "使用默认 TOKEN，请在生产环境通过 INGEST_TOKEN 环境变量覆盖，"
-            "并避免把生产令牌提交到代码仓库"
-        )
+    token = os.environ.get("INGEST_TOKEN", "").strip()
+    if not token:
+        logger.error("缺少 INGEST_TOKEN 环境变量")
+        return 2
 
     logger.info("开始提交来文 API=%s 文件数=%d", api_base, len(UPLOAD_ITEMS))
     try:

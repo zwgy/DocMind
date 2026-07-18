@@ -30,16 +30,23 @@ const results = ref<Record<string, ExtractionResult>>({})
 const showSidebar = ref(false)
 const draggingWindow = ref(false)
 const ingestingFileIds = new Set<string>()
+let extractionRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const selectedFile = computed(() => context.selectedFile)
 const currentTokenUsage = computed(() => {
   const usage = chat.agentState?.token_usage
-  return usage && typeof usage === 'object' && !Array.isArray(usage) ? (usage as Record<string, unknown>) : null
+  return usage && typeof usage === 'object' && !Array.isArray(usage)
+    ? (usage as Record<string, unknown>)
+    : null
 })
 
 function openSidebar() {
   showSidebar.value = true
-  void chat.refreshThreads(context.config.token, context.config.agentId, context.config.conversationScopeKey)
+  void chat.refreshThreads(
+    context.config.token,
+    context.config.agentId,
+    context.config.conversationScopeKey
+  )
 }
 
 function cacheExtractionResults(files: IncomingPageFile[], items: ExtractionResult[] = []) {
@@ -49,60 +56,123 @@ function cacheExtractionResults(files: IncomingPageFile[], items: ExtractionResu
       items.find((candidate) => {
         const incomingId = candidate.incomingFileId || candidate.name
         return incomingId === file.source_file_id
-      }) || items[index]
+      }) || (items.length === 1 ? items[0] : items[index])
     if (item) next[file.source_file_id] = item
   }
   results.value = next
 }
 
-async function refreshExtraction(queryFiles: IncomingPageFile[] = selectedFile.value ? [selectedFile.value] : [], syncPending = false) {
+function filesForSelectedDocuments(selectedFiles: IncomingPageFile[]) {
+  const documentKey = (file: IncomingPageFile) =>
+    file.source_function_id && file.source_doc_id
+      ? `${file.source_system || 'production'}\u0000${file.source_function_id}\u0000${file.source_doc_id}`
+      : ''
+  const selectedKeys = new Set(selectedFiles.map(documentKey).filter(Boolean))
+  const candidates = [
+    ...selectedFiles,
+    ...context.files.filter((file) => selectedKeys.has(documentKey(file)))
+  ]
+  return [...new Map(candidates.map((file) => [file.source_file_id, file])).values()]
+}
+
+async function refreshExtraction(
+  queryFiles: IncomingPageFile[] = selectedFile.value ? [selectedFile.value] : [],
+  syncPending = false
+) {
+  if (extractionRefreshTimer) {
+    clearTimeout(extractionRefreshTimer)
+    extractionRefreshTimer = null
+  }
   const file = selectedFile.value
   if (!file) {
     chat.setContextSummary({ file: null, result: null })
-    return
+    return false
   }
-  if (!queryFiles.length) return
+  if (!queryFiles.length) return false
   if (context.config.authError) {
-    chat.setContextSummary({ file, result: results.value[file.source_file_id] || null, error: context.config.authError })
-    return
+    chat.setContextSummary({
+      file,
+      result: results.value[file.source_file_id] || null,
+      error: context.config.authError
+    })
+    return false
   }
   if (!context.config.token) {
     // 父页面可能先响应附件列表、后完成换票；这里等待 token 到达，避免无凭证请求把摘要卡片打成 401。
     chat.setContextSummary({ file, result: results.value[file.source_file_id] || null })
-    return
+    return false
   }
   loading.value = true
   error.value = ''
-  chat.setContextSummary({ file, result: results.value[file.source_file_id] || null, loading: true })
+  chat.setContextSummary({
+    file,
+    result: results.value[file.source_file_id] || null,
+    loading: true
+  })
   try {
     let response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
     cacheExtractionResults(queryFiles, response.items || [])
-    const pendingFiles = syncPending
-      ? queryFiles.filter((file) => {
-          const result = results.value[file.source_file_id]
-          return result?.matchStatus === 'pending_sync' && file.source_url && !ingestingFileIds.has(file.source_file_id)
-        })
+    const pendingCandidates = syncPending
+      ? queryFiles.filter(
+          (file) => results.value[file.source_file_id]?.matchStatus === 'pending_sync'
+        )
       : []
+    const missingSourceFiles = pendingCandidates.filter((file) => !file.source_url)
+    if (missingSourceFiles.length) {
+      throw new Error(
+        `以下附件缺少下载地址，无法形成完整来文：${missingSourceFiles.map((file) => file.name).join('、')}`
+      )
+    }
+    const pendingFiles = pendingCandidates.filter(
+      (file) => !ingestingFileIds.has(file.source_file_id)
+    )
     if (pendingFiles.length) {
       pendingFiles.forEach((file) => ingestingFileIds.add(file.source_file_id))
-      await Promise.all(
-        pendingFiles.map((file) => ingestIncomingDocument(file, context.config.token).catch(() => null))
-      )
+      try {
+        await ingestIncomingDocument(pendingFiles, context.config.token)
+      } finally {
+        pendingFiles.forEach((file) => ingestingFileIds.delete(file.source_file_id))
+      }
       response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
       cacheExtractionResults(queryFiles, response.items || [])
     }
-    if (selectedFile.value?.source_file_id === file.source_file_id) chat.setContextSummary({ file, result: results.value[file.source_file_id] || null, loading: false })
+    if (selectedFile.value?.source_file_id === file.source_file_id)
+      chat.setContextSummary({
+        file,
+        result: results.value[file.source_file_id] || null,
+        loading: false
+      })
+    return true
   } catch (err) {
     error.value = err instanceof Error ? err.message : '查询失败'
-    if (selectedFile.value?.source_file_id === file.source_file_id) chat.setContextSummary({ file, result: results.value[file.source_file_id] || null, error: error.value })
+    if (selectedFile.value?.source_file_id === file.source_file_id)
+      chat.setContextSummary({
+        file,
+        result: results.value[file.source_file_id] || null,
+        error: error.value
+      })
+    return false
   } finally {
     loading.value = false
+    const currentFile = selectedFile.value
+    const currentResult = currentFile ? results.value[currentFile.source_file_id] : null
+    if (
+      currentFile &&
+      currentResult?.matchStatus === 'matched' &&
+      !['ready', 'failed'].includes(currentResult.extractionStatus)
+    ) {
+      extractionRefreshTimer = setTimeout(() => void refreshExtraction(), 2000)
+    }
   }
 }
 
 async function createChat() {
   try {
-    const thread = await chat.newConversation(context.config.token, context.config.agentId, context.config.conversationScopeKey)
+    const thread = await chat.newConversation(
+      context.config.token,
+      context.config.agentId,
+      context.config.conversationScopeKey
+    )
     showSidebar.value = false
     notifyConversationCreated({ conversationId: thread.id })
   } catch (err) {
@@ -118,13 +188,22 @@ async function selectThread(threadId: string) {
 
 async function submitInterrupt(answer: unknown) {
   try {
-    await chat.submitInterrupt(chat.currentThreadId, answer, context.config.token, context.config.agentId)
+    await chat.submitInterrupt(
+      chat.currentThreadId,
+      answer,
+      context.config.token,
+      context.config.agentId
+    )
   } catch (err) {
     chat.error = err instanceof Error ? err.message : '恢复运行失败'
   }
 }
 
-async function submitFeedback(event: { messageId: string; rating: 'like' | 'dislike'; reason: string | null }) {
+async function submitFeedback(event: {
+  messageId: string
+  rating: 'like' | 'dislike'
+  reason: string | null
+}) {
   try {
     await chat.feedback(event, context.config.token)
   } catch (err) {
@@ -145,9 +224,21 @@ async function sendChat(payload: {
   restoreUploadDraft: (retry: { files: boolean; image: boolean; message: string }) => void
 }) {
   const selectedPageFiles = payload.selectedPageFiles || []
-  if (selectedPageFiles.length) await refreshExtraction(selectedPageFiles, true)
+  if (
+    selectedPageFiles.length &&
+    !(await refreshExtraction(filesForSelectedDocuments(selectedPageFiles), true))
+  ) {
+    payload.restoreUploadDraft({
+      files: false,
+      image: false,
+      message: error.value || '来文附件尚未准备完成，请稍后重试'
+    })
+    return
+  }
   const selectedContextFile = selectedPageFiles[0] || null
-  const selectedContextResult = selectedContextFile ? results.value[selectedContextFile.source_file_id] || null : null
+  const selectedContextResult = selectedContextFile
+    ? results.value[selectedContextFile.source_file_id] || null
+    : null
   const result = await chat.send(
     {
       text: payload.text,
@@ -164,7 +255,8 @@ async function sendChat(payload: {
     context.config.conversationScopeKey
   )
   if (result && 'retryUpload' in result) payload.restoreUploadDraft(result.retryUpload)
-  else if (result) notifyMessageSent({ conversationId: result.threadId, messageId: result.messageId })
+  else if (result)
+    notifyMessageSent({ conversationId: result.threadId, messageId: result.messageId })
 }
 
 function windowDragPayload(event: PointerEvent) {
@@ -218,7 +310,12 @@ watch(
 )
 
 watch(
-  [() => context.config.token, () => context.config.agentId, () => context.config.conversationScopeKey, () => context.config.authError],
+  [
+    () => context.config.token,
+    () => context.config.agentId,
+    () => context.config.conversationScopeKey,
+    () => context.config.authError
+  ],
   () => {
     if (context.config.authError) {
       chat.error = context.config.authError
@@ -232,7 +329,11 @@ watch(
       return
     }
     if (!context.config.token) return
-    void chat.bootstrap(context.config.token, context.config.agentId, context.config.conversationScopeKey)
+    void chat.bootstrap(
+      context.config.token,
+      context.config.agentId,
+      context.config.conversationScopeKey
+    )
     void refreshExtraction()
   },
   { immediate: true }
@@ -246,6 +347,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   endWindowDrag()
+  if (extractionRefreshTimer) clearTimeout(extractionRefreshTimer)
   document.removeEventListener('visibilitychange', resumeVisibleThread)
 })
 </script>
@@ -258,10 +360,20 @@ onUnmounted(() => {
       </button>
       <h1 class="chat-title">AI智能助手</h1>
       <nav class="window-actions" aria-label="窗口控制">
-        <button v-if="context.windowState === 'normal'" type="button" title="最小化到悬浮按钮" @click="notifyMinimize">
+        <button
+          v-if="context.windowState === 'normal'"
+          type="button"
+          title="最小化到悬浮按钮"
+          @click="notifyMinimize"
+        >
           <Minus :size="16" />
         </button>
-        <button v-if="context.windowState === 'normal'" type="button" title="最大化" @click="notifyMaximize">
+        <button
+          v-if="context.windowState === 'normal'"
+          type="button"
+          title="最大化"
+          @click="notifyMaximize"
+        >
           <Maximize2 :size="15" />
         </button>
         <button v-else type="button" title="还原窗口" @click="notifyRestore">
@@ -274,7 +386,13 @@ onUnmounted(() => {
     </header>
 
     <Transition name="sidebar-fade">
-      <button v-if="showSidebar" type="button" class="sidebar-overlay" aria-label="关闭对话列表" @click="showSidebar = false"></button>
+      <button
+        v-if="showSidebar"
+        type="button"
+        class="sidebar-overlay"
+        aria-label="关闭对话列表"
+        @click="showSidebar = false"
+      ></button>
     </Transition>
     <Transition name="sidebar-slide">
       <aside v-if="showSidebar" class="conversation-drawer">
@@ -286,12 +404,36 @@ onUnmounted(() => {
           :loading-more="chat.isLoadingMoreThreads"
           @new="createChat"
           @close="showSidebar = false"
-          @refresh="chat.refreshThreads(context.config.token, context.config.agentId, context.config.conversationScopeKey)"
-          @load-more="chat.loadMoreThreads(context.config.token, context.config.agentId, context.config.conversationScopeKey)"
+          @refresh="
+            chat.refreshThreads(
+              context.config.token,
+              context.config.agentId,
+              context.config.conversationScopeKey
+            )
+          "
+          @load-more="
+            chat.loadMoreThreads(
+              context.config.token,
+              context.config.agentId,
+              context.config.conversationScopeKey
+            )
+          "
           @select="selectThread"
-          @rename="(event) => event.title && chat.renameConversation(event.threadId, event.title, context.config.token)"
+          @rename="
+            (event) =>
+              event.title &&
+              chat.renameConversation(event.threadId, event.title, context.config.token)
+          "
           @delete="(threadId) => chat.removeConversation(threadId, context.config.token)"
-          @pin="(threadId) => chat.togglePinConversation(threadId, context.config.token, context.config.agentId, context.config.conversationScopeKey)"
+          @pin="
+            (threadId) =>
+              chat.togglePinConversation(
+                threadId,
+                context.config.token,
+                context.config.agentId,
+                context.config.conversationScopeKey
+              )
+          "
         />
       </aside>
     </Transition>

@@ -12,11 +12,17 @@ import {
 } from '../src/utils/context-summary.ts'
 
 const file = { name: '来文.docx', source_file_id: 'S001' }
-const chatMessagesSource = readFileSync(new URL('../src/components/ChatMessages.vue', import.meta.url), 'utf8')
+const chatMessagesSource = readFileSync(
+  new URL('../src/components/ChatMessages.vue', import.meta.url),
+  'utf8'
+)
 
 test('context summary top area shows document metadata and fills missing values', () => {
   assert.match(chatMessagesSource, /contextSummary\.file\.name/)
-  assert.doesNotMatch(chatMessagesSource, /contextSummary\.file\.title \|\| item\.message\.contextSummary\.file\.name/)
+  assert.doesNotMatch(
+    chatMessagesSource,
+    /contextSummary\.file\.title \|\| item\.message\.contextSummary\.file\.name/
+  )
   assert.match(chatMessagesSource, /class="context-summary-meta"/)
   assert.match(chatMessagesSource, /\['incoming-type', '来文类型', file\.incoming_type \|\| '无'\]/)
   assert.match(chatMessagesSource, /\['source-unit', '发文单位', file\.source_unit \|\| '无'\]/)
@@ -42,6 +48,7 @@ test('buildContextSummaryMessage uses metadata returned by the matched incoming 
 
   assert.deepEqual(message?.contextSummary?.file, {
     ...file,
+    name: '路用客车检修运用管理办法',
     source_system: 'oa',
     document_number: '上铁辆〔2020〕316号',
     title: '路用客车检修运用管理办法',
@@ -73,7 +80,10 @@ test('buildContextSummaryMessage creates ready context card payload', () => {
   assert.equal(message?.role, 'system')
   assert.equal(message?.contextSummary?.file.name, '来文.docx')
   assert.equal(message?.contextSummary?.statusText, '已生成结构化结果')
-  assert.deepEqual(message?.contextSummary?.matchedCategories, [{ name: 'risk', evidence: '风险依据' }])
+  assert.deepEqual(message?.contextSummary?.matchedCategories, [
+    { name: 'risk', evidence: '风险依据' }
+  ])
+  assert.match(message?.content || '', /来文：来文\.docx/)
   assert.match(message?.content || '', /现场作业监护需加强/)
 })
 
@@ -105,8 +115,17 @@ test('buildContextSummaryMessage keeps backend summary when extraction items are
 test('extractionStatusText renders non-ready states', () => {
   assert.equal(extractionStatusText({ file, result: null, loading: true }), '查询中')
   assert.equal(extractionStatusText({ file, result: null, error: '查询失败' }), '查询失败')
-  assert.equal(extractionStatusText({ file, result: { matchStatus: 'pending_sync', extractionStatus: 'not_found' } }), '待同步入库')
-  assert.equal(extractionStatusText({ file, result: { matchStatus: 'matched', extractionStatus: 'failed' } }), '抽取失败')
+  assert.equal(
+    extractionStatusText({
+      file,
+      result: { matchStatus: 'pending_sync', extractionStatus: 'not_found' }
+    }),
+    '待同步入库'
+  )
+  assert.equal(
+    extractionStatusText({ file, result: { matchStatus: 'matched', extractionStatus: 'failed' } }),
+    '抽取失败'
+  )
 })
 
 test('matchedExtractionCategories renders labels from backend display metadata', () => {
@@ -154,15 +173,22 @@ test('extraction item labels use backend display metadata and hide duplicated so
   }
 
   assert.equal(extractionItemTypeText('management_requirement_item', result), '管理要求')
-  assert.deepEqual(displayExtractionDataEntries({
-    role: null,
-    department: '集团公司车辆部',
-    period_type: '长期性',
-    requirement: '制定集团公司路用客车检修运用管理办法。',
-    source_quote: '原文依据'
-  }, 'management_requirement_item', result), [
-    ['涉及部门', '集团公司车辆部'],
-    ['要求类型', '长期性'],
-    ['管理要求', '制定集团公司路用客车检修运用管理办法。']
-  ])
+  assert.deepEqual(
+    displayExtractionDataEntries(
+      {
+        role: null,
+        department: '集团公司车辆部',
+        period_type: '长期性',
+        requirement: '制定集团公司路用客车检修运用管理办法。',
+        source_quote: '原文依据'
+      },
+      'management_requirement_item',
+      result
+    ),
+    [
+      ['涉及部门', '集团公司车辆部'],
+      ['要求类型', '长期性'],
+      ['管理要求', '制定集团公司路用客车检修运用管理办法。']
+    ]
+  )
 })

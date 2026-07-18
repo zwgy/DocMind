@@ -4,13 +4,24 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+
+class AdditionalClassification(BaseModel):
+    """有独立原文证据支持的附加业务分类。"""
+
+    classification: str
+    confidence: float = Field(ge=0, le=1)
+    evidence: str = Field(min_length=1)
+
+
 class IncomingDocumentClassificationResult(BaseModel):
     """来文摘要阶段的模型输出。"""
 
-    classification: str = Field(default="通用类")
-    classification_confidence: float | None = Field(default=None, ge=0, le=1)
-    summary: str = Field(default="")
-    structured_result: dict[str, Any] = Field(default_factory=dict)
+    classification: str
+    classification_confidence: float = Field(ge=0, le=1)
+    classification_evidence: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    additional_classifications: list[AdditionalClassification] = Field(default_factory=list)
+
 
 class CategoryDecision(BaseModel):
     matched: bool = Field(default=False, description="该类别是否命中文档或片段内容")
@@ -46,12 +57,18 @@ class DocumentCategoryResult(BaseModel):
     safety_management: CategoryDecision = Field(
         default_factory=CategoryDecision,
         description="安全管理类：包含安全生产、现场作业、安全检查、平安建设等内容",
-        json_schema_extra={"label": "安全管理类", "extraction_schemas": ["risk_item", "task_item", "management_requirement_item"]},
+        json_schema_extra={
+            "label": "安全管理类",
+            "extraction_schemas": ["risk_item", "task_item", "management_requirement_item"],
+        },
     )
     risk_management: CategoryDecision = Field(
         default_factory=CategoryDecision,
         description="风险管理类：包含安全风险、网络安全风险、平安建设风险、风险防控要求等内容",
-        json_schema_extra={"label": "风险管理类", "extraction_schemas": ["risk_item", "task_item", "management_requirement_item"]},
+        json_schema_extra={
+            "label": "风险管理类",
+            "extraction_schemas": ["risk_item", "task_item", "management_requirement_item"],
+        },
     )
     staged_work: CategoryDecision = Field(
         default_factory=CategoryDecision,
@@ -61,7 +78,10 @@ class DocumentCategoryResult(BaseModel):
     long_term_requirement: CategoryDecision = Field(
         default_factory=CategoryDecision,
         description="长期性、持续性管理要求类：长期执行、周期性管理要求、持续整改要求等内容",
-        json_schema_extra={"label": "长期管理要求类", "extraction_schemas": ["task_item", "management_requirement_item"]},
+        json_schema_extra={
+            "label": "长期管理要求类",
+            "extraction_schemas": ["task_item", "management_requirement_item"],
+        },
     )
     general: CategoryDecision = Field(
         default_factory=CategoryDecision,
@@ -289,9 +309,7 @@ def document_category_label_mapping() -> dict[str, str]:
 
 def extraction_schema_display_metadata(schema_ids: list[str] | None = None) -> dict[str, Any]:
     selected_ids = [
-        schema_id
-        for schema_id in (schema_ids or list(EXTRACTION_SCHEMAS))
-        if schema_id in EXTRACTION_SCHEMAS
+        schema_id for schema_id in (schema_ids or list(EXTRACTION_SCHEMAS)) if schema_id in EXTRACTION_SCHEMAS
     ]
     schema_labels: dict[str, str] = {}
     field_labels: dict[str, dict[str, str]] = {}
@@ -326,19 +344,28 @@ def extraction_schema_ids_for_categories(categories: dict[str, bool | CategoryDe
     return selected
 
 
-def category_result_for_classification_label(label: str | None) -> DocumentCategoryResult:
+def category_result_for_classification_labels(labels: list[str] | None) -> DocumentCategoryResult:
     result = DocumentCategoryResult()
-    normalized = str(label or "").strip()
-    if not normalized:
-        return result
-    for name, field in DocumentCategoryResult.model_fields.items():
-        extra = field.json_schema_extra or {}
-        if str(extra.get("label") or "").strip() != normalized:
-            continue
-        # 摘要分类已经由同一套标签约束产生；复用它，避免结构化抽取阶段重复分类并被模型漏判短路。
-        setattr(result, name, CategoryDecision(matched=True, evidence=f"摘要阶段分类：{normalized}"))
-        return result
+    normalized = list(dict.fromkeys(str(label or "").strip() for label in (labels or []) if str(label or "").strip()))
+    matched_names: list[str] = []
+    for label in normalized:
+        for name, field in DocumentCategoryResult.model_fields.items():
+            extra = field.json_schema_extra or {}
+            if str(extra.get("label") or "").strip() == label:
+                matched_names.append(name)
+                break
+    # 通用类仅作为兜底，不能与明确业务类型同时触发抽取。
+    if any(name != "general" for name in matched_names):
+        matched_names = [name for name in matched_names if name != "general"]
+    for name in matched_names:
+        field = DocumentCategoryResult.model_fields[name]
+        label = str((field.json_schema_extra or {}).get("label") or name)
+        setattr(result, name, CategoryDecision(matched=True, evidence=f"摘要阶段分类：{label}"))
     return result
+
+
+def category_result_for_classification_label(label: str | None) -> DocumentCategoryResult:
+    return category_result_for_classification_labels([label] if label else [])
 
 
 def category_result_to_mapping(result: DocumentCategoryResult) -> dict[str, bool]:

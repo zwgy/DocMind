@@ -111,16 +111,17 @@ class Tasker:
         # 记录每个任务上次落库时的进度，用于进度节流
         self._last_persisted_progress: dict[str, float] = {}
 
-    async def start(self) -> None:
+    async def start(self) -> list[Task]:
         async with self._lock:
             if self._started:
-                return
-            await self._load_state()
+                return []
+            interrupted_tasks = await self._load_state()
             for _ in range(self.worker_count):
                 worker = asyncio.create_task(self._worker_loop(), name="tasker-worker")
                 self._workers.append(worker)
             self._started = True
             logger.info("Tasker started with {} workers", self.worker_count)
+            return interrupted_tasks
 
     async def shutdown(self) -> None:
         async with self._lock:
@@ -363,7 +364,8 @@ class Tasker:
 
     def _collect_stale_terminal_ids(self) -> list[str]:
         """从内存中剔除超出保留上限的旧终态任务，返回需要从数据库删除的 id（调用方须持锁）。"""
-        terminal = [task for task in self._tasks.values() if task.status in TERMINAL_STATUSES]
+        # Windows 时钟可能让连续任务拿到相同时间；先反转插入顺序，平局时保留新任务。
+        terminal = [task for task in reversed(self._tasks.values()) if task.status in TERMINAL_STATUSES]
         if len(terminal) <= MAX_TERMINAL_TASKS:
             return []
         terminal.sort(key=lambda item: item.created_at or "", reverse=True)
@@ -381,9 +383,10 @@ class Tasker:
         if stale_ids:
             logger.info("Pruned {} old terminal tasks", len(stale_ids))
 
-    async def _load_state(self) -> None:
+    async def _load_state(self) -> list[Task]:
         records = await self._repo.list_all()
         interrupted = 0
+        interrupted_tasks: list[Task] = []
         for record in records:
             task = Task.from_dict(record.to_dict())
             if task.status not in TERMINAL_STATUSES:
@@ -393,6 +396,7 @@ class Tasker:
                 task.updated_at = utc_isoformat()
                 await self._persist_task(task)
                 interrupted += 1
+                interrupted_tasks.append(task)
             self._tasks[task.id] = task
         if interrupted:
             logger.info("Marked {} interrupted tasks as failed", interrupted)
@@ -401,6 +405,7 @@ class Tasker:
             await self._repo.delete(task_id)
         if stale_ids:
             logger.info("Pruned {} old terminal tasks on startup", len(stale_ids))
+        return interrupted_tasks
 
     async def _persist_task(self, task: Task) -> None:
         data: dict[str, Any] = {

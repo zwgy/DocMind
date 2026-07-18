@@ -25,7 +25,11 @@
           allow-clear
           @change="reloadFirstPage"
         >
-          <a-select-option v-for="item in processingStatusOptions" :key="item.value" :value="item.value">
+          <a-select-option
+            v-for="item in processingStatusOptions"
+            :key="item.value"
+            :value="item.value"
+          >
             {{ item.label }}
           </a-select-option>
         </a-select>
@@ -36,7 +40,11 @@
           allow-clear
           @change="reloadFirstPage"
         >
-          <a-select-option v-for="item in importStatusOptions" :key="item.value" :value="item.value">
+          <a-select-option
+            v-for="item in importStatusOptions"
+            :key="item.value"
+            :value="item.value"
+          >
             {{ item.label }}
           </a-select-option>
         </a-select>
@@ -55,11 +63,13 @@
           <template v-if="column.key === 'filename'">
             <div class="file-cell">
               <FileText :size="16" />
-              <span :title="record.filename">{{ record.filename }}</span>
+              <span :title="record.title || record.sourceDocumentId">{{
+                record.title || record.sourceDocumentId
+              }}</span>
             </div>
           </template>
           <template v-else-if="column.key === 'classification'">
-            <a-tag>{{ record.classification || '未分类' }}</a-tag>
+            <a-tag>{{ record.effectiveClassification || '未分类' }}</a-tag>
           </template>
           <template v-else-if="column.key === 'status'">
             <a-tag :color="processingStatusMeta(record.status).color">
@@ -106,7 +116,7 @@
     <a-drawer
       v-model:open="detailOpen"
       width="min(920px, 92vw)"
-      :title="detail?.filename || '来文详情'"
+      :title="detail?.title || detail?.sourceDocumentId || '来文详情'"
       :destroy-on-close="true"
     >
       <a-spin :spinning="detailLoading">
@@ -114,17 +124,30 @@
           <section class="detail-section">
             <h2>基本信息</h2>
             <a-descriptions size="small" bordered :column="2">
-              <a-descriptions-item label="来源系统">{{ detail.sourceSystem || '-' }}</a-descriptions-item>
-              <a-descriptions-item label="功能 ID">{{ detail.sourceFunctionId || '-' }}</a-descriptions-item>
-              <a-descriptions-item label="外部单号">{{ detail.sourceDocumentId || '-' }}</a-descriptions-item>
-              <a-descriptions-item label="文件大小">{{ formatSize(detail.fileSize) }}</a-descriptions-item>
-              <a-descriptions-item label="上传时间">{{ formatDate(detail.createdAt) }}</a-descriptions-item>
-              <a-descriptions-item label="内容 Hash" :span="2">{{ detail.contentHash || '-' }}</a-descriptions-item>
-              <a-descriptions-item label="原文存储" :span="2">
-                <span class="path-text">{{ detail.originalFileUrl || '-' }}</span>
-              </a-descriptions-item>
-              <a-descriptions-item label="Markdown 存储" :span="2">
-                <span class="path-text">{{ detail.markdownFileUrl || '-' }}</span>
+              <a-descriptions-item label="来源系统">{{
+                detail.sourceSystem || '-'
+              }}</a-descriptions-item>
+              <a-descriptions-item label="功能 ID">{{
+                detail.sourceFunctionId || '-'
+              }}</a-descriptions-item>
+              <a-descriptions-item label="外部单号">{{
+                detail.sourceDocumentId || '-'
+              }}</a-descriptions-item>
+              <a-descriptions-item label="附件数量">{{
+                detail.files?.length || 0
+              }}</a-descriptions-item>
+              <a-descriptions-item label="上传时间">{{
+                formatDate(detail.createdAt)
+              }}</a-descriptions-item>
+              <a-descriptions-item label="来文标题" :span="2">{{
+                detail.title || '-'
+              }}</a-descriptions-item>
+              <a-descriptions-item
+                v-for="[key, value] in documentMetadataEntries"
+                :key="key"
+                :label="documentMetadataLabel(key)"
+              >
+                {{ displayValue(value) }}
               </a-descriptions-item>
             </a-descriptions>
           </section>
@@ -135,10 +158,35 @@
               <a-tag :color="processingStatusMeta(detail.status).color">
                 {{ processingStatusMeta(detail.status).label }}
               </a-tag>
-              <a-tag>{{ detail.classification || '未分类' }}</a-tag>
+              <a-tag>{{ detail.effectiveClassification || '未分类' }}</a-tag>
+              <a-tag v-if="detail.confirmedClassification" color="blue">已人工纠偏</a-tag>
+              <a-tag v-if="detail.reviewStatus === 'confirmed'" color="green">已确认</a-tag>
               <span v-if="detail.classificationConfidence !== null" class="muted">
                 置信度 {{ percent(detail.classificationConfidence) }}
               </span>
+              <a-select
+                v-model:value="selectedClassification"
+                size="small"
+                class="classification-select"
+                :options="classificationOptions"
+              />
+              <a-button
+                size="small"
+                :loading="correcting"
+                :disabled="
+                  detail.status !== 'ready' ||
+                  ['importing', 'partial', 'indexed'].includes(detail.knowledgeImportStatus)
+                "
+                @click="correctClassification"
+                >纠偏并重跑</a-button
+              >
+              <a-button
+                size="small"
+                type="primary"
+                :disabled="detail.status !== 'ready' || detail.reviewStatus === 'confirmed'"
+                @click="confirmDocument"
+                >确认来文</a-button
+              >
             </div>
             <a-alert
               v-if="detail.processingError"
@@ -146,6 +194,16 @@
               show-icon
               :message="detail.processingError"
             />
+            <div v-if="detail.additionalClassifications?.length" class="additional-classifications">
+              <p
+                v-for="item in detail.additionalClassifications"
+                :key="item.classification"
+                class="summary-text"
+              >
+                <a-tag color="purple">附加分类：{{ item.classification }}</a-tag>
+                置信度 {{ percent(item.confidence) }}；原文依据：{{ item.evidence }}
+              </p>
+            </div>
             <a-typography-paragraph class="summary-text">
               {{ detail.summary || '暂无摘要' }}
             </a-typography-paragraph>
@@ -154,10 +212,15 @@
           <section class="detail-section">
             <h2>结构化结果</h2>
             <div v-if="businessExtractionGroups.length" class="business-extraction-list">
-              <section v-for="group in businessExtractionGroups" :key="group.itemType" class="business-extraction-group">
+              <section
+                v-for="group in businessExtractionGroups"
+                :key="group.itemType"
+                class="business-extraction-group"
+              >
                 <h3>{{ group.label }}（{{ group.items.length }}）</h3>
+                <p class="summary-text">{{ group.summary }}</p>
                 <article
-                  v-for="(item, index) in group.items"
+                  v-for="(item, index) in group.items.slice(0, 1)"
                   :key="item.item_id || `${group.itemType}-${index}`"
                   class="business-extraction-item"
                 >
@@ -169,17 +232,85 @@
                     </template>
                   </dl>
                   <blockquote v-if="item.source_quote">{{ item.source_quote }}</blockquote>
+                  <div
+                    v-for="evidence in item.evidence || []"
+                    :key="`${evidence.file_name}-${evidence.source_location}`"
+                    class="muted"
+                  >
+                    依据：{{ evidence.file_name }} {{ evidence.source_location || '' }}
+                    <blockquote v-if="evidence.quote">{{ evidence.quote }}</blockquote>
+                  </div>
                 </article>
+                <a-collapse v-if="group.items.length > 1" ghost>
+                  <a-collapse-panel
+                    :key="group.itemType"
+                    :header="`查看其余 ${group.items.length - 1} 条`"
+                  >
+                    <article
+                      v-for="(item, index) in group.items.slice(1)"
+                      :key="item.item_id || `${group.itemType}-more-${index}`"
+                      class="business-extraction-item"
+                    >
+                      <strong>{{ group.label }} {{ index + 2 }}</strong>
+                      <dl v-if="displayExtractionDataEntries(item).length">
+                        <template
+                          v-for="[key, value] in displayExtractionDataEntries(item)"
+                          :key="key"
+                        >
+                          <dt>{{ key }}</dt>
+                          <dd>{{ displayValue(value) }}</dd>
+                        </template>
+                      </dl>
+                      <blockquote v-if="item.source_quote">{{ item.source_quote }}</blockquote>
+                      <div
+                        v-for="evidence in item.evidence || []"
+                        :key="`${evidence.file_name}-${evidence.source_location}`"
+                        class="muted"
+                      >
+                        依据：{{ evidence.file_name }} {{ evidence.source_location || '' }}
+                        <blockquote v-if="evidence.quote">{{ evidence.quote }}</blockquote>
+                      </div>
+                    </article>
+                  </a-collapse-panel>
+                </a-collapse>
               </section>
             </div>
             <div v-else class="empty-content compact">
               <p>正式结构化结果暂未生成</p>
             </div>
-            <a-collapse v-if="hasSummaryStructuredResult" ghost class="summary-result-collapse">
-              <a-collapse-panel key="summary" header="摘要阶段关键事实">
-                <pre class="json-box">{{ stringifyJson(detail.structuredResult) }}</pre>
-              </a-collapse-panel>
-            </a-collapse>
+          </section>
+
+          <section class="detail-section">
+            <h2>附件（{{ detail.files?.length || 0 }}）</h2>
+            <a-list size="small" :data-source="detail.files || []">
+              <template #renderItem="{ item }">
+                <a-list-item>
+                  <a-space>
+                    <FileText :size="15" />
+                    <span>{{ item.filename }}</span>
+                    <a-tag v-if="item.isMainFile">主文件</a-tag>
+                    <a-tag :color="processingStatusMeta(item.status).color">{{
+                      processingStatusMeta(item.status).label
+                    }}</a-tag>
+                    <a-tag :color="importStatusMeta(item.knowledgeImportStatus).color">
+                      {{ importStatusMeta(item.knowledgeImportStatus).label }}
+                    </a-tag>
+                  </a-space>
+                  <template #actions>
+                    <a-button type="link" size="small" @click="selectAttachment(item)"
+                      >查看原文</a-button
+                    >
+                    <a-button
+                      v-if="canOpenKnowledgePreview(item)"
+                      type="link"
+                      size="small"
+                      @click="openKnowledgePreview(item)"
+                      >知识库预览</a-button
+                    >
+                  </template>
+                </a-list-item>
+              </template>
+            </a-list>
           </section>
 
           <section class="detail-section">
@@ -207,7 +338,7 @@
                   <AgentFilePreview
                     v-else-if="sourcePreviewHasContent"
                     :file="sourcePreview"
-                    :file-path="detail.filename || ''"
+                    :file-path="selectedAttachment?.filename || ''"
                     :show-header="false"
                     :show-download="false"
                     :full-height="true"
@@ -224,7 +355,13 @@
                     Markdown
                   </span>
                 </template>
-                <pre class="markdown-box">{{ detail.markdownPreview || '暂无可预览内容' }}</pre>
+                <a-alert
+                  v-if="attachmentMarkdownTruncated"
+                  type="warning"
+                  show-icon
+                  message="内容较长，当前仅展示前 40000 个字符"
+                />
+                <pre class="markdown-box">{{ attachmentMarkdown || '暂无可预览内容' }}</pre>
               </a-tab-pane>
             </a-tabs>
             <div v-else class="empty-content">
@@ -238,8 +375,9 @@
               <a-tag :color="importStatusMeta(detail.knowledgeImportStatus).color">
                 {{ importStatusMeta(detail.knowledgeImportStatus).label }}
               </a-tag>
-              <span>{{ databaseName(detail.linkedKbId) || detail.linkedKbId || '未选择知识库' }}</span>
-              <span v-if="detail.linkedFileId" class="muted">文件 ID：{{ detail.linkedFileId }}</span>
+              <span>{{
+                databaseName(detail.linkedKbId) || detail.linkedKbId || '未选择知识库'
+              }}</span>
             </div>
             <a-alert
               v-if="detail.knowledgeImportError"
@@ -256,11 +394,11 @@
               存入知识库
             </a-button>
             <a-button
-              v-if="canOpenKnowledgePreview(detail)"
+              v-if="canOpenKnowledgePreview(selectedAttachment)"
               class="detail-action-button"
-              @click="openKnowledgePreview(detail)"
+              @click="openKnowledgePreview(selectedAttachment)"
             >
-              预览文件
+              预览当前附件
             </a-button>
             <a-button
               v-if="canRetry(detail)"
@@ -291,6 +429,7 @@
             show-search
             option-filter-prop="label"
             :options="databaseOptions"
+            :disabled="importTarget?.knowledgeImportStatus === 'partial'"
           />
         </a-form-item>
         <a-form-item label="目标文件夹">
@@ -304,6 +443,22 @@
             tree-node-filter-prop="title"
             placeholder="默认根目录"
           />
+        </a-form-item>
+        <a-form-item label="导入附件" required>
+          <a-checkbox-group v-model:value="importForm.sourceFileIds" class="import-file-list">
+            <a-checkbox
+              v-for="file in importTarget?.files || []"
+              :key="file.sourceFileId"
+              :value="file.sourceFileId"
+              :disabled="file.knowledgeImportStatus === 'indexed'"
+            >
+              {{ file.filename }}{{ file.isMainFile ? '（主文件）' : '' }}
+              <a-tag :color="importStatusMeta(file.knowledgeImportStatus).color">
+                {{ importStatusMeta(file.knowledgeImportStatus).label }}
+              </a-tag>
+            </a-checkbox>
+          </a-checkbox-group>
+          <div class="muted">默认选择尚未入库的全部附件，可取消不需要进入知识库的附件。</div>
         </a-form-item>
         <a-form-item label="OCR 引擎">
           <a-select v-model:value="importForm.ocrEngine" :options="ocrOptions" />
@@ -344,6 +499,12 @@ const loading = ref(false)
 const detailOpen = ref(false)
 const detailLoading = ref(false)
 const detail = ref(null)
+const selectedAttachment = ref(null)
+const attachmentMarkdown = ref('')
+const attachmentMarkdownTruncated = ref(false)
+const selectedClassification = ref()
+const classificationOptions = ref([])
+const correcting = ref(false)
 const databases = ref([])
 const importOpen = ref(false)
 const importing = ref(false)
@@ -377,6 +538,7 @@ const pager = reactive({ page: 1, pageSize: 20 })
 const importForm = reactive({
   kbId: undefined,
   parentId: null,
+  sourceFileIds: [],
   ocrEngine: 'disable',
   chunkParams: {
     chunk_preset_id: '',
@@ -385,13 +547,18 @@ const importForm = reactive({
 })
 
 const columns = [
-  { title: '文件名', key: 'filename', dataIndex: 'filename', width: 260, fixed: 'left' },
+  { title: '来文', key: 'filename', dataIndex: 'title', width: 260, fixed: 'left' },
   { title: '来源系统', key: 'sourceSystem', dataIndex: 'sourceSystem', width: 120 },
   { title: '功能 ID', key: 'sourceFunctionId', dataIndex: 'sourceFunctionId', width: 140 },
   { title: '外部单号', key: 'sourceDocumentId', dataIndex: 'sourceDocumentId', width: 180 },
   { title: '分类', key: 'classification', dataIndex: 'classification', width: 140 },
   { title: '处理状态', key: 'status', dataIndex: 'status', width: 120 },
-  { title: '知识库状态', key: 'knowledgeImportStatus', dataIndex: 'knowledgeImportStatus', width: 120 },
+  {
+    title: '知识库状态',
+    key: 'knowledgeImportStatus',
+    dataIndex: 'knowledgeImportStatus',
+    width: 120
+  },
   { title: '目标知识库', key: 'linkedKbId', dataIndex: 'linkedKbId', width: 160 },
   { title: '上传时间', key: 'createdAt', dataIndex: 'createdAt', width: 170 },
   { title: '操作', key: 'actions', width: 200, fixed: 'right' }
@@ -400,7 +567,7 @@ const columns = [
 const processingStatusOptions = [
   { value: 'uploaded', label: '待处理' },
   { value: 'parsing', label: '解析中' },
-  { value: 'summarizing', label: '摘要中' },
+  { value: 'extracting', label: '抽取中' },
   { value: 'ready', label: '已完成' },
   { value: 'failed', label: '失败' }
 ]
@@ -408,6 +575,7 @@ const processingStatusOptions = [
 const importStatusOptions = [
   { value: 'none', label: '未入库' },
   { value: 'importing', label: '入库中' },
+  { value: 'partial', label: '部分入库' },
   { value: 'indexed', label: '已入库' },
   { value: 'failed', label: '入库失败' }
 ]
@@ -444,7 +612,7 @@ function processingStatusMeta(status) {
     {
       uploaded: { label: '待处理', color: 'default' },
       parsing: { label: '解析中', color: 'processing' },
-      summarizing: { label: '摘要中', color: 'processing' },
+      extracting: { label: '抽取中', color: 'processing' },
       ready: { label: '已完成', color: 'success' },
       failed: { label: '失败', color: 'error' }
     }[status] || { label: status || '未知', color: 'default' }
@@ -456,6 +624,7 @@ function importStatusMeta(status) {
     {
       none: { label: '未入库', color: 'default' },
       importing: { label: '入库中', color: 'processing' },
+      partial: { label: '部分入库', color: 'warning' },
       indexed: { label: '已入库', color: 'success' },
       failed: { label: '入库失败', color: 'error' }
     }[status || 'none'] || { label: status || '未知', color: 'default' }
@@ -471,24 +640,14 @@ function formatDate(value) {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-'
 }
 
-function formatSize(value) {
-  const size = Number(value || 0)
-  if (!size) return '-'
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
-  return `${(size / 1024 / 1024).toFixed(1)} MB`
-}
-
 function percent(value) {
   return `${Math.round(Number(value || 0) * 100)}%`
 }
 
-function stringifyJson(value) {
-  return JSON.stringify(value || {}, null, 2)
-}
-
 function canImport(record) {
-  return record?.status === 'ready' && !['importing', 'indexed'].includes(record?.knowledgeImportStatus)
+  return (
+    record?.status === 'ready' && !['importing', 'indexed'].includes(record?.knowledgeImportStatus)
+  )
 }
 
 function canRetry(record) {
@@ -497,45 +656,53 @@ function canRetry(record) {
 }
 
 function canOpenKnowledgePreview(record) {
-  return Boolean(record?.linkedKbId && record?.linkedFileId)
+  return Boolean(detail.value?.linkedKbId && record?.linkedFileId)
 }
 
-const hasOriginalFile = computed(() => Boolean(detail.value?.originalFileUrl))
-const hasMarkdownFile = computed(() => Boolean(detail.value?.markdownFileUrl))
+const hasOriginalFile = computed(() => Boolean(selectedAttachment.value?.hasOriginalFile))
+const hasMarkdownFile = computed(() => Boolean(selectedAttachment.value?.hasMarkdownFile))
 const sourcePreviewHasContent = computed(
   () => Boolean(sourcePreview.content) || Boolean(sourcePreview.previewUrl || sourcePreview.url)
 )
-const businessExtractionItems = computed(() => detail.value?.businessExtraction?.items || [])
 const businessExtractionGroups = computed(() => {
-  const groups = new Map()
-  businessExtractionItems.value.forEach((item) => {
-    const itemType = item?.item_type || 'unknown'
-    if (!groups.has(itemType)) {
-      groups.set(itemType, {
-        itemType,
-        label: extractionItemTypeText(itemType),
-        items: []
-      })
-    }
-    groups.get(itemType).items.push(item)
-  })
-  const schemaIds = detail.value?.businessExtraction?.schemaIds || []
-  return [
-    ...schemaIds.filter((itemType) => groups.has(itemType)).map((itemType) => groups.get(itemType)),
-    ...Array.from(groups.values()).filter((group) => !schemaIds.includes(group.itemType))
-  ]
+  return (detail.value?.businessExtraction?.groups || []).map((group) => ({
+    itemType: group.itemType,
+    label: extractionItemTypeText(group.itemType),
+    summary: group.summary,
+    items: group.details || []
+  }))
 })
-const hasSummaryStructuredResult = computed(() => Object.keys(detail.value?.structuredResult || {}).length > 0)
+const documentMetadataEntries = computed(() =>
+  Object.entries(detail.value?.documentMetadata || {}).filter(
+    ([key, value]) => key !== 'title' && value !== null && value !== undefined && value !== ''
+  )
+)
+
+function documentMetadataLabel(key) {
+  return (
+    {
+      document_number: '来文编号',
+      incoming_type: '来文类型',
+      source_unit: '发文单位',
+      incoming_date: '来文日期'
+    }[key] || key
+  )
+}
 
 function extractionItemTypeText(itemType) {
-  return detail.value?.businessExtraction?.display?.schemaLabels?.[itemType] || itemType || '结构化对象'
+  return (
+    detail.value?.businessExtraction?.display?.schemaLabels?.[itemType] || itemType || '结构化对象'
+  )
 }
 
 function displayExtractionDataEntries(item) {
-  const data = item?.confirmed_data || item?.data || {}
+  const data = item?.data || {}
   const labels = detail.value?.businessExtraction?.display?.fieldLabels?.[item?.item_type] || {}
   return Object.entries(data)
-    .filter(([key, value]) => key !== 'source_quote' && value !== null && value !== undefined && value !== '')
+    .filter(
+      ([key, value]) =>
+        key !== 'source_quote' && value !== null && value !== undefined && value !== ''
+    )
     .map(([key, value]) => [labels[key] || key, value])
 }
 
@@ -570,23 +737,50 @@ function resetSourcePreview() {
   sourcePreview.message = ''
 }
 
-function pickDefaultPreviewTab(record) {
-  if (!record?.originalFileUrl) return 'markdown'
+async function loadMarkdownPreview() {
+  if (!detail.value?.incomingId || !selectedAttachment.value?.hasMarkdownFile) {
+    attachmentMarkdown.value = ''
+    attachmentMarkdownTruncated.value = false
+    return
+  }
+  try {
+    const response = await incomingDocumentApi.getMarkdown(
+      detail.value.incomingId,
+      selectedAttachment.value.sourceFileId
+    )
+    attachmentMarkdown.value = response.content || ''
+    attachmentMarkdownTruncated.value = Boolean(response.truncated)
+  } catch (error) {
+    attachmentMarkdown.value = error?.message || '加载 Markdown 失败'
+    attachmentMarkdownTruncated.value = false
+  }
+}
+
+function pickDefaultPreviewTab() {
+  if (!selectedAttachment.value?.hasOriginalFile) return 'markdown'
   // 文件类型不可预览（zip、exe 等）时直接落到 Markdown，避免空白原文 tab
-  return getPreviewTypeByPath(record.filename || '') === 'unsupported' ? 'markdown' : 'source'
+  return getPreviewTypeByPath(selectedAttachment.value.filename || '') === 'unsupported'
+    ? 'markdown'
+    : 'source'
 }
 
 async function loadSourcePreview() {
-  if (!detail.value?.originalFileUrl) return
+  if (!detail.value?.incomingId || !selectedAttachment.value?.hasOriginalFile) return
   const requestId = ++sourcePreviewSeq.value
   sourcePreview.loading = true
   sourcePreview.message = ''
   try {
-    const response = await incomingDocumentApi.getOriginalFile(detail.value.incomingId)
+    const response = await incomingDocumentApi.getOriginalFile(
+      detail.value.incomingId,
+      selectedAttachment.value.sourceFileId
+    )
     if (requestId !== sourcePreviewSeq.value) {
       // 用户已经切换详情或关闭抽屉，丢弃延迟到达的响应
       if (response?.blob) {
-        response.blob().then((blob) => window.URL.revokeObjectURL(window.URL.createObjectURL(blob))).catch(() => {})
+        response
+          .blob()
+          .then((blob) => window.URL.revokeObjectURL(window.URL.createObjectURL(blob)))
+          .catch(() => {})
       }
       return
     }
@@ -607,6 +801,16 @@ async function loadSourcePreview() {
       sourcePreview.loading = false
     }
   }
+}
+
+function selectAttachment(file) {
+  selectedAttachment.value = file
+  resetSourcePreview()
+  attachmentMarkdown.value = ''
+  attachmentMarkdownTruncated.value = false
+  previewTab.value = 'source'
+  loadSourcePreview()
+  loadMarkdownPreview()
 }
 
 function buildFolderTree(items) {
@@ -701,6 +905,10 @@ async function openDetail(record) {
   detailLoading.value = true
   try {
     detail.value = await incomingDocumentApi.detail(record.incomingId)
+    selectedAttachment.value =
+      detail.value.files?.find((file) => file.isMainFile) || detail.value.files?.[0] || null
+    loadMarkdownPreview()
+    selectedClassification.value = detail.value.effectiveClassification
   } catch (error) {
     message.error(error.message || '加载详情失败')
   } finally {
@@ -708,10 +916,57 @@ async function openDetail(record) {
   }
 }
 
-function openImport(record) {
-  importTarget.value = record
-  importForm.kbId = record.linkedKbId || databaseOptions.value[0]?.value
+async function correctClassification() {
+  if (!detail.value?.incomingId || !selectedClassification.value) return
+  correcting.value = true
+  try {
+    await incomingDocumentApi.correctClassification(
+      detail.value.incomingId,
+      selectedClassification.value
+    )
+    detail.value = await incomingDocumentApi.detail(detail.value.incomingId)
+    message.success('已按纠偏分类重新抽取')
+    await loadDocuments()
+  } catch (error) {
+    message.error(error.message || '分类纠偏失败')
+  } finally {
+    correcting.value = false
+  }
+}
+
+async function confirmDocument() {
+  if (!detail.value?.incomingId) return
+  try {
+    await incomingDocumentApi.confirm(detail.value.incomingId)
+    detail.value = await incomingDocumentApi.detail(detail.value.incomingId)
+    message.success('来文已确认')
+  } catch (error) {
+    message.error(error.message || '确认失败')
+  }
+}
+
+async function loadClassificationOptions() {
+  const result = await incomingDocumentApi.options()
+  classificationOptions.value = Object.values(result.classifications || {}).map((label) => ({
+    value: label,
+    label
+  }))
+}
+
+async function openImport(record) {
+  try {
+    importTarget.value = Array.isArray(record.files)
+      ? record
+      : await incomingDocumentApi.detail(record.incomingId)
+  } catch (error) {
+    message.error(error.message || '加载来文附件失败')
+    return
+  }
+  importForm.kbId = importTarget.value.linkedKbId || databaseOptions.value[0]?.value
   importForm.parentId = null
+  importForm.sourceFileIds = (importTarget.value.files || [])
+    .filter((file) => file.knowledgeImportStatus !== 'indexed')
+    .map((file) => file.sourceFileId)
   importForm.ocrEngine = 'disable'
   importForm.chunkParams.chunk_preset_id = ''
   importForm.chunkParams.chunk_parser_config = {}
@@ -737,7 +992,7 @@ async function retryProcessing(record) {
 }
 
 function openKnowledgePreview(record) {
-  knowledgePreview.kbId = record.linkedKbId
+  knowledgePreview.kbId = detail.value.linkedKbId
   knowledgePreview.fileId = record.linkedFileId
   knowledgePreviewOpen.value = true
 }
@@ -745,6 +1000,10 @@ function openKnowledgePreview(record) {
 async function submitImport() {
   if (!importTarget.value?.incomingId || !importForm.kbId) {
     message.warning('请选择目标知识库')
+    return
+  }
+  if (!importForm.sourceFileIds.length) {
+    message.warning('请至少选择一个待入库附件')
     return
   }
 
@@ -758,6 +1017,7 @@ async function submitImport() {
     await incomingDocumentApi.importToKnowledge(importTarget.value.incomingId, {
       kbId: importForm.kbId,
       parentId: importForm.parentId || null,
+      sourceFileIds: importForm.sourceFileIds,
       params
     })
     message.success('已提交入库任务')
@@ -774,7 +1034,7 @@ async function submitImport() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadDatabases(), loadDocuments()])
+  await Promise.all([loadDatabases(), loadDocuments(), loadClassificationOptions()])
 })
 
 watch(
@@ -793,11 +1053,14 @@ watch(
   (incomingId) => {
     if (!incomingId) {
       resetSourcePreview()
+      selectedAttachment.value = null
+      attachmentMarkdown.value = ''
+      attachmentMarkdownTruncated.value = false
       previewTab.value = 'source'
       return
     }
     resetSourcePreview()
-    previewTab.value = pickDefaultPreviewTab(detail.value)
+    previewTab.value = pickDefaultPreviewTab()
     if (previewTab.value === 'source') {
       loadSourcePreview()
     }
@@ -979,6 +1242,13 @@ onBeforeUnmount(() => {
 .detail-action-button {
   margin-top: 12px;
   margin-right: 8px;
+}
+
+.import-file-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .preview-tabs {

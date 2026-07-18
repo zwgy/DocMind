@@ -7,6 +7,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from yuxi.services.task_service import tasker
 from yuxi.agents.mcp.service import ensure_builtin_mcp_servers_in_db
 from yuxi.models.providers.service import ensure_builtin_model_providers_in_db
+from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
 from yuxi.services.run_queue_service import close_queue_clients, get_redis_client
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.knowledge import knowledge_base
@@ -103,7 +104,52 @@ async def lifespan(app: FastAPI):
     await checkpointer.setup()
     print("LangGraph Checkpoint tables verified/created!")
 
-    await tasker.start()
+    interrupted_tasks = await tasker.start()
+    try:
+        incoming_repo = IncomingDocumentRepository()
+        for task in interrupted_tasks:
+            incoming_id = task.payload.get("incoming_id")
+            if task.type == "knowledge_ingest":
+                marker = (task.payload.get("params") or {}).get("_incoming_document") or {}
+                incoming_id = marker.get("incoming_id")
+                document = await incoming_repo.get_by_incoming_id(incoming_id) if incoming_id else None
+                if document is None or document.knowledge_import_status != "importing":
+                    continue
+                interrupted_file_ids = set(marker.get("incoming_file_ids") or [])
+                files = await incoming_repo.list_files(incoming_id)
+                for file in files:
+                    if file.incoming_file_id in interrupted_file_ids and file.knowledge_import_status == "importing":
+                        await incoming_repo.update_file(
+                            file.incoming_file_id,
+                            {"knowledge_import_status": "failed", "knowledge_import_error": task.message},
+                        )
+                has_indexed = any(file.knowledge_import_status == "indexed" for file in files)
+                await incoming_repo.update_document(
+                    incoming_id,
+                    {
+                        "knowledge_import_status": "partial" if has_indexed else "failed",
+                        "knowledge_import_error": task.message,
+                        "linked_kb_id": document.linked_kb_id if has_indexed else None,
+                    },
+                )
+                continue
+            if task.type != "incoming_document_process" or not incoming_id:
+                continue
+            document = await incoming_repo.get_by_incoming_id(incoming_id)
+            if document is None or document.status not in {"uploaded", "parsing", "extracting"}:
+                continue
+            await incoming_repo.update_document(
+                incoming_id,
+                {"status": "failed", "processing_error": task.message},
+            )
+            for file in await incoming_repo.list_files(incoming_id):
+                if file.status == "parsing":
+                    await incoming_repo.update_file(
+                        file.incoming_file_id,
+                        {"status": "failed", "processing_error": task.message},
+                    )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Failed to reconcile interrupted incoming-document tasks: {exc}")
     logger.info(f"""
 
 ░██     ░██                       ░██

@@ -16,6 +16,8 @@ export type IncomingPageFile = {
   source_function_id?: string
   source_doc_id?: string
   source_system?: string
+  document_metadata?: Record<string, unknown>
+  is_main_file?: boolean
   document_number?: string
   title?: string
   incoming_type?: string
@@ -46,11 +48,32 @@ export type ExtractionCategory = {
   evidence?: string | null
 }
 
+export type AdditionalClassification = {
+  classification: string
+  confidence: number
+  evidence: string
+}
+
 export type ExtractionItem = {
   item_id: string
   item_type: string
   data?: Record<string, unknown>
   source_quote?: string | null
+  evidence?: Array<{
+    source_file_id?: string
+    incoming_file_id?: string
+    file_name?: string
+    quote?: string | null
+    source_location?: string | null
+  }>
+}
+
+export type IncomingDocumentFileResult = {
+  sourceFileId: string
+  filename: string
+  isMainFile?: boolean
+  status?: string
+  hasParsedMarkdown?: boolean
 }
 
 export type ExtractionDisplay = {
@@ -61,6 +84,7 @@ export type ExtractionDisplay = {
 }
 
 export type ExtractionResult = {
+  incomingId?: string
   incomingFileId?: string
   name?: string
   source_system?: string
@@ -79,15 +103,19 @@ export type ExtractionResult = {
   hasParsedMarkdown?: boolean
   taskId?: string | null
   classification?: string | null
+  aiClassificationEvidence?: string | null
+  additionalClassifications?: AdditionalClassification[]
   categories?: Record<string, ExtractionCategory>
   items?: ExtractionItem[]
   schemaIds?: string[]
   summary?: string | null
   structuredResult?: Record<string, unknown> | null
+  files?: IncomingDocumentFileResult[]
   display?: ExtractionDisplay
 }
 
 export type IframeContextFile = IncomingPageFile & {
+  incomingId?: string
   matchStatus?: string
   extractionStatus?: string
   fileStatus?: string
@@ -97,10 +125,14 @@ export type IframeContextFile = IncomingPageFile & {
   runId?: string | null
   summary?: string
   summaryTruncated?: boolean
+  classification?: string | null
+  aiClassificationEvidence?: string | null
   categories?: Record<string, ExtractionCategory>
+  additionalClassifications?: AdditionalClassification[]
   items?: ExtractionItem[]
   schemaIds?: string[]
   display?: ExtractionDisplay
+  documentFiles?: IncomingDocumentFileResult[]
 }
 
 export type IframeContextPayload = {

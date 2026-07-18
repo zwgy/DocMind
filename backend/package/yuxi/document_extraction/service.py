@@ -16,6 +16,7 @@ from yuxi.document_extraction.schemas import (
     DocumentCategoryResult,
     IncomingDocumentClassificationResult,
     category_result_for_classification_label,
+    category_result_for_classification_labels,
     category_result_to_mapping,
     extraction_schema_ids_for_categories,
     get_extraction_schema,
@@ -23,6 +24,7 @@ from yuxi.document_extraction.schemas import (
 from yuxi.knowledge.chunking.ragflow_like.dispatcher import chunk_markdown
 from yuxi.knowledge.chunking.ragflow_like.nlp import count_tokens
 from yuxi.knowledge.utils import is_minio_url, parse_minio_url
+from yuxi.models.providers.cache import model_cache
 from yuxi.repositories.document_business_extraction_repository import DocumentBusinessExtractionRepository
 from yuxi.storage.minio import get_minio_client
 from yuxi.utils import hashstr, logger
@@ -30,7 +32,21 @@ from yuxi.utils.datetime_utils import utc_isoformat
 
 MarkdownReader = Callable[[str], str | Awaitable[str]]
 SHORT_MARKDOWN_EXTRACTION_TOKEN_LIMIT = 12_000
-INCOMING_CLASSIFICATION_MARKDOWN_LIMIT = 20_000
+DEFAULT_MODEL_CONTEXT_TOKEN_LIMIT = 32_768
+MODEL_INPUT_TOKEN_RATIO = 0.7
+DOCUMENT_CHUNK_OVERLAP_PERCENT = 10
+
+
+def document_input_token_limit(model_spec: str) -> int:
+    """给正文保留 70% 上下文，剩余空间用于提示词和结构化输出。"""
+    info = model_cache.get_model_info(model_spec)
+    try:
+        context_limit = int(info.context_length) if info and info.context_length else DEFAULT_MODEL_CONTEXT_TOKEN_LIMIT
+    except (TypeError, ValueError):
+        context_limit = DEFAULT_MODEL_CONTEXT_TOKEN_LIMIT
+    if context_limit <= 0:
+        context_limit = DEFAULT_MODEL_CONTEXT_TOKEN_LIMIT
+    return max(1_024, int(context_limit * MODEL_INPUT_TOKEN_RATIO))
 
 
 @dataclass(slots=True)
@@ -50,7 +66,7 @@ class ExtractedBusinessItem:
     item_type: str
     data: dict[str, Any]
     source_quote: str
-    status: str = "draft"
+    evidence: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -87,6 +103,7 @@ class BusinessExtractionService:
         chunks: list[dict[str, Any]],
         model_spec: str | None = None,
         category_result: DocumentCategoryResult,
+        merge_items: bool = True,
     ) -> BusinessExtractionDraft:
         llm = self._resolve_llm(model_spec)
         normalized_chunks = [
@@ -147,7 +164,7 @@ class BusinessExtractionService:
             file_id=file_id,
             categories=category_result,
             schema_ids=schema_ids,
-            items=_merge_obvious_duplicate_items(items),
+            items=_merge_obvious_duplicate_items(items) if merge_items else items,
             errors=errors,
         )
 
@@ -188,6 +205,7 @@ class BusinessExtractionService:
             document_key=document_key,
             filename=filename or document_key,
             processing_params=processing_params,
+            token_limit=document_input_token_limit(model_spec),
         )
         run_id = f"ber_{hashstr(f'{document_scope}:{document_key}:{markdown_file}:{utc_isoformat()}', 16)}"
         run_metadata = {
@@ -241,8 +259,7 @@ class BusinessExtractionService:
                         "chunk_id": None,
                         "item_type": item.item_type,
                         "data": item.data,
-                        "source_quote": item.source_quote,
-                        "status": item.status,
+                        "evidence": item.evidence,
                     }
                     for idx, item in enumerate(draft.items)
                 ],
@@ -263,6 +280,159 @@ class BusinessExtractionService:
                 run_id,
                 {"status": "failed", "error": str(exc), "run_metadata": run_metadata | {"errors": [str(exc)]}},
             )
+            raise
+
+    async def run_incoming_document_extraction(
+        self,
+        *,
+        incoming_id: str,
+        files: list[dict[str, str]],
+        classifications: list[str],
+        model_spec: str,
+        operator_id: str | None = None,
+    ) -> dict[str, Any]:
+        """以一份来文为单位抽取，附件只作为原文证据来源。"""
+        category_result = category_result_for_classification_labels(classifications)
+        if not any(category_result_to_mapping(category_result).values()):
+            raise ValueError("A valid classification is required for business extraction")
+        run_id = f"ber_{hashstr(f'incoming:{incoming_id}:{utc_isoformat()}', 16)}"
+        source_files = {
+            str(file["incoming_file_id"]): {
+                "source_file_id": str(file.get("source_file_id") or file["incoming_file_id"]),
+                "file_name": str(file["filename"]),
+            }
+            for file in files
+        }
+        await self.extraction_repo.create_run(
+            {
+                "run_id": run_id,
+                "document_scope": "incoming",
+                "incoming_id": incoming_id,
+                "status": "running",
+                "model_spec": model_spec,
+                "created_by": operator_id,
+                "run_metadata": {"source_files": source_files, "model_spec": model_spec},
+            }
+        )
+        try:
+            all_items: list[ExtractedBusinessItem] = []
+            errors: list[dict[str, Any]] = []
+            input_limit = document_input_token_limit(model_spec)
+            document_markdown = _incoming_markdown_bundle(files)
+            if count_tokens(document_markdown) <= input_limit:
+                draft = await self.extract_chunks(
+                    document_scope="incoming",
+                    incoming_id=incoming_id,
+                    model_spec=model_spec,
+                    chunks=[{"chunk_id": None, "content": document_markdown, "chunk_index": 0}],
+                    category_result=category_result,
+                )
+                for item in draft.items:
+                    matched_files = _source_files_for_quote(item.source_quote, files)
+                    if not matched_files:
+                        errors.append(
+                            {"chunk_id": None, "schema_id": item.item_type, "error": "source quote not found"}
+                        )
+                        continue
+                    item.evidence = [
+                        {
+                            "source_file_id": str(file.get("source_file_id") or file["incoming_file_id"]),
+                            "incoming_file_id": str(file["incoming_file_id"]),
+                            "file_name": str(file["filename"]),
+                            "quote": item.source_quote,
+                            "source_location": "全文",
+                        }
+                        for file in matched_files
+                    ]
+                all_items.extend(draft.items)
+                errors.extend(draft.errors)
+            else:
+                for file in files:
+                    incoming_file_id = str(file["incoming_file_id"])
+                    segments = self._markdown_segments(
+                        markdown=str(file["markdown"]),
+                        document_key=f"{incoming_id}:{incoming_file_id}",
+                        filename=str(file["filename"]),
+                        processing_params={},
+                        token_limit=input_limit,
+                    )
+                    draft = await self.extract_chunks(
+                        document_scope="incoming",
+                        incoming_id=incoming_id,
+                        file_id=incoming_file_id,
+                        model_spec=model_spec,
+                        chunks=segments,
+                        category_result=category_result,
+                        merge_items=False,
+                    )
+                    source = source_files[incoming_file_id]
+                    segment_text = {
+                        str(segment.get("chunk_id")) if segment.get("chunk_id") is not None else None: str(
+                            segment.get("content") or ""
+                        )
+                        for segment in segments
+                    }
+                    for item in draft.items:
+                        if item.source_quote not in segment_text.get(item.chunk_id, ""):
+                            errors.append(
+                                {
+                                    "chunk_id": item.chunk_id,
+                                    "schema_id": item.item_type,
+                                    "error": "source quote not found",
+                                }
+                            )
+                            continue
+                        item.evidence = [
+                            {
+                                "source_file_id": source["source_file_id"],
+                                "incoming_file_id": incoming_file_id,
+                                "file_name": source["file_name"],
+                                "quote": item.source_quote,
+                                "source_location": "全文" if len(segments) == 1 else f"分块 {item.chunk_id}",
+                            }
+                        ]
+                    all_items.extend(draft.items)
+                    errors.extend(draft.errors)
+
+            if errors:
+                # 来文级结果必须覆盖全部附件和分块，不能把部分成功伪装成完整结果。
+                failed = ", ".join(
+                    f"{item.get('schema_id')}@{item.get('chunk_id') or 'document'}" for item in errors[:5]
+                )
+                raise RuntimeError(f"Business extraction incomplete: {failed}")
+
+            merged = _merge_obvious_duplicate_items(all_items)
+            await self.extraction_repo.replace_result(
+                run_id=run_id,
+                result_data={
+                    "document_scope": "incoming",
+                    "incoming_id": incoming_id,
+                    "categories": category_result.model_dump(),
+                    "schema_ids": extraction_schema_ids_for_categories(category_result_to_mapping(category_result)),
+                    "status": "draft",
+                    "created_by": operator_id,
+                },
+                items=[
+                    {
+                        "item_id": f"bei_{hashstr(f'{run_id}:{index}:{item.item_type}', 16)}",
+                        "document_scope": item.document_scope,
+                        "incoming_id": item.incoming_id,
+                        "kb_id": item.kb_id,
+                        "file_id": item.file_id,
+                        "chunk_id": None,
+                        "item_type": item.item_type,
+                        "data": item.data,
+                        "evidence": item.evidence,
+                    }
+                    for index, item in enumerate(merged)
+                ],
+            )
+            await self.extraction_repo.update_run(
+                run_id, {"status": "success", "run_metadata": {"source_files": source_files, "errors": errors}}
+            )
+            return {"run_id": run_id, "item_count": len(merged), "errors": errors}
+        except Exception as exc:
+            await self.extraction_repo.update_run(run_id, {"status": "failed", "error": str(exc)})
             raise
 
     async def link_knowledge_file(self, *, incoming_id: str, kb_id: str, file_id: str) -> None:
@@ -286,15 +456,23 @@ class BusinessExtractionService:
         document_key: str,
         filename: str,
         processing_params: dict[str, Any],
+        token_limit: int | None = None,
     ) -> list[dict[str, Any]]:
         text = markdown.strip()
         if not text:
             return []
-        if count_tokens(text) <= SHORT_MARKDOWN_EXTRACTION_TOKEN_LIMIT:
+        token_limit = token_limit or SHORT_MARKDOWN_EXTRACTION_TOKEN_LIMIT
+        if count_tokens(text) <= token_limit:
             return [{"chunk_id": None, "content": text, "chunk_index": 0}]
-        chunks = chunk_markdown(text, document_key, filename, processing_params)
+        params = dict(processing_params)
+        parser_config = dict(params.get("chunk_parser_config") or {})
+        # 通用解析器允许块略超目标值，因此目标取输入预算的 2/3，确保最终块仍能放入模型。
+        parser_config.setdefault("chunk_token_num", max(512, int(token_limit / 1.5)))
+        parser_config.setdefault("overlapped_percent", DOCUMENT_CHUNK_OVERLAP_PERCENT)
+        params["chunk_parser_config"] = parser_config
+        chunks = chunk_markdown(text, document_key, filename, params)
         return [
-            {"chunk_id": None, "content": chunk["content"], "chunk_index": chunk["chunk_index"]}
+            {"chunk_id": chunk["chunk_id"], "content": chunk["content"], "chunk_index": chunk["chunk_index"]}
             for chunk in chunks
         ]
 
@@ -359,48 +537,73 @@ async def classify_incoming_document(
         filename=filename,
         markdown=markdown,
         metadata=metadata,
-        markdown_limit=INCOMING_CLASSIFICATION_MARKDOWN_LIMIT,
     )
     data = await ModelJsonLLM(model_spec).complete_json(prompt, IncomingDocumentClassificationResult)
     return IncomingDocumentClassificationResult.model_validate(data).model_dump()
 
 
+def _incoming_markdown_bundle(files: list[dict[str, str]]) -> str:
+    return "\n\n".join(f"## 文件：{file['filename']}\n\n{file['markdown']}" for file in files)
+
+
+def _source_files_for_quote(quote: str, files: list[dict[str, str]]) -> list[dict[str, str]]:
+    source_quote = quote.strip()
+    return [file for file in files if source_quote and source_quote in str(file.get("markdown") or "")]
+
+
+ITEM_IDENTITY_FIELDS = {
+    "risk_item": ("risk_name",),
+    "task_item": ("task_name",),
+    "assessment_item": ("target",),
+    "reward_punishment_item": ("target", "action_type"),
+    "management_requirement_item": ("requirement",),
+    "general_item": ("content",),
+}
+
+
 def _merge_obvious_duplicate_items(items: list[ExtractedBusinessItem]) -> list[ExtractedBusinessItem]:
     merged: list[ExtractedBusinessItem] = []
-    index_by_key: dict[tuple[str, tuple[tuple[str, str], ...]], int] = {}
     for item in items:
-        key = _item_merge_key(item)
-        if key is None:
+        identity_fields = ITEM_IDENTITY_FIELDS.get(item.item_type, ())
+        identity = tuple(_normalize_merge_value(item.data.get(name)) for name in identity_fields)
+        target = None
+        if identity_fields and all(identity):
+            # ponytail: 结果条目通常只有几十条；若实测达到千级再改为按身份字段建索引。
+            for existing in merged:
+                if existing.item_type != item.item_type:
+                    continue
+                existing_identity = tuple(_normalize_merge_value(existing.data.get(name)) for name in identity_fields)
+                if existing_identity != identity:
+                    continue
+                conflicts = any(
+                    left and right and left != right
+                    for name in set(existing.data) | set(item.data)
+                    if name != "source_quote"
+                    for left, right in [
+                        (
+                            _normalize_merge_value(existing.data.get(name)),
+                            _normalize_merge_value(item.data.get(name)),
+                        )
+                    ]
+                )
+                if not conflicts:
+                    target = existing
+                    break
+        if target is None:
             merged.append(item)
             continue
-        existing_index = index_by_key.get(key)
-        if existing_index is None:
-            index_by_key[key] = len(merged)
-            merged.append(item)
-            continue
-        target = merged[existing_index]
-        # 业务字段完全一致时才合并；原文依据允许来自不同分块并应全部保留。
+        for name, value in item.data.items():
+            if name != "source_quote" and not _normalize_merge_value(target.data.get(name)):
+                target.data[name] = value
         quotes = [quote for quote in (target.source_quote, item.source_quote) if quote]
         target.source_quote = "\n".join(dict.fromkeys(quotes))
         target.data["source_quote"] = target.source_quote
+        target.evidence = [*target.evidence, *item.evidence]
     return merged
-
-
-def _item_merge_key(item: ExtractedBusinessItem) -> tuple[str, tuple[tuple[str, str], ...]] | None:
-    # source_quote 是证据而非业务身份；其余字段任一不同都表示不能确认是同一事项。
-    values = tuple(
-        sorted(
-            (name, _normalize_merge_value(value))
-            for name, value in item.data.items()
-            if name != "source_quote"
-        )
-    )
-    if not values:
-        return None
-    return item.item_type, values
 
 
 def _normalize_merge_value(value: Any) -> str:
     if value is None:
         return ""
-    return " ".join(str(value).strip().lower().split())
+    normalized = " ".join(str(value).strip().lower().split())
+    return "" if normalized == "未明确" else normalized

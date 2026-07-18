@@ -3,11 +3,12 @@ from __future__ import annotations
 import pytest
 
 from yuxi.services import iframe_context_service as svc
+from yuxi.agents.backends.sandbox import paths as sandbox_paths
 
 
 @pytest.mark.asyncio
 async def test_render_iframe_context_inlines_short_page_and_kb_pointer(tmp_path, monkeypatch):
-    monkeypatch.setattr(svc.app_config, "save_dir", str(tmp_path))
+    monkeypatch.setattr(sandbox_paths.conf, "save_dir", str(tmp_path))
 
     prompt = await svc.render_iframe_context_prompt(
         thread_id="thread-1",
@@ -36,7 +37,7 @@ async def test_render_iframe_context_inlines_short_page_and_kb_pointer(tmp_path,
 
 @pytest.mark.asyncio
 async def test_render_iframe_context_writes_long_page_to_thread_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(svc.app_config, "save_dir", str(tmp_path))
+    monkeypatch.setattr(sandbox_paths.conf, "save_dir", str(tmp_path))
     monkeypatch.setattr(svc, "IFRAME_PAGE_INLINE_CHARS", 20)
     monkeypatch.setattr(svc, "IFRAME_PAGE_PREVIEW_CHARS", 10)
 
@@ -54,7 +55,7 @@ async def test_render_iframe_context_writes_long_page_to_thread_file(tmp_path, m
 
 @pytest.mark.asyncio
 async def test_render_iframe_context_marks_unready_files_without_tool_path(tmp_path, monkeypatch):
-    monkeypatch.setattr(svc.app_config, "save_dir", str(tmp_path))
+    monkeypatch.setattr(sandbox_paths.conf, "save_dir", str(tmp_path))
 
     prompt = await svc.render_iframe_context_prompt(
         thread_id="thread-1",
@@ -77,7 +78,7 @@ async def test_render_iframe_context_marks_unready_files_without_tool_path(tmp_p
 
 @pytest.mark.asyncio
 async def test_render_iframe_context_keeps_business_items_until_total_limit(tmp_path, monkeypatch):
-    monkeypatch.setattr(svc.app_config, "save_dir", str(tmp_path))
+    monkeypatch.setattr(sandbox_paths.conf, "save_dir", str(tmp_path))
     monkeypatch.setattr(svc, "IFRAME_CONTEXT_TOTAL_CHARS", 4000)
 
     prompt = await svc.render_iframe_context_prompt(
@@ -111,15 +112,7 @@ async def test_render_iframe_context_keeps_business_items_until_total_limit(tmp_
 
 
 @pytest.mark.asyncio
-async def test_render_iframe_context_writes_incoming_markdown_to_thread_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(svc.app_config, "save_dir", str(tmp_path))
-
-    async def fake_read_incoming_markdown(incoming_id):
-        assert incoming_id == "inc_1"
-        return "# 完整来文\n\n客户要求复核 Global Finance 的资质。"
-
-    monkeypatch.setattr(svc, "_read_incoming_markdown", fake_read_incoming_markdown)
-
+async def test_render_iframe_context_keeps_incoming_summary_evidence_and_attachment_list():
     prompt = await svc.render_iframe_context_prompt(
         thread_id="thread-1",
         uid="user-1",
@@ -133,11 +126,39 @@ async def test_render_iframe_context_writes_incoming_markdown_to_thread_file(tmp
                     "extractionStatus": "ready",
                     "hasMarkdown": True,
                     "summary": "客户审查摘要",
+                    "additionalClassifications": [
+                        {
+                            "classification": "风险管理类",
+                            "confidence": 0.91,
+                            "evidence": "需复核 Global Finance 的资质。",
+                        }
+                    ],
+                    "documentFiles": [
+                        {
+                            "sourceFileId": "main",
+                            "filename": "client-review.pdf",
+                            "isMainFile": True,
+                            "status": "parsed",
+                        },
+                        {
+                            "sourceFileId": "attachment",
+                            "filename": "资质附件.xlsx",
+                            "isMainFile": False,
+                            "status": "parsed",
+                        },
+                    ],
                     "items": [
                         {
                             "item_type": "risk_item",
                             "data": {"risk_name": "资质待核验", "department": "审查部"},
                             "source_quote": "需复核 Global Finance 的资质。",
+                            "evidence": [
+                                {
+                                    "file_name": "资质附件.xlsx",
+                                    "source_location": "分块 2",
+                                    "quote": "需复核 Global Finance 的资质。",
+                                }
+                            ],
                         }
                     ],
                 }
@@ -145,12 +166,15 @@ async def test_render_iframe_context_writes_incoming_markdown_to_thread_file(tmp
         },
     )
 
-    host_path = tmp_path / "threads" / "thread-1" / "user-data" / "uploads" / "iframe-context" / "incoming" / "inc_1.md"
-    assert host_path.read_text(encoding="utf-8") == "# 完整来文\n\n客户要求复核 Global Finance 的资质。"
     assert "客户审查摘要" in prompt
+    assert "有证据支持的附加分类" in prompt
+    assert "风险管理类（置信度 0.91）" in prompt
     assert "结构化信息" in prompt
     assert "risk_item" in prompt
     assert "资质待核验" in prompt
     assert "Global Finance" in prompt
-    assert "/home/gem/user-data/uploads/iframe-context/incoming/inc_1.md" in prompt
-    assert "read_file" in prompt
+    assert "client-review.pdf（主文件" in prompt
+    assert "资质附件.xlsx（附件" in prompt
+    assert "当前未提供未入库来文的全文读取能力" in prompt
+    assert "Phase 1" not in prompt
+    assert "read_file" not in prompt
