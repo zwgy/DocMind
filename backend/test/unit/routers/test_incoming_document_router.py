@@ -128,12 +128,15 @@ async def test_markdown_preview_reports_truncation(monkeypatch):
         async def list_files(self, _incoming_id):
             return [file]
 
-    class FakeMinio:
-        async def adownload_file(self, _bucket, _object_name):
-            return "完整内容".encode() * 10
+    async def fake_download_text(_url):
+        return "完整内容" * 10
 
     monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", FakeRepo)
-    monkeypatch.setattr(incoming_document_router, "get_minio_client", lambda: FakeMinio())
+    monkeypatch.setattr(
+        incoming_document_router.IncomingDocumentMarkdownService,
+        "download_text",
+        staticmethod(fake_download_text),
+    )
     monkeypatch.setattr(incoming_document_router, "INCOMING_MARKDOWN_PREVIEW_CHARS", 8)
 
     result = await incoming_document_router.get_incoming_document_markdown(

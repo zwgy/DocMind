@@ -30,6 +30,7 @@ from yuxi.services.incoming_document_ingest_service import (
     IncomingDocumentIngestService,
     IncomingKnowledgeImportConflict,
 )
+from yuxi.services.incoming_document_markdown_service import IncomingDocumentMarkdownService
 from yuxi.services.incoming_document_service import IncomingDocumentService, IncomingPageFile
 from yuxi.storage.minio import get_minio_client
 from yuxi.storage.postgres.models_business import User
@@ -319,8 +320,7 @@ async def get_incoming_document_markdown(
     file = next((item for item in files if item.source_file_id == source_file_id), None)
     if file is None or not file.markdown_file_url:
         raise HTTPException(status_code=404, detail="附件 Markdown 尚未生成")
-    bucket_name, object_name = parse_minio_url(file.markdown_file_url)
-    content = (await get_minio_client().adownload_file(bucket_name, object_name)).decode("utf-8", errors="replace")
+    content = await IncomingDocumentMarkdownService.download_text(file.markdown_file_url)
     return {
         "content": content[:INCOMING_MARKDOWN_PREVIEW_CHARS],
         "truncated": len(content) > INCOMING_MARKDOWN_PREVIEW_CHARS,

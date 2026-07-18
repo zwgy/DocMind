@@ -295,6 +295,18 @@ def test_knowledge_base_builtin_skill_spec():
     assert (knowledge_base["source_dir"] / "SKILL.md").exists()
 
 
+def test_incoming_document_builtin_skill_spec():
+    specs = {spec["slug"]: spec for spec in svc.list_builtin_skill_specs()}
+
+    incoming_document = specs["incoming-document"]
+    assert incoming_document["tool_dependencies"] == [
+        "search_incoming_documents",
+        "read_incoming_document",
+        "get_incoming_document_statistics",
+    ]
+    assert (incoming_document["source_dir"] / "SKILL.md").exists()
+
+
 def test_mysql_reporter_builtin_skill_spec_replaces_reporter_and_deep_reporter():
     specs = {spec["slug"]: spec for spec in svc.list_builtin_skill_specs()}
 

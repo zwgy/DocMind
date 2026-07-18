@@ -47,6 +47,17 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
         ),
     ),
     BuiltinSkillSpec(
+        slug="incoming-document",
+        source_dir=_SKILLS_ROOT / "incoming-document",
+        description="查询、读取和统计已接入系统的来文，并在必要时按附件核验原文。",
+        version="2026.07.18",
+        tool_dependencies=(
+            "search_incoming_documents",
+            "read_incoming_document",
+            "get_incoming_document_statistics",
+        ),
+    ),
+    BuiltinSkillSpec(
         slug="mysql-reporter",
         source_dir=_SKILLS_ROOT / "mysql-reporter",
         description="生成 MySQL 查询报表并生成可视化图表。",

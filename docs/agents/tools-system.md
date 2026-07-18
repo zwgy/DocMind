@@ -18,7 +18,7 @@ def example_tool(text: str) -> str:
 ```
 
 装饰器参数：
-- **category**: 工具分类，用于分组（`buildin`、`mysql`、`debug`）
+- **category**: 工具分类，用于分组（如 `buildin`、`knowledge`、`incoming_document`、`debug`）
 - **tags**: 标签列表，用于前端展示
 - **display_name**: 显示名称（给人看的名字）
 - **icon**: 图标名称（可选）
@@ -73,13 +73,25 @@ kb_tools = get_common_kb_tools()
 | `find_kb_document` | 在已知文件内按关键词或正则定位内容 |
 | `open_kb_document` | 按 `file_id` 分段打开知识库文档（默认窗口 1800 行） |
 
+### 来文工具 (incoming_document)
+
+来文工具不属于 Agent 基础 `buildin` 工具，由内置 `incoming-document` Skill 的 `tool_dependencies` 按需加载。管理员在 Agent 中配置该 Skill 后，模型读取对应 `SKILL.md` 激活能力，三个工具才对模型可见。
+
+| 工具 | 说明 |
+|------|------|
+| `search_incoming_documents` | 按日期、分类、条目类型、标题、文号或附件名分页查找来文 |
+| `read_incoming_document` | 读取来文级结论、附件和正式结构化结果，按需将指定附件 Markdown 写入当前会话 sandbox |
+| `get_incoming_document_statistics` | 按分类、条目类型和月份统计来文文档数及结构化 detail 数 |
+
+条目类型筛选同时接受内部 ID 和 Schema 当前中文名称；需要原文时，先由 `read_incoming_document` 返回虚拟 `markdown_path`，再使用沙箱 `read_file` 分段读取。
+
 ## 工具组装
 
 工具组装在 Graph 创建阶段完成。内置 Agent 会先调用 `prepare_agent_runtime_context` 过滤当前用户可用资源，再调用 `resolve_configured_runtime_tools(context)` 加载已配置工具：
 
 1. **基础工具**：从 `context.tools` 中按名称筛选
 2. **MCP 工具**：根据 `context.mcps` 加载 MCP 服务器工具
-3. **Skill 依赖工具**：由 `SkillsMiddleware` 在 Skill 激活后按需追加，包括 `knowledge-base` 绑定的知识库工具
+3. **Skill 依赖工具**：由 `SkillsMiddleware` 在 Skill 激活后按需追加，包括 `knowledge-base` 绑定的知识库工具和 `incoming-document` 绑定的来文工具
 
 ```python
 from yuxi.agents.context import prepare_agent_runtime_context

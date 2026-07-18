@@ -143,6 +143,7 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
     kb_id = _clean_text(file_info.get("kbId") or file_info.get("linkedKbId"))
     file_id = _clean_text(file_info.get("fileId") or file_info.get("linkedFileId"))
     incoming_id = _clean_text(file_info.get("incomingId"))
+    selected_source_file_id = _clean_text(file_info.get("source_file_id") or file_info.get("incomingFileId"))
     has_parsed = bool(file_info.get("hasParsedMarkdown") or file_info.get("hasMarkdown"))
     lines = [f"- {name}"]
 
@@ -183,8 +184,8 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
             filename = _clean_text(document_file.get("filename")) or "未命名附件"
             role = "主文件" if document_file.get("isMainFile") else "附件"
             status = _clean_text(document_file.get("status")) or "未知"
-            source_file_id = _clean_text(document_file.get("sourceFileId"))
-            lines.append(f"    - {filename}（{role}，{status}，source_file_id={source_file_id}）")
+            listed_source_file_id = _clean_text(document_file.get("sourceFileId"))
+            lines.append(f"    - {filename}（{role}，{status}，source_file_id={listed_source_file_id}）")
 
     if not summary:
         if match_status == "multiple":
@@ -198,19 +199,31 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
         else:
             lines.append(f"  状态：{extraction_status or match_status or '未知'}")
 
-    # 已入库文件可以按需读取全文；未入库来文当前只向小助手提供摘要和证据。
-    if kb_id and file_id and (summary or has_parsed):
+    # Skill 激活规则在来文区域统一说明；附件这里只提供定位参数，避免重复提示挤占上下文。
+    if incoming_id and selected_source_file_id and has_parsed:
+        lines.append(
+            "  原文定位参数："
+            f"incoming_id={json.dumps(incoming_id, ensure_ascii=False)}，"
+            f"source_file_id={json.dumps(selected_source_file_id, ensure_ascii=False)}。"
+        )
+    elif kb_id and file_id and (summary or has_parsed):
         lines.append(f'  全文读取：open_kb_document(kb_id="{kb_id}", file_id="{file_id}")')
-    elif incoming_id and has_parsed:
-        lines.append("  原文：当前未提供未入库来文的全文读取能力；摘要和证据不足时应明确说明，不能推测原文内容。")
     return "\n".join(lines)
 
 
 async def _render_files(thread_id: str, uid: str, files: list[Any]) -> str:
-    file_prompts = [await _render_file(thread_id, uid, item) for item in files if isinstance(item, dict)]
+    file_items = [item for item in files if isinstance(item, dict)]
+    file_prompts = [await _render_file(thread_id, uid, item) for item in file_items]
     if not file_prompts:
         return ""
-    return "【当前来文】\n" + "\n".join(file_prompts)
+    lines = ["【当前来文】"]
+    if any(_clean_text(item.get("incomingId")) for item in file_items):
+        lines.append(
+            "来文处理能力：需要查询、统计或核验附件原文时，使用可用 Skills 列表中的 "
+            "incoming-document 技能；先使用 `read_file` 读取该 Skill 的 SKILL.md 激活能力，再按技能说明调用工具。"
+        )
+    lines.extend(file_prompts)
+    return "\n".join(lines)
 
 
 async def render_iframe_context_prompt(thread_id: str, uid: str, iframe_context: dict[str, Any] | None) -> str:
@@ -219,7 +232,8 @@ async def render_iframe_context_prompt(thread_id: str, uid: str, iframe_context:
 
     sections = [
         "### iframe 页面与附件上下文",
-        "用户问题可能与当前嵌入页和选中附件有关。优先依据下列摘要回答；摘要不足时按给定工具读取全文。不要编造尚未解析完成的附件内容。",
+        "用户问题可能与当前嵌入页和选中附件有关。优先依据下列摘要回答；"
+        "需要更多信息时按【当前来文】中的来文处理能力说明操作。不要编造尚未解析完成的附件内容。",
     ]
     page = iframe_context.get("page")
     if isinstance(page, dict):
