@@ -46,9 +46,10 @@ def test_render_preview_payload_truncates_long_markdown():
     assert len(payload["content"]) == MAX_TEXT_PREVIEW_CHARS
 
 
-def test_office_pdf_preview_scope_only_includes_docx_and_pptx():
+def test_office_pdf_preview_scope_includes_supported_legacy_and_modern_office_files():
+    assert is_office_pdf_preview_file("demo.doc") is True
     assert is_office_pdf_preview_file("demo.docx") is True
+    assert is_office_pdf_preview_file("demo.xls") is True
+    assert is_office_pdf_preview_file("demo.xlsx") is True
+    assert is_office_pdf_preview_file("demo.ppt") is True
     assert is_office_pdf_preview_file("demo.pptx") is True
-    assert is_office_pdf_preview_file("demo.xlsx") is False
-    assert is_office_pdf_preview_file("demo.doc") is False
-    assert is_office_pdf_preview_file("demo.ppt") is False

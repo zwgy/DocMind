@@ -108,11 +108,11 @@ async def test_render_iframe_context_keeps_business_items_until_total_limit(tmp_
 
     assert "requirement-0" in prompt
     assert "requirement-7" in prompt
-    assert "source quote 7" in prompt
+    assert "source quote 7" not in prompt
 
 
 @pytest.mark.asyncio
-async def test_render_iframe_context_keeps_incoming_summary_evidence_and_attachment_list():
+async def test_render_iframe_context_keeps_source_file_id_without_injecting_evidence_text():
     prompt = await svc.render_iframe_context_prompt(
         thread_id="thread-1",
         uid="user-1",
@@ -154,10 +154,15 @@ async def test_render_iframe_context_keeps_incoming_summary_evidence_and_attachm
                     "items": [
                         {
                             "item_type": "risk_item",
-                            "data": {"risk_name": "资质待核验", "department": "审查部"},
+                            "data": {
+                                "risk_name": "资质待核验",
+                                "department": "审查部",
+                                "source_quote": "需复核 Global Finance 的资质。",
+                            },
                             "source_quote": "需复核 Global Finance 的资质。",
                             "evidence": [
                                 {
+                                    "source_file_id": "attachment",
                                     "file_name": "资质附件.xlsx",
                                     "source_location": "分块 2",
                                     "quote": "需复核 Global Finance 的资质。",
@@ -172,12 +177,13 @@ async def test_render_iframe_context_keeps_incoming_summary_evidence_and_attachm
 
     assert "客户审查摘要" in prompt
     assert "主分类：考评类" in prompt
-    assert "有证据支持的附加分类" in prompt
+    assert "附加分类" in prompt
     assert "风险管理类（置信度 0.91）" in prompt
     assert "结构化信息" in prompt
     assert "risk_item" in prompt
     assert "资质待核验" in prompt
-    assert "Global Finance" in prompt
+    assert "Global Finance" not in prompt
+    assert "原文定位：附件名=资质附件.xlsx，位置=分块 2，source_file_id=attachment" in prompt
     assert "client-review.pdf（主文件" in prompt
     assert "资质附件.xlsx（附件" in prompt
     assert "可用 Skills 列表中的 incoming-document 技能" in prompt

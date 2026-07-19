@@ -56,12 +56,67 @@
         :data-source="documents"
         :loading="loading"
         :pagination="pagination"
+        :expanded-row-keys="expandedRowKeys"
+        :show-expand-column="false"
         :scroll="{ x: 1160 }"
         @change="handleTableChange"
       >
+        <template #expandedRowRender="{ record }">
+          <a-spin :spinning="isAttachmentListLoading(record.incomingId)">
+            <a-list
+              v-if="expandedAttachmentFiles(record.incomingId).length"
+              class="expanded-attachment-list"
+              size="small"
+              :data-source="expandedAttachmentFiles(record.incomingId)"
+            >
+              <template #renderItem="{ item }">
+                <a-list-item>
+                  <a-space>
+                    <FileText :size="15" />
+                    <span>{{ item.filename }}</span>
+                    <a-tag v-if="item.isMainFile">主文件</a-tag>
+                    <a-tag :color="processingStatusMeta(item.status).color">
+                      {{ processingStatusMeta(item.status).label }}
+                    </a-tag>
+                    <a-tag :color="importStatusMeta(item.knowledgeImportStatus).color">
+                      {{ importStatusMeta(item.knowledgeImportStatus).label }}
+                    </a-tag>
+                  </a-space>
+                  <template #actions>
+                    <a-button
+                      type="link"
+                      size="small"
+                      @click="openDetail(record, item.sourceFileId)"
+                    >
+                      查看
+                    </a-button>
+                  </template>
+                </a-list-item>
+              </template>
+            </a-list>
+            <div
+              v-else-if="!isAttachmentListLoading(record.incomingId)"
+              class="empty-content compact"
+            >
+              <p>暂无附件</p>
+            </div>
+          </a-spin>
+        </template>
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'filename'">
-            <div class="file-cell">
+            <div
+              class="file-cell attachment-toggle"
+              role="button"
+              tabindex="0"
+              :aria-label="`展开${record.title || record.sourceDocumentId}的附件`"
+              @click="toggleAttachmentList(record)"
+              @keydown.enter.prevent="toggleAttachmentList(record)"
+              @keydown.space.prevent="toggleAttachmentList(record)"
+            >
+              <ChevronRight
+                :size="16"
+                :class="{ 'is-expanded': isAttachmentListExpanded(record.incomingId) }"
+              />
               <FileText :size="16" />
               <span :title="record.title || record.sourceDocumentId">{{
                 record.title || record.sourceDocumentId
@@ -105,7 +160,7 @@
                 :disabled="!canImport(record)"
                 @click="openImport(record)"
               >
-                存入知识库
+                批量入库
               </a-button>
             </div>
           </template>
@@ -239,13 +294,12 @@
                         <dd>{{ displayValue(value) }}</dd>
                       </template>
                     </dl>
-                    <blockquote v-if="item.source_quote">{{ item.source_quote }}</blockquote>
                     <div
                       v-for="evidence in item.evidence || []"
                       :key="`${evidence.file_name}-${evidence.source_location}`"
                       class="muted"
                     >
-                      依据：{{ evidence.file_name }} {{ evidence.source_location || '' }}
+                      原文依据：{{ evidence.file_name }} {{ evidence.source_location || '' }}
                       <blockquote v-if="evidence.quote">{{ evidence.quote }}</blockquote>
                     </div>
                   </article>
@@ -368,7 +422,7 @@
               class="detail-action-button"
               @click="openImport(detail)"
             >
-              存入知识库
+              批量入库
             </a-button>
             <a-button
               v-if="canOpenKnowledgePreview(selectedAttachment)"
@@ -392,7 +446,7 @@
 
     <a-modal
       v-model:open="importOpen"
-      title="存入知识库"
+      title="批量入库"
       width="720px"
       :confirm-loading="importing"
       :destroy-on-close="true"
@@ -421,21 +475,32 @@
             placeholder="默认根目录"
           />
         </a-form-item>
-        <a-form-item label="导入附件" required>
+        <a-form-item label="选择要入库的附件" required>
           <a-checkbox-group v-model:value="importForm.sourceFileIds" class="import-file-list">
-            <a-checkbox
+            <div
               v-for="file in importTarget?.files || []"
               :key="file.sourceFileId"
-              :value="file.sourceFileId"
-              :disabled="file.knowledgeImportStatus === 'indexed'"
+              class="import-file-item"
             >
-              {{ file.filename }}{{ file.isMainFile ? '（主文件）' : '' }}
-              <a-tag :color="importStatusMeta(file.knowledgeImportStatus).color">
-                {{ importStatusMeta(file.knowledgeImportStatus).label }}
-              </a-tag>
-            </a-checkbox>
+              <a-button type="link" size="small" @click.stop="openImportAttachmentPreview(file)">
+                预览
+              </a-button>
+              <a-checkbox
+                :value="file.sourceFileId"
+                :disabled="file.knowledgeImportStatus === 'indexed'"
+              >
+                {{ file.filename }}{{ file.isMainFile ? '（主文件）' : '' }}
+                <a-tag :color="importStatusMeta(file.knowledgeImportStatus).color">
+                  {{ importStatusMeta(file.knowledgeImportStatus).label }}
+                </a-tag>
+              </a-checkbox>
+            </div>
           </a-checkbox-group>
-          <div class="muted">默认选择尚未入库的全部附件，可取消不需要进入知识库的附件。</div>
+          <div class="muted">
+            已选择
+            {{ importForm.sourceFileIds.length }}
+            个附件；默认选择尚未入库的全部附件，可取消不需要进入知识库的附件。
+          </div>
         </a-form-item>
         <a-form-item label="OCR 引擎">
           <a-select v-model:value="importForm.ocrEngine" :options="ocrOptions" />
@@ -446,6 +511,27 @@
           :database-preset-id="selectedDatabasePresetId"
         />
       </a-form>
+    </a-modal>
+
+    <a-modal
+      v-model:open="importPreviewOpen"
+      :title="`预览附件：${importPreviewFile?.filename || ''}`"
+      width="900px"
+      :footer="null"
+      :destroy-on-close="true"
+      @after-close="resetImportPreview"
+    >
+      <a-spin :spinning="importPreview.loading" tip="正在加载原文...">
+        <AgentFilePreview
+          v-if="importPreviewFile && !importPreview.loading"
+          :file="importPreview"
+          :file-path="importPreviewFile.filename"
+          :show-download="false"
+          :show-fullscreen="true"
+          :full-height="true"
+          content-class="import-preview-content"
+        />
+      </a-spin>
     </a-modal>
 
     <FileDetailModal
@@ -460,7 +546,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import { message } from 'ant-design-vue'
-import { FileSearch, FileText, RefreshCw } from 'lucide-vue-next'
+import { ChevronRight, FileSearch, FileText, RefreshCw } from 'lucide-vue-next'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import AgentFilePreview from '@/components/AgentFilePreview.vue'
 import ChunkParamsConfig from '@/components/ChunkParamsConfig.vue'
@@ -473,6 +559,9 @@ import { getPreviewTypeByPath, normalizePreviewResponse } from '@/utils/file_pre
 const documents = ref([])
 const total = ref(0)
 const loading = ref(false)
+const expandedRowKeys = ref([])
+const expandedAttachments = reactive({})
+const expandedAttachmentLoadingIds = ref([])
 const detailOpen = ref(false)
 const detailLoading = ref(false)
 const detail = ref(null)
@@ -486,6 +575,18 @@ const databases = ref([])
 const importOpen = ref(false)
 const importing = ref(false)
 const importTarget = ref(null)
+const importPreviewOpen = ref(false)
+const importPreviewFile = ref(null)
+const importPreviewSeq = ref(0)
+const importPreview = reactive({
+  loading: false,
+  url: '',
+  content: null,
+  previewType: '',
+  previewUrl: '',
+  supported: true,
+  message: ''
+})
 const retryingId = ref('')
 // "原文 / Markdown" Tab 与原文预览状态，与知识库 FileDetailModal 保持同样的请求序号防抖模式。
 const previewTab = ref('source')
@@ -636,6 +737,18 @@ function canOpenKnowledgePreview(record) {
   return Boolean(detail.value?.linkedKbId && record?.linkedFileId)
 }
 
+function isAttachmentListExpanded(incomingId) {
+  return expandedRowKeys.value.includes(incomingId)
+}
+
+function isAttachmentListLoading(incomingId) {
+  return expandedAttachmentLoadingIds.value.includes(incomingId)
+}
+
+function expandedAttachmentFiles(incomingId) {
+  return expandedAttachments[incomingId] || []
+}
+
 const hasOriginalFile = computed(() => Boolean(selectedAttachment.value?.hasOriginalFile))
 const hasMarkdownFile = computed(() => Boolean(selectedAttachment.value?.hasMarkdownFile))
 const sourcePreviewHasContent = computed(
@@ -702,6 +815,13 @@ function revokeSourcePreviewUrl() {
   }
 }
 
+function revokeImportPreviewUrl() {
+  const url = importPreview.previewUrl || importPreview.url
+  if (url && url.startsWith('blob:')) {
+    window.URL.revokeObjectURL(url)
+  }
+}
+
 function resetSourcePreview() {
   sourcePreviewSeq.value += 1
   revokeSourcePreviewUrl()
@@ -712,6 +832,19 @@ function resetSourcePreview() {
   sourcePreview.previewUrl = ''
   sourcePreview.supported = true
   sourcePreview.message = ''
+}
+
+function resetImportPreview() {
+  importPreviewSeq.value += 1
+  revokeImportPreviewUrl()
+  importPreview.loading = false
+  importPreview.url = ''
+  importPreview.content = null
+  importPreview.previewType = ''
+  importPreview.previewUrl = ''
+  importPreview.supported = true
+  importPreview.message = ''
+  importPreviewFile.value = null
 }
 
 async function loadMarkdownPreview() {
@@ -785,8 +918,8 @@ function selectAttachment(file) {
   resetSourcePreview()
   attachmentMarkdown.value = ''
   attachmentMarkdownTruncated.value = false
-  previewTab.value = 'source'
-  loadSourcePreview()
+  previewTab.value = pickDefaultPreviewTab()
+  if (previewTab.value === 'source') loadSourcePreview()
   loadMarkdownPreview()
 }
 
@@ -828,6 +961,9 @@ async function loadDocuments() {
     })
     documents.value = result.items || []
     total.value = result.total || 0
+    expandedRowKeys.value = []
+    Object.keys(expandedAttachments).forEach((incomingId) => delete expandedAttachments[incomingId])
+    expandedAttachmentLoadingIds.value = []
   } catch (error) {
     message.error(error.message || '加载来文失败')
   } finally {
@@ -877,19 +1013,77 @@ function handleTableChange(nextPagination) {
   loadDocuments()
 }
 
-async function openDetail(record) {
+async function openDetail(record, sourceFileId) {
   detailOpen.value = true
   detailLoading.value = true
   try {
     detail.value = await incomingDocumentApi.detail(record.incomingId)
-    selectedAttachment.value =
-      detail.value.files?.find((file) => file.isMainFile) || detail.value.files?.[0] || null
-    loadMarkdownPreview()
+    selectAttachment(
+      detail.value.files?.find((file) => file.sourceFileId === sourceFileId) ||
+        detail.value.files?.find((file) => file.isMainFile) ||
+        detail.value.files?.[0] ||
+        null
+    )
     selectedClassification.value = detail.value.effectiveClassification
   } catch (error) {
     message.error(error.message || '加载详情失败')
   } finally {
     detailLoading.value = false
+  }
+}
+
+async function toggleAttachmentList(record) {
+  const incomingId = record.incomingId
+  if (isAttachmentListExpanded(incomingId)) {
+    expandedRowKeys.value = expandedRowKeys.value.filter((value) => value !== incomingId)
+    return
+  }
+
+  expandedRowKeys.value = [...expandedRowKeys.value, incomingId]
+  if (Object.prototype.hasOwnProperty.call(expandedAttachments, incomingId)) return
+
+  // 分页列表首次加载不携带全部附件，用户展开某一来文时才读取一次详情，避免形成 N+1 请求。
+  expandedAttachmentLoadingIds.value = [...expandedAttachmentLoadingIds.value, incomingId]
+  try {
+    const result = await incomingDocumentApi.detail(incomingId)
+    expandedAttachments[incomingId] = result.files || []
+  } catch (error) {
+    expandedAttachments[incomingId] = []
+    message.error(error.message || '加载来文附件失败')
+  } finally {
+    expandedAttachmentLoadingIds.value = expandedAttachmentLoadingIds.value.filter(
+      (value) => value !== incomingId
+    )
+  }
+}
+
+async function openImportAttachmentPreview(file) {
+  if (!importTarget.value?.incomingId) return
+  // 入库判断只需核对当前附件原文；独立状态避免干扰已打开详情抽屉中的预览内容。
+  resetImportPreview()
+  importPreviewFile.value = file
+  importPreviewOpen.value = true
+  const requestId = ++importPreviewSeq.value
+  importPreview.loading = true
+  try {
+    const response = await incomingDocumentApi.getOriginalFile(
+      importTarget.value.incomingId,
+      file.sourceFileId
+    )
+    if (requestId !== importPreviewSeq.value) return
+    const preview = await normalizePreviewResponse(response)
+    importPreview.previewType = preview.previewType || ''
+    importPreview.previewUrl = preview.previewUrl || ''
+    importPreview.url = preview.previewUrl || ''
+    importPreview.content = preview.content ?? null
+    importPreview.supported = preview.supported !== false
+    importPreview.message = preview.message || ''
+  } catch (error) {
+    if (requestId !== importPreviewSeq.value) return
+    importPreview.supported = false
+    importPreview.message = error?.message || '加载原文失败'
+  } finally {
+    if (requestId === importPreviewSeq.value) importPreview.loading = false
   }
 }
 
@@ -924,10 +1118,12 @@ async function confirmDocument() {
 
 async function loadClassificationOptions() {
   const result = await incomingDocumentApi.options()
-  classificationOptions.value = Object.entries(result.classifications || {}).map(([value, label]) => ({
-    value,
-    label
-  }))
+  classificationOptions.value = Object.entries(result.classifications || {}).map(
+    ([value, label]) => ({
+      value,
+      label
+    })
+  )
 }
 
 async function openImport(record) {
@@ -1024,26 +1220,6 @@ watch(
   }
 )
 
-// 详情切换 / drawer 关闭时重置原文预览，并自动挑选默认 tab
-watch(
-  () => detail.value?.incomingId,
-  (incomingId) => {
-    if (!incomingId) {
-      resetSourcePreview()
-      selectedAttachment.value = null
-      attachmentMarkdown.value = ''
-      attachmentMarkdownTruncated.value = false
-      previewTab.value = 'source'
-      return
-    }
-    resetSourcePreview()
-    previewTab.value = pickDefaultPreviewTab()
-    if (previewTab.value === 'source') {
-      loadSourcePreview()
-    }
-  }
-)
-
 // 用户从 Markdown tab 切回原文 tab 时按需触发加载
 watch(previewTab, (tab) => {
   if (tab === 'source' && !sourcePreviewHasContent.value && !sourcePreview.loading) {
@@ -1054,12 +1230,16 @@ watch(previewTab, (tab) => {
 watch(detailOpen, (open) => {
   if (!open) {
     resetSourcePreview()
+    selectedAttachment.value = null
+    attachmentMarkdown.value = ''
+    attachmentMarkdownTruncated.value = false
     previewTab.value = 'source'
   }
 })
 
 onBeforeUnmount(() => {
   resetSourcePreview()
+  resetImportPreview()
 })
 </script>
 
@@ -1102,6 +1282,27 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.attachment-toggle {
+  cursor: pointer;
+}
+
+.attachment-toggle:hover {
+  color: var(--color-primary-700);
+}
+
+.attachment-toggle svg {
+  flex: none;
+  transition: transform 0.2s ease;
+}
+
+.attachment-toggle svg.is-expanded {
+  transform: rotate(90deg);
+}
+
+.expanded-attachment-list {
+  max-width: 760px;
 }
 
 .detail-body {
@@ -1221,6 +1422,17 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
+}
+
+.import-file-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.import-preview-content {
+  min-height: 420px;
+  max-height: 65vh;
 }
 
 .preview-tabs {

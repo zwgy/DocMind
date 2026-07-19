@@ -280,7 +280,7 @@ async def get_incoming_document_original_file(
         # 超出二进制预览上限时复用 file_preview 提供的标准化超大响应。
         return render_preview_too_large_payload()
 
-    # .docx/.pptx 与知识库一致先转换为 PDF，便于浏览器内嵌预览。
+    # 新旧 Office 文件与知识库一致先转换为 PDF，便于浏览器内嵌预览。
     if is_office_pdf_preview_file(filename):
         pdf_bytes = await convert_office_to_pdf(filename, content)
         return _stream_incoming_binary(

@@ -232,7 +232,7 @@ test('buildIframeContext uses backend summary when extraction items are empty', 
   assert.equal(context.files[0].summary, 'Full document summary')
 })
 
-test('buildIframeContext keeps structured extraction details with backend summary', () => {
+test('buildIframeContext keeps all structured items for source file targeting', () => {
   const context = buildIframeContext({
     text: 'Summarize',
     includePage: false,
@@ -255,10 +255,11 @@ test('buildIframeContext keeps structured extraction details with backend summar
   })
 
   assert.match(context.files[0].summary, /Full document summary/)
-  assert.match(context.files[0].summary, /Source quote/)
+  assert.doesNotMatch(context.files[0].summary, /Source quote/)
   assert.match(context.files[0].summary, /主分类：风险管理类/)
   assert.deepEqual(context.files[0].items, [
     { item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' },
+    { item_id: 'i2', item_type: 'risk', source_quote: 'Second risk' },
     { item_id: 'i3', item_type: 'task', source_quote: 'Task quote' }
   ])
 })
@@ -516,7 +517,7 @@ test('buildIframeContext keeps all selected files without changing the query', (
   assert.equal(buildChatQuery(input), '只看附件风险')
   assert.equal(context.files.length, 2)
   assert.equal(context.files[0].fileId, 'file1')
-  assert.match(context.files[0].summary, /付款超期/)
+  assert.doesNotMatch(context.files[0].summary, /付款超期/)
   assert.deepEqual(context.files[0].categories, { risk: { matched: true, evidence: '超期' } })
   assert.deepEqual(context.files[0].schemaIds, ['risk_item'])
   assert.deepEqual(context.files[0].items, [{ source_quote: '付款超期' }])

@@ -88,19 +88,11 @@ def _summary_from_file(file_info: dict[str, Any]) -> str:
         return summary
 
     categories = file_info.get("categories")
-    items = file_info.get("items")
     parts: list[str] = []
     if isinstance(categories, dict):
         for name, value in categories.items():
             if isinstance(value, dict) and value.get("matched"):
-                evidence = _clean_text(value.get("evidence"))
-                parts.append(f"{name}：{evidence}" if evidence else str(name))
-    if isinstance(items, list):
-        for item in items:
-            if isinstance(item, dict):
-                quote = _clean_text(item.get("source_quote"))
-                if quote:
-                    parts.append(quote)
+                parts.append(str(name))
     return "\n".join(parts)
 
 
@@ -114,24 +106,34 @@ def _business_items_text(file_info: dict[str, Any]) -> str:
             continue
         item_type = _clean_text(item.get("item_type")) or "unknown"
         data = item.get("data") or {}
-        source_quote = _clean_text(item.get("source_quote"))
         evidence = item.get("evidence")
         parts = [f"- {item_type}"]
         if isinstance(data, dict) and data:
-            parts.append(json.dumps(data, ensure_ascii=False))
-        if source_quote:
-            parts.append(f"依据：{source_quote}")
+            # source_quote 是逐字原文，只在用户要求核验时由 Skill 回读附件；普通问答仅保留业务字段。
+            visible_data = {key: value for key, value in data.items() if key != "source_quote"}
+            if visible_data:
+                parts.append(json.dumps(visible_data, ensure_ascii=False))
         if isinstance(evidence, list):
             sources = []
             for entry in evidence:
                 if not isinstance(entry, dict):
                     continue
+                source_file_id = _clean_text(entry.get("source_file_id"))
                 file_name = _clean_text(entry.get("file_name"))
-                location = _clean_text(entry.get("source_location"))
-                quote = _clean_text(entry.get("quote"))
-                sources.append("；".join(value for value in (file_name, location, quote) if value))
+                source_location = _clean_text(entry.get("source_location"))
+                source = "，".join(
+                    value
+                    for value in (
+                        f"附件名={file_name}" if file_name else "",
+                        f"位置={source_location}" if source_location else "",
+                        f"source_file_id={source_file_id}" if source_file_id else "",
+                    )
+                    if value
+                )
+                if source and source not in sources:
+                    sources.append(source)
             if sources:
-                parts.append(f"来源附件：{' | '.join(sources)}")
+                parts.append(f"原文定位：{' | '.join(sources)}")
         lines.append("；".join(parts))
     return "\n".join(lines)
 
@@ -153,23 +155,19 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
         lines.extend(["  状态：已有摘要", f"  摘要：{summary}"])
 
     classification = _clean_text(file_info.get("classificationLabel") or file_info.get("classification"))
-    classification_evidence = _clean_text(file_info.get("aiClassificationEvidence"))
     if classification:
         lines.append(f"  主分类：{classification}")
-        if classification_evidence:
-            lines.append(f"  主分类依据：{classification_evidence}")
 
     additional_classifications = file_info.get("additionalClassifications")
     if isinstance(additional_classifications, list) and additional_classifications:
-        lines.append("  有证据支持的附加分类：")
+        lines.append("  附加分类：")
         for item in additional_classifications:
             if not isinstance(item, dict):
                 continue
             classification = _clean_text(item.get("classificationLabel") or item.get("classification"))
-            evidence = _clean_text(item.get("evidence"))
             confidence = item.get("confidence")
-            if classification and evidence:
-                lines.append(f"    - {classification}（置信度 {confidence}）：{evidence}")
+            if classification:
+                lines.append(f"    - {classification}（置信度 {confidence}）")
 
     business_items = _business_items_text(file_info)
     if business_items:

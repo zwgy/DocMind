@@ -14,7 +14,11 @@ MAX_TEXT_PREVIEW_CHARS = 250_000
 _MARKDOWN_EXTENSIONS = frozenset({".md", ".markdown", ".mdx"})
 _PDF_EXTENSIONS = frozenset({".pdf"})
 _HTML_EXTENSIONS = frozenset({".html", ".htm"})
-_OFFICE_PDF_PREVIEW_EXTENSIONS = frozenset({".docx", ".pptx"})
+# API 镜像已安装 Writer、Calc、Impress；预览范围必须与这些组件覆盖的
+# 新旧 Office 格式保持一致，避免可解析的附件在管理页被误判为二进制文件。
+_OFFICE_PDF_PREVIEW_EXTENSIONS = frozenset(
+    {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
+)
 _OFFICE_MEDIA_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",

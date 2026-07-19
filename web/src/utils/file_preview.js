@@ -12,7 +12,7 @@ const IMAGE_EXTENSIONS = new Set([
 ])
 const PDF_EXTENSIONS = new Set(['.pdf'])
 const HTML_EXTENSIONS = new Set(['.html', '.htm'])
-const OFFICE_EXTENSIONS = new Set(['.docx', '.pptx'])
+const OFFICE_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'])
 const TEXT_EXTENSIONS = new Set([
   '.txt',
   '.text',

@@ -80,23 +80,15 @@ function summarizeExtraction(result?: ExtractionResult | null) {
   if (!result) return ''
   if (result.matchStatus !== 'matched' || result.extractionStatus !== 'ready') return ''
   const summary = String(result.summary || '').trim()
-  // 后端 summary 与业务抽取 items 都可能有价值；只在没有结构化细节时返回纯摘要，避免两者互相覆盖。
+  // 摘要与分类用于普通问答；原文依据由后端按需读取，不能预先挤占本地模型上下文。
   const lines: string[] = summary
     ? [summary]
     : [`匹配状态：${result.matchStatus}`, `抽取状态：${result.extractionStatus}`]
   if (result.classification) lines.push(`主分类：${result.classification}`)
   const categories = Object.entries(result.categories || {})
     .filter(([, value]) => value?.matched)
-    .map(
-      ([key, value]) =>
-        `${result.display?.categoryLabels?.[key] || key}：命中${value.evidence ? `，依据：${value.evidence}` : ''}`
-    )
+    .map(([key]) => `${result.display?.categoryLabels?.[key] || key}：命中`)
   if (categories.length) lines.push(`分类：${categories.join('；')}`)
-  const quotes = (result.items || [])
-    .map((item) => item.source_quote || '')
-    .filter(Boolean)
-    .slice(0, 5)
-  if (quotes.length) lines.push(`原文依据：${quotes.join('；')}`)
   return lines.join('\n')
 }
 
@@ -140,12 +132,6 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
       input.extractionResults?.[file.source_file_id] ||
       (file.source_file_id === input.selectedFile?.source_file_id ? input.extractionResult : null)
     const summary = summarizeExtraction(result)
-    const seenItemTypes = new Set<string>()
-    const representativeItems = (result?.items || []).filter((item) => {
-      if (seenItemTypes.has(item.item_type)) return false
-      seenItemTypes.add(item.item_type)
-      return true
-    })
     const entry = {
       ...file,
       name: result?.title || file.name,
@@ -163,7 +149,8 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
       aiClassificationEvidence: result?.aiClassificationEvidence,
       categories: result?.categories,
       additionalClassifications: result?.additionalClassifications,
-      items: representativeItems,
+      // 所有事项都保留，以便模型按 item 的 source_file_id 精确读取原文；后端渲染提示词时会移除原文片段。
+      items: result?.items || [],
       schemaIds: result?.schemaIds,
       display: result?.display,
       documentFiles: result?.files

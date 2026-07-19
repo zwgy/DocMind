@@ -137,20 +137,28 @@ async def test_read_office_pdf_preview_converts_and_caches_pdf(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_non_docx_pptx_office_files_do_not_get_pdf_preview(tmp_path, monkeypatch) -> None:
+async def test_xlsx_file_preview_converts_to_pdf(tmp_path, monkeypatch) -> None:
     kb = make_kb(tmp_path)
     kb.test_file_meta["filename"] = "demo.xlsx"
     minio_client = FakeMinioClient()
     minio_client.objects[("knowledgebases", "db1/upload/demo.docx")] = b"PK\x03\x04excel"
     monkeypatch.setattr("yuxi.storage.minio.get_minio_client", lambda: minio_client)
 
+    async def fake_convert(filename: str, content: bytes) -> bytes:
+        assert filename == "demo.xlsx"
+        assert content == b"PK\x03\x04excel"
+        return b"%PDF-1.4\nconverted-xlsx"
+
+    monkeypatch.setattr("yuxi.knowledge.base.convert_office_to_pdf", fake_convert)
+
     entry = kb._knowledge_file_entry("db1", "file1", kb.test_file_meta)
     response = await kb.read_file_preview("db1", "file1")
 
     assert entry["has_original_file"] is True
     assert entry["has_parsed_markdown"] is True
-    assert response["preview_type"] == "unsupported"
-    assert response["supported"] is False
+    assert response["preview_type"] == "pdf"
+    assert response["supported"] is True
+    assert response["content"] == b"%PDF-1.4\nconverted-xlsx"
 
 
 @pytest.mark.asyncio

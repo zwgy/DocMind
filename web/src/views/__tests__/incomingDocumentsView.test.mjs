@@ -39,3 +39,13 @@ assert.match(component, /extracting: \{ label: '抽取中'/, '页面应识别当
 assert.match(component, /partial: \{ label: '部分入库'/, '页面应识别附件部分入库状态')
 assert.match(component, /sourceFileIds: \[\]/, '知识库导入应支持选择附件')
 assert.match(component, /record\?\.linkedFileId/, '知识库预览应使用附件级 file ID')
+assert.match(component, /批量入库/, '来文级入库入口应明确为批量操作')
+assert.match(component, /openImportAttachmentPreview/, '批量入库前应支持预览附件原文')
+assert.match(component, /expandedRowRender/, '来文列表应支持默认折叠的附件清单')
+assert.match(component, /:show-expand-column="false"/, '来文列表应隐藏表格默认的展开按钮')
+assert.match(component, /原文依据：/, '结构化条目证据应使用明确的原文依据标签')
+assert.doesNotMatch(
+  component,
+  /<blockquote v-if="item\.source_quote">/,
+  '结构化条目不应重复展示原文依据'
+)
