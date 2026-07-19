@@ -132,6 +132,6 @@ docker logs docmind-chat-iframe --tail 100
 ## 生产接入要求
 
 - iframe 消息目标由 iframe 地址自动推导；生产环境通过 `CHAT_IFRAME_ALLOWED_ORIGINS` 限制可换票的宿主来源。
-- 使用 `/api/chat-iframe/token` 自助换票时，必须同时配置 `CHAT_IFRAME_ALLOWED_SOURCES` 和 `CHAT_IFRAME_ALLOWED_ORIGINS`。
+- `/api/chat-iframe/token` 默认使用父页面传入的外部用户身份自助换票；`CHAT_IFRAME_ALLOWED_ORIGINS` 可选配置，用于限制可换票的宿主来源。
 - 仅 iframe 与 API 不同域时才需显式设置 `apiBaseUrl`；更强审计需求可使用外部系统自己的 `tokenExchangeUrl`。
 - 发布后使用真实父页面、测试业务身份和附件完成一次浏览器端问答验收。

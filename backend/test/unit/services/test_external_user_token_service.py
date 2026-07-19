@@ -48,32 +48,18 @@ async def test_backend_exchange_creates_default_user_and_token(session):
     assert AuthUtils.decode_token(result["access_token"])["sub"] == str(user.id)
 
 
-async def test_iframe_exchange_requires_enabled_source_and_origin(session, monkeypatch):
-    monkeypatch.delenv("CHAT_IFRAME_AUTO_LOGIN_ENABLED", raising=False)
-    with pytest.raises(HTTPException) as disabled:
-        await exchange_external_user_iframe_token(
-            session,
-            source_system="oa",
-            external_user_id="1001",
-            external_user_name="张三",
-            origin="https://oa.example.com",
-        )
-    assert disabled.value.status_code == 403
+async def test_iframe_exchange_allows_self_login_by_default_and_checks_origin_when_configured(session, monkeypatch):
+    monkeypatch.delenv("CHAT_IFRAME_ALLOWED_ORIGINS", raising=False)
+    result = await exchange_external_user_iframe_token(
+        session,
+        source_system="erp",
+        external_user_id="1001",
+        external_user_name="张三",
+        origin="https://erp.example.com",
+    )
+    assert result["uid"] == "ext_erp_1001"
 
-    monkeypatch.setenv("CHAT_IFRAME_AUTO_LOGIN_ENABLED", "true")
-    monkeypatch.setenv("CHAT_IFRAME_ALLOWED_SOURCES", "oa")
     monkeypatch.setenv("CHAT_IFRAME_ALLOWED_ORIGINS", "https://oa.example.com")
-
-    with pytest.raises(HTTPException) as bad_source:
-        await exchange_external_user_iframe_token(
-            session,
-            source_system="erp",
-            external_user_id="1001",
-            external_user_name="张三",
-            origin="https://oa.example.com",
-        )
-    assert bad_source.value.status_code == 403
-
     with pytest.raises(HTTPException) as bad_origin:
         await exchange_external_user_iframe_token(
             session,

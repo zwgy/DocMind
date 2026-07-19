@@ -42,16 +42,14 @@ bash scripts/manage.sh prod init
 
 - `SILICONFLOW_API_KEY` 或其他模型提供商密钥：不配置时平台可启动，但无法正常调用模型
 - `YUXI_CORS_ORIGINS`：浏览器跨域访问时必填
-- `CHAT_IFRAME_*`：仅在启用外部用户自助换票时配置
+- `CHAT_IFRAME_*`：仅在需要限制 chat-iframe 自助换票来源或调整限流时配置
 - 宿主机端口、GPU OCR、Sandbox、MinerU 等基础设施相关变量
 
 仍可手动执行 `cp .env.template .env.prod`，但随后必须自行填写上面的安全变量；推荐优先使用 `prod init`。
 
-如使用 chat-iframe 自助换票，还必须同时设置：
+chat-iframe 默认直接使用父页面传入的外部用户身份自助换票。如需限制可换票的宿主来源，可设置：
 
 ```env
-CHAT_IFRAME_AUTO_LOGIN_ENABLED=true
-CHAT_IFRAME_ALLOWED_SOURCES=oa
 CHAT_IFRAME_ALLOWED_ORIGINS=https://oa.example.com
 ```
 

@@ -54,15 +54,7 @@ def _normalize_external_identity(
     return source, external_id, external_name, uid
 
 
-def _ensure_iframe_exchange_allowed(source_system: str, origin: str | None) -> None:
-    enabled = os.getenv("CHAT_IFRAME_AUTO_LOGIN_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
-    if not enabled:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="chat-iframe 自助登录未启用")
-
-    allowed_sources = _csv_env("CHAT_IFRAME_ALLOWED_SOURCES")
-    if allowed_sources and source_system not in allowed_sources:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="source_system 不在允许列表中")
-
+def _ensure_iframe_exchange_allowed(origin: str | None) -> None:
     allowed_origins = _csv_env("CHAT_IFRAME_ALLOWED_ORIGINS")
     request_origin = str(origin or "").strip()
     if allowed_origins and request_origin not in allowed_origins:
@@ -191,7 +183,7 @@ async def exchange_external_user_iframe_token(
     source, _external_id, display_name, uid = _normalize_external_identity(
         source_system, external_user_id, external_user_name
     )
-    _ensure_iframe_exchange_allowed(source, origin)
+    _ensure_iframe_exchange_allowed(origin)
     user, source = await _get_or_create_external_user(
         db,
         source_system=source,

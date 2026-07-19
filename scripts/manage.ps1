@@ -237,15 +237,6 @@ try {
             }
         }
 
-        if (@("1", "true", "yes", "on") -contains (Get-DotEnvValue "CHAT_IFRAME_AUTO_LOGIN_ENABLED").ToLowerInvariant()) {
-            foreach ($name in @("CHAT_IFRAME_ALLOWED_SOURCES", "CHAT_IFRAME_ALLOWED_ORIGINS")) {
-                if ([string]::IsNullOrWhiteSpace((Get-DotEnvValue $name))) {
-                    Write-Host "Error: $name is required when chat-iframe auto login is enabled." -ForegroundColor Red
-                    $failed = $true
-                }
-            }
-        }
-
         if ($failed) {
             throw "Production environment validation failed."
         }

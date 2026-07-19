@@ -50,15 +50,15 @@ def test_management_scripts_share_the_same_safe_compose_contract():
 
     assert 'compose=(docker compose --env-file "$env_file" -f "$compose_file")' in bash
     assert '$composeArgs = @("compose", "--env-file", $envFile, "-f", $composeFile)' in powershell
-    assert bash.index("run_compose config --quiet") < bash.index("run_compose up -d --build")
+    assert bash.index("run_compose config --quiet") < bash.index("run_compose_with_target up -d --build")
     assert powershell.index('Invoke-Compose @("config", "--quiet")') < powershell.index(
         'Invoke-Compose (@("up", "-d", "--build")'
     )
     for key in (
         "JWT_SECRET_KEY",
         "POSTGRES_PASSWORD",
+        "MINIO_ACCESS_KEY",
         "MINIO_SECRET_KEY",
-        "CHAT_IFRAME_ALLOWED_ORIGINS",
     ):
         assert key in bash
         assert key in powershell

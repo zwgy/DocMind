@@ -428,18 +428,18 @@ new DocMindChatIframe({
 })
 ```
 
-如果传入 `tokenExchangeUrl`，父脚本会向该外部系统后端地址 POST `{ source_system, external_user_id, external_user_name }`，由外部后端再调用 DocMind `/api/external-users/token` 换票。该模式适合生产环境和更强审计要求。
+默认不需要传入 `tokenExchangeUrl`。父脚本会直接使用 `{ source_system, external_user_id, external_user_name }` 请求 DocMind `/api/chat-iframe/token`，由 DocMind 自动创建或复用外部用户并返回 token。
 
-如果不传 `tokenExchangeUrl`，父脚本会直接 POST `${apiBaseUrl || ''}/api/chat-iframe/token`。该模式需要 DocMind 后端设置：
+如果传入 `tokenExchangeUrl`，父脚本会向该外部系统后端地址 POST `{ source_system, external_user_id, external_user_name }`，由外部后端再调用 DocMind `/api/external-users/token` 换票。该模式适合更强审计要求。
+
+直连自助登录模式需要 DocMind 后端设置：
 
 ```env
-CHAT_IFRAME_AUTO_LOGIN_ENABLED=true
-CHAT_IFRAME_ALLOWED_SOURCES=oa
-CHAT_IFRAME_ALLOWED_ORIGINS=https://oa.example.com
+CHAT_IFRAME_ALLOWED_ORIGINS=http://localhost:5174
 CHAT_IFRAME_TOKEN_RATE_LIMIT_PER_MINUTE=60
 ```
 
-`CHAT_IFRAME_ALLOWED_SOURCES` 和 `CHAT_IFRAME_ALLOWED_ORIGINS` 留空时不校验对应维度。自动创建的外部账号 uid 为 `ext_{source_system}_{external_user_id}`，默认普通用户、默认部门 `id=1`，后续由超级管理员在 DocMind 后台调整角色或部门。
+`CHAT_IFRAME_ALLOWED_ORIGINS` 留空时不校验父页面 Origin。自动创建的外部账号 uid 为 `ext_{source_system}_{external_user_id}`，默认普通用户、默认部门 `id=1`，后续由超级管理员在 DocMind 后台调整角色或部门。
 
 ## 17. iframe_context 上下文策略
 

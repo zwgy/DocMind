@@ -212,7 +212,6 @@ read_env_value() {
 }
 
 # 生产发布前门禁：拒绝模板空值、占位符和公开默认密码。
-# chat-iframe 自助换票开启时，来源与 Origin 白名单也必须显式配置。
 validate_prod_env() {
     local failed=0
     local key value
@@ -231,17 +230,6 @@ validate_prod_env() {
     [ "$(read_env_value NEO4J_PASSWORD)" = "0123456789" ] && echo "Error: NEO4J_PASSWORD uses the public default." >&2 && failed=1
     [ "$(read_env_value MINIO_ACCESS_KEY)" = "minioadmin" ] && echo "Error: MINIO_ACCESS_KEY uses the public default." >&2 && failed=1
     [ "$(read_env_value MINIO_SECRET_KEY)" = "minioadmin" ] && echo "Error: MINIO_SECRET_KEY uses the public default." >&2 && failed=1
-
-    case "$(read_env_value CHAT_IFRAME_AUTO_LOGIN_ENABLED | tr '[:upper:]' '[:lower:]')" in
-        1|true|yes|on)
-            for key in CHAT_IFRAME_ALLOWED_SOURCES CHAT_IFRAME_ALLOWED_ORIGINS; do
-                if [ -z "$(read_env_value "$key")" ]; then
-                    echo "Error: $key is required when chat-iframe auto login is enabled." >&2
-                    failed=1
-                fi
-            done
-            ;;
-    esac
 
     [ "$failed" -eq 0 ]
 }
