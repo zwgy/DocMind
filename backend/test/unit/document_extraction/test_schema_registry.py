@@ -2,6 +2,7 @@ import pytest
 
 from yuxi.document_extraction.schemas import (
     DocumentCategoryResult,
+    ManagementRequirementItem,
     category_result_for_classification_label,
     extraction_schema_display_metadata,
     extraction_schema_ids_for_categories,
@@ -68,3 +69,32 @@ def test_extraction_schema_display_metadata_uses_schema_labels():
     assert display["schemaLabels"]["general_item"] == "通用事项"
     assert display["fieldLabels"]["management_requirement_item"]["department"] == "涉及部门"
     assert display["fieldLabels"]["management_requirement_item"]["source_quote"] == "原文依据"
+
+
+def test_management_requirement_accepts_multiple_departments_and_roles():
+    item = ManagementRequirementItem.model_validate(
+        {
+            "requirement": "按职责开展设备检修",
+            "department": ["车辆段", "机务段"],
+            "role": ["检修人员", "验收人员"],
+            "period_type": "长期性",
+            "source_quote": "车辆段、机务段应组织检修人员和验收人员按职责开展设备检修",
+        }
+    )
+
+    assert item.department == ["车辆段", "机务段"]
+    assert item.role == ["检修人员", "验收人员"]
+
+
+def test_null_period_type_is_normalized_but_unknown_value_is_rejected():
+    payload = {
+        "requirement": "按职责开展设备检修",
+        "department": None,
+        "role": None,
+        "period_type": None,
+        "source_quote": "按职责开展设备检修",
+    }
+
+    assert ManagementRequirementItem.model_validate(payload).period_type == "未明确"
+    with pytest.raises(ValueError, match="Input should be"):
+        ManagementRequirementItem.model_validate({**payload, "period_type": "临时性"})

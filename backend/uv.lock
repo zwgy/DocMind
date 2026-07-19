@@ -5036,7 +5036,6 @@ dependencies = [
     { name = "python-iso639" },
     { name = "python-magic" },
     { name = "python-oxmsg" },
-    { name = "rapidfuzz" },
     { name = "regex" },
     { name = "requests" },
     { name = "spacy" },

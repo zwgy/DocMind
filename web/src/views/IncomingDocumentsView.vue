@@ -211,70 +211,47 @@
 
           <section class="detail-section">
             <h2>结构化结果</h2>
-            <div v-if="businessExtractionGroups.length" class="business-extraction-list">
-              <section
+            <a-collapse
+              v-if="businessExtractionGroups.length"
+              class="business-extraction-list"
+              ghost
+            >
+              <a-collapse-panel
                 v-for="group in businessExtractionGroups"
                 :key="group.itemType"
                 class="business-extraction-group"
+                :header="`${group.label}（${group.items.length}）`"
               >
-                <h3>{{ group.label }}（{{ group.items.length }}）</h3>
-                <p class="summary-text">{{ group.summary }}</p>
-                <article
-                  v-for="(item, index) in group.items.slice(0, 1)"
-                  :key="item.item_id || `${group.itemType}-${index}`"
-                  class="business-extraction-item"
-                >
-                  <strong>{{ group.label }} {{ index + 1 }}</strong>
-                  <dl v-if="displayExtractionDataEntries(item).length">
-                    <template v-for="[key, value] in displayExtractionDataEntries(item)" :key="key">
-                      <dt>{{ key }}</dt>
-                      <dd>{{ displayValue(value) }}</dd>
-                    </template>
-                  </dl>
-                  <blockquote v-if="item.source_quote">{{ item.source_quote }}</blockquote>
-                  <div
-                    v-for="evidence in item.evidence || []"
-                    :key="`${evidence.file_name}-${evidence.source_location}`"
-                    class="muted"
+                <div class="business-extraction-group-content">
+                  <p class="summary-text">{{ group.summary }}</p>
+                  <article
+                    v-for="(item, index) in group.items"
+                    :key="item.item_id || `${group.itemType}-${index}`"
+                    class="business-extraction-item"
                   >
-                    依据：{{ evidence.file_name }} {{ evidence.source_location || '' }}
-                    <blockquote v-if="evidence.quote">{{ evidence.quote }}</blockquote>
-                  </div>
-                </article>
-                <a-collapse v-if="group.items.length > 1" ghost>
-                  <a-collapse-panel
-                    :key="group.itemType"
-                    :header="`查看其余 ${group.items.length - 1} 条`"
-                  >
-                    <article
-                      v-for="(item, index) in group.items.slice(1)"
-                      :key="item.item_id || `${group.itemType}-more-${index}`"
-                      class="business-extraction-item"
-                    >
-                      <strong>{{ group.label }} {{ index + 2 }}</strong>
-                      <dl v-if="displayExtractionDataEntries(item).length">
-                        <template
-                          v-for="[key, value] in displayExtractionDataEntries(item)"
-                          :key="key"
-                        >
-                          <dt>{{ key }}</dt>
-                          <dd>{{ displayValue(value) }}</dd>
-                        </template>
-                      </dl>
-                      <blockquote v-if="item.source_quote">{{ item.source_quote }}</blockquote>
-                      <div
-                        v-for="evidence in item.evidence || []"
-                        :key="`${evidence.file_name}-${evidence.source_location}`"
-                        class="muted"
+                    <strong>{{ group.label }} {{ index + 1 }}</strong>
+                    <dl v-if="displayExtractionDataEntries(item).length">
+                      <template
+                        v-for="[key, value] in displayExtractionDataEntries(item)"
+                        :key="key"
                       >
-                        依据：{{ evidence.file_name }} {{ evidence.source_location || '' }}
-                        <blockquote v-if="evidence.quote">{{ evidence.quote }}</blockquote>
-                      </div>
-                    </article>
-                  </a-collapse-panel>
-                </a-collapse>
-              </section>
-            </div>
+                        <dt>{{ key }}</dt>
+                        <dd>{{ displayValue(value) }}</dd>
+                      </template>
+                    </dl>
+                    <blockquote v-if="item.source_quote">{{ item.source_quote }}</blockquote>
+                    <div
+                      v-for="evidence in item.evidence || []"
+                      :key="`${evidence.file_name}-${evidence.source_location}`"
+                      class="muted"
+                    >
+                      依据：{{ evidence.file_name }} {{ evidence.source_location || '' }}
+                      <blockquote v-if="evidence.quote">{{ evidence.quote }}</blockquote>
+                    </div>
+                  </article>
+                </div>
+              </a-collapse-panel>
+            </a-collapse>
             <div v-else class="empty-content compact">
               <p>正式结构化结果暂未生成</p>
             </div>
@@ -1161,22 +1138,17 @@ onBeforeUnmount(() => {
 }
 
 .business-extraction-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  margin-top: 4px;
 }
 
-.business-extraction-group {
+.business-extraction-group-content {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.business-extraction-group h3 {
-  margin: 0;
-  color: var(--gray-800);
-  font-size: 14px;
-  font-weight: 600;
+.business-extraction-group-content .summary-text {
+  margin-top: 0;
 }
 
 .business-extraction-item {

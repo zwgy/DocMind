@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 
 class AdditionalClassification(BaseModel):
@@ -18,7 +18,7 @@ class IncomingDocumentClassificationResult(BaseModel):
 
     classification: str = Field(description="稳定分类 ID，例如 risk_management")
     classification_confidence: float = Field(ge=0, le=1)
-    classification_evidence: str = Field(min_length=1)
+    classification_evidence: str | None = Field(default=None)
     summary: str = Field(min_length=1)
     additional_classifications: list[AdditionalClassification] = Field(default_factory=list)
 
@@ -93,11 +93,19 @@ class DocumentCategoryResult(BaseModel):
 PeriodType = Literal["阶段性", "长期性", "周期性", "未明确"]
 
 
+def _normalize_period_type(value: Any) -> Any:
+    # 模型常用 null 表示原文未说明周期，业务契约中该语义就是“未明确”；其他非法值仍由枚举校验拒绝。
+    return "未明确" if value is None else value
+
+
+ExtractedPeriodType = Annotated[PeriodType, BeforeValidator(_normalize_period_type)]
+
+
 class RiskItem(BaseModel):
     model_config = {"json_schema_extra": {"label": "风险事项"}}
 
     risk_name: str = Field(
-        description="风险事项名称，必须来自原文，不要自行编造",
+        description="需要用户重点关注的关键风险事项名称，必须有原文支持，不要自行编造",
         json_schema_extra={"label": "风险名称"},
     )
     department: str | None = Field(
@@ -115,7 +123,7 @@ class RiskItem(BaseModel):
         description="涉及岗位、人员角色或责任对象；没有则为 null",
         json_schema_extra={"label": "涉及岗位、角色"},
     )
-    period_type: PeriodType = Field(
+    period_type: ExtractedPeriodType = Field(
         default="未明确",
         description="风险是阶段性、长期性、周期性还是未明确",
         json_schema_extra={"label": "风险类型"},
@@ -135,7 +143,7 @@ class TaskItem(BaseModel):
     model_config = {"json_schema_extra": {"label": "任务要求"}}
 
     task_name: str = Field(
-        description="任务、整改要求或工作要求名称，必须来自原文",
+        description="需要用户重点跟进的关键任务、整改要求或工作要求名称，必须有原文支持",
         json_schema_extra={"label": "任务名称"},
     )
     department: str | None = Field(
@@ -153,7 +161,7 @@ class TaskItem(BaseModel):
         description="明确时间节点、周期或截止日期；没有则为 null",
         json_schema_extra={"label": "时间节点"},
     )
-    period_type: PeriodType = Field(
+    period_type: ExtractedPeriodType = Field(
         default="未明确",
         description="任务是阶段性、长期性、周期性还是未明确",
         json_schema_extra={"label": "任务类型"},
@@ -228,20 +236,20 @@ class ManagementRequirementItem(BaseModel):
     model_config = {"json_schema_extra": {"label": "管理要求"}}
 
     requirement: str = Field(
-        description="管理要求、制度要求、技术标准或长期要求内容",
+        description="需要用户重点掌握的核心管理要求、制度要求、技术标准或长期要求",
         json_schema_extra={"label": "管理要求"},
     )
-    department: str | None = Field(
+    department: str | list[str] | None = Field(
         default=None,
-        description="涉及部门；没有则为 null",
+        description="涉及部门；多个部门使用字符串数组，单个部门使用字符串，没有则为 null",
         json_schema_extra={"label": "涉及部门"},
     )
-    role: str | None = Field(
+    role: str | list[str] | None = Field(
         default=None,
-        description="涉及岗位、角色或人员；没有则为 null",
+        description="涉及岗位、角色或人员；多个对象使用字符串数组，单个对象使用字符串，没有则为 null",
         json_schema_extra={"label": "涉及岗位、角色"},
     )
-    period_type: PeriodType = Field(
+    period_type: ExtractedPeriodType = Field(
         default="未明确",
         description="要求是阶段性、长期性、周期性还是未明确",
         json_schema_extra={"label": "要求类型"},

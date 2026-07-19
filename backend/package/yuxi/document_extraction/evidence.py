@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 import unicodedata
 
 _QUOTE_TRANSLATION = str.maketrans({"“": '"', "”": '"', "„": '"', "‟": '"', "‘": "'", "’": "'"})
+_PDF_PAGE_NUMBER_RE = re.compile(r"(?m)^[ \t]*[—–-]\s*\d+\s*[—–-][ \t]*$")
 
 
 def find_source_quote(quote: str | None, source_text: str) -> str | None:
@@ -29,9 +31,14 @@ def find_source_quote(quote: str | None, source_text: str) -> str | None:
 
 def _normalize(value: str, *, with_indexes: bool = False):
     """消除解析排版差异，同时保留原文索引用于回写真实引用。"""
+    # PDF 页码可能插入一个词甚至一个句子的中间；等长遮罩可在忽略噪声的同时保留原文索引。
+    masked_chars = list(value)
+    for match in _PDF_PAGE_NUMBER_RE.finditer(value):
+        masked_chars[match.start() : match.end()] = " " * (match.end() - match.start())
+    masked_value = "".join(masked_chars)
     chars: list[str] = []
     indexes: list[int] = []
-    for index, char in enumerate(value):
+    for index, char in enumerate(masked_value):
         normalized = unicodedata.normalize("NFKC", char).translate(_QUOTE_TRANSLATION)
         for normalized_char in normalized:
             if normalized_char.isspace():

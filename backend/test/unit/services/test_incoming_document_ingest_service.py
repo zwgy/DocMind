@@ -734,6 +734,36 @@ def test_primary_classification_evidence_normalizes_pdf_whitespace_and_quotes():
     assert result.classification_evidence == source_text
 
 
+def test_primary_classification_evidence_rejects_paraphrase():
+    source_text = "中国铁路上海局集团有限公司关于重新修订客车检修运用管理办法。"
+    result = ingest_module._validated_classification_result(
+        ingest_module.IncomingDocumentClassificationResult(
+            classification="规章制度类",
+            classification_confidence=0.95,
+            classification_evidence="中国铁路上海局集团有限公司关于重新印发客车检修规程",
+            summary="发布修订后的客车检修管理办法。",
+        ),
+        source_text,
+    )
+
+    assert result.classification_evidence is None
+
+
+def test_unmatched_primary_classification_evidence_does_not_fail_document():
+    result = ingest_module._validated_classification_result(
+        ingest_module.IncomingDocumentClassificationResult(
+            classification="规章制度类",
+            classification_confidence=0.95,
+            classification_evidence="模型概括但并非原文逐字引用",
+            summary="发布修订后的客车检修规程。",
+        ),
+        "各单位应遵照修订后的客车检修规程执行。",
+    )
+
+    assert result.classification == "regulation"
+    assert result.classification_evidence is None
+
+
 def test_invalid_primary_classification_is_rejected():
     with pytest.raises(ValueError, match="not configured"):
         ingest_module._validated_classification_result(

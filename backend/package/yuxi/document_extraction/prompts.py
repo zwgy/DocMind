@@ -14,12 +14,16 @@ def build_extraction_prompt(schema: type[BaseModel], chunk_text: str) -> str:
 规则：
 1. 只能返回 JSON 对象，格式为 {{"items": [...]}}。
 2. 没有明确证据时返回 {{"items": []}}。
-3. source_quote 必须逐字摘录原文，不要改写。
+3. source_quote 必须逐字摘录一段能够直接支持该 item 的连续原文，不要改写；优先选择 20 至 120 个字符的核心片段。
 4. 不确定的可选字段填 null，不要猜测。
-5. 每个 item 表示一个独立业务事项，不要按字段、句子或段落机械拆分。
-6. 同一事项的背景、依据、责任对象和要求应合并到同一个 item。
-7. 多个并列且可独立执行或确认的事项才拆成多个 items。
-8. 只抽取 {schema.__name__} 对应内容，不要输出其他类型的业务事项。
+5. 只提取对理解文档主旨、关键结论、重要责任、核心动作、重要时间或主要风险有直接价值的事项；
+   不要穷举每句话、每一款或每个执行步骤。
+6. 同一主题、目标或责任语境下的连续内容应合并为一个 item；
+   背景、依据、流程、例外和实施细节应纳入对核心事项的概括，不单独拆项。
+7. 只有主题、责任对象、目标或时限存在实质差异，且分开后仍是用户需要关注的关键事项时，才拆成多个 items。
+8. item 中的主体、数值、日期、义务和结论必须全部由 source_quote 直接支持；
+   如果一段连续引用无法共同支持合并后的具体细节，只保留这段引用能够支持的核心结论，不拼接分散信息。
+9. 只抽取 {schema.__name__} 对应内容，不要输出其他类型的业务事项。
 
 字段说明：
 {fields}
@@ -62,7 +66,7 @@ def build_category_prompt(
             "",
             "JSON 字段：",
             "- classification: 单一来文稳定分类 ID，只能填写“分类说明”中括号前的英文 ID",
-            "- classification_evidence: 支持主分类判断的原文逐字引用",
+            "- classification_evidence: 支持主分类判断的原文逐字引用；无法可靠逐字引用时填 null，不要改写或概括",
             "- additional_classifications: 附加分类对象列表，默认必须填 []；每项包含 classification、confidence、"
             "evidence，classification 只能填写稳定分类 ID 且不能与主分类重复，evidence 必须逐字摘录正文",
             "- classification_confidence: 0 到 1 的置信度",

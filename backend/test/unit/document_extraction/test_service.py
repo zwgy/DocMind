@@ -295,6 +295,47 @@ def test_long_markdown_uses_large_overlapping_chunks(monkeypatch):
     assert segments[0]["chunk_id"] == "doc_chunk_0"
 
 
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "第一章 总则\n第一条 适用范围。\n第二章 职责\n第二条 各单位负责落实。",
+        "# Overview\n\n## Responsibilities\n\n各单位负责落实。",
+        "1. 适用范围\n\n2. 主要职责\n\n各单位负责落实。",
+    ],
+)
+async def test_document_uses_full_context_when_content_fits_regardless_of_format(markdown):
+    class CollectingLLM:
+        def __init__(self):
+            self.prompts = []
+
+        async def complete_json(self, prompt, _schema):
+            self.prompts.append(prompt)
+            return {"items": []}
+
+    repository = FakeExtractionRepository()
+    llm = CollectingLLM()
+    service = BusinessExtractionService(llm=llm, extraction_repo=repository)
+
+    result = await service.run_incoming_document_extraction(
+        incoming_id="inc_1",
+        classifications=["规章制度类"],
+        model_spec="model-a",
+        files=[
+            {
+                "incoming_file_id": "incf_main",
+                "source_file_id": "main",
+                "filename": "制度.pdf",
+                "markdown_file": "minio://parsed/main.md",
+                "markdown": markdown,
+            }
+        ],
+    )
+
+    assert result["item_count"] == 0
+    assert len(llm.prompts) == 1
+    assert markdown in llm.prompts[0]
+
+
 async def test_extract_chunks_uses_known_risk_category():
     service = BusinessExtractionService(llm=FakeLLM())
 
@@ -382,6 +423,45 @@ async def test_incoming_document_extraction_fails_when_any_schema_chunk_fails():
     assert repository.updated[-1][1]["status"] == "failed"
 
 
+async def test_incoming_document_extraction_drops_paraphrased_quote():
+    class ParaphrasingLLM:
+        async def complete_json(self, _prompt, _schema):
+            return {
+                "items": [
+                    {
+                        "requirement": "重新修订客车检修运用管理办法",
+                        "department": None,
+                        "role": None,
+                        "period_type": "长期性",
+                        "source_quote": "中国铁路上海局集团有限公司关于重新印发客车检修规程",
+                    }
+                ]
+            }
+
+    repository = FakeExtractionRepository()
+    service = BusinessExtractionService(llm=ParaphrasingLLM(), extraction_repo=repository)
+    source = "中国铁路上海局集团有限公司关于重新修订客车检修运用管理办法。"
+
+    result = await service.run_incoming_document_extraction(
+        incoming_id="inc_1",
+        classifications=["规章制度类"],
+        model_spec="model-a",
+        files=[
+            {
+                "incoming_file_id": "incf_main",
+                "source_file_id": "main",
+                "filename": "主文件.pdf",
+                "markdown_file": "minio://parsed/main.md",
+                "markdown": source,
+            }
+        ],
+    )
+
+    assert result["item_count"] == 0
+    assert result["dropped_item_count"] == 1
+    assert repository.replaced["items"] == []
+
+
 async def test_long_incoming_extraction_keeps_each_chunk_evidence(monkeypatch):
     repository = FakeExtractionRepository()
     service = BusinessExtractionService(llm=FakeDuplicateManagementLLM(), extraction_repo=repository)
@@ -412,14 +492,14 @@ async def test_long_incoming_extraction_keeps_each_chunk_evidence(monkeypatch):
     )
 
     item = repository.replaced["items"][0]
-    assert {evidence["source_location"] for evidence in item["evidence"]} == {"分块 chunk_1", "分块 chunk_2"}
+    assert {evidence["source_location"] for evidence in item["evidence"]} == {"正文第 1 部分", "正文第 2 部分"}
     assert {evidence["quote"] for evidence in item["evidence"]} == {
         "第 1 段要求建立问题整改台账",
         "第 2 段要求建立问题整改台账",
     }
 
 
-async def test_long_incoming_extraction_rejects_hallucinated_quote(monkeypatch):
+async def test_long_incoming_extraction_drops_hallucinated_quote(monkeypatch):
     class HallucinatingLLM:
         async def complete_json(self, _prompt, _schema):
             return {
@@ -444,24 +524,29 @@ async def test_long_incoming_extraction_rejects_hallucinated_quote(monkeypatch):
         lambda *_args: [{"chunk_id": "chunk_1", "content": "各单位应建立问题整改台账", "chunk_index": 0}],
     )
 
-    with pytest.raises(RuntimeError, match="Business extraction incomplete"):
-        await service.run_incoming_document_extraction(
-            incoming_id="inc_1",
-            classifications=["规章制度类"],
-            model_spec="model-a",
-            files=[
-                {
-                    "incoming_file_id": "incf_main",
-                    "source_file_id": "main",
-                    "filename": "主文件.pdf",
-                    "markdown_file": "minio://parsed/main.md",
-                    "markdown": "各单位应建立问题整改台账",
-                }
-            ],
-        )
+    result = await service.run_incoming_document_extraction(
+        incoming_id="inc_1",
+        classifications=["规章制度类"],
+        model_spec="model-a",
+        files=[
+            {
+                "incoming_file_id": "incf_main",
+                "source_file_id": "main",
+                "filename": "主文件.pdf",
+                "markdown_file": "minio://parsed/main.md",
+                "markdown": "各单位应建立问题整改台账",
+            }
+        ],
+    )
 
-    assert repository.replaced is None
-    assert repository.updated[-1][1]["status"] == "failed"
+    assert result["item_count"] == 0
+    assert result["warnings"] == [
+        {"chunk_id": "chunk_1", "schema_id": "management_requirement_item", "error": "source quote not found"}
+    ]
+    assert repository.replaced["items"] == []
+    assert result["dropped_item_count"] == 1
+    assert repository.updated[-1][1]["run_metadata"]["dropped_item_count"] == 1
+    assert repository.updated[-1][1]["status"] == "success"
 
 
 def test_multiple_extraction_classifications_keep_each_schema_and_drop_general_fallback():
