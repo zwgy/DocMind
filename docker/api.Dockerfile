@@ -20,30 +20,45 @@ ENV TZ=Asia/Shanghai \
 RUN npm config set registry https://registry.npmmirror.com --global \
     && npm cache clean --force
 
+ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+ARG APT_SECURITY_MIRROR=mirrors.tuna.tsinghua.edu.cn/debian-security
+
 # 设置代理和时区，更换镜像源，安装系统依赖 - 合并为一个RUN减少层数
-RUN set -ex \
+RUN set -ex; \
     # (A) 设置时区
-    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
-    # (B) 替换清华源 (针对 Debian Bookworm 的新版格式)
-    && sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
-    && sed -i 's|security.debian.org/debian-security|mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources \
+    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime; \
+    echo $TZ > /etc/timezone; \
     # (C) 安装必要的系统库
-    && apt-get update \
-    && apt-get install -y --no-install-recommends --fix-missing \
-        curl \
-        ffmpeg \
-        fonts-liberation \
-        fonts-noto-cjk \
-        git \
-        libpq5 \
-        libsm6 \
-        libxext6 \
-        libreoffice-impress-nogui \
-        libreoffice-calc-nogui \
-        libreoffice-writer-nogui \
+    install_system_deps() { \
+        apt-get update; \
+        apt-get install -y --no-install-recommends --fix-missing \
+            curl \
+            ffmpeg \
+            fonts-liberation \
+            fonts-noto-cjk \
+            git \
+            libpq5 \
+            libsm6 \
+            libxext6 \
+            libreoffice-impress-nogui \
+            libreoffice-calc-nogui \
+            libreoffice-writer-nogui; \
+    }; \
+    cp /etc/apt/sources.list.d/debian.sources /tmp/debian.sources.default; \
+    if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+        sed -i "s|security.debian.org/debian-security|$APT_SECURITY_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    # macOS Docker Desktop 构建时偶发无法访问国内镜像源；失败时回退官方源，避免部署被镜像站可用性卡住。
+    install_system_deps || { \
+        echo "APT mirror failed, retrying with Debian official sources."; \
+        cp /tmp/debian.sources.default /etc/apt/sources.list.d/debian.sources; \
+        rm -rf /var/lib/apt/lists/*; \
+        install_system_deps; \
+    }; \
     # (D) 清理垃圾，减小体积
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/* /tmp/debian.sources.default
 
 # 复制项目配置文件
 COPY ../backend/pyproject.toml /app/pyproject.toml

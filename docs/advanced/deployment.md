@@ -119,6 +119,20 @@ bash scripts/manage.sh <dev|prod> <action> [service]
 
 除 `down` 外，可在末尾指定单个服务，例如 `bash scripts/manage.sh prod logs api`。开发环境首次 `deploy` 且缺少 `.env` 时会复用 `scripts/init.sh` 或 `scripts/init.ps1` 初始化；生产环境首次 `deploy` 且缺少 `.env.prod` 时会交互生成独立配置，绝不会从开发配置复制。
 
+API 镜像构建默认使用清华 Debian 源加速 apt 安装；如果本机 Docker 无法连接该镜像源，Dockerfile 会自动回退到 Debian 官方源。也可以在 `.env` 或 `.env.prod` 中显式切换：
+
+```env
+APT_MIRROR=deb.debian.org
+APT_SECURITY_MIRROR=security.debian.org/debian-security
+```
+
+前端镜像构建默认通过 DaoCloud 代理解析 `node:24-alpine` 与 `nginx:alpine`，避免 Docker Hub 鉴权超时。内网已有镜像仓库或希望直连 Docker Hub 时，可覆盖：
+
+```env
+NODE_ALPINE_IMAGE=node:24-alpine
+NGINX_ALPINE_IMAGE=nginx:alpine
+```
+
 ### 更新代码
 
 ```bash

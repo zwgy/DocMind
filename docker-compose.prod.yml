@@ -35,6 +35,9 @@ services:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
+        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-mirrors.tuna.tsinghua.edu.cn/debian-security}
     image: yuxi-api:${YUXI_VERSION:-0.7.1.dev0}
     container_name: api-prod
     working_dir: /app
@@ -73,6 +76,9 @@ services:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
+        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-mirrors.tuna.tsinghua.edu.cn/debian-security}
     image: yuxi-api:${YUXI_VERSION:-0.7.1.dev0}
     container_name: worker-prod
     working_dir: /app
@@ -150,6 +156,9 @@ services:
       context: .
       dockerfile: docker/web.Dockerfile
       target: production
+      args:
+        NODE_ALPINE_IMAGE: ${NODE_ALPINE_IMAGE:-m.daocloud.io/docker.io/library/node:24-alpine}
+        NGINX_ALPINE_IMAGE: ${NGINX_ALPINE_IMAGE:-m.daocloud.io/docker.io/library/nginx:alpine}
     image: yuxi-web:${YUXI_VERSION:-0.7.1.dev0}
     container_name: web-prod
     ports:
@@ -169,6 +178,9 @@ services:
       context: .
       dockerfile: docker/chat-iframe.Dockerfile
       target: production
+      args:
+        NODE_ALPINE_IMAGE: ${NODE_ALPINE_IMAGE:-m.daocloud.io/docker.io/library/node:24-alpine}
+        NGINX_ALPINE_IMAGE: ${NGINX_ALPINE_IMAGE:-m.daocloud.io/docker.io/library/nginx:alpine}
     image: yuxi-chat-iframe:${YUXI_VERSION:-0.7.1.dev0}
     container_name: chat-iframe-prod
     expose:

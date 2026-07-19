@@ -1,7 +1,8 @@
-# syntax=docker/dockerfile:1
-
 # 与主 Web 对齐 Node 24；仍选 Alpine 以保持前端构建镜像轻量。
-FROM node:24-alpine AS development
+ARG NODE_ALPINE_IMAGE=m.daocloud.io/docker.io/library/node:24-alpine
+ARG NGINX_ALPINE_IMAGE=m.daocloud.io/docker.io/library/nginx:alpine
+
+FROM ${NODE_ALPINE_IMAGE} AS development
 
 WORKDIR /app
 ENV TZ=Asia/Shanghai
@@ -25,7 +26,7 @@ RUN pnpm build \
     && test -f dist/index.html \
     && test -f dist/docmind-chat-iframe-parent.js
 
-FROM nginx:alpine AS production
+FROM ${NGINX_ALPINE_IMAGE} AS production
 
 COPY ./docker/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY ./chat-iframe/nginx.conf /etc/nginx/conf.d/default.conf

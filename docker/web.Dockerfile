@@ -1,6 +1,9 @@
 # 前端仅在构建阶段使用 Node，不依赖 glibc，因此使用同一 Node 24 的 Alpine 变体减小镜像体积。
+ARG NODE_ALPINE_IMAGE=m.daocloud.io/docker.io/library/node:24-alpine
+ARG NGINX_ALPINE_IMAGE=m.daocloud.io/docker.io/library/nginx:alpine
+
 # 开发阶段
-FROM node:24-alpine AS development
+FROM ${NODE_ALPINE_IMAGE} AS development
 WORKDIR /app
 ENV TZ=Asia/Shanghai
 
@@ -23,7 +26,7 @@ EXPOSE 5173
 # 启动开发服务器的命令在 docker-compose 文件中定义
 
 # 生产阶段
-FROM node:24-alpine AS build-stage
+FROM ${NODE_ALPINE_IMAGE} AS build-stage
 WORKDIR /app
 
 # 安装 pnpm
@@ -41,7 +44,7 @@ COPY ./web .
 RUN pnpm run build
 
 # 生产环境运行阶段
-FROM nginx:alpine AS production
+FROM ${NGINX_ALPINE_IMAGE} AS production
 COPY --from=build-stage /app/dist /usr/share/nginx/html
 COPY ./docker/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY ./docker/nginx/default.conf /etc/nginx/conf.d/default.conf

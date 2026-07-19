@@ -184,8 +184,6 @@ fi
 
 # Compose 参数固定在此处，确保每个操作都使用与环境对应的文件，避免误把开发变量带入生产。
 compose=(docker compose --env-file "$env_file" -f "$compose_file")
-target=()
-[ -n "$service" ] && target=("$service")
 
 # 先打印完整命令，再执行，便于运维从日志中复制排查；不打印 .env 的具体值。
 run_compose() {
@@ -193,6 +191,16 @@ run_compose() {
     printf '%q ' "${compose[@]}" "$@"
     printf '\n'
     "${compose[@]}" "$@"
+}
+
+run_compose_with_target() {
+    # macOS 系统 Bash 仍常见 3.2 版本；在 set -u 下展开空数组会报 unbound variable。
+    # 这里按是否指定 service 决定是否追加参数，避免空数组兼容性问题。
+    if [ -n "$service" ]; then
+        run_compose "$@" "$service"
+    else
+        run_compose "$@"
+    fi
 }
 
 # 读取最后一个同名变量，和 Compose 对重复变量的覆盖顺序保持一致；仅用于安全校验。
@@ -243,17 +251,17 @@ case "$action" in
         # deploy 固定先做配置解析，避免镜像构建或容器变更后才发现变量错误。
         [ "$environment" = "prod" ] && validate_prod_env
         run_compose config --quiet
-        run_compose up -d --build "${target[@]}"
+        run_compose_with_target up -d --build
         run_compose ps
         ;;
     start)
-        run_compose up -d --no-build "${target[@]}"
+        run_compose_with_target up -d --no-build
         ;;
     stop)
-        run_compose stop "${target[@]}"
+        run_compose_with_target stop
         ;;
     restart)
-        run_compose restart "${target[@]}"
+        run_compose_with_target restart
         ;;
     down)
         # down 是整个 Compose 项目的销毁操作，单服务场景应使用 stop，防止误解行为。
@@ -264,13 +272,13 @@ case "$action" in
         run_compose down
         ;;
     status)
-        run_compose ps "${target[@]}"
+        run_compose_with_target ps
         ;;
     logs)
-        run_compose logs --tail 200 -f "${target[@]}"
+        run_compose_with_target logs --tail 200 -f
         ;;
     build)
-        run_compose build "${target[@]}"
+        run_compose_with_target build
         ;;
     config)
         [ "$environment" = "prod" ] && validate_prod_env
