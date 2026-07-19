@@ -14,6 +14,7 @@ from yuxi.config import cache as runtime_cache
 from yuxi.utils.logging_config import logger
 
 READONLY_CONFIG_FIELDS = frozenset({"save_dir"})
+REMOVED_CONFIG_FIELDS = frozenset({"business_extraction_model"})
 
 
 class Config(BaseModel):
@@ -43,7 +44,6 @@ class Config(BaseModel):
         default="siliconflow-cn:Pro/BAAI/bge-reranker-v2-m3",
         description="默认 Re-Ranker 模型",
     )
-    business_extraction_model: str | None = Field(default=None, description="业务结构化抽取默认模型")
     content_guard_llm_model: str = Field(
         default="siliconflow-cn:Pro/MiniMaxAI/MiniMax-M2.5",
         description="内容审查LLM模型",
@@ -84,6 +84,9 @@ class Config(BaseModel):
             for key, value in user_config.items():
                 if key in READONLY_CONFIG_FIELDS:
                     logger.warning(f"Readonly config key ignored: {key}")
+                elif key in REMOVED_CONFIG_FIELDS:
+                    # 旧版已写入配置文件的抽取模型不再参与运行，保留兼容读取避免重启时误报未知配置。
+                    logger.info(f"Removed config key ignored: {key}")
                 elif key in type(self).model_fields:
                     setattr(self, key, value)
                 else:
@@ -109,10 +112,6 @@ class Config(BaseModel):
         self.sandbox_keepalive_interval_seconds = int(
             os.getenv("SANDBOX_KEEPALIVE_INTERVAL_SECONDS") or self.sandbox_keepalive_interval_seconds or 30
         )
-        self.business_extraction_model = (
-            os.getenv("BUSINESS_EXTRACTION_MODEL") or self.business_extraction_model or self.default_model
-        ).strip()
-
         if self.sandbox_provider.lower() != "provisioner":
             raise ValueError("Only sandbox_provider=provisioner is supported.")
         if not self.sandbox_provisioner_url:

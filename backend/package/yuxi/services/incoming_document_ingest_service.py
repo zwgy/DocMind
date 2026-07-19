@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from asyncio import gather
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -31,6 +32,7 @@ UploadMarkdownFn = Callable[..., Awaitable[str]]
 ClassifyDocumentFn = Callable[..., Awaitable[dict[str, Any]]]
 INCOMING_DOCUMENT_PROCESS_TASK_TYPE = "incoming_document_process"
 MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.8
+_EVIDENCE_QUOTE_TRANSLATION = str.maketrans({"“": '"', "”": '"', "„": '"', "‟": '"', "‘": "'", "’": "'"})
 
 
 class IncomingKnowledgeImportConflict(ValueError):
@@ -656,7 +658,7 @@ class IncomingDocumentIngestService:
     ) -> IncomingDocumentClassificationResult:
         from yuxi.config.app import config
 
-        model_spec = config.business_extraction_model or config.default_model
+        model_spec = config.default_model
         input_limit = document_input_token_limit(model_spec)
         bundle = _markdown_bundle(parsed_files)
         filename = str((document.document_metadata or {}).get("title") or document.source_document_id)
@@ -797,7 +799,7 @@ class IncomingDocumentIngestService:
                 for parsed in parsed_files
             ],
             classifications=classifications,
-            model_spec=config.business_extraction_model or config.default_model,
+            model_spec=config.default_model,
             operator_id=operator_id,
         )
 
@@ -942,20 +944,56 @@ def _validated_classification_result(
     result.classification_evidence = result.classification_evidence.strip()
     if not result.summary:
         raise ValueError("Incoming document summary is empty")
-    if not result.classification_evidence or result.classification_evidence not in source_text:
+    primary_evidence = _find_source_evidence(result.classification_evidence, source_text)
+    if primary_evidence is None:
         raise ValueError("Primary classification evidence was not found in the analyzed text")
+    result.classification_evidence = primary_evidence
     result.additional_classifications = _merge_additional_classifications(
         [
-            item
+            item.model_copy(update={"evidence": evidence})
             for item in result.additional_classifications
-            if item.confidence >= MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD
-            and item.evidence.strip()
-            and item.evidence.strip() in source_text
+            if (evidence := _find_source_evidence(item.evidence, source_text)) is not None
+            and item.confidence >= MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD
             and _valid_extraction_classifications([item.classification], None)
         ],
         result.classification,
     )
     return result
+
+
+def _find_source_evidence(evidence: str, source_text: str) -> str | None:
+    """返回原文中的证据片段，兼容 PDF/OCR 解析产生的空白和引号差异。"""
+    evidence = evidence.strip()
+    if not evidence:
+        return None
+    if evidence in source_text:
+        return evidence
+
+    normalized_evidence = _normalize_evidence(evidence)
+    # 只对足够长的引用做排版兼容，避免单个字符在归一化后误命中原文。
+    if len(normalized_evidence) < 8:
+        return None
+    normalized_source, source_indexes = _normalize_evidence(source_text, with_indexes=True)
+    start = normalized_source.find(normalized_evidence)
+    if start < 0:
+        return None
+    end = start + len(normalized_evidence) - 1
+    return source_text[source_indexes[start] : source_indexes[end] + 1]
+
+
+def _normalize_evidence(value: str, *, with_indexes: bool = False):
+    """逐字符归一化并保留原文索引，确保最终持久化的仍是原文片段。"""
+    chars: list[str] = []
+    indexes: list[int] = []
+    for index, char in enumerate(value):
+        normalized = unicodedata.normalize("NFKC", char).translate(_EVIDENCE_QUOTE_TRANSLATION)
+        for normalized_char in normalized:
+            if normalized_char.isspace():
+                continue
+            chars.append(normalized_char)
+            indexes.append(index)
+    normalized_value = "".join(chars)
+    return (normalized_value, indexes) if with_indexes else normalized_value
 
 
 def _merge_additional_classifications(

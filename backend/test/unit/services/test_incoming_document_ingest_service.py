@@ -719,6 +719,21 @@ def test_additional_classification_requires_confidence_and_source_evidence():
     assert result.additional_classifications[0].evidence == "存在重大风险"
 
 
+def test_primary_classification_evidence_normalizes_pdf_whitespace_and_quotes():
+    source_text = "为进一步规范路用客车的检修\n运用管理，现将重新修订的„中国铁路客车检修规程‟印发给你们。"
+    result = ingest_module._validated_classification_result(
+        ingest_module.IncomingDocumentClassificationResult(
+            classification="规章制度类",
+            classification_confidence=0.95,
+            classification_evidence='为进一步规范路用客车的检修运用管理，现将重新修订的"中国铁路客车检修规程"印发给你们。',
+            summary="发布修订后的客车检修规程。",
+        ),
+        source_text,
+    )
+
+    assert result.classification_evidence == source_text
+
+
 def test_invalid_primary_classification_is_rejected():
     with pytest.raises(ValueError, match="not configured"):
         ingest_module._validated_classification_result(
