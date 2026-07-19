@@ -47,10 +47,10 @@ async def test_classify_incoming_document_declares_categories(monkeypatch):
 
     assert result["classification"] == "安全管理类"
     prompt = captured["prompt"]
-    assert "- 通报类：" in prompt
-    assert "- 奖惩处置类：包含奖励、表彰、处罚" in prompt
-    assert "- 通用类：" in prompt
-    assert "只能填写“分类说明”中每行冒号前的名称" in prompt
+    assert "- notification（通报类）：" in prompt
+    assert "- reward_punishment（奖惩处置类）：包含奖励、表彰、处罚" in prompt
+    assert "- general（通用类）：" in prompt
+    assert "只能填写“分类说明”中括号前的英文 ID" in prompt
     assert "按照来文的主要目的" in prompt
     assert "无法归入上述专业类别时填“通用类”" not in prompt
     assert "默认必须填 []" in prompt

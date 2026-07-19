@@ -7,7 +7,12 @@ from langgraph.prebuilt.tool_node import ToolRuntime
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from yuxi.agents.toolkits.registry import tool
-from yuxi.document_extraction.schemas import extraction_schema_display_metadata
+from yuxi.document_extraction.schemas import (
+    document_category_label,
+    document_category_label_mapping,
+    extraction_schema_display_metadata,
+    normalize_document_category_ids,
+)
 from yuxi.repositories.document_business_extraction_repository import DocumentBusinessExtractionRepository
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
 from yuxi.services.incoming_document_markdown_service import (
@@ -15,7 +20,7 @@ from yuxi.services.incoming_document_markdown_service import (
     IncomingDocumentMarkdownService,
 )
 
-INCOMING_TOOL_CONFIG_GUIDE = "由 incoming-document Skill 按需加载，不作为 Agent 基础工具直接配置。"
+INCOMING_TOOL_CONFIG_GUIDE = "由来文业务 Skill 按需加载，不作为 Agent 基础工具直接配置。"
 
 FilterValue = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 SourceFileId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)]
@@ -27,7 +32,7 @@ class IncomingDocumentFilters(BaseModel):
     classifications: list[FilterValue] = Field(
         default_factory=list,
         max_length=50,
-        description="有效主分类列表，列表内按任一匹配",
+        description="有效主分类列表，支持稳定 ID 或当前中文名称，列表内按任一匹配",
     )
     item_types: list[FilterValue] = Field(
         default_factory=list,
@@ -63,17 +68,24 @@ def _iso(value: Any) -> Any:
 
 
 def _document_payload(document) -> dict[str, Any]:
+    classification = document.confirmed_classification or document.ai_classification
     return {
         "incoming_id": document.incoming_id,
         "source_system": document.source_system,
         "source_function_id": document.source_function_id,
         "source_document_id": document.source_document_id,
         "document_metadata": document.document_metadata or {},
-        "classification": document.confirmed_classification or document.ai_classification,
+        "classification": classification,
+        "classification_label": document_category_label(classification),
         "ai_classification": document.ai_classification,
+        "ai_classification_label": document_category_label(document.ai_classification),
         "classification_confidence": document.classification_confidence,
         "classification_evidence": document.classification_evidence,
-        "additional_classifications": document.additional_classifications or [],
+        "additional_classifications": [
+            item | {"classification_label": document_category_label(item.get("classification"))}
+            for item in document.additional_classifications or []
+            if isinstance(item, dict)
+        ],
         "summary": document.summary,
         "status": document.status,
         "review_status": document.review_status,
@@ -157,6 +169,7 @@ async def search_incoming_documents(
 ) -> dict[str, Any] | str:
     """按时间、分类、条目类型或关键词查找来文；先用本工具定位来文，再按需读取详情。"""
     try:
+        normalized_classifications = normalize_document_category_ids(classifications)
         normalized_item_types = _normalize_item_types(item_types)
     except ValueError as exc:
         return str(exc)
@@ -165,7 +178,7 @@ async def search_incoming_documents(
     documents, total = await repo.search_business_documents(
         date_from=date_from.isoformat() if date_from else None,
         date_to=date_to.isoformat() if date_to else None,
-        classifications=classifications,
+        classifications=normalized_classifications or None,
         item_types=normalized_item_types or None,
         keyword=keyword,
         page=page,
@@ -184,6 +197,7 @@ async def search_incoming_documents(
         "total": total,
         "page": page,
         "page_size": page_size,
+        "classification_labels": document_category_label_mapping(),
         "item_type_labels": _item_type_labels(),
     }
 
@@ -242,6 +256,7 @@ async def read_incoming_document(
         "result_groups": _result_groups(extraction),
         "categories": (extraction or {}).get("categories") or {},
         "schema_ids": (extraction or {}).get("schema_ids") or [],
+        "classification_labels": document_category_label_mapping(),
         "item_type_labels": _item_type_labels(),
         "markdown_files": markdown_files,
     }
@@ -263,18 +278,22 @@ async def get_incoming_document_statistics(
 ) -> dict[str, Any] | str:
     """统计筛选范围内的来文总数，并按分类、条目类型和月份聚合。"""
     try:
+        normalized_classifications = normalize_document_category_ids(classifications)
         normalized_item_types = _normalize_item_types(item_types)
     except ValueError as exc:
         return str(exc)
     result = await IncomingDocumentRepository().get_business_statistics(
         date_from=date_from.isoformat() if date_from else None,
         date_to=date_to.isoformat() if date_to else None,
-        classifications=classifications,
+        classifications=normalized_classifications or None,
         item_types=normalized_item_types or None,
         keyword=keyword,
     )
     labels = _item_type_labels()
+    for item in result.get("by_classification") or []:
+        item["classification_label"] = document_category_label(item.get("classification"))
     for item in result.get("by_item_type") or []:
         item["item_type_label"] = labels.get(item.get("item_type"), item.get("item_type"))
+    result["classification_labels"] = document_category_label_mapping()
     result["item_type_labels"] = labels
     return result

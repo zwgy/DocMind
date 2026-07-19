@@ -69,7 +69,7 @@
             </div>
           </template>
           <template v-else-if="column.key === 'classification'">
-            <a-tag>{{ record.effectiveClassification || '未分类' }}</a-tag>
+            <a-tag>{{ record.effectiveClassificationLabel || '未分类' }}</a-tag>
           </template>
           <template v-else-if="column.key === 'status'">
             <a-tag :color="processingStatusMeta(record.status).color">
@@ -158,7 +158,7 @@
               <a-tag :color="processingStatusMeta(detail.status).color">
                 {{ processingStatusMeta(detail.status).label }}
               </a-tag>
-              <a-tag>{{ detail.effectiveClassification || '未分类' }}</a-tag>
+              <a-tag>{{ detail.effectiveClassificationLabel || '未分类' }}</a-tag>
               <a-tag v-if="detail.confirmedClassification" color="blue">已人工纠偏</a-tag>
               <a-tag v-if="detail.reviewStatus === 'confirmed'" color="green">已确认</a-tag>
               <span v-if="detail.classificationConfidence !== null" class="muted">
@@ -200,7 +200,7 @@
                 :key="item.classification"
                 class="summary-text"
               >
-                <a-tag color="purple">附加分类：{{ item.classification }}</a-tag>
+                <a-tag color="purple">附加分类：{{ item.classificationLabel }}</a-tag>
                 置信度 {{ percent(item.confidence) }}；原文依据：{{ item.evidence }}
               </p>
             </div>
@@ -947,8 +947,8 @@ async function confirmDocument() {
 
 async function loadClassificationOptions() {
   const result = await incomingDocumentApi.options()
-  classificationOptions.value = Object.values(result.classifications || {}).map((label) => ({
-    value: label,
+  classificationOptions.value = Object.entries(result.classifications || {}).map(([value, label]) => ({
+    value,
     label
   }))
 }

@@ -27,6 +27,25 @@ def test_parse_file_metas_reads_main_file_marker():
     assert [meta.is_main_file for meta in metas] == [True, None]
 
 
+async def test_management_list_normalizes_classification_label(monkeypatch):
+    captured = {}
+
+    class FakeRepo:
+        async def list_for_management(self, **kwargs):
+            captured.update(kwargs)
+            return [], 0
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", FakeRepo)
+
+    result = await incoming_document_router.list_incoming_documents(
+        classification="风险管理类",
+        current_user=SimpleNamespace(),
+    )
+
+    assert result == {"items": [], "total": 0}
+    assert captured["classification"] == "risk_management"
+
+
 async def test_get_detail_returns_document_and_attachment_list(monkeypatch):
     document = SimpleNamespace(
         incoming_id="inc_1",
@@ -35,7 +54,7 @@ async def test_get_detail_returns_document_and_attachment_list(monkeypatch):
         source_document_id="DOC-1",
         document_metadata={"title": "专项检查"},
         status="ready",
-        ai_classification="阶段性工作类",
+        ai_classification="staged_work",
         confirmed_classification=None,
         classification_confidence=0.8,
         review_status="draft",
@@ -80,7 +99,8 @@ async def test_get_detail_returns_document_and_attachment_list(monkeypatch):
     result = await incoming_document_router.get_incoming_document_detail("inc_1", current_user=SimpleNamespace())
 
     assert result["title"] == "专项检查"
-    assert result["effectiveClassification"] == "阶段性工作类"
+    assert result["effectiveClassification"] == "staged_work"
+    assert result["effectiveClassificationLabel"] == "阶段性工作类"
     assert result["files"] == [
         {
             "incomingFileId": "incf_1",

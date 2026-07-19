@@ -59,6 +59,8 @@ _DEFAULT_MCP_SERVERS = {
         "description": "离线生成 DOCX、PDF、XLSX 文件",
         "icon": "📄",
         "tags": ["内置", "文档"],
+        # 仅在 Agent 配置或 Skill 依赖它时加载；默认启用避免业务 Skill 在全新部署中缺少导出工具。
+        "enabled": 1,
     },
 }
 
@@ -98,6 +100,7 @@ async def _stage_builtin_mcp_artifact(request, handler):
         content=f"已生成文件 {virtual_path}，请调用 present_artifacts 交付。",
         tool_call_id=tool_call_id,
     )
+
 
 _RETIRED_BUILTIN_MCP_SERVER_SLUGS = ("sequentialthinking",)
 
@@ -157,7 +160,7 @@ async def ensure_builtin_mcp_servers_in_db() -> None:
                             sse_read_timeout=config.get("sse_read_timeout"),
                             tags=config.get("tags"),
                             icon=config.get("icon"),
-                            enabled=0,
+                            enabled=int(config.get("enabled", 0)),
                             created_by="system",
                             updated_by="system",
                         )

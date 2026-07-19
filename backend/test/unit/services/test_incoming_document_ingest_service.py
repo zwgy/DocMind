@@ -194,10 +194,10 @@ async def test_process_reads_all_attachments_and_extracts_one_document_result():
 
     assert result == {"incoming_id": "inc_1", "status": "ready"}
     assert repo.document.summary.startswith("这份来文")
-    assert repo.document.ai_classification == "阶段性工作类"
+    assert repo.document.ai_classification == "staged_work"
     assert len(extraction.calls) == 1
     assert [file["source_file_id"] for file in extraction.calls[0]["files"]] == ["main", "attachment"]
-    assert extraction.calls[0]["classifications"] == ["阶段性工作类"]
+    assert extraction.calls[0]["classifications"] == ["staged_work"]
     assert all(file.markdown_file_url for file in repo.files)
 
 
@@ -238,8 +238,8 @@ async def test_process_rejects_empty_parsed_markdown():
 @pytest.mark.parametrize(
     ("confidence", "expected_classifications"),
     [
-        (0.8, ["规章制度类", "安全管理类", "阶段性工作类"]),
-        (0.79, ["规章制度类"]),
+        (0.8, ["regulation", "safety_management", "staged_work"]),
+        (0.79, ["regulation"]),
     ],
 )
 async def test_classification_correction_recomputes_secondary_extraction_routes(
@@ -294,7 +294,7 @@ async def test_classification_correction_recomputes_secondary_extraction_routes(
     result = await service.correct_classification("inc_1", classification="规章制度类", operator_id="admin")
 
     assert result["status"] == "ready"
-    assert repo.document.confirmed_classification == "规章制度类"
+    assert repo.document.confirmed_classification == "regulation"
     assert extraction.calls[0]["classifications"] == expected_classifications
 
 
@@ -696,7 +696,7 @@ def test_low_confidence_classification_does_not_enable_secondary_extraction():
         additional_classifications=[{"classification": "阶段性工作类", "confidence": 0.79, "evidence": "阶段任务"}],
     )
 
-    assert ingest_module._trusted_extraction_classifications(result) == ["安全管理类"]
+    assert ingest_module._trusted_extraction_classifications(result) == ["safety_management"]
 
 
 def test_additional_classification_requires_confidence_and_source_evidence():
@@ -715,7 +715,7 @@ def test_additional_classification_requires_confidence_and_source_evidence():
         "应加强现场安全管理，存在重大风险，本月完成检查。",
     )
 
-    assert [item.classification for item in result.additional_classifications] == ["风险管理类"]
+    assert [item.classification for item in result.additional_classifications] == ["risk_management"]
     assert result.additional_classifications[0].evidence == "存在重大风险"
 
 
@@ -773,7 +773,7 @@ async def test_long_document_classification_uses_structured_chunks(monkeypatch):
     )
 
     assert result.summary == "临时提要"
-    assert ingest_module._trusted_extraction_classifications(result) == ["阶段性工作类", "安全管理类"]
+    assert ingest_module._trusted_extraction_classifications(result) == ["staged_work", "safety_management"]
     assert result.additional_classifications[0].evidence in "超长附件\n第一部分 内容\n第二部分 内容"
     assert chunk_params[0]["chunk_parser_config"]["overlapped_percent"] == 10
-    assert any("抽取分类：阶段性工作类、安全管理类" in prompt for prompt in prompts)
+    assert any("抽取分类：staged_work、safety_management" in prompt for prompt in prompts)

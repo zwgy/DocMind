@@ -36,11 +36,11 @@ def build_category_prompt(
     metadata: dict[str, object] | None,
 ) -> str:
     category_lines = []
-    for field in DocumentCategoryResult.model_fields.values():
+    for category_id, field in DocumentCategoryResult.model_fields.items():
         label = str((field.json_schema_extra or {}).get("label") or "")
         description = field.description or ""
         _, separator, detail = description.partition("：")
-        category_lines.append(f"- {label}：{detail if separator else description}")
+        category_lines.append(f"- {category_id}（{label}）：{detail if separator else description}")
 
     rules = [
         "1. classification 按照来文的主要目的选择最匹配的一类，不要因正文零散出现某类关键词而改变分类。",
@@ -61,10 +61,10 @@ def build_category_prompt(
             "\n".join(category_lines),
             "",
             "JSON 字段：",
-            "- classification: 单一来文分类名称，只能填写“分类说明”中每行冒号前的名称",
+            "- classification: 单一来文稳定分类 ID，只能填写“分类说明”中括号前的英文 ID",
             "- classification_evidence: 支持主分类判断的原文逐字引用",
             "- additional_classifications: 附加分类对象列表，默认必须填 []；每项包含 classification、confidence、"
-            "evidence，classification 只能填写配置分类且不能与主分类重复，evidence 必须逐字摘录正文",
+            "evidence，classification 只能填写稳定分类 ID 且不能与主分类重复，evidence 必须逐字摘录正文",
             "- classification_confidence: 0 到 1 的置信度",
             "- summary: 基于所提供正文的来文摘要，包含结论、关键事实、要求、对象、时间节点和注意事项",
             "",

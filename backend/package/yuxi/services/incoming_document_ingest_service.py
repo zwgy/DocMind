@@ -9,9 +9,8 @@ from yuxi.document_extraction import BusinessExtractionService, classify_incomin
 from yuxi.document_extraction.schemas import (
     AdditionalClassification,
     IncomingDocumentClassificationResult,
-    category_result_for_classification_label,
-    category_result_for_classification_labels,
-    category_result_to_mapping,
+    document_category_id,
+    document_category_label,
 )
 from yuxi.document_extraction.service import document_input_token_limit
 from yuxi.knowledge.chunking.ragflow_like.dispatcher import chunk_markdown
@@ -325,7 +324,8 @@ class IncomingDocumentIngestService:
     async def correct_classification(
         self, incoming_id: str, *, classification: str, operator_id: str | None = None
     ) -> dict[str, Any]:
-        if not any(category_result_to_mapping(category_result_for_classification_label(classification)).values()):
+        classification = document_category_id(classification)
+        if classification is None:
             raise ValueError("classification is not configured")
         document = await self.incoming_repo.get_by_incoming_id(incoming_id)
         if document is None:
@@ -411,7 +411,12 @@ class IncomingDocumentIngestService:
                 incoming_id, {"status": "failed", "processing_error": str(exc), "updated_by": operator_id}
             )
             raise
-        return {"incomingId": incoming_id, "effectiveClassification": classification, "status": "ready"}
+        return {
+            "incomingId": incoming_id,
+            "effectiveClassification": classification,
+            "effectiveClassificationLabel": document_category_label(classification),
+            "status": "ready",
+        }
 
     async def confirm_document(self, incoming_id: str, *, operator_id: str) -> dict[str, Any]:
         document = await self.incoming_repo.get_by_incoming_id(incoming_id)
@@ -916,24 +921,25 @@ def _trusted_extraction_classifications(result: IncomingDocumentClassificationRe
 
 
 def _valid_extraction_classifications(labels: list[str] | None, primary: str | None) -> list[str]:
-    candidates = list(dict.fromkeys([str(label).strip() for label in [primary, *(labels or [])] if str(label).strip()]))
-    result = category_result_for_classification_labels(candidates)
-    valid_labels = {
-        str((field.json_schema_extra or {}).get("label") or name)
-        for name, field in result.__class__.model_fields.items()
-        if getattr(result, name).matched
-    }
-    return [label for label in candidates if label in valid_labels]
+    classifications: list[str] = []
+    for value in [primary, *(labels or [])]:
+        classification = document_category_id(value)
+        if classification and classification not in classifications:
+            classifications.append(classification)
+    if any(classification != "general" for classification in classifications):
+        classifications = [classification for classification in classifications if classification != "general"]
+    return classifications
 
 
 def _validated_classification_result(
     result: IncomingDocumentClassificationResult, source_text: str
 ) -> IncomingDocumentClassificationResult:
-    result.classification = result.classification.strip()
+    classification = document_category_id(result.classification)
+    if classification is None:
+        raise ValueError(f"Classification is not configured: {result.classification}")
+    result.classification = classification
     result.summary = result.summary.strip()
     result.classification_evidence = result.classification_evidence.strip()
-    if not any(category_result_to_mapping(category_result_for_classification_label(result.classification)).values()):
-        raise ValueError(f"Classification is not configured: {result.classification}")
     if not result.summary:
         raise ValueError("Incoming document summary is empty")
     if not result.classification_evidence or result.classification_evidence not in source_text:
@@ -957,12 +963,17 @@ def _merge_additional_classifications(
 ) -> list[AdditionalClassification]:
     merged: dict[str, AdditionalClassification] = {}
     for item in items:
-        label = item.classification.strip()
+        classification = document_category_id(item.classification)
         evidence = item.evidence.strip()
-        if label == primary or not evidence or item.confidence < MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD:
+        if (
+            classification is None
+            or classification == primary
+            or not evidence
+            or item.confidence < MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD
+        ):
             continue
-        normalized = item.model_copy(update={"classification": label, "evidence": evidence})
-        if label not in merged or normalized.confidence > merged[label].confidence:
-            merged[label] = normalized
+        normalized = item.model_copy(update={"classification": classification, "evidence": evidence})
+        if classification not in merged or normalized.confidence > merged[classification].confidence:
+            merged[classification] = normalized
     valid_labels = set(_valid_extraction_classifications(list(merged), primary))
-    return [item for label, item in merged.items() if label in valid_labels]
+    return [item for classification, item in merged.items() if classification in valid_labels]

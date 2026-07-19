@@ -73,7 +73,7 @@ async def test_ensure_builtin_mcp_servers_removes_retired_system_server(monkeypa
     assert chart is not None
     assert document_exporter is not None
     assert document_exporter.command == "python"
-    assert document_exporter.enabled == 0
+    assert document_exporter.enabled == 1
 
 
 async def test_stage_builtin_mcp_artifact_copies_file_to_thread_outputs(tmp_path, monkeypatch):
@@ -164,9 +164,7 @@ async def test_get_enabled_mcp_tools_loads_latest_config_from_db(monkeypatch):
     assert captured == [
         {
             "server_name": "demo",
-            "additional_servers": {
-                "demo": {"transport": "stdio", "command": "demo", "disabled_tools": ["tool_b"]}
-            },
+            "additional_servers": {"demo": {"transport": "stdio", "command": "demo", "disabled_tools": ["tool_b"]}},
             "disabled_tools": ["tool_b"],
         }
     ]

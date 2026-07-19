@@ -49,13 +49,42 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
     BuiltinSkillSpec(
         slug="incoming-document",
         source_dir=_SKILLS_ROOT / "incoming-document",
-        description="查询、读取和统计已接入系统的来文，并在必要时按附件核验原文。",
+        description="查询、读取、统计和综合解读已接入系统的来文，并在必要时按附件核验原文。",
         version="2026.07.18",
         tool_dependencies=(
             "search_incoming_documents",
             "read_incoming_document",
             "get_incoming_document_statistics",
+            "ask_user_question",
         ),
+    ),
+    BuiltinSkillSpec(
+        slug="build-risk-ledger",
+        source_dir=_SKILLS_ROOT / "build-risk-ledger",
+        description="按时间范围汇总多份来文中的风险、管理要求和任务，生成可追溯风险台账。",
+        version="2026.07.18",
+        tool_dependencies=(
+            "search_incoming_documents",
+            "read_incoming_document",
+            "get_incoming_document_statistics",
+            "ask_user_question",
+            "present_artifacts",
+        ),
+        mcp_dependencies=("document-exporter",),
+    ),
+    BuiltinSkillSpec(
+        slug="summarize-assessment-actions",
+        source_dir=_SKILLS_ROOT / "summarize-assessment-actions",
+        description="按时间范围汇总多份来文中的通报、考评和奖惩事项，保留对象、结果、后续要求及依据。",
+        version="2026.07.18",
+        tool_dependencies=(
+            "search_incoming_documents",
+            "read_incoming_document",
+            "get_incoming_document_statistics",
+            "ask_user_question",
+            "present_artifacts",
+        ),
+        mcp_dependencies=("document-exporter",),
     ),
     BuiltinSkillSpec(
         slug="mysql-reporter",

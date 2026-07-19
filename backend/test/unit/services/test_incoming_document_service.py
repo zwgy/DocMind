@@ -29,7 +29,7 @@ async def test_query_returns_one_document_summary_for_multiple_attachments():
         source_system="oa",
         status="ready",
         summary="整份来文部署专项检查，附件包含风险清单。",
-        ai_classification="阶段性工作类",
+        ai_classification="staged_work",
         confirmed_classification=None,
         document_metadata={"title": "专项检查通知", "incoming_date": "2026-07-17"},
         knowledge_import_status="partial",
@@ -87,7 +87,8 @@ async def test_query_returns_one_document_summary_for_multiple_attachments():
     item = result["items"][0]
     assert item["incomingId"] == "inc_1"
     assert item["summary"].startswith("整份来文")
-    assert item["classification"] == "阶段性工作类"
+    assert item["classification"] == "staged_work"
+    assert item["classificationLabel"] == "阶段性工作类"
     assert (item["kbId"], item["fileId"], item["fileStatus"]) == ("kb_1", "kbf_main", "indexed")
     assert [file["filename"] for file in item["files"]] == ["主文件.pdf", "风险清单.xlsx"]
     assert item["hasParsedMarkdown"] is True

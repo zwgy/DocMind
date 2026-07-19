@@ -152,7 +152,7 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
         summary, _ = _truncate(summary, IFRAME_FILE_SUMMARY_CHARS)
         lines.extend(["  状态：已有摘要", f"  摘要：{summary}"])
 
-    classification = _clean_text(file_info.get("classification"))
+    classification = _clean_text(file_info.get("classificationLabel") or file_info.get("classification"))
     classification_evidence = _clean_text(file_info.get("aiClassificationEvidence"))
     if classification:
         lines.append(f"  主分类：{classification}")
@@ -165,7 +165,7 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
         for item in additional_classifications:
             if not isinstance(item, dict):
                 continue
-            classification = _clean_text(item.get("classification"))
+            classification = _clean_text(item.get("classificationLabel") or item.get("classification"))
             evidence = _clean_text(item.get("evidence"))
             confidence = item.get("confidence")
             if classification and evidence:

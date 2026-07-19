@@ -10,8 +10,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
 from yuxi.document_extraction.schemas import (
+    document_category_label,
     document_category_label_mapping,
     extraction_schema_display_metadata,
+    normalize_document_category_ids,
 )
 from yuxi.knowledge.utils import parse_minio_url
 from yuxi.repositories.document_business_extraction_repository import DocumentBusinessExtractionRepository
@@ -97,6 +99,10 @@ async def list_incoming_documents(
     current_user: User = Depends(get_admin_user),
 ):
     del current_user
+    try:
+        classification = normalize_document_category_ids([classification])[0] if classification else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     # 管理页列表只暴露来文处理状态和入库状态，知识库内容仍走知识库文件接口。
     items, total = await IncomingDocumentRepository().list_for_management(
         page=page,
@@ -370,6 +376,8 @@ def _incoming_document_payload(record, *, detail: bool) -> dict:
     effective_classification = getattr(record, "confirmed_classification", None) or getattr(
         record, "ai_classification", None
     )
+    ai_classification = getattr(record, "ai_classification", None)
+    confirmed_classification = getattr(record, "confirmed_classification", None)
     payload = {
         "incomingId": record.incoming_id,
         "sourceSystem": record.source_system,
@@ -382,12 +390,19 @@ def _incoming_document_payload(record, *, detail: bool) -> dict:
         "sourceUnit": metadata.get("source_unit"),
         "incomingDate": metadata.get("incoming_date"),
         "status": record.status,
-        "aiClassification": getattr(record, "ai_classification", None),
-        "confirmedClassification": getattr(record, "confirmed_classification", None),
+        "aiClassification": ai_classification,
+        "aiClassificationLabel": document_category_label(ai_classification),
+        "confirmedClassification": confirmed_classification,
+        "confirmedClassificationLabel": document_category_label(confirmed_classification),
         "effectiveClassification": effective_classification,
+        "effectiveClassificationLabel": document_category_label(effective_classification),
         "classificationConfidence": getattr(record, "classification_confidence", None),
         "aiClassificationEvidence": getattr(record, "classification_evidence", None),
-        "additionalClassifications": getattr(record, "additional_classifications", None) or [],
+        "additionalClassifications": [
+            item | {"classificationLabel": document_category_label(item.get("classification"))}
+            for item in getattr(record, "additional_classifications", None) or []
+            if isinstance(item, dict)
+        ],
         "reviewStatus": getattr(record, "review_status", None) or "draft",
         "confirmedBy": getattr(record, "confirmed_by", None),
         "confirmedAt": _iso(getattr(record, "confirmed_at", None)),

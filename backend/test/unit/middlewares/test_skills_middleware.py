@@ -289,6 +289,54 @@ async def test_awrap_model_call_keeps_gated_tools_when_activated():
     assert captured["tools"] == {"read_file", "list_kbs", "query_kb"}
 
 
+@pytest.mark.asyncio
+async def test_awrap_model_call_loads_activated_skill_mcp_dependencies(monkeypatch):
+    async def fake_get_enabled_mcp_tools(server_name: str):
+        assert server_name == "document-exporter"
+        return [SimpleNamespace(name="generate_xlsx")]
+
+    monkeypatch.setattr(skills_middleware, "get_enabled_mcp_tools", fake_get_enabled_mcp_tools)
+
+    class FakeRequest:
+        def __init__(self, tools):
+            self.runtime = SimpleNamespace(
+                context=SimpleNamespace(
+                    _readable_skills=["build-risk-ledger"],
+                    _runtime_skill_dependency_map={
+                        "build-risk-ledger": {
+                            "tools": ["present_artifacts"],
+                            "mcps": ["document-exporter"],
+                            "skills": [],
+                        }
+                    },
+                    tools=["present_artifacts"],
+                    mcps=[],
+                )
+            )
+            self.state = {"activated_skills": ["build-risk-ledger"]}
+            self.tools = tools
+
+        def override(self, *, tools):
+            new_request = FakeRequest(tools)
+            new_request.runtime = self.runtime
+            new_request.state = self.state
+            return new_request
+
+    captured = {}
+
+    async def handler(request):
+        captured["tools"] = {tool.name for tool in request.tools}
+        return "ok"
+
+    result = await SkillsMiddleware().awrap_model_call(
+        FakeRequest([SimpleNamespace(name="present_artifacts")]),
+        handler,
+    )
+
+    assert result == "ok"
+    assert captured["tools"] == {"present_artifacts", "generate_xlsx"}
+
+
 def test_read_file_activates_only_readable_skill() -> None:
     middleware = SkillsMiddleware()
     result = ToolMessage(content="ok", tool_call_id="tool-1", name="read_file")

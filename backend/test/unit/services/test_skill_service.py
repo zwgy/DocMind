@@ -303,8 +303,34 @@ def test_incoming_document_builtin_skill_spec():
         "search_incoming_documents",
         "read_incoming_document",
         "get_incoming_document_statistics",
+        "ask_user_question",
     ]
     assert (incoming_document["source_dir"] / "SKILL.md").exists()
+
+
+def test_phase3_incoming_business_skill_specs():
+    specs = {spec["slug"]: spec for spec in svc.list_builtin_skill_specs()}
+    incoming_tools = {
+        "search_incoming_documents",
+        "read_incoming_document",
+        "get_incoming_document_statistics",
+    }
+
+    assert "review-incoming-document" not in specs
+    incoming_content = (specs["incoming-document"]["source_dir"] / "SKILL.md").read_text(encoding="utf-8")
+    assert all(heading in incoming_content for heading in ("### A. 单篇来文解读", "### B. 来文检索", "### C. 来文统计"))
+
+    for slug in ("build-risk-ledger", "summarize-assessment-actions"):
+        spec = specs[slug]
+        assert incoming_tools < set(spec["tool_dependencies"])
+        assert "ask_user_question" in spec["tool_dependencies"]
+        assert "present_artifacts" in spec["tool_dependencies"]
+        assert spec["mcp_dependencies"] == ["document-exporter"]
+        assert (spec["source_dir"] / "SKILL.md").exists()
+        assert "page_size=50" in (spec["source_dir"] / "SKILL.md").read_text(encoding="utf-8")
+
+    assessment_content = (specs["summarize-assessment-actions"]["source_dir"] / "SKILL.md").read_text(encoding="utf-8")
+    assert 'classifications=["notification", "assessment", "reward_punishment"]' in assessment_content
 
 
 def test_mysql_reporter_builtin_skill_spec_replaces_reporter_and_deep_reporter():

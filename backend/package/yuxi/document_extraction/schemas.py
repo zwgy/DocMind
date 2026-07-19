@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 class AdditionalClassification(BaseModel):
     """有独立原文证据支持的附加业务分类。"""
 
-    classification: str
+    classification: str = Field(description="稳定分类 ID，例如 risk_management")
     confidence: float = Field(ge=0, le=1)
     evidence: str = Field(min_length=1)
 
@@ -16,7 +16,7 @@ class AdditionalClassification(BaseModel):
 class IncomingDocumentClassificationResult(BaseModel):
     """来文摘要阶段的模型输出。"""
 
-    classification: str
+    classification: str = Field(description="稳定分类 ID，例如 risk_management")
     classification_confidence: float = Field(ge=0, le=1)
     classification_evidence: str = Field(min_length=1)
     summary: str = Field(min_length=1)
@@ -307,6 +307,46 @@ def document_category_label_mapping() -> dict[str, str]:
     }
 
 
+def document_category_id(value: str | None) -> str | None:
+    """将稳定 ID 或当前中文名称统一为稳定 ID。"""
+    normalized = str(value or "").strip().casefold()
+    if not normalized:
+        return None
+    labels = document_category_label_mapping()
+    return next(
+        (
+            category_id
+            for category_id, label in labels.items()
+            if normalized in {category_id.casefold(), label.casefold()}
+        ),
+        None,
+    )
+
+
+def normalize_document_category_ids(values: list[str] | None) -> list[str]:
+    """严格归一分类筛选值，避免错误名称静默返回空结果。"""
+    normalized: list[str] = []
+    unknown: list[str] = []
+    for value in values or []:
+        category_id = document_category_id(value)
+        if category_id is None:
+            unknown.append(str(value).strip())
+        elif category_id not in normalized:
+            normalized.append(category_id)
+    if unknown:
+        supported = "、".join(
+            f"{label}（{category_id}）" for category_id, label in document_category_label_mapping().items()
+        )
+        raise ValueError(f"未知分类：{'、'.join(unknown)}。当前支持：{supported}")
+    return normalized
+
+
+def document_category_label(category_id: str | None) -> str | None:
+    if category_id is None:
+        return None
+    return document_category_label_mapping().get(category_id, category_id)
+
+
 def extraction_schema_display_metadata(schema_ids: list[str] | None = None) -> dict[str, Any]:
     selected_ids = [
         schema_id for schema_id in (schema_ids or list(EXTRACTION_SCHEMAS)) if schema_id in EXTRACTION_SCHEMAS
@@ -346,14 +386,7 @@ def extraction_schema_ids_for_categories(categories: dict[str, bool | CategoryDe
 
 def category_result_for_classification_labels(labels: list[str] | None) -> DocumentCategoryResult:
     result = DocumentCategoryResult()
-    normalized = list(dict.fromkeys(str(label or "").strip() for label in (labels or []) if str(label or "").strip()))
-    matched_names: list[str] = []
-    for label in normalized:
-        for name, field in DocumentCategoryResult.model_fields.items():
-            extra = field.json_schema_extra or {}
-            if str(extra.get("label") or "").strip() == label:
-                matched_names.append(name)
-                break
+    matched_names = normalize_document_category_ids(labels)
     # 通用类仅作为兜底，不能与明确业务类型同时触发抽取。
     if any(name != "general" for name in matched_names):
         matched_names = [name for name in matched_names if name != "general"]

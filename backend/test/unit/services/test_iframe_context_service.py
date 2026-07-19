@@ -127,9 +127,12 @@ async def test_render_iframe_context_keeps_incoming_summary_evidence_and_attachm
                     "extractionStatus": "ready",
                     "hasMarkdown": True,
                     "summary": "客户审查摘要",
+                    "classification": "assessment",
+                    "classificationLabel": "考评类",
                     "additionalClassifications": [
                         {
-                            "classification": "风险管理类",
+                            "classification": "risk_management",
+                            "classificationLabel": "风险管理类",
                             "confidence": 0.91,
                             "evidence": "需复核 Global Finance 的资质。",
                         }
@@ -168,6 +171,7 @@ async def test_render_iframe_context_keeps_incoming_summary_evidence_and_attachm
     )
 
     assert "客户审查摘要" in prompt
+    assert "主分类：考评类" in prompt
     assert "有证据支持的附加分类" in prompt
     assert "风险管理类（置信度 0.91）" in prompt
     assert "结构化信息" in prompt

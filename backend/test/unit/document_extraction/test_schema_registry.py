@@ -1,3 +1,5 @@
+import pytest
+
 from yuxi.document_extraction.schemas import (
     DocumentCategoryResult,
     category_result_for_classification_label,
@@ -5,6 +7,7 @@ from yuxi.document_extraction.schemas import (
     extraction_schema_ids_for_categories,
     field_description_lines,
     get_extraction_schema,
+    normalize_document_category_ids,
 )
 
 
@@ -22,6 +25,15 @@ def test_classification_label_maps_to_category_result():
 
     assert result.regulation.matched is True
     assert schema_ids == ["management_requirement_item"]
+
+
+def test_classification_filter_accepts_id_or_label_and_rejects_unknown():
+    assert normalize_document_category_ids(["assessment", "考评类", "notification"]) == [
+        "assessment",
+        "notification",
+    ]
+    with pytest.raises(ValueError, match="未知分类.*当前支持"):
+        normalize_document_category_ids(["考核类"])
 
 
 def test_general_classification_maps_to_general_schema():

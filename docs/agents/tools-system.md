@@ -75,7 +75,7 @@ kb_tools = get_common_kb_tools()
 
 ### 来文工具 (incoming_document)
 
-来文工具不属于 Agent 基础 `buildin` 工具，由内置 `incoming-document` Skill 的 `tool_dependencies` 按需加载。管理员在 Agent 中配置该 Skill 后，模型读取对应 `SKILL.md` 激活能力，三个工具才对模型可见。
+来文工具不属于 Agent 基础 `buildin` 工具，由来文类内置 Skill 的 `tool_dependencies` 按需加载。管理员在 Agent 中配置 Skill 后，模型读取对应 `SKILL.md` 激活能力，声明的工具才对模型可见。
 
 | 工具 | 说明 |
 |------|------|
@@ -83,7 +83,17 @@ kb_tools = get_common_kb_tools()
 | `read_incoming_document` | 读取来文级结论、附件和正式结构化结果，按需将指定附件 Markdown 写入当前会话 sandbox |
 | `get_incoming_document_statistics` | 按分类、条目类型和月份统计来文文档数及结构化 detail 数 |
 
-条目类型筛选同时接受内部 ID 和 Schema 当前中文名称；需要原文时，先由 `read_incoming_document` 返回虚拟 `markdown_path`，再使用沙箱 `read_file` 分段读取。
+分类和条目类型筛选都接受稳定 ID 或当前中文名称，并在查询前统一为 ID；未知值直接返回当前支持列表，不会静默得到空结果。分类中文名称只用于界面和回答展示，调整名称不会影响数据库、Skill 或历史查询。需要原文时，先由 `read_incoming_document` 返回虚拟 `markdown_path`，再使用沙箱 `read_file` 分段读取。
+
+Phase 3 首批业务 Skill：
+
+| Skill | 用途 | 依赖 |
+|------|------|------|
+| `incoming-document` | 来文查询、统计、单篇综合解读和按附件核验 | 查询、读取、统计来文、向用户提问 |
+| `build-risk-ledger` | 按时间范围生成风险汇总和 XLSX 台账 | 查询、读取、统计来文、向用户提问，`document-exporter` |
+| `summarize-assessment-actions` | 汇总通报、考评、奖惩和后续任务 | 查询、读取、统计来文、向用户提问，`document-exporter` |
+
+`document-exporter` 是离线内置 MCP，全新部署默认启用，但不会成为 Agent 默认工具；只有 Agent 直接配置它，或上述业务 Skill 被激活时，生成工具才会向模型开放。
 
 ## 工具组装
 
@@ -91,7 +101,7 @@ kb_tools = get_common_kb_tools()
 
 1. **基础工具**：从 `context.tools` 中按名称筛选
 2. **MCP 工具**：根据 `context.mcps` 加载 MCP 服务器工具
-3. **Skill 依赖工具**：由 `SkillsMiddleware` 在 Skill 激活后按需追加，包括 `knowledge-base` 绑定的知识库工具和 `incoming-document` 绑定的来文工具
+3. **Skill 依赖工具**：由 `SkillsMiddleware` 在 Skill 激活后按需追加，包括 `knowledge-base` 绑定的知识库工具和各来文 Skill 绑定的来文工具、文档导出 MCP
 
 ```python
 from yuxi.agents.context import prepare_agent_runtime_context

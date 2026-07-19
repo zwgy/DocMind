@@ -21,7 +21,7 @@ def _document():
         source_document_id="doc-1",
         document_metadata={"title": "风险通知", "incoming_date": "2026-07-01"},
         confirmed_classification=None,
-        ai_classification="风险管理类",
+        ai_classification="risk_management",
         classification_confidence=0.95,
         classification_evidence="存在逾期风险",
         additional_classifications=[],
@@ -46,7 +46,7 @@ def test_incoming_document_tools_are_registered_for_skill_gating():
         metadata = get_extra_metadata(tool_name)
         assert metadata is not None
         assert metadata.category == "incoming_document"
-        assert "incoming-document Skill" in metadata.config_guide
+        assert "来文业务 Skill" in metadata.config_guide
 
     context = SimpleNamespace(
         _readable_skills=["incoming-document"],
@@ -81,6 +81,25 @@ def test_item_type_names_are_dynamically_normalized():
 
 
 @pytest.mark.asyncio
+async def test_search_normalizes_classification_id_or_label_and_rejects_unknown(monkeypatch):
+    class FakeRepository:
+        async def search_business_documents(self, **kwargs):
+            assert kwargs["classifications"] == ["risk_management"]
+            return [], 0
+
+        async def get_business_document_facets(self, _incoming_ids):
+            return {}
+
+    monkeypatch.setattr(tools, "IncomingDocumentRepository", FakeRepository)
+
+    result = await _tool_callable(tools.search_incoming_documents)(classifications=["风险管理类"])
+    invalid = await _tool_callable(tools.search_incoming_documents)(classifications=["风险管控类"])
+
+    assert result["classification_labels"]["risk_management"] == "风险管理类"
+    assert "未知分类" in invalid
+
+
+@pytest.mark.asyncio
 async def test_search_returns_document_summary_without_full_details_or_urls(monkeypatch):
     class FakeRepository:
         async def search_business_documents(self, **kwargs):
@@ -102,6 +121,8 @@ async def test_search_returns_document_summary_without_full_details_or_urls(monk
     assert result["total"] == 1
     assert result["items"][0]["attachment_count"] == 2
     assert result["items"][0]["item_types"] == ["risk_item"]
+    assert result["items"][0]["classification"] == "risk_management"
+    assert result["items"][0]["classification_label"] == "风险管理类"
     assert result["item_type_labels"]["risk_item"] == "风险事项"
     assert "result_groups" not in result["items"][0]
     assert "minio" not in str(result).lower()
@@ -275,7 +296,7 @@ async def test_statistics_uses_same_filters(monkeypatch):
             assert kwargs == {
                 "date_from": None,
                 "date_to": "2026-07-31",
-                "classifications": ["风险管理类"],
+                "classifications": ["risk_management"],
                 "item_types": None,
                 "keyword": None,
             }

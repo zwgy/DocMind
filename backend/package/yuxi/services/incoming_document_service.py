@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from yuxi.document_extraction.schemas import extraction_schema_display_metadata
+from yuxi.document_extraction.schemas import document_category_label, extraction_schema_display_metadata
 from yuxi.repositories.document_business_extraction_repository import DocumentBusinessExtractionRepository
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
 
@@ -81,7 +81,7 @@ class IncomingDocumentService:
         schema_ids = (extraction or {}).get("schema_ids") or []
         display = extraction_schema_display_metadata(schema_ids)
         classification = document.confirmed_classification or document.ai_classification
-        display["classificationLabel"] = classification
+        display["classificationLabel"] = document_category_label(classification)
         metadata = document.document_metadata or {}
         return base | {
             "incomingId": document.incoming_id,
@@ -95,8 +95,13 @@ class IncomingDocumentService:
             "processingStatus": document.status,
             "extractionStatus": "ready" if document.status == "ready" and document.summary else document.status,
             "classification": classification,
+            "classificationLabel": document_category_label(classification),
             "aiClassificationEvidence": getattr(document, "classification_evidence", None),
-            "additionalClassifications": getattr(document, "additional_classifications", None) or [],
+            "additionalClassifications": [
+                item | {"classificationLabel": document_category_label(item.get("classification"))}
+                for item in getattr(document, "additional_classifications", None) or []
+                if isinstance(item, dict)
+            ],
             "summary": document.summary,
             "hasParsedMarkdown": bool(document_files) and all(file.markdown_file_url for file in document_files),
             "runId": (extraction or {}).get("run_id"),
