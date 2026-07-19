@@ -48,7 +48,10 @@ import requests
 # =====================================================================
 
 # API 地址：第三方按实际部署的网关地址替换，或通过 INGEST_API_BASE 注入。
-DEFAULT_API_BASE = "http://192.168.1.220:5050"
+DEFAULT_API_BASE = "http://127.0.0.1:5050"
+
+# Token：第三方token，或通过 INGEST_TOKEN 注入。
+DEFAULT_TOKEN = "yxkey_31421aa8e7ffa9414898693d80b2b804fa14140f5ef4e55f"
 
 # 单次 HTTP 请求的超时秒数。
 REQUEST_TIMEOUT_SECONDS = 60
@@ -58,9 +61,7 @@ MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 2
 
 # 第三方本地的来文目录，按实际情况替换。
-BASE_DIR = Path(
-    r"D:\work\llm\docMind\branches\docMind-dev-v1.0\chat-iframe\public\中国铁路上海局集团有限公司关于重新印发《中国铁路上海局集团有限公司路用客车检修运用管理办法》的通知"
-)
+BASE_DIR = Path(r"/Volumes/highDisk/Work/DocMind/chat-iframe/public/test1/")
 
 # 接口路径，固定不需要外部配置。
 INGEST_ENDPOINT = "/api/incoming-documents/ingest"
@@ -307,7 +308,7 @@ def main() -> int:
     )
 
     api_base = os.environ.get("INGEST_API_BASE", DEFAULT_API_BASE)
-    token = os.environ.get("INGEST_TOKEN", "").strip()
+    token = os.environ.get("INGEST_TOKEN", DEFAULT_TOKEN).strip()
     if not token:
         logger.error("缺少 INGEST_TOKEN 环境变量")
         return 2
