@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import unicodedata
 from asyncio import gather
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
 from yuxi.document_extraction import BusinessExtractionService, classify_incoming_document
+from yuxi.document_extraction.evidence import find_source_quote
 from yuxi.document_extraction.schemas import (
     AdditionalClassification,
     IncomingDocumentClassificationResult,
@@ -32,7 +32,6 @@ UploadMarkdownFn = Callable[..., Awaitable[str]]
 ClassifyDocumentFn = Callable[..., Awaitable[dict[str, Any]]]
 INCOMING_DOCUMENT_PROCESS_TASK_TYPE = "incoming_document_process"
 MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.8
-_EVIDENCE_QUOTE_TRANSLATION = str.maketrans({"“": '"', "”": '"', "„": '"', "‟": '"', "‘": "'", "’": "'"})
 
 
 class IncomingKnowledgeImportConflict(ValueError):
@@ -380,6 +379,7 @@ class IncomingDocumentIngestService:
                 routing.classification != classification
                 and routing.classification_confidence is not None
                 and routing.classification_confidence >= MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD
+                and routing.classification_evidence
             ):
                 routing_additional.append(
                     AdditionalClassification(
@@ -703,6 +703,7 @@ class IncomingDocumentIngestService:
                 if (
                     result.classification_confidence is not None
                     and result.classification_confidence >= MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD
+                    and result.classification_evidence
                 ):
                     observed_classifications.append(
                         AdditionalClassification(
@@ -755,7 +756,7 @@ class IncomingDocumentIngestService:
             model_spec=model_spec,
         )
         result = _validated_classification_result(IncomingDocumentClassificationResult.model_validate(raw), final_input)
-        if result.classification_evidence not in bundle:
+        if not result.classification_evidence:
             primary_evidence = next(
                 (
                     item.evidence
@@ -764,8 +765,6 @@ class IncomingDocumentIngestService:
                 ),
                 None,
             )
-            if primary_evidence is None:
-                raise ValueError("Primary classification evidence was not found in the incoming document")
             result.classification_evidence = primary_evidence
         result.additional_classifications = _merge_additional_classifications(
             [
@@ -941,59 +940,21 @@ def _validated_classification_result(
         raise ValueError(f"Classification is not configured: {result.classification}")
     result.classification = classification
     result.summary = result.summary.strip()
-    result.classification_evidence = result.classification_evidence.strip()
     if not result.summary:
         raise ValueError("Incoming document summary is empty")
-    primary_evidence = _find_source_evidence(result.classification_evidence, source_text)
-    if primary_evidence is None:
-        raise ValueError("Primary classification evidence was not found in the analyzed text")
-    result.classification_evidence = primary_evidence
+    # 主分类和摘要不能因为本地模型把依据轻微改写而整体失败；无法定位时不发布伪原文。
+    result.classification_evidence = find_source_quote(result.classification_evidence, source_text)
     result.additional_classifications = _merge_additional_classifications(
         [
             item.model_copy(update={"evidence": evidence})
             for item in result.additional_classifications
-            if (evidence := _find_source_evidence(item.evidence, source_text)) is not None
+            if (evidence := find_source_quote(item.evidence, source_text)) is not None
             and item.confidence >= MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD
             and _valid_extraction_classifications([item.classification], None)
         ],
         result.classification,
     )
     return result
-
-
-def _find_source_evidence(evidence: str, source_text: str) -> str | None:
-    """返回原文中的证据片段，兼容 PDF/OCR 解析产生的空白和引号差异。"""
-    evidence = evidence.strip()
-    if not evidence:
-        return None
-    if evidence in source_text:
-        return evidence
-
-    normalized_evidence = _normalize_evidence(evidence)
-    # 只对足够长的引用做排版兼容，避免单个字符在归一化后误命中原文。
-    if len(normalized_evidence) < 8:
-        return None
-    normalized_source, source_indexes = _normalize_evidence(source_text, with_indexes=True)
-    start = normalized_source.find(normalized_evidence)
-    if start < 0:
-        return None
-    end = start + len(normalized_evidence) - 1
-    return source_text[source_indexes[start] : source_indexes[end] + 1]
-
-
-def _normalize_evidence(value: str, *, with_indexes: bool = False):
-    """逐字符归一化并保留原文索引，确保最终持久化的仍是原文片段。"""
-    chars: list[str] = []
-    indexes: list[int] = []
-    for index, char in enumerate(value):
-        normalized = unicodedata.normalize("NFKC", char).translate(_EVIDENCE_QUOTE_TRANSLATION)
-        for normalized_char in normalized:
-            if normalized_char.isspace():
-                continue
-            chars.append(normalized_char)
-            indexes.append(index)
-    normalized_value = "".join(chars)
-    return (normalized_value, indexes) if with_indexes else normalized_value
 
 
 def _merge_additional_classifications(
