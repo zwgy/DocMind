@@ -437,6 +437,40 @@ class IncomingDocumentIngestService:
         )
         return {"incomingId": incoming_id, "reviewStatus": "confirmed"}
 
+    async def delete_incoming(self, incoming_id: str, *, operator_id: str | None = None) -> dict[str, Any]:
+        """管理员清理来文：仓库校验并完成 DB 级联删除，这里负责 MinIO 兜底清理。
+
+        删除前置条件由仓库在事务内校验；对象存储清理放在事务外，DB 是真相源，
+        MinIO 部分失败时记录到 ``minioErrors`` 供审计 / 异步任务兜底。
+        """
+
+        document, files = await self.incoming_repo.delete_cascade(incoming_id)
+        if document is None:
+            raise ValueError(f"Incoming document not found: {incoming_id}")
+
+        minio_errors: list[str] = []
+        client = get_minio_client()
+        for file in files:
+            for url in (file.original_file_url, file.markdown_file_url):
+                if not url:
+                    continue
+                try:
+                    bucket, object_name = parse_minio_url(url)
+                except ValueError as exc:
+                    minio_errors.append(f"{url}: {exc}")
+                    continue
+                try:
+                    await client.adelete_file(bucket, object_name)
+                except Exception as exc:
+                    minio_errors.append(f"{bucket}/{object_name}: {exc}")
+
+        return {
+            "incomingId": incoming_id,
+            "removedFiles": len(files),
+            "minioErrors": minio_errors,
+            "operatorId": operator_id,
+        }
+
     async def retry_processing(self, incoming_id: str, *, operator_id: str | None = None) -> dict[str, Any]:
         document = await self.incoming_repo.get_by_incoming_id(incoming_id)
         if document is None:

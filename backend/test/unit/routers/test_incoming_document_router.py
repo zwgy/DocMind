@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from server.routers import incoming_document_router
 
@@ -211,3 +212,72 @@ async def test_knowledge_import_delegates_selected_attachment_ids(monkeypatch):
 
     assert result["status"] == "queued"
     assert calls[0][1]["source_file_ids"] == ["attachment"]
+
+
+async def test_delete_incoming_document_returns_service_payload(monkeypatch):
+    captured = {}
+
+    class FakeService:
+        async def delete_incoming(self, incoming_id, *, operator_id=None):
+            captured["incoming_id"] = incoming_id
+            captured["operator_id"] = operator_id
+            return {
+                "incomingId": incoming_id,
+                "removedFiles": 2,
+                "minioErrors": [],
+                "operatorId": operator_id,
+            }
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentIngestService", FakeService)
+
+    result = await incoming_document_router.delete_incoming_document("inc_1", current_user=SimpleNamespace(uid="admin"))
+
+    assert result["incomingId"] == "inc_1"
+    assert result["removedFiles"] == 2
+    assert captured == {"incoming_id": "inc_1", "operator_id": "admin"}
+
+
+async def test_delete_incoming_document_maps_processing_error_to_400(monkeypatch):
+    class FakeService:
+        async def delete_incoming(self, incoming_id, *, operator_id=None):
+            raise ValueError("来文正在处理中，无法删除")
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentIngestService", FakeService)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await incoming_document_router.delete_incoming_document("inc_1", current_user=SimpleNamespace(uid="admin"))
+
+    assert exc_info.value.status_code == 400
+    assert "正在处理中" in str(exc_info.value.detail)
+
+
+async def test_delete_incoming_document_maps_imported_error_to_409(monkeypatch):
+    class FakeService:
+        async def delete_incoming(self, incoming_id, *, operator_id=None):
+            raise ValueError("该来文已入库知识库，请先在知识库中删除对应文件后再清理")
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentIngestService", FakeService)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await incoming_document_router.delete_incoming_document("inc_1", current_user=SimpleNamespace(uid="admin"))
+
+    assert exc_info.value.status_code == 409
+    assert "已入库知识库" in str(exc_info.value.detail)
+
+
+async def test_delete_incoming_document_propagates_minio_errors(monkeypatch):
+    class FakeService:
+        async def delete_incoming(self, incoming_id, *, operator_id=None):
+            return {
+                "incomingId": incoming_id,
+                "removedFiles": 1,
+                "minioErrors": ["documents/inc_1/incf_1/original.pdf: connection reset"],
+                "operatorId": operator_id,
+            }
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentIngestService", FakeService)
+
+    result = await incoming_document_router.delete_incoming_document("inc_1", current_user=SimpleNamespace(uid="admin"))
+
+    assert result["minioErrors"] == ["documents/inc_1/incf_1/original.pdf: connection reset"]
+    assert result["removedFiles"] == 1

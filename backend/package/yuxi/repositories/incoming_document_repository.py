@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_knowledge import (
@@ -424,6 +424,60 @@ class IncomingDocumentRepository:
             ],
             "by_month": [{"month": month, "document_count": int(count)} for month, count in month_rows.all()],
         }
+
+    async def delete_cascade(self, incoming_id: str) -> tuple[IncomingDocument | None, list[IncomingDocumentFile]]:
+        """在单事务内校验并删除来文主记录，返回被删的主记录与附件。
+
+        删除规则与业务约束：
+        - 状态处于 ``parsing`` / ``extracting`` 时拒绝（处理任务运行中）。
+        - 已入库知识库（``knowledge_import_status`` 在 importing/partial/indexed 或
+          ``linked_kb_id`` 非空）时拒绝，避免与 KB 文件状态不一致。
+        - 抽取运行记录不在外键级联链上，显式按 ``run_id`` 批量删除；结果与条目
+          通过 ``DocumentBusinessExtractionResult.run_id`` 的 CASCADE 自动清理。
+
+        调用方拿到 ``files`` 后应负责清理 MinIO 上的原文 / Markdown 对象，DB 是
+        真相源，MinIO 失败不回滚本次删除（写入审计日志便于后续清理任务兜底）。
+        """
+
+        async with pg_manager.get_async_session_context() as session:
+            document = (
+                await session.execute(select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id))
+            ).scalar_one_or_none()
+            if document is None:
+                return None, []
+            if document.status in {"parsing", "extracting"}:
+                raise ValueError("来文正在处理中，无法删除")
+            if getattr(document, "knowledge_import_status", None) in {"importing", "partial", "indexed"} or getattr(
+                document, "linked_kb_id", None
+            ):
+                raise ValueError("该来文已入库知识库，请先在知识库中删除对应文件后再清理")
+
+            files = list(
+                (
+                    await session.execute(
+                        select(IncomingDocumentFile).where(IncomingDocumentFile.incoming_id == incoming_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            run_ids = [
+                row[0]
+                for row in (
+                    await session.execute(
+                        select(DocumentBusinessExtractionRun.run_id).where(
+                            DocumentBusinessExtractionRun.incoming_id == incoming_id
+                        )
+                    )
+                ).all()
+            ]
+            if run_ids:
+                await session.execute(
+                    delete(DocumentBusinessExtractionRun).where(DocumentBusinessExtractionRun.run_id.in_(run_ids))
+                )
+            await session.execute(delete(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id))
+            await session.commit()
+        return document, files
 
     async def get_business_document_facets(self, incoming_ids: list[str]) -> dict[str, dict[str, Any]]:
         """批量补齐搜索结果需要的附件数和条目类型，避免逐文档查询。"""

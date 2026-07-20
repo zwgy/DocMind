@@ -1,4 +1,4 @@
-import { apiAdminGet, apiAdminPost, apiAdminPut } from './base'
+import { apiAdminDelete, apiAdminGet, apiAdminPost, apiAdminPut } from './base'
 
 const buildQuery = (params = {}) => {
   const query = new URLSearchParams()
@@ -47,5 +47,9 @@ export const incomingDocumentApi = {
 
   confirm: async (incomingId) => {
     return apiAdminPost(`/api/incoming-documents/${incomingId}/confirm`, {})
+  },
+
+  remove: async (incomingId) => {
+    return apiAdminDelete(`/api/incoming-documents/${incomingId}`)
   }
 }

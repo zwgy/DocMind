@@ -139,3 +139,151 @@ async def test_business_document_facets_batch_file_counts_and_item_types(monkeyp
         "inc-1": {"attachment_count": 2, "item_types": ["risk_item", "task_item"]},
         "inc-2": {"attachment_count": 0, "item_types": []},
     }
+
+
+@pytest.mark.asyncio
+async def test_delete_cascade_returns_none_when_document_missing(monkeypatch):
+    class FakeSession:
+        async def execute(self, statement):
+            class _Result:
+                def scalar_one_or_none(self_inner):
+                    return None
+
+            return _Result()
+
+    @asynccontextmanager
+    async def fake_session_context():
+        yield FakeSession()
+
+    monkeypatch.setattr(repo_module.pg_manager, "get_async_session_context", fake_session_context)
+
+    document, files = await IncomingDocumentRepository().delete_cascade("inc-missing")
+
+    assert document is None
+    assert files == []
+
+
+@pytest.mark.asyncio
+async def test_delete_cascade_rejects_processing_documents(monkeypatch):
+    document = SimpleNamespace(
+        incoming_id="inc-1",
+        status="parsing",
+        knowledge_import_status="none",
+        linked_kb_id=None,
+    )
+
+    class FakeSession:
+        async def execute(self, statement):
+            class _Result:
+                def scalar_one_or_none(self_inner):
+                    return document
+
+            return _Result()
+
+    @asynccontextmanager
+    async def fake_session_context():
+        yield FakeSession()
+
+    monkeypatch.setattr(repo_module.pg_manager, "get_async_session_context", fake_session_context)
+
+    with pytest.raises(ValueError, match="正在处理中"):
+        await IncomingDocumentRepository().delete_cascade("inc-1")
+
+
+@pytest.mark.asyncio
+async def test_delete_cascade_rejects_already_imported_documents(monkeypatch):
+    document = SimpleNamespace(
+        incoming_id="inc-1",
+        status="ready",
+        knowledge_import_status="indexed",
+        linked_kb_id="kb_1",
+    )
+
+    class FakeSession:
+        async def execute(self, statement):
+            class _Result:
+                def scalar_one_or_none(self_inner):
+                    return document
+
+            return _Result()
+
+    @asynccontextmanager
+    async def fake_session_context():
+        yield FakeSession()
+
+    monkeypatch.setattr(repo_module.pg_manager, "get_async_session_context", fake_session_context)
+
+    with pytest.raises(ValueError, match="已入库知识库"):
+        await IncomingDocumentRepository().delete_cascade("inc-1")
+
+
+@pytest.mark.asyncio
+async def test_delete_cascade_removes_document_runs_and_returns_files(monkeypatch):
+    document = SimpleNamespace(
+        incoming_id="inc-1",
+        status="failed",
+        knowledge_import_status="failed",
+        linked_kb_id=None,
+    )
+    files = [
+        SimpleNamespace(incoming_file_id="incf-1", original_file_url="minio://documents/a.pdf"),
+        SimpleNamespace(incoming_file_id="incf-2", original_file_url="minio://documents/b.pdf"),
+    ]
+    delete_calls: list[str] = []
+
+    class FakeScalarsResult:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def all(self):
+            return self.rows
+
+        def scalars(self):
+            return FakeScalarsResult(self.rows)
+
+    class FakeScalarResult:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeSession:
+        def __init__(self):
+            self.committed = False
+
+        async def execute(self, statement):
+            sql = str(statement.compile())
+            upper = sql.upper()
+            if "SELECT" in upper and "INCOMING_DOCUMENTS" in upper:
+                return FakeScalarResult(document)
+            if "INCOMING_DOCUMENT_FILES" in upper and "DELETE" not in upper:
+                return FakeScalarsResult(files)
+            if "DOCUMENT_BUSINESS_EXTRACTION_RUNS" in upper and "RUN_ID" in upper and "DELETE" not in upper:
+                return FakeScalarsResult([("run-1",), ("run-2",)])
+            if "DELETE" in upper:
+                delete_calls.append(sql)
+                return FakeScalarResult(None)
+            return FakeScalarsResult([])
+
+        async def commit(self):
+            self.committed = True
+
+    session = FakeSession()
+
+    @asynccontextmanager
+    async def fake_session_context():
+        yield session
+
+    monkeypatch.setattr(repo_module.pg_manager, "get_async_session_context", fake_session_context)
+
+    deleted, returned_files = await IncomingDocumentRepository().delete_cascade("inc-1")
+
+    assert deleted is document
+    assert [file.incoming_file_id for file in returned_files] == ["incf-1", "incf-2"]
+    assert session.committed is True
+    # 两条 DELETE：先清抽取运行，再清来文主表（CASCADE 带动附件与抽取结果）。
+    assert len(delete_calls) == 2
+    joined = " | ".join(delete_calls).upper()
+    assert "DOCUMENT_BUSINESS_EXTRACTION_RUNS" in joined
+    assert "INCOMING_DOCUMENTS" in joined

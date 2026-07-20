@@ -53,6 +53,15 @@ class FakeIncomingRepo:
     async def list_files(self, incoming_id):
         return [file for file in self.files if file.incoming_id == incoming_id]
 
+    async def delete_cascade(self, incoming_id):
+        if self.document is None or self.document.incoming_id != incoming_id:
+            return None, []
+        files = [file for file in self.files if file.incoming_id == incoming_id]
+        self.files = [file for file in self.files if file.incoming_id != incoming_id]
+        deleted_document = self.document
+        self.document = None
+        return deleted_document, files
+
     async def upsert_file(self, incoming_id, incoming_file_id, data):
         file = next((item for item in self.files if item.source_file_id == data["source_file_id"]), None)
         if file is None:
@@ -822,3 +831,77 @@ async def test_long_document_classification_uses_structured_chunks(monkeypatch):
     assert result.additional_classifications[0].evidence in "超长附件\n第一部分 内容\n第二部分 内容"
     assert chunk_params[0]["chunk_parser_config"]["overlapped_percent"] == 10
     assert any("抽取分类：staged_work、safety_management" in prompt for prompt in prompts)
+
+
+@pytest.mark.asyncio
+async def test_delete_incoming_returns_payload_and_cleans_minio(monkeypatch):
+    files = [
+        SimpleNamespace(
+            incoming_id="inc-1",
+            incoming_file_id="incf-1",
+            original_file_url="minio://documents/inc-1/incf-1/original.pdf",
+            markdown_file_url="minio://parsed/inc-1/incf-1/parsed.md",
+        )
+    ]
+    repo = FakeIncomingRepo()
+    repo.files = files
+    repo.document = SimpleNamespace(incoming_id="inc-1")
+    monkeypatch.setattr(ingest_module, "IncomingDocumentRepository", lambda: repo)
+
+    deleted_calls: list[tuple[str, str]] = []
+
+    class FakeMinio:
+        async def adelete_file(self, bucket, object_name):
+            deleted_calls.append((bucket, object_name))
+            return True
+
+    monkeypatch.setattr(ingest_module, "get_minio_client", lambda: FakeMinio())
+
+    result = await IncomingDocumentIngestService().delete_incoming("inc-1", operator_id="admin")
+
+    assert result["incomingId"] == "inc-1"
+    assert result["removedFiles"] == 1
+    assert result["minioErrors"] == []
+    assert result["operatorId"] == "admin"
+    assert sorted(deleted_calls) == [
+        ("documents", "inc-1/incf-1/original.pdf"),
+        ("parsed", "inc-1/incf-1/parsed.md"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_incoming_records_minio_errors_without_failing(monkeypatch):
+    files = [
+        SimpleNamespace(
+            incoming_id="inc-1",
+            incoming_file_id="incf-1",
+            original_file_url="minio://documents/inc-1/incf-1/original.pdf",
+            markdown_file_url=None,
+        )
+    ]
+    repo = FakeIncomingRepo()
+    repo.files = files
+    repo.document = SimpleNamespace(incoming_id="inc-1")
+    monkeypatch.setattr(ingest_module, "IncomingDocumentRepository", lambda: repo)
+
+    class FakeMinio:
+        async def adelete_file(self, bucket, object_name):
+            del bucket, object_name
+            raise RuntimeError("S3 unreachable")
+
+    monkeypatch.setattr(ingest_module, "get_minio_client", lambda: FakeMinio())
+
+    result = await IncomingDocumentIngestService().delete_incoming("inc-1")
+
+    assert result["removedFiles"] == 1
+    assert len(result["minioErrors"]) == 1
+    assert "S3 unreachable" in result["minioErrors"][0]
+
+
+@pytest.mark.asyncio
+async def test_delete_incoming_raises_when_document_missing(monkeypatch):
+    repo = FakeIncomingRepo()
+    monkeypatch.setattr(ingest_module, "IncomingDocumentRepository", lambda: repo)
+
+    with pytest.raises(ValueError, match="not found"):
+        await IncomingDocumentIngestService().delete_incoming("inc-missing")

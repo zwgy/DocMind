@@ -49,3 +49,11 @@ assert.doesNotMatch(
   /<blockquote v-if="item\.source_quote">/,
   '结构化条目不应重复展示原文依据'
 )
+assert.match(component, /canDelete\(record\)/, '来文行/详情抽屉需要 canDelete 守卫')
+assert.match(component, /'importing', 'partial', 'indexed'/, 'canDelete 必须拦截已入库知识库的来文（importing/partial/indexed）')
+assert.match(component, /'parsing', 'extracting'/, 'canDelete 必须拦截处理中的来文（parsing/extracting）')
+assert.match(component, /openDeleteConfirm\(record\)/, '列表行的删除按钮应触发 openDeleteConfirm')
+assert.match(component, /openDeleteConfirm\(detail\)/, '详情抽屉的删除按钮也应触发 openDeleteConfirm')
+assert.match(component, /confirmDelete/, '删除弹窗的确认按钮应调用 confirmDelete')
+assert.match(component, /isDeleteConfirmValid/, '删除确认应要求用户输入来源单号后 6 位')
+assert.match(component, /incomingDocumentApi\.remove/, '删除逻辑必须通过 incomingDocumentApi.remove 调用后端')

@@ -8,6 +8,10 @@
 
 ### 开发记录
 
+- 来文管理增加删除入口：列表行与详情抽屉都暴露"删除"按钮，处理中（`parsing`/`extracting`）和已入库知识库（`importing`/`partial`/`indexed`）的来文不开放删除；后端 `DELETE /api/incoming-documents/{incoming_id}` 在事务内校验并按 `incoming_documents → incoming_document_files` 与 `document_business_extraction_runs → results → items` 顺序级联清理，对应 MinIO 原文与 Markdown 在事务外尝试清理并将未删除对象写入 `minioErrors` 供后续兜底；前端用"来源单号后 6 位"作为二次确认，防止误删已确认来文。
+
+### 开发记录
+
 - 收敛小助手来文上下文：提示词不再预置结构化 item 的逐字原文和分类依据；保留全部业务字段、附件清单及每个 item evidence 的附件名、原文位置与 `source_file_id`，用户需要依据或核验时由 `incoming-document` Skill 精确读取对应附件原文，降低本地模型上下文占用并避免将摘要引用误作完整原文。
 - 优化来文管理附件核对与预览：来文列表标题可按需展开附件清单，附件“查看”统一进入既有详情抽屉并定位当前附件；“存入知识库”明确为“批量入库”，导入弹窗保留多选并新增附件原文预览与已选数量提示。结构化结果仅保留带文件名和位置的“原文依据”，移除重复的同段引用。Office 原文预览统一扩展至 `.doc/.docx/.xls/.xlsx/.ppt/.pptx`，复用 API 镜像已有 LibreOffice 转 PDF 能力，避免旧版 Word、Excel 等附件被误提示为二进制文件。
 - 简化 chat-iframe 自助登录配置：不传 `tokenExchangeUrl` 时默认直接使用父页面传入的 `source_system`、`external_user_id` 和 `external_user_name` 向 DocMind 换取 token；移除重复的 `CHAT_IFRAME_AUTO_LOGIN_ENABLED` 开关和 `CHAT_IFRAME_ALLOWED_SOURCES` 白名单，避免新增业务系统时反复改后端配置。保留可选的 `CHAT_IFRAME_ALLOWED_ORIGINS` 和接口限流配置，用于需要时限制宿主来源和请求频率。

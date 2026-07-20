@@ -247,6 +247,22 @@ async def retry_incoming_document_processing(incoming_id: str, current_user: Use
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@incoming_documents.delete("/{incoming_id}")
+async def delete_incoming_document(incoming_id: str, current_user: User = Depends(get_admin_user)):
+    """彻底删除来文：清 DB（主表 + 附件 + 抽取运行）+ MinIO 原文 / Markdown。
+
+    校验在仓库层完成：处理中或已入库知识库时返回 409，其余错误返回 400。
+    MinIO 部分失败不阻断响应，结果中 ``minioErrors`` 列出未删除的对象名。
+    """
+
+    try:
+        return await IncomingDocumentIngestService().delete_incoming(incoming_id, operator_id=current_user.uid)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 409 if "已入库知识库" in message else 400
+        raise HTTPException(status_code=status_code, detail=message) from exc
+
+
 @incoming_documents.get("/{incoming_id}/file/original")
 async def get_incoming_document_original_file(
     incoming_id: str,

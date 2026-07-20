@@ -162,6 +162,16 @@
               >
                 批量入库
               </a-button>
+              <a-button
+                v-if="canDelete(record)"
+                type="link"
+                danger
+                size="small"
+                :loading="deletingId === record.incomingId"
+                @click="openDeleteConfirm(record)"
+              >
+                删除
+              </a-button>
             </div>
           </template>
         </template>
@@ -439,6 +449,15 @@
             >
               重新处理
             </a-button>
+            <a-button
+              v-if="canDelete(detail)"
+              class="detail-action-button"
+              danger
+              :loading="deletingId === detail.incomingId"
+              @click="openDeleteConfirm(detail)"
+            >
+              删除来文
+            </a-button>
           </section>
         </div>
       </a-spin>
@@ -539,6 +558,39 @@
       :kb-id="knowledgePreview.kbId"
       :file-id="knowledgePreview.fileId"
     />
+
+    <a-modal
+      v-model:open="deleteOpen"
+      :title="`删除来文：${deleteTarget?.title || deleteTarget?.sourceDocumentId || ''}`"
+      width="520px"
+      :confirm-loading="deletingId === deleteTarget?.incomingId"
+      :destroy-on-close="true"
+      ok-text="确认删除"
+      ok-button-props="{ danger: true }"
+      @ok="confirmDelete"
+      @cancel="closeDeleteConfirm"
+    >
+      <a-alert
+        v-if="deleteTarget"
+        type="warning"
+        show-icon
+        :message="deleteTarget.reviewStatus === 'confirmed' ? '该来文已确认，删除后无法恢复' : '此操作将彻底删除来文及其附件'"
+        class="delete-warning"
+      />
+      <a-descriptions v-if="deleteTarget" size="small" :column="1" bordered class="delete-summary">
+        <a-descriptions-item label="来源单号">{{ deleteTarget.sourceDocumentId }}</a-descriptions-item>
+        <a-descriptions-item label="处理状态">
+          <a-tag :color="processingStatusMeta(deleteTarget.status).color">
+            {{ processingStatusMeta(deleteTarget.status).label }}
+          </a-tag>
+        </a-descriptions-item>
+        <a-descriptions-item label="上传时间">{{ formatDate(deleteTarget.createdAt) }}</a-descriptions-item>
+      </a-descriptions>
+      <p class="delete-hint">
+        为避免误删，请在下方输入来源单号后 <strong>6 位</strong>（不区分大小写、忽略空白）以确认删除。
+      </p>
+      <a-input v-model:value="deleteConfirmText" placeholder="请输入来源单号后 6 位" allow-clear />
+    </a-modal>
   </div>
 </template>
 
@@ -604,6 +656,10 @@ const folderLoading = ref(false)
 const folderTreeData = ref([])
 const knowledgePreviewOpen = ref(false)
 const knowledgePreview = reactive({ kbId: '', fileId: '' })
+const deleteOpen = ref(false)
+const deleteTarget = ref(null)
+const deleteConfirmText = ref('')
+const deletingId = ref('')
 
 const filters = reactive({
   keyword: '',
@@ -731,6 +787,81 @@ function canImport(record) {
 function canRetry(record) {
   // 已完成但结构化结果为空时也需要人工重跑，正在处理中的状态不开放重复提交。
   return record?.status === 'failed' || record?.status === 'ready'
+}
+
+function canDelete(record) {
+  // 处理中（parsing/extracting）或已入库知识库的来文禁止在管理页删除。
+  if (!record) return false
+  if (['parsing', 'extracting'].includes(record.status)) return false
+  if (['importing', 'partial', 'indexed'].includes(record.knowledgeImportStatus)) return false
+  return true
+}
+
+const deleteConfirmExpectedSuffix = computed(() => {
+  const target = deleteTarget.value
+  if (!target?.sourceDocumentId) return ''
+  return String(target.sourceDocumentId).replace(/\s+/g, '').slice(-6).toLowerCase()
+})
+
+const isDeleteConfirmValid = computed(() => {
+  const expected = deleteConfirmExpectedSuffix.value
+  if (!expected || expected.length < 6) return false
+  return deleteConfirmText.value.replace(/\s+/g, '').toLowerCase() === expected
+})
+
+async function openDeleteConfirm(record) {
+  if (!record?.incomingId || !canDelete(record)) return
+  // 列表行只有摘要字段；详情抽屉场景需要拉详情以展示附件数 / 上传时间等。
+  let target = record
+  if (!record.createdAt || !record.sourceDocumentId) {
+    try {
+      target = await incomingDocumentApi.detail(record.incomingId)
+    } catch (error) {
+      message.error(error.message || '加载来文详情失败')
+      return
+    }
+  }
+  deleteTarget.value = target
+  deleteConfirmText.value = ''
+  deleteOpen.value = true
+}
+
+function closeDeleteConfirm() {
+  deleteOpen.value = false
+  deleteTarget.value = null
+  deleteConfirmText.value = ''
+}
+
+async function confirmDelete() {
+  if (!deleteTarget.value?.incomingId) {
+    closeDeleteConfirm()
+    return
+  }
+  if (!isDeleteConfirmValid.value) {
+    message.warning('请输入正确的来源单号后 6 位以确认删除')
+    return
+  }
+  const incomingId = deleteTarget.value.incomingId
+  deletingId.value = incomingId
+  try {
+    const result = await incomingDocumentApi.remove(incomingId)
+    const removedFiles = result?.removedFiles ?? 0
+    const minioErrors = Array.isArray(result?.minioErrors) ? result.minioErrors : []
+    message.success(
+      minioErrors.length
+        ? `来文已删除，但 ${minioErrors.length} 个对象清理失败，请联系运维`
+        : `来文已删除（清理 ${removedFiles} 个附件）`
+    )
+    if (detailOpen.value && detail.value?.incomingId === incomingId) {
+      detailOpen.value = false
+    }
+    closeDeleteConfirm()
+    await loadDocuments()
+  } catch (error) {
+    message.error(error.message || '删除来文失败')
+  } finally {
+    deletingId.value = ''
+  }
 }
 
 function canOpenKnowledgePreview(record) {
@@ -1437,6 +1568,20 @@ onBeforeUnmount(() => {
 
 .preview-tabs {
   margin-top: 4px;
+}
+
+.delete-warning {
+  margin-bottom: 12px;
+}
+
+.delete-summary {
+  margin-bottom: 12px;
+}
+
+.delete-hint {
+  margin: 8px 0;
+  color: var(--gray-700);
+  font-size: 13px;
 }
 
 .preview-tab-label {
