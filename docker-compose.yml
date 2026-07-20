@@ -192,8 +192,8 @@ services:
       dockerfile: docker/web.Dockerfile
       target: development
       args:
-        NODE_ALPINE_IMAGE: ${NODE_ALPINE_IMAGE:-m.daocloud.io/docker.io/library/node:24-alpine}
-        NGINX_ALPINE_IMAGE: ${NGINX_ALPINE_IMAGE:-m.daocloud.io/docker.io/library/nginx:alpine}
+        NODE_ALPINE_IMAGE: ${NODE_ALPINE_IMAGE:-node:24-alpine}
+        NGINX_ALPINE_IMAGE: ${NGINX_ALPINE_IMAGE:-nginx:alpine}
     image: yuxi-web:${YUXI_VERSION:-0.7.1.dev0}
     container_name: web-dev
     volumes:
@@ -224,8 +224,8 @@ services:
       dockerfile: docker/chat-iframe.Dockerfile
       target: development
       args:
-        NODE_ALPINE_IMAGE: ${NODE_ALPINE_IMAGE:-m.daocloud.io/docker.io/library/node:24-alpine}
-        NGINX_ALPINE_IMAGE: ${NGINX_ALPINE_IMAGE:-m.daocloud.io/docker.io/library/nginx:alpine}
+        NODE_ALPINE_IMAGE: ${NODE_ALPINE_IMAGE:-node:24-alpine}
+        NGINX_ALPINE_IMAGE: ${NGINX_ALPINE_IMAGE:-nginx:alpine}
     image: yuxi-chat-iframe:${YUXI_VERSION:-0.7.1.dev0}
     container_name: chat-iframe-dev
     volumes:

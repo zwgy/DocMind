@@ -124,12 +124,21 @@ APT_MIRROR=deb.debian.org
 APT_SECURITY_MIRROR=security.debian.org/debian-security
 ```
 
-前端镜像构建默认通过 DaoCloud 代理解析 `node:24-alpine` 与 `nginx:alpine`，避免 Docker Hub 鉴权超时。内网已有镜像仓库或希望直连 Docker Hub 时，可覆盖：
+前端镜像构建默认直连 Docker Hub。镜像仓库是否可访问取决于部署机器所在网络，因此不要把镜像代理提交到仓库；在每台机器自己的 `.env` 或 `.env.prod` 中覆盖即可。公司网络可直连 Docker Hub 时可显式配置：
 
 ```env
 NODE_ALPINE_IMAGE=node:24-alpine
 NGINX_ALPINE_IMAGE=nginx:alpine
 ```
+
+家中或其他网络无法访问 Docker Hub 时，改为该网络可访问的镜像代理，例如：
+
+```env
+NODE_ALPINE_IMAGE=registry.cn-hangzhou.aliyuncs.com/library/node:24-alpine
+NGINX_ALPINE_IMAGE=registry.cn-hangzhou.aliyuncs.com/library/nginx:alpine
+```
+
+`bash scripts/manage.sh dev deploy` 会使用 `.env`，`bash scripts/manage.sh prod deploy` 会使用 `.env.prod`；两者均被 Git 忽略，更新代码不会覆盖本机镜像源设置。
 
 ### 更新代码
 

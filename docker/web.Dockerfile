@@ -1,6 +1,7 @@
 # 前端仅在构建阶段使用 Node，不依赖 glibc，因此使用同一 Node 24 的 Alpine 变体减小镜像体积。
-ARG NODE_ALPINE_IMAGE=m.daocloud.io/docker.io/library/node:24-alpine
-ARG NGINX_ALPINE_IMAGE=m.daocloud.io/docker.io/library/nginx:alpine
+# 默认直连 Docker Hub；镜像代理由每台机器的 .env/.env.prod 覆盖，避免将某个网络环境写死到镜像定义中。
+ARG NODE_ALPINE_IMAGE=node:24-alpine
+ARG NGINX_ALPINE_IMAGE=nginx:alpine
 
 # 开发阶段
 FROM ${NODE_ALPINE_IMAGE} AS development

@@ -1,6 +1,7 @@
 # 与主 Web 对齐 Node 24；仍选 Alpine 以保持前端构建镜像轻量。
-ARG NODE_ALPINE_IMAGE=m.daocloud.io/docker.io/library/node:24-alpine
-ARG NGINX_ALPINE_IMAGE=m.daocloud.io/docker.io/library/nginx:alpine
+# 默认直连 Docker Hub；镜像代理由每台机器的 .env/.env.prod 覆盖，避免将某个网络环境写死到镜像定义中。
+ARG NODE_ALPINE_IMAGE=node:24-alpine
+ARG NGINX_ALPINE_IMAGE=nginx:alpine
 
 FROM ${NODE_ALPINE_IMAGE} AS development
 

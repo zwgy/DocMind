@@ -282,6 +282,7 @@
 
 ### 修复
 
+- 前端 Docker 基础镜像不再默认绑定特定镜像代理：Compose 与 Dockerfile 默认使用 Docker Hub，`NODE_ALPINE_IMAGE`、`NGINX_ALPINE_IMAGE` 继续由每台部署机器的 `.env` 或 `.env.prod` 覆盖；开发初始化不再预拉取这两个固定名称的镜像，避免初始化与实际构建使用不同镜像源。
 - 调整聊天首页的智能体切换入口：在无历史对话时，智能体数量 `<= 3` 且 `chat-main` 宽度不小于 `380px` 时继续使用横向 segmented；当智能体数量 `>= 4` 或内容区宽度小于 `380px` 时自动收敛为“当前智能体 + 下拉按钮”形式，避免多智能体或窄屏场景下入口被截断
 - 发布前一致性修复：统一 0.6.0 版本号（backend/package/web）、更新 dev/prod 镜像标签语义（`0.6.0.dev` / `0.6.0`），并为 `/api/system/health` 补充 `version` 字段，提升部署可观测性与发版追溯能力
 - 收敛“状态工作台”自动弹出规则：前端不再因为共享 `workspace` 或文件系统天然存在内容而默认展开，改为仅在 `/home/gem/user-data/uploads` 或 `/home/gem/user-data/outputs` 下检测到实际文件时自动弹出；手动打开、关闭、刷新和伸缩交互保持不变
