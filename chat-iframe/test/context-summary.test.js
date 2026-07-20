@@ -19,6 +19,9 @@ const chatMessagesSource = readFileSync(
 
 test('context summary top area shows document metadata and fills missing values', () => {
   assert.match(chatMessagesSource, /contextSummary\.file\.name/)
+  assert.match(chatMessagesSource, /\{\{ selectedAttachmentNames\.join\(' ｜ '\) \}\}/)
+  assert.doesNotMatch(chatMessagesSource, /已选附件：/)
+  assert.match(chatMessagesSource, /file\.is_main_file && item\.message\.contextSummary\.file\.title/)
   assert.doesNotMatch(
     chatMessagesSource,
     /contextSummary\.file\.title \|\| item\.message\.contextSummary\.file\.name/
@@ -48,7 +51,7 @@ test('buildContextSummaryMessage uses metadata returned by the matched incoming 
 
   assert.deepEqual(message?.contextSummary?.file, {
     ...file,
-    name: '路用客车检修运用管理办法',
+    name: '来文.docx',
     source_system: 'oa',
     document_number: '上铁辆〔2020〕316号',
     title: '路用客车检修运用管理办法',
@@ -96,6 +99,16 @@ test('buildContextSummaryMessage updates with switched file', () => {
   assert.equal(message?.id, 'context-summary')
   assert.equal(message?.contextSummary?.file.source_file_id, 'S002')
   assert.equal(message?.contextSummary?.statusText, '等待查询')
+})
+
+test('buildContextSummaryMessage supports a stable id for each selected attachment', () => {
+  const message = buildContextSummaryMessage(
+    { file: { name: '附件4.xls', source_file_id: 'S003' }, result: null },
+    'context-summary-S003'
+  )
+
+  assert.equal(message?.id, 'context-summary-S003')
+  assert.equal(message?.contextSummary?.file.name, '附件4.xls')
 })
 
 test('buildContextSummaryMessage keeps backend summary when extraction items are empty', () => {

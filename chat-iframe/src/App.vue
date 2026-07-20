@@ -27,6 +27,7 @@ const chat = useChatStore()
 const loading = ref(false)
 const error = ref('')
 const results = ref<Record<string, ExtractionResult>>({})
+const selectedPageFiles = ref<IncomingPageFile[]>([])
 const showSidebar = ref(false)
 const draggingWindow = ref(false)
 const ingestingFileIds = new Set<string>()
@@ -62,6 +63,28 @@ function cacheExtractionResults(files: IncomingPageFile[], items: ExtractionResu
   results.value = next
 }
 
+function refreshContextSummaries(options: { loading?: boolean; error?: string } = {}) {
+  const files = selectedPageFiles.value.length
+    ? selectedPageFiles.value
+    : selectedFile.value
+      ? [selectedFile.value]
+      : []
+  chat.setContextSummaries(
+    files.map((file) => ({
+      file,
+      result: results.value[file.source_file_id] || null,
+      ...options
+    }))
+  )
+}
+
+function updateSelectedPageFiles(files: IncomingPageFile[]) {
+  selectedPageFiles.value = files
+  // 多选摘要必须与发送给模型的附件集一致，避免最后点击的副附件覆盖主附件摘要。
+  refreshContextSummaries()
+  if (files.length) void refreshExtraction(filesForSelectedDocuments(files))
+}
+
 function filesForSelectedDocuments(selectedFiles: IncomingPageFile[]) {
   const documentKey = (file: IncomingPageFile) =>
     file.source_function_id && file.source_doc_id
@@ -85,30 +108,22 @@ async function refreshExtraction(
   }
   const file = selectedFile.value
   if (!file) {
-    chat.setContextSummary({ file: null, result: null })
+    refreshContextSummaries()
     return false
   }
   if (!queryFiles.length) return false
   if (context.config.authError) {
-    chat.setContextSummary({
-      file,
-      result: results.value[file.source_file_id] || null,
-      error: context.config.authError
-    })
+    refreshContextSummaries({ error: context.config.authError })
     return false
   }
   if (!context.config.token) {
     // 父页面可能先响应附件列表、后完成换票；这里等待 token 到达，避免无凭证请求把摘要卡片打成 401。
-    chat.setContextSummary({ file, result: results.value[file.source_file_id] || null })
+    refreshContextSummaries()
     return false
   }
   loading.value = true
   error.value = ''
-  chat.setContextSummary({
-    file,
-    result: results.value[file.source_file_id] || null,
-    loading: true
-  })
+  refreshContextSummaries({ loading: true })
   try {
     let response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
     cacheExtractionResults(queryFiles, response.items || [])
@@ -136,21 +151,13 @@ async function refreshExtraction(
       response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
       cacheExtractionResults(queryFiles, response.items || [])
     }
-    if (selectedFile.value?.source_file_id === file.source_file_id)
-      chat.setContextSummary({
-        file,
-        result: results.value[file.source_file_id] || null,
-        loading: false
-      })
+    if (queryFiles.some((candidate) => candidate.source_file_id === selectedFile.value?.source_file_id))
+      refreshContextSummaries()
     return true
   } catch (err) {
     error.value = err instanceof Error ? err.message : '查询失败'
-    if (selectedFile.value?.source_file_id === file.source_file_id)
-      chat.setContextSummary({
-        file,
-        result: results.value[file.source_file_id] || null,
-        error: error.value
-      })
+    if (queryFiles.some((candidate) => candidate.source_file_id === selectedFile.value?.source_file_id))
+      refreshContextSummaries({ error: error.value })
     return false
   } finally {
     loading.value = false
@@ -300,10 +307,7 @@ function startWindowDrag(event: PointerEvent) {
 watch(
   () => selectedFile.value?.source_file_id,
   () => {
-    chat.setContextSummary({
-      file: selectedFile.value,
-      result: selectedFile.value ? results.value[selectedFile.value.source_file_id] || null : null
-    })
+    refreshContextSummaries()
     void refreshExtraction()
   },
   { immediate: true }
@@ -320,11 +324,7 @@ watch(
     if (context.config.authError) {
       chat.error = context.config.authError
       if (selectedFile.value) {
-        chat.setContextSummary({
-          file: selectedFile.value,
-          result: results.value[selectedFile.value.source_file_id] || null,
-          error: context.config.authError
-        })
+        refreshContextSummaries({ error: context.config.authError })
       }
       return
     }
@@ -470,6 +470,7 @@ onUnmounted(() => {
           @update:ask-file="chat.askFile = $event"
           @update:selected-model-spec="chat.setSelectedModelSpec($event)"
           @update:selected-page-source-file-id="context.selectFile($event)"
+          @update:selected-page-files="updateSelectedPageFiles"
           @submit="sendChat"
           @stop="chat.stop(context.config.token)"
         />

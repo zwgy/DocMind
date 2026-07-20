@@ -71,7 +71,7 @@
             >
               <template #renderItem="{ item }">
                 <a-list-item>
-                  <div>
+                  <div class="attachment-list-content">
                     <a-space>
                       <FileText :size="15" />
                       <span>{{ item.filename }}</span>
@@ -83,7 +83,7 @@
                         {{ importStatusMeta(item.knowledgeImportStatus).label }}
                       </a-tag>
                     </a-space>
-                    <p v-if="!item.isMainFile && item.summary" class="attachment-summary">
+                    <p v-if="!item.isMainFile && item.summary" class="attachment-summary" :title="item.summary">
                       {{ item.summary }}
                     </p>
                   </div>
@@ -328,10 +328,10 @@
 
           <section class="detail-section">
             <h2>附件（{{ detail.files?.length || 0 }}）</h2>
-            <a-list size="small" :data-source="detail.files || []">
+            <a-list class="detail-attachment-list" size="small" :data-source="detail.files || []">
               <template #renderItem="{ item }">
                 <a-list-item>
-                  <div>
+                  <div class="attachment-list-content">
                     <a-space>
                       <FileText :size="15" />
                       <span>{{ item.filename }}</span>
@@ -343,7 +343,7 @@
                         {{ importStatusMeta(item.knowledgeImportStatus).label }}
                       </a-tag>
                     </a-space>
-                    <p v-if="!item.isMainFile && item.summary" class="attachment-summary">
+                    <p v-if="!item.isMainFile && item.summary" class="attachment-summary" :title="item.summary">
                       {{ item.summary }}
                     </p>
                   </div>
@@ -1463,8 +1463,24 @@ onBeforeUnmount(() => {
   max-width: 760px;
 }
 
+.attachment-list-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.expanded-attachment-list :deep(.ant-list-item),
+.detail-attachment-list :deep(.ant-list-item) {
+  align-items: flex-start;
+}
+
+.expanded-attachment-list :deep(.ant-list-item-action),
+.detail-attachment-list :deep(.ant-list-item-action) {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
 .attachment-summary {
-  max-width: 680px;
+  max-width: 100%;
   margin: 5px 0 0 23px;
   overflow: hidden;
   color: var(--gray-600);

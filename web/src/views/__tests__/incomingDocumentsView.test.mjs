@@ -44,6 +44,8 @@ assert.match(component, /openImportAttachmentPreview/, '批量入库前应支持
 assert.match(component, /expandedRowRender/, '来文列表应支持默认折叠的附件清单')
 assert.match(component, /:show-expand-column="false"/, '来文列表应隐藏表格默认的展开按钮')
 assert.match(component, /!item\.isMainFile && item\.summary/, '副附件列表应展示附件级摘要')
+assert.match(component, /:title="item\.summary"/, '副附件摘要悬停时应显示完整内容')
+assert.match(component, /attachment-list-content/, '附件内容区应保留可收缩宽度，避免操作列挤压摘要')
 assert.match(
   component,
   /selectedAttachment && !selectedAttachment\.isMainFile && selectedAttachment\.summary/,

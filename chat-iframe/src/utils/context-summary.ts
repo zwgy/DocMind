@@ -8,10 +8,10 @@ type SummaryInput = {
 }
 
 function contextSummaryFile(file: IncomingPageFile, result: ExtractionResult | null): IncomingPageFile {
-  // 宿主页只负责文件定位，已入库来文的展示字段以查询结果为准。
+  // 宿主页的附件名才是当前选择对象；来文标题仅补充元数据，不能覆盖副附件名称。
   return {
     ...file,
-    name: result?.title || file.name,
+    name: file.name,
     source_system: result?.source_system || file.source_system,
     document_number: result?.document_number || file.document_number,
     title: result?.title || file.title,
@@ -95,13 +95,13 @@ function summaryContent(input: SummaryInput) {
   return lines.join('\n')
 }
 
-export function buildContextSummaryMessage(input: SummaryInput): ChatMessage | null {
+export function buildContextSummaryMessage(input: SummaryInput, id = 'context-summary'): ChatMessage | null {
   if (!input.file) return null
   const file = contextSummaryFile(input.file, input.result)
   const matchedCategories = matchedExtractionCategories(input.result)
-  // 摘要卡片是当前页面上下文，不写入后端历史；固定 id 便于切换附件时前端稳定替换。
+  // 摘要卡片是当前页面上下文，不写入后端历史；调用方按附件提供稳定 id，便于整体替换。
   return {
-    id: 'context-summary',
+    id,
     role: 'system',
     type: 'context_summary',
     content: summaryContent({ ...input, file }),

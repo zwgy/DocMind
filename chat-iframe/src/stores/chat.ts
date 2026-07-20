@@ -66,7 +66,7 @@ type ChatState = {
   threadOffset: number
   hasMoreThreads: boolean
   isLoadingMoreThreads: boolean
-  contextSummaryMessage: ChatMessage | null
+  contextSummaryMessages: ChatMessage[]
   modelOptions: ModelOption[]
   selectedModelSpec: string
   modelSpecsByThread: Record<string, string>
@@ -162,7 +162,7 @@ export const useChatStore = defineStore('chat', {
     threadOffset: 0,
     hasMoreThreads: false,
     isLoadingMoreThreads: false,
-    contextSummaryMessage: null,
+    contextSummaryMessages: [],
     modelOptions: [],
     selectedModelSpec: '',
     modelSpecsByThread: {},
@@ -193,7 +193,7 @@ export const useChatStore = defineStore('chat', {
     },
     displayMessages(state) {
       const messages = state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.messages || []
-      return state.contextSummaryMessage ? [state.contextSummaryMessage, ...messages] : messages
+      return [...state.contextSummaryMessages, ...messages]
     }
   },
   actions: {
@@ -239,7 +239,12 @@ export const useChatStore = defineStore('chat', {
       runtime.isStreaming = false
     },
     setContextSummary(input: { file: IncomingPageFile | null; result: ExtractionResult | null; loading?: boolean; error?: string }) {
-      this.contextSummaryMessage = buildContextSummaryMessage(input)
+      this.setContextSummaries([input])
+    },
+    setContextSummaries(inputs: Array<{ file: IncomingPageFile | null; result: ExtractionResult | null; loading?: boolean; error?: string }>) {
+      this.contextSummaryMessages = inputs
+        .map((input) => buildContextSummaryMessage(input, `context-summary-${input.file?.source_file_id || 'current'}`))
+        .filter((message): message is ChatMessage => Boolean(message))
     },
     async bootstrap(token?: string, agentId?: string, conversationScopeKey?: string) {
       this.isLoading = true

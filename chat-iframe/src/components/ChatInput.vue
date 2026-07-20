@@ -64,6 +64,7 @@ const emit = defineEmits<{
   'update:askFile': [value: boolean]
   'update:selectedModelSpec': [value: string]
   'update:selectedPageSourceFileId': [value: string]
+  'update:selectedPageFiles': [files: IncomingPageFile[]]
 }>()
 
 const text = ref('')
@@ -174,13 +175,14 @@ watch(
     const selected = props.pageFiles.filter((file) => file.selected).map((file) => file.source_file_id)
     if (!next.size && selected.length) selected.forEach((id) => next.add(id))
     selectedPageSourceFileIds.value = next
-    emit('update:askFile', next.size > 0)
+    syncAskFile()
   },
   { immediate: true }
 )
 
 function syncAskFile() {
   emit('update:askFile', selectedPageSourceFileIds.value.size > 0)
+  emit('update:selectedPageFiles', selectedPageFiles.value)
 }
 
 function resizeTextarea() {
