@@ -58,7 +58,7 @@
         :pagination="pagination"
         :expanded-row-keys="expandedRowKeys"
         :show-expand-column="false"
-        :scroll="{ x: 1160 }"
+        :scroll="{ x: 1220 }"
         @change="handleTableChange"
       >
         <template #expandedRowRender="{ record }">
@@ -574,20 +574,29 @@
         v-if="deleteTarget"
         type="warning"
         show-icon
-        :message="deleteTarget.reviewStatus === 'confirmed' ? '该来文已确认，删除后无法恢复' : '此操作将彻底删除来文及其附件'"
+        :message="
+          deleteTarget.reviewStatus === 'confirmed'
+            ? '该来文已确认，删除后无法恢复'
+            : '此操作将彻底删除来文及其附件'
+        "
         class="delete-warning"
       />
       <a-descriptions v-if="deleteTarget" size="small" :column="1" bordered class="delete-summary">
-        <a-descriptions-item label="来源单号">{{ deleteTarget.sourceDocumentId }}</a-descriptions-item>
+        <a-descriptions-item label="来源单号">{{
+          deleteTarget.sourceDocumentId
+        }}</a-descriptions-item>
         <a-descriptions-item label="处理状态">
           <a-tag :color="processingStatusMeta(deleteTarget.status).color">
             {{ processingStatusMeta(deleteTarget.status).label }}
           </a-tag>
         </a-descriptions-item>
-        <a-descriptions-item label="上传时间">{{ formatDate(deleteTarget.createdAt) }}</a-descriptions-item>
+        <a-descriptions-item label="上传时间">{{
+          formatDate(deleteTarget.createdAt)
+        }}</a-descriptions-item>
       </a-descriptions>
       <p class="delete-hint">
-        为避免误删，请在下方输入来源单号后 <strong>6 位</strong>（不区分大小写、忽略空白）以确认删除。
+        为避免误删，请在下方输入来源单号后
+        <strong>6 位</strong>（不区分大小写、忽略空白）以确认删除。
       </p>
       <a-input v-model:value="deleteConfirmText" placeholder="请输入来源单号后 6 位" allow-clear />
     </a-modal>
@@ -695,7 +704,7 @@ const columns = [
   },
   { title: '目标知识库', key: 'linkedKbId', dataIndex: 'linkedKbId', width: 160 },
   { title: '上传时间', key: 'createdAt', dataIndex: 'createdAt', width: 170 },
-  { title: '操作', key: 'actions', width: 200, fixed: 'right' }
+  { title: '操作', key: 'actions', width: 260, fixed: 'right' }
 ]
 
 const processingStatusOptions = [
