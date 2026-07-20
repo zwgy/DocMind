@@ -43,6 +43,13 @@ assert.match(component, /批量入库/, '来文级入库入口应明确为批量
 assert.match(component, /openImportAttachmentPreview/, '批量入库前应支持预览附件原文')
 assert.match(component, /expandedRowRender/, '来文列表应支持默认折叠的附件清单')
 assert.match(component, /:show-expand-column="false"/, '来文列表应隐藏表格默认的展开按钮')
+assert.match(component, /!item\.isMainFile && item\.summary/, '副附件列表应展示附件级摘要')
+assert.match(
+  component,
+  /selectedAttachment && !selectedAttachment\.isMainFile && selectedAttachment\.summary/,
+  '详情抽屉选中副附件时应展示其摘要'
+)
+assert.match(component, /副附件摘要/, '详情抽屉应标识副附件摘要区')
 assert.match(component, /来源定位：/, '结构化条目应展示附件和分段来源定位')
 assert.doesNotMatch(
   component,

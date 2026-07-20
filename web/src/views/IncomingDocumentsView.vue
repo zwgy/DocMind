@@ -71,17 +71,22 @@
             >
               <template #renderItem="{ item }">
                 <a-list-item>
-                  <a-space>
-                    <FileText :size="15" />
-                    <span>{{ item.filename }}</span>
-                    <a-tag v-if="item.isMainFile">主文件</a-tag>
-                    <a-tag :color="processingStatusMeta(item.status).color">
-                      {{ processingStatusMeta(item.status).label }}
-                    </a-tag>
-                    <a-tag :color="importStatusMeta(item.knowledgeImportStatus).color">
-                      {{ importStatusMeta(item.knowledgeImportStatus).label }}
-                    </a-tag>
-                  </a-space>
+                  <div>
+                    <a-space>
+                      <FileText :size="15" />
+                      <span>{{ item.filename }}</span>
+                      <a-tag v-if="item.isMainFile">主文件</a-tag>
+                      <a-tag :color="processingStatusMeta(item.status).color">
+                        {{ processingStatusMeta(item.status).label }}
+                      </a-tag>
+                      <a-tag :color="importStatusMeta(item.knowledgeImportStatus).color">
+                        {{ importStatusMeta(item.knowledgeImportStatus).label }}
+                      </a-tag>
+                    </a-space>
+                    <p v-if="!item.isMainFile && item.summary" class="attachment-summary">
+                      {{ item.summary }}
+                    </p>
+                  </div>
                   <template #actions>
                     <a-button
                       type="link"
@@ -326,17 +331,22 @@
             <a-list size="small" :data-source="detail.files || []">
               <template #renderItem="{ item }">
                 <a-list-item>
-                  <a-space>
-                    <FileText :size="15" />
-                    <span>{{ item.filename }}</span>
-                    <a-tag v-if="item.isMainFile">主文件</a-tag>
-                    <a-tag :color="processingStatusMeta(item.status).color">{{
-                      processingStatusMeta(item.status).label
-                    }}</a-tag>
-                    <a-tag :color="importStatusMeta(item.knowledgeImportStatus).color">
-                      {{ importStatusMeta(item.knowledgeImportStatus).label }}
-                    </a-tag>
-                  </a-space>
+                  <div>
+                    <a-space>
+                      <FileText :size="15" />
+                      <span>{{ item.filename }}</span>
+                      <a-tag v-if="item.isMainFile">主文件</a-tag>
+                      <a-tag :color="processingStatusMeta(item.status).color">{{
+                        processingStatusMeta(item.status).label
+                      }}</a-tag>
+                      <a-tag :color="importStatusMeta(item.knowledgeImportStatus).color">
+                        {{ importStatusMeta(item.knowledgeImportStatus).label }}
+                      </a-tag>
+                    </a-space>
+                    <p v-if="!item.isMainFile && item.summary" class="attachment-summary">
+                      {{ item.summary }}
+                    </p>
+                  </div>
                   <template #actions>
                     <a-button type="link" size="small" @click="selectAttachment(item)"
                       >查看原文</a-button
@@ -352,6 +362,14 @@
                 </a-list-item>
               </template>
             </a-list>
+          </section>
+
+          <section
+            v-if="selectedAttachment && !selectedAttachment.isMainFile && selectedAttachment.summary"
+            class="detail-section"
+          >
+            <h2>副附件摘要</h2>
+            <p class="summary-text">{{ selectedAttachment.summary }}</p>
           </section>
 
           <section class="detail-section">
@@ -1443,6 +1461,17 @@ onBeforeUnmount(() => {
 
 .expanded-attachment-list {
   max-width: 760px;
+}
+
+.attachment-summary {
+  max-width: 680px;
+  margin: 5px 0 0 23px;
+  overflow: hidden;
+  color: var(--gray-600);
+  font-size: 13px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detail-body {

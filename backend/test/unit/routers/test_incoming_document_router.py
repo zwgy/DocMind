@@ -82,17 +82,37 @@ async def test_get_detail_returns_document_and_attachment_list(monkeypatch):
         knowledge_import_error=None,
         linked_file_id=None,
     )
+    attachment = SimpleNamespace(
+        incoming_file_id="incf_2",
+        source_file_id="attachment",
+        filename="attachment.xlsx",
+        is_main_file=False,
+        file_size=20,
+        status="parsed",
+        processing_error=None,
+        original_file_url="minio://documents/attachment.xlsx",
+        markdown_file_url="minio://parsed/attachment.md",
+        knowledge_import_status="none",
+        knowledge_import_error=None,
+        linked_file_id=None,
+    )
 
     class FakeRepo:
         async def get_by_incoming_id(self, _incoming_id):
             return document
 
         async def list_files(self, _incoming_id):
-            return [file]
+            return [file, attachment]
 
     class FakeExtractionRepo:
         async def get_latest_by_incoming_id(self, _incoming_id):
-            return {"run_id": "ber_1", "schema_ids": ["task_item"], "categories": {}, "items": []}
+            return {
+                "run_id": "ber_1",
+                "schema_ids": ["task_item"],
+                "categories": {},
+                "items": [],
+                "run_metadata": {"attachment_summaries": {"attachment": "附件包含检查事项清单。"}},
+            }
 
     monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", FakeRepo)
     monkeypatch.setattr(incoming_document_router, "DocumentBusinessExtractionRepository", FakeExtractionRepo)
@@ -102,22 +122,35 @@ async def test_get_detail_returns_document_and_attachment_list(monkeypatch):
     assert result["title"] == "专项检查"
     assert result["effectiveClassification"] == "staged_work"
     assert result["effectiveClassificationLabel"] == "阶段性工作类"
-    assert result["files"] == [
-        {
-            "incomingFileId": "incf_1",
-            "sourceFileId": "main",
-            "filename": "主文件.pdf",
-            "isMainFile": True,
-            "fileSize": 10,
-            "status": "parsed",
-            "processingError": None,
-            "hasOriginalFile": True,
-            "hasMarkdownFile": True,
-            "linkedFileId": None,
-            "knowledgeImportStatus": "none",
-            "knowledgeImportError": None,
-        }
-    ]
+    assert result["files"][0] == {
+        "incomingFileId": "incf_1",
+        "sourceFileId": "main",
+        "filename": "主文件.pdf",
+        "isMainFile": True,
+        "fileSize": 10,
+        "status": "parsed",
+        "processingError": None,
+        "hasOriginalFile": True,
+        "hasMarkdownFile": True,
+        "linkedFileId": None,
+        "knowledgeImportStatus": "none",
+        "knowledgeImportError": None,
+    }
+    assert result["files"][1] == {
+        "incomingFileId": "incf_2",
+        "sourceFileId": "attachment",
+        "filename": "attachment.xlsx",
+        "isMainFile": False,
+        "fileSize": 20,
+        "status": "parsed",
+        "processingError": None,
+        "hasOriginalFile": True,
+        "hasMarkdownFile": True,
+        "linkedFileId": None,
+        "knowledgeImportStatus": "none",
+        "knowledgeImportError": None,
+        "summary": "附件包含检查事项清单。",
+    }
 
 
 async def test_original_preview_rejects_unknown_attachment_instead_of_falling_back(monkeypatch):

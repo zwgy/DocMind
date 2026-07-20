@@ -133,12 +133,19 @@ async def get_incoming_document_detail(incoming_id: str, current_user: User = De
         raise HTTPException(status_code=404, detail=f"Incoming document not found: {incoming_id}")
     payload = _incoming_document_payload(record, detail=True)
     files = await IncomingDocumentRepository().list_files(incoming_id)
-    payload["files"] = [_incoming_file_payload(file) for file in files]
     business_extraction = (
         await DocumentBusinessExtractionRepository().get_latest_by_incoming_id(incoming_id)
         if record.status == "ready"
         else None
     )
+    attachment_summaries = ((business_extraction or {}).get("run_metadata") or {}).get("attachment_summaries") or {}
+    payload["files"] = [
+        _incoming_file_payload(
+            file,
+            summary=attachment_summaries.get(file.source_file_id) if not file.is_main_file else None,
+        )
+        for file in files
+    ]
     payload["businessExtraction"] = _business_extraction_payload(business_extraction)
     return payload
 
@@ -439,8 +446,8 @@ def _incoming_document_payload(record, *, detail: bool) -> dict:
     return payload
 
 
-def _incoming_file_payload(file) -> dict:
-    return {
+def _incoming_file_payload(file, *, summary: str | None = None) -> dict:
+    payload = {
         "incomingFileId": file.incoming_file_id,
         "sourceFileId": file.source_file_id,
         "filename": file.filename,
@@ -454,6 +461,9 @@ def _incoming_file_payload(file) -> dict:
         "knowledgeImportStatus": file.knowledge_import_status or "none",
         "knowledgeImportError": file.knowledge_import_error,
     }
+    if summary:
+        payload["summary"] = summary
+    return payload
 
 
 def _business_extraction_payload(extraction: dict | None) -> dict | None:
