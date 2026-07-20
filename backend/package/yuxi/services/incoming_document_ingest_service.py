@@ -5,7 +5,11 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from yuxi.document_extraction import BusinessExtractionService, classify_incoming_document
+from yuxi.document_extraction import (
+    BusinessExtractionService,
+    classify_incoming_document,
+    summarize_incoming_attachment,
+)
 from yuxi.document_extraction.evidence import find_source_quote
 from yuxi.document_extraction.schemas import (
     AdditionalClassification,
@@ -30,6 +34,7 @@ UploadFileFn = Callable[..., Awaitable[dict[str, Any]]]
 ParseDocumentFn = Callable[[str, dict[str, Any]], Awaitable[str]]
 UploadMarkdownFn = Callable[..., Awaitable[str]]
 ClassifyDocumentFn = Callable[..., Awaitable[dict[str, Any]]]
+SummarizeAttachmentFn = Callable[..., Awaitable[str]]
 INCOMING_DOCUMENT_PROCESS_TASK_TYPE = "incoming_document_process"
 MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.8
 
@@ -50,6 +55,7 @@ class IncomingDocumentIngestService:
         parse_document: ParseDocumentFn | None = None,
         upload_markdown: UploadMarkdownFn | None = None,
         classify_document: ClassifyDocumentFn | None = None,
+        summarize_attachment: SummarizeAttachmentFn | None = None,
         business_extraction_service: BusinessExtractionService | None = None,
     ):
         self.incoming_repo = incoming_repo or IncomingDocumentRepository()
@@ -58,6 +64,7 @@ class IncomingDocumentIngestService:
         self.parse_document = parse_document or _parse_incoming_document
         self.upload_markdown = upload_markdown or _upload_incoming_markdown
         self.classify_document = classify_document or classify_incoming_document
+        self.summarize_attachment = summarize_attachment or summarize_incoming_attachment
         self.business_extraction_service = business_extraction_service or BusinessExtractionService()
 
     async def ingest_files(
@@ -291,13 +298,18 @@ class IncomingDocumentIngestService:
             await _set_progress(context, 50, f"已解析全部 {len(files)} 个附件")
 
             await self.incoming_repo.update_document(incoming_id, {"status": "extracting", "updated_by": operator_id})
-            classification = await self._classify_document_bundle(document, parsed_files)
+            main_files = [
+                parsed for parsed in parsed_files if getattr(parsed["file"], "is_main_file", False)
+            ] or parsed_files[:1]
+            classification = await self._classify_document_bundle(document, main_files)
+            attachment_summaries = await self._summarize_supplementary_files(parsed_files)
             extraction_classifications = _trusted_extraction_classifications(classification)
             await self._run_document_extraction(
                 incoming_id=incoming_id,
                 parsed_files=parsed_files,
                 classifications=extraction_classifications,
                 operator_id=operator_id,
+                attachment_summaries=attachment_summaries,
             )
             await self.incoming_repo.update_document(
                 incoming_id,
@@ -373,7 +385,11 @@ class IncomingDocumentIngestService:
                     },
                 )
         try:
-            routing = await self._classify_document_bundle(document, parsed_files)
+            main_files = [
+                parsed for parsed in parsed_files if getattr(parsed["file"], "is_main_file", False)
+            ] or parsed_files[:1]
+            routing = await self._classify_document_bundle(document, main_files)
+            attachment_summaries = await self._summarize_supplementary_files(parsed_files)
             routing_additional: list[AdditionalClassification] = []
             if (
                 routing.classification != classification
@@ -398,6 +414,7 @@ class IncomingDocumentIngestService:
                 parsed_files=parsed_files,
                 classifications=extraction_classifications,
                 operator_id=operator_id,
+                attachment_summaries=attachment_summaries,
             )
             await self.incoming_repo.update_document(
                 incoming_id,
@@ -816,6 +833,7 @@ class IncomingDocumentIngestService:
         parsed_files: list[dict[str, Any]],
         classifications: list[str],
         operator_id: str | None,
+        attachment_summaries: dict[str, str] | None = None,
     ) -> None:
         from yuxi.config.app import config
 
@@ -826,6 +844,7 @@ class IncomingDocumentIngestService:
                     "incoming_file_id": parsed["file"].incoming_file_id,
                     "source_file_id": parsed["file"].source_file_id,
                     "filename": parsed["file"].filename,
+                    "is_main_file": getattr(parsed["file"], "is_main_file", False),
                     "markdown_file": parsed["markdown_url"],
                     "markdown": parsed["markdown"],
                 }
@@ -834,6 +853,83 @@ class IncomingDocumentIngestService:
             classifications=classifications,
             model_spec=config.default_model,
             operator_id=operator_id,
+            attachment_summaries=attachment_summaries,
+        )
+
+    async def _summarize_supplementary_files(self, parsed_files: list[dict[str, Any]]) -> dict[str, str]:
+        """副附件只生成定位摘要，避免混入主来文的分类和业务结构化结果。"""
+
+        main_file = next(
+            (parsed for parsed in parsed_files if getattr(parsed["file"], "is_main_file", False)),
+            parsed_files[0] if parsed_files else None,
+        )
+        supplementary_files = [parsed for parsed in parsed_files if parsed is not main_file]
+        if not supplementary_files:
+            return {}
+        results = await gather(
+            *(self._summarize_attachment(parsed) for parsed in supplementary_files)
+        )
+        return {
+            parsed["file"].source_file_id: summary
+            for parsed, summary in zip(supplementary_files, results, strict=True)
+            if summary
+        }
+
+    async def _summarize_attachment(self, parsed: dict[str, Any]) -> str:
+        from yuxi.config.app import config
+
+        file = parsed["file"]
+        markdown = parsed["markdown"]
+        input_limit = document_input_token_limit(config.default_model)
+        if count_tokens(markdown) <= input_limit:
+            return await self.summarize_attachment(
+                filename=file.filename,
+                markdown=markdown,
+                model_spec=config.default_model,
+            )
+
+        chunks = chunk_markdown(
+            markdown,
+            file.incoming_file_id,
+            file.filename,
+            {
+                "chunk_parser_config": {
+                    "chunk_token_num": max(512, int(input_limit / 1.5)),
+                    "overlapped_percent": 10,
+                }
+            },
+        )
+        summaries = await gather(
+            *(
+                self.summarize_attachment(
+                    filename=file.filename,
+                    markdown=str(chunk["content"]),
+                    model_spec=config.default_model,
+                )
+                for chunk in chunks
+            )
+        )
+        previous_tokens = count_tokens("\n\n".join(summaries))
+        while previous_tokens > input_limit:
+            condensed = await gather(
+                *(
+                    self.summarize_attachment(
+                        filename=file.filename,
+                        markdown="\n\n".join(group),
+                        model_spec=config.default_model,
+                    )
+                    for group in _group_by_token_budget(summaries, input_limit)
+                )
+            )
+            current_tokens = count_tokens("\n\n".join(condensed))
+            if current_tokens >= previous_tokens:
+                raise RuntimeError("Attachment summary reduction did not converge")
+            summaries = condensed
+            previous_tokens = current_tokens
+        return await self.summarize_attachment(
+            filename=file.filename,
+            markdown="\n\n".join(summaries),
+            model_spec=config.default_model,
         )
 
     @staticmethod

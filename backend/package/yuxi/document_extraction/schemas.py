@@ -23,6 +23,12 @@ class IncomingDocumentClassificationResult(BaseModel):
     additional_classifications: list[AdditionalClassification] = Field(default_factory=list)
 
 
+class IncomingAttachmentSummary(BaseModel):
+    """副附件的轻量内容摘要；不承担来文分类或业务条目抽取职责。"""
+
+    summary: str = Field(min_length=1, description="基于附件原文的简洁内容摘要")
+
+
 class CategoryDecision(BaseModel):
     matched: bool = Field(default=False, description="该类别是否命中文档或片段内容")
     evidence: str | None = Field(default=None, description="判断该类别成立的原文依据；未命中时为 null")
@@ -134,8 +140,8 @@ class RiskItem(BaseModel):
         json_schema_extra={"label": "管理要求"},
     )
     source_quote: str = Field(
-        description="支持该风险抽取结果的原文片段，必须逐字摘录",
-        json_schema_extra={"label": "原文依据"},
+        description="帮助后续回读原文的参考片段，必须基于输入文本",
+        json_schema_extra={"label": "参考片段"},
     )
 
 
@@ -167,8 +173,8 @@ class TaskItem(BaseModel):
         json_schema_extra={"label": "任务类型"},
     )
     source_quote: str = Field(
-        description="支持该任务抽取结果的原文片段，必须逐字摘录",
-        json_schema_extra={"label": "原文依据"},
+        description="帮助后续回读原文的参考片段，必须基于输入文本",
+        json_schema_extra={"label": "参考片段"},
     )
 
 
@@ -195,8 +201,8 @@ class AssessmentItem(BaseModel):
         json_schema_extra={"label": "考评结果"},
     )
     source_quote: str = Field(
-        description="支持该考评抽取结果的原文片段，必须逐字摘录",
-        json_schema_extra={"label": "原文依据"},
+        description="帮助后续回读原文的参考片段，必须基于输入文本",
+        json_schema_extra={"label": "参考片段"},
     )
 
 
@@ -227,8 +233,8 @@ class RewardPunishmentItem(BaseModel):
         json_schema_extra={"label": "后续要求"},
     )
     source_quote: str = Field(
-        description="支持该奖惩通报抽取结果的原文片段，必须逐字摘录",
-        json_schema_extra={"label": "原文依据"},
+        description="帮助后续回读原文的参考片段，必须基于输入文本",
+        json_schema_extra={"label": "参考片段"},
     )
 
 
@@ -255,8 +261,8 @@ class ManagementRequirementItem(BaseModel):
         json_schema_extra={"label": "要求类型"},
     )
     source_quote: str = Field(
-        description="支持该管理要求抽取结果的原文片段，必须逐字摘录",
-        json_schema_extra={"label": "原文依据"},
+        description="帮助后续回读原文的参考片段，必须基于输入文本",
+        json_schema_extra={"label": "参考片段"},
     )
 
 
@@ -278,8 +284,8 @@ class GeneralItem(BaseModel):
         json_schema_extra={"label": "相关时间"},
     )
     source_quote: str = Field(
-        description="支持该通用事项的原文片段，必须逐字摘录",
-        json_schema_extra={"label": "原文依据"},
+        description="帮助后续回读原文的参考片段，必须基于输入文本",
+        json_schema_extra={"label": "参考片段"},
     )
 
 

@@ -43,7 +43,7 @@ assert.match(component, /批量入库/, '来文级入库入口应明确为批量
 assert.match(component, /openImportAttachmentPreview/, '批量入库前应支持预览附件原文')
 assert.match(component, /expandedRowRender/, '来文列表应支持默认折叠的附件清单')
 assert.match(component, /:show-expand-column="false"/, '来文列表应隐藏表格默认的展开按钮')
-assert.match(component, /原文依据：/, '结构化条目证据应使用明确的原文依据标签')
+assert.match(component, /来源定位：/, '结构化条目应展示附件和分段来源定位')
 assert.doesNotMatch(
   component,
   /<blockquote v-if="item\.source_quote">/,

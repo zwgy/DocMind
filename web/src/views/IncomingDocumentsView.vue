@@ -309,8 +309,8 @@
                       :key="`${evidence.file_name}-${evidence.source_location}`"
                       class="muted"
                     >
-                      原文依据：{{ evidence.file_name }} {{ evidence.source_location || '' }}
-                      <blockquote v-if="evidence.quote">{{ evidence.quote }}</blockquote>
+                      来源定位：{{ evidence.file_name }} {{ evidence.source_location || '' }}
+                      <blockquote v-if="evidence.quote">模型参考片段：{{ evidence.quote }}</blockquote>
                     </div>
                   </article>
                 </div>

@@ -40,11 +40,10 @@ class IncomingDocumentService:
         seen = set()
         for raw in files:
             item = await self._query_one(IncomingPageFile.model_validate(raw))
-            incoming_id = item.get("incomingId")
-            if incoming_id and incoming_id in seen:
+            key = (str(item.get("incomingId") or ""), str(item.get("source_file_id") or ""))
+            if key in seen:
                 continue
-            if incoming_id:
-                seen.add(incoming_id)
+            seen.add(key)
             results.append(item)
         return {"items": results}
 
@@ -83,6 +82,9 @@ class IncomingDocumentService:
         classification = document.confirmed_classification or document.ai_classification
         display["classificationLabel"] = document_category_label(classification)
         metadata = document.document_metadata or {}
+        is_main_file = bool(matched_file.is_main_file)
+        attachment_summaries = ((extraction or {}).get("run_metadata") or {}).get("attachment_summaries") or {}
+        summary = document.summary if is_main_file else attachment_summaries.get(matched_file.source_file_id)
         return base | {
             "incomingId": document.incoming_id,
             "source_system": document.source_system,
@@ -93,24 +95,26 @@ class IncomingDocumentService:
             "incoming_date": metadata.get("incoming_date"),
             "matchStatus": "matched",
             "processingStatus": document.status,
-            "extractionStatus": "ready" if document.status == "ready" and document.summary else document.status,
-            "classification": classification,
-            "classificationLabel": document_category_label(classification),
+            "extractionStatus": "ready" if document.status == "ready" and summary else document.status,
+            "classification": classification if is_main_file else None,
+            "classificationLabel": document_category_label(classification) if is_main_file else None,
             "aiClassificationEvidence": getattr(document, "classification_evidence", None),
             "additionalClassifications": [
                 item | {"classificationLabel": document_category_label(item.get("classification"))}
                 for item in getattr(document, "additional_classifications", None) or []
                 if isinstance(item, dict)
-            ],
-            "summary": document.summary,
-            "hasParsedMarkdown": bool(document_files) and all(file.markdown_file_url for file in document_files),
-            "runId": (extraction or {}).get("run_id"),
+            ]
+            if is_main_file
+            else [],
+            "summary": summary,
+            "hasParsedMarkdown": bool(matched_file.markdown_file_url),
+            "runId": (extraction or {}).get("run_id") if is_main_file else None,
             "kbId": document.linked_kb_id,
             "fileId": getattr(matched_file, "linked_file_id", None),
             "fileStatus": getattr(matched_file, "knowledge_import_status", None) or "none",
-            "categories": (extraction or {}).get("categories") or {},
-            "schemaIds": schema_ids,
-            "items": (extraction or {}).get("items") or [],
+            "categories": ((extraction or {}).get("categories") or {}) if is_main_file else {},
+            "schemaIds": schema_ids if is_main_file else [],
+            "items": (extraction or {}).get("items") or [] if is_main_file else [],
             "files": [
                 {
                     "sourceFileId": file.source_file_id,

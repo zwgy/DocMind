@@ -9,6 +9,8 @@ class FakeIncomingRepo:
         self.files = files or []
 
     async def get_file_for_source(self, **_kwargs):
+        if isinstance(self.match, dict):
+            return self.match.get(_kwargs["source_file_id"])
         return self.match
 
     async def list_files(self, _incoming_id):
@@ -23,7 +25,7 @@ class FakeExtractionRepo:
         return self.result
 
 
-async def test_query_returns_one_document_summary_for_multiple_attachments():
+async def test_query_returns_each_selected_main_and_attachment():
     document = SimpleNamespace(
         incoming_id="inc_1",
         source_system="oa",
@@ -31,6 +33,7 @@ async def test_query_returns_one_document_summary_for_multiple_attachments():
         summary="整份来文部署专项检查，附件包含风险清单。",
         ai_classification="staged_work",
         confirmed_classification=None,
+        additional_classifications=[],
         document_metadata={"title": "专项检查通知", "incoming_date": "2026-07-17"},
         knowledge_import_status="partial",
         linked_kb_id="kb_1",
@@ -53,14 +56,36 @@ async def test_query_returns_one_document_summary_for_multiple_attachments():
         knowledge_import_status="none",
         linked_file_id=None,
     )
+    attachment_2 = SimpleNamespace(
+        source_file_id="attachment-2",
+        filename="检查记录.xlsx",
+        is_main_file=False,
+        status="parsed",
+        markdown_file_url="minio://parsed/attachment-2.md",
+        knowledge_import_status="none",
+        linked_file_id=None,
+    )
     extraction = {
         "run_id": "ber_1",
         "schema_ids": ["task_item", "risk_item"],
         "categories": {},
         "items": [{"item_type": "risk_item", "data": {"risk_name": "延期"}, "evidence": []}],
+        "run_metadata": {
+            "attachment_summaries": {
+                "attachment": "风险清单列出检查事项。",
+                "attachment-2": "检查记录列出已完成检查。",
+            }
+        },
     }
     service = IncomingDocumentService(
-        incoming_repo=FakeIncomingRepo((document, main), [main, attachment]),
+        incoming_repo=FakeIncomingRepo(
+            {
+                "main": (document, main),
+                "attachment": (document, attachment),
+                "attachment-2": (document, attachment_2),
+            },
+            [main, attachment, attachment_2],
+        ),
         extraction_repo=FakeExtractionRepo(extraction),
     )
 
@@ -80,20 +105,32 @@ async def test_query_returns_one_document_summary_for_multiple_attachments():
                 "source_function_id": "incoming",
                 "source_doc_id": "DOC-1",
             },
+            {
+                "name": "检查记录.xlsx",
+                "source_file_id": "attachment-2",
+                "source_system": "oa",
+                "source_function_id": "incoming",
+                "source_doc_id": "DOC-1",
+            },
         ]
     )
 
-    assert len(result["items"]) == 1
+    assert len(result["items"]) == 3
     item = result["items"][0]
     assert item["incomingId"] == "inc_1"
     assert item["summary"].startswith("整份来文")
     assert item["classification"] == "staged_work"
     assert item["classificationLabel"] == "阶段性工作类"
     assert (item["kbId"], item["fileId"], item["fileStatus"]) == ("kb_1", "kbf_main", "indexed")
-    assert [file["filename"] for file in item["files"]] == ["主文件.pdf", "风险清单.xlsx"]
+    assert [file["filename"] for file in item["files"]] == ["主文件.pdf", "风险清单.xlsx", "检查记录.xlsx"]
     assert item["hasParsedMarkdown"] is True
     assert all(file["hasParsedMarkdown"] for file in item["files"])
     assert item["items"][0]["item_type"] == "risk_item"
+    attachment_item = result["items"][1]
+    assert attachment_item["summary"] == "风险清单列出检查事项。"
+    assert attachment_item["classification"] is None
+    assert attachment_item["items"] == []
+    assert result["items"][2]["summary"] == "检查记录列出已完成检查。"
 
 
 async def test_query_returns_pending_sync_when_attachment_is_not_ingested():
@@ -117,6 +154,59 @@ async def test_query_returns_pending_sync_when_attachment_is_not_ingested():
             "reason": "source_file_id not found",
         }
     ]
+
+
+async def test_query_returns_selected_attachment_summary_without_main_items():
+    document = SimpleNamespace(
+        incoming_id="inc_1",
+        source_system="oa",
+        status="ready",
+        summary="主文件摘要",
+        ai_classification="staged_work",
+        confirmed_classification=None,
+        additional_classifications=[],
+        document_metadata={},
+        knowledge_import_status="none",
+        linked_kb_id=None,
+    )
+    attachment = SimpleNamespace(
+        source_file_id="attachment",
+        filename="风险清单.xlsx",
+        is_main_file=False,
+        status="parsed",
+        markdown_file_url="minio://parsed/attachment.md",
+        knowledge_import_status="none",
+        linked_file_id=None,
+    )
+    extraction = {
+        "run_id": "ber_1",
+        "schema_ids": ["risk_item"],
+        "categories": {"risk_management": {"matched": True}},
+        "items": [{"item_type": "risk_item", "data": {"risk_name": "延期"}}],
+        "run_metadata": {"attachment_summaries": {"attachment": "风险清单列出检查风险。"}},
+    }
+    service = IncomingDocumentService(
+        incoming_repo=FakeIncomingRepo((document, attachment), [attachment]),
+        extraction_repo=FakeExtractionRepo(extraction),
+    )
+
+    result = await service.query_extractions(
+        [
+            {
+                "name": "风险清单.xlsx",
+                "source_file_id": "attachment",
+                "source_system": "oa",
+                "source_function_id": "incoming",
+                "source_doc_id": "DOC-1",
+            }
+        ]
+    )
+
+    item = result["items"][0]
+    assert item["summary"] == "风险清单列出检查风险。"
+    assert item["classification"] is None
+    assert item["items"] == []
+    assert item["hasParsedMarkdown"] is True
 
 
 async def test_query_hides_previous_extraction_while_document_is_not_ready():

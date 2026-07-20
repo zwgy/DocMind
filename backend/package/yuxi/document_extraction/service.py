@@ -7,15 +7,16 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from yuxi.document_extraction.evidence import find_source_quote
 from yuxi.document_extraction.llm import JsonLLM, ModelJsonLLM
 from yuxi.document_extraction.prompts import (
+    build_attachment_summary_prompt,
     build_extraction_prompt,
     build_category_prompt,
 )
 from yuxi.document_extraction.schemas import (
     DocumentCategoryResult,
     IncomingDocumentClassificationResult,
+    IncomingAttachmentSummary,
     category_result_for_classification_label,
     category_result_for_classification_labels,
     category_result_to_mapping,
@@ -287,12 +288,13 @@ class BusinessExtractionService:
         self,
         *,
         incoming_id: str,
-        files: list[dict[str, str]],
+        files: list[dict[str, Any]],
         classifications: list[str],
         model_spec: str,
         operator_id: str | None = None,
+        attachment_summaries: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """以一份来文为单位抽取，附件只作为原文证据来源。"""
+        """以一份来文为单位抽取，并按附件保留可靠的原文定位。"""
         category_result = category_result_for_classification_labels(classifications)
         category_mapping = category_result_to_mapping(category_result)
         if not any(category_mapping.values()):
@@ -305,6 +307,7 @@ class BusinessExtractionService:
             }
             for file in files
         }
+        attachment_summaries = attachment_summaries or {}
         await self.extraction_repo.create_run(
             {
                 "run_id": run_id,
@@ -315,6 +318,7 @@ class BusinessExtractionService:
                 "created_by": operator_id,
                 "run_metadata": {
                     "source_files": source_files,
+                    "attachment_summaries": attachment_summaries,
                     "model_spec": model_spec,
                 },
             }
@@ -322,106 +326,49 @@ class BusinessExtractionService:
         try:
             all_items: list[ExtractedBusinessItem] = []
             errors: list[dict[str, Any]] = []
-            warnings: list[dict[str, Any]] = []
-            dropped_item_count = 0
             input_limit = document_input_token_limit(model_spec)
-            document_markdown = _incoming_markdown_bundle(files)
-            if count_tokens(document_markdown) <= input_limit:
+            main_files = [file for file in files if file.get("is_main_file")]
+            # 历史调用没有传主附件标记时，沿用首文件作为主附件；正式来文入口始终传入 is_main_file。
+            for file in main_files or files[:1]:
+                incoming_file_id = str(file["incoming_file_id"])
+                document_key = f"{incoming_id}:{incoming_file_id}"
+                segments = self._markdown_segments(
+                    markdown=str(file["markdown"]),
+                    document_key=document_key,
+                    filename=str(file["filename"]),
+                    processing_params={},
+                    token_limit=input_limit,
+                )
                 draft = await self.extract_chunks(
                     document_scope="incoming",
                     incoming_id=incoming_id,
+                    file_id=incoming_file_id,
                     model_spec=model_spec,
-                    chunks=[{"chunk_id": None, "content": document_markdown, "chunk_index": 0}],
+                    chunks=segments,
                     category_result=category_result,
+                    merge_items=False,
                 )
-                verified_items = []
+                source = source_files[incoming_file_id]
+                segment_location = {
+                    str(segment.get("chunk_id")) if segment.get("chunk_id") is not None else None: (
+                        "全文" if len(segments) == 1 else f"正文第 {int(segment.get('chunk_index') or 0) + 1} 部分"
+                    )
+                    for segment in segments
+                }
                 for item in draft.items:
-                    matched_files = _source_files_for_quote(item.source_quote, files)
-                    if not matched_files:
-                        dropped_item_count += 1
-                        warnings.append(
-                            {"chunk_id": None, "schema_id": item.item_type, "error": "source quote not found"}
-                        )
-                        logger.warning(
-                            "Business extraction item dropped because source quote was not found: "
-                            f"incoming_id={incoming_id}, schema={item.item_type}"
-                        )
-                        continue
-                    item.source_quote = matched_files[0][1]
-                    item.data["source_quote"] = item.source_quote
+                    # 抽取结论可以概括原文，不能因模型参考片段不是逐字引文而丢弃；
+                    # 按附件分别抽取，才能把后续原文读取准确收敛到对应文件和分段。
                     item.evidence = [
                         {
-                            "source_file_id": str(file.get("source_file_id") or file["incoming_file_id"]),
-                            "incoming_file_id": str(file["incoming_file_id"]),
-                            "file_name": str(file["filename"]),
-                            "quote": source_quote,
-                            "source_location": "全文",
+                            "source_file_id": source["source_file_id"],
+                            "incoming_file_id": incoming_file_id,
+                            "file_name": source["file_name"],
+                            "quote": item.source_quote,
+                            "source_location": segment_location.get(item.chunk_id) or "全文",
                         }
-                        for file, source_quote in matched_files
                     ]
-                    verified_items.append(item)
-                all_items.extend(verified_items)
+                all_items.extend(draft.items)
                 errors.extend(draft.errors)
-            else:
-                for file in files:
-                    incoming_file_id = str(file["incoming_file_id"])
-                    document_key = f"{incoming_id}:{incoming_file_id}"
-                    segments = self._markdown_segments(
-                        markdown=str(file["markdown"]),
-                        document_key=document_key,
-                        filename=str(file["filename"]),
-                        processing_params={},
-                        token_limit=input_limit,
-                    )
-                    draft = await self.extract_chunks(
-                        document_scope="incoming",
-                        incoming_id=incoming_id,
-                        file_id=incoming_file_id,
-                        model_spec=model_spec,
-                        chunks=segments,
-                        category_result=category_result,
-                        merge_items=False,
-                    )
-                    source = source_files[incoming_file_id]
-                    segment_location = {
-                        str(segment.get("chunk_id")) if segment.get("chunk_id") is not None else None: (
-                            "全文" if len(segments) == 1 else f"正文第 {int(segment.get('chunk_index') or 0) + 1} 部分"
-                        )
-                        for segment in segments
-                    }
-                    verified_items = []
-                    for item in draft.items:
-                        # 分块只控制模型上下文，evidence 始终回到完整附件原文定位。
-                        source_quote = find_source_quote(item.source_quote, str(file.get("markdown") or ""))
-                        if source_quote is None:
-                            dropped_item_count += 1
-                            warnings.append(
-                                {
-                                    "chunk_id": item.chunk_id,
-                                    "schema_id": item.item_type,
-                                    "error": "source quote not found",
-                                }
-                            )
-                            logger.warning(
-                                "Business extraction item dropped because source quote was not found: "
-                                f"incoming_id={incoming_id}, file_id={incoming_file_id}, "
-                                f"chunk_id={item.chunk_id}, schema={item.item_type}"
-                            )
-                            continue
-                        item.source_quote = source_quote
-                        item.data["source_quote"] = source_quote
-                        item.evidence = [
-                            {
-                                "source_file_id": source["source_file_id"],
-                                "incoming_file_id": incoming_file_id,
-                                "file_name": source["file_name"],
-                                "quote": source_quote,
-                                "source_location": segment_location.get(item.chunk_id) or "全文",
-                            }
-                        ]
-                        verified_items.append(item)
-                    all_items.extend(verified_items)
-                    errors.extend(draft.errors)
 
             if errors:
                 # 模型调用或 schema 解析失败意味着该分块未完成，不能发布为完整来文结果。
@@ -462,10 +409,11 @@ class BusinessExtractionService:
                     "status": "success",
                     "run_metadata": {
                         "source_files": source_files,
+                        "attachment_summaries": attachment_summaries,
                         "model_spec": model_spec,
                         "errors": errors,
-                        "warnings": warnings,
-                        "dropped_item_count": dropped_item_count,
+                        "warnings": [],
+                        "dropped_item_count": 0,
                     },
                 },
             )
@@ -473,8 +421,8 @@ class BusinessExtractionService:
                 "run_id": run_id,
                 "item_count": len(merged),
                 "errors": errors,
-                "warnings": warnings,
-                "dropped_item_count": dropped_item_count,
+                "warnings": [],
+                "dropped_item_count": 0,
             }
         except Exception as exc:
             await self.extraction_repo.update_run(run_id, {"status": "failed", "error": str(exc)})
@@ -587,17 +535,13 @@ async def classify_incoming_document(
     return IncomingDocumentClassificationResult.model_validate(data).model_dump()
 
 
-def _incoming_markdown_bundle(files: list[dict[str, str]]) -> str:
-    return "\n\n".join(f"## 文件：{file['filename']}\n\n{file['markdown']}" for file in files)
-
-
-def _source_files_for_quote(quote: str, files: list[dict[str, str]]) -> list[tuple[dict[str, str], str]]:
-    matched_files = []
-    for file in files:
-        source_quote = find_source_quote(quote, str(file.get("markdown") or ""))
-        if source_quote:
-            matched_files.append((file, source_quote))
-    return matched_files
+async def summarize_incoming_attachment(*, filename: str, markdown: str, model_spec: str) -> str:
+    """只概括副附件内容，不混入来文分类与业务结构化语义。"""
+    data = await ModelJsonLLM(model_spec).complete_json(
+        build_attachment_summary_prompt(filename=filename, markdown=markdown),
+        IncomingAttachmentSummary,
+    )
+    return IncomingAttachmentSummary.model_validate(data).summary
 
 
 ITEM_IDENTITY_FIELDS = {

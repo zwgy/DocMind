@@ -362,7 +362,7 @@ async def test_extract_chunks_uses_known_risk_category():
     assert result.items[0].data["risk_name"] == "现场作业监护不到位"
 
 
-async def test_incoming_document_extraction_keeps_attachment_evidence():
+async def test_incoming_document_extraction_only_extracts_main_file():
     repository = FakeExtractionRepository()
     llm = FakeLLM()
     service = BusinessExtractionService(llm=llm, extraction_repo=repository)
@@ -376,6 +376,7 @@ async def test_incoming_document_extraction_keeps_attachment_evidence():
                 "incoming_file_id": "incf_main",
                 "source_file_id": "main",
                 "filename": "主文件.pdf",
+                "is_main_file": True,
                 "markdown_file": "minio://parsed/main.md",
                 "markdown": "现场作业监护不到位，应加强现场监护。",
             },
@@ -383,6 +384,7 @@ async def test_incoming_document_extraction_keeps_attachment_evidence():
                 "incoming_file_id": "incf_attachment",
                 "source_file_id": "attachment",
                 "filename": "附件.xlsx",
+                "is_main_file": False,
                 "markdown_file": "minio://parsed/attachment.md",
                 "markdown": "现场作业监护不到位，应加强现场监护。",
             },
@@ -391,8 +393,8 @@ async def test_incoming_document_extraction_keeps_attachment_evidence():
 
     assert result["item_count"] == 1
     item = next(item for item in repository.replaced["items"] if item["item_type"] == "risk_item")
-    assert {evidence["file_name"] for evidence in item["evidence"]} == {"主文件.pdf", "附件.xlsx"}
-    assert all("## 文件：主文件.pdf" in prompt and "## 文件：附件.xlsx" in prompt for prompt in llm.prompts)
+    assert {evidence["file_name"] for evidence in item["evidence"]} == {"主文件.pdf"}
+    assert len(llm.prompts) == 3
 
 
 async def test_incoming_document_extraction_fails_when_any_schema_chunk_fails():
@@ -423,7 +425,7 @@ async def test_incoming_document_extraction_fails_when_any_schema_chunk_fails():
     assert repository.updated[-1][1]["status"] == "failed"
 
 
-async def test_incoming_document_extraction_drops_paraphrased_quote():
+async def test_incoming_document_extraction_keeps_paraphrased_reference_with_source_location():
     class ParaphrasingLLM:
         async def complete_json(self, _prompt, _schema):
             return {
@@ -457,9 +459,18 @@ async def test_incoming_document_extraction_drops_paraphrased_quote():
         ],
     )
 
-    assert result["item_count"] == 0
-    assert result["dropped_item_count"] == 1
-    assert repository.replaced["items"] == []
+    assert result["item_count"] == 1
+    assert result["dropped_item_count"] == 0
+    item = repository.replaced["items"][0]
+    assert item["evidence"] == [
+        {
+            "source_file_id": "main",
+            "incoming_file_id": "incf_main",
+            "file_name": "主文件.pdf",
+            "quote": "中国铁路上海局集团有限公司关于重新印发客车检修规程",
+            "source_location": "全文",
+        }
+    ]
 
 
 async def test_long_incoming_extraction_keeps_each_chunk_evidence(monkeypatch):
@@ -499,7 +510,7 @@ async def test_long_incoming_extraction_keeps_each_chunk_evidence(monkeypatch):
     }
 
 
-async def test_long_incoming_extraction_drops_hallucinated_quote(monkeypatch):
+async def test_long_incoming_extraction_keeps_nonliteral_reference(monkeypatch):
     class HallucinatingLLM:
         async def complete_json(self, _prompt, _schema):
             return {
@@ -539,13 +550,12 @@ async def test_long_incoming_extraction_drops_hallucinated_quote(monkeypatch):
         ],
     )
 
-    assert result["item_count"] == 0
-    assert result["warnings"] == [
-        {"chunk_id": "chunk_1", "schema_id": "management_requirement_item", "error": "source quote not found"}
-    ]
-    assert repository.replaced["items"] == []
-    assert result["dropped_item_count"] == 1
-    assert repository.updated[-1][1]["run_metadata"]["dropped_item_count"] == 1
+    assert result["item_count"] == 1
+    assert result["warnings"] == []
+    assert repository.replaced["items"][0]["evidence"][0]["quote"] == "原文中不存在的依据"
+    assert repository.replaced["items"][0]["evidence"][0]["source_location"] == "全文"
+    assert result["dropped_item_count"] == 0
+    assert repository.updated[-1][1]["run_metadata"]["dropped_item_count"] == 0
     assert repository.updated[-1][1]["status"] == "success"
 
 

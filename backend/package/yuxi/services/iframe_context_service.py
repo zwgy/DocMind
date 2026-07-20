@@ -109,7 +109,7 @@ def _business_items_text(file_info: dict[str, Any]) -> str:
         evidence = item.get("evidence")
         parts = [f"- {item_type}"]
         if isinstance(data, dict) and data:
-            # source_quote 是逐字原文，只在用户要求核验时由 Skill 回读附件；普通问答仅保留业务字段。
+            # 参考片段可能是模型概括，普通问答不把它当作原文引用；需要细节时按来源定位回读附件。
             visible_data = {key: value for key, value in data.items() if key != "source_quote"}
             if visible_data:
                 parts.append(json.dumps(visible_data, ensure_ascii=False))

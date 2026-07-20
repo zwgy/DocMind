@@ -151,16 +151,23 @@ async def test_process_reads_all_attachments_and_extracts_one_document_result():
     async def fake_markdown_upload(*, incoming_id, markdown):
         return f"minio://parsed/{incoming_id}.md"
 
+    classify_calls = []
+
     async def fake_classify(**kwargs):
-        assert "文件：主文件.pdf" in kwargs["markdown"]
-        assert "文件：附件.xlsx" in kwargs["markdown"]
+        classify_calls.append(kwargs)
         return {
             "classification": "阶段性工作类",
             "classification_confidence": 0.9,
             "classification_evidence": "附件事实",
-            "summary": "这份来文部署专项检查，并以附件列出具体事项。",
+            "summary": "这份来文部署专项检查。",
             "structured_result": {},
         }
+
+    summary_calls = []
+
+    async def fake_summarize_attachment(**kwargs):
+        summary_calls.append(kwargs)
+        return "风险清单附件列出检查事项。"
 
     repo = FakeIncomingRepo()
     repo.document = SimpleNamespace(
@@ -178,6 +185,7 @@ async def test_process_reads_all_attachments_and_extracts_one_document_result():
             source_file_id="main",
             filename="主文件.pdf",
             original_file_url="minio://main",
+            is_main_file=True,
             status="uploaded",
         ),
         SimpleNamespace(
@@ -186,6 +194,7 @@ async def test_process_reads_all_attachments_and_extracts_one_document_result():
             source_file_id="attachment",
             filename="附件.xlsx",
             original_file_url="minio://attachment",
+            is_main_file=False,
             status="uploaded",
         ),
     ]
@@ -196,17 +205,23 @@ async def test_process_reads_all_attachments_and_extracts_one_document_result():
         parse_document=fake_parse,
         upload_markdown=fake_markdown_upload,
         classify_document=fake_classify,
+        summarize_attachment=fake_summarize_attachment,
         business_extraction_service=extraction,
     )
 
     result = await service.process_incoming_document("inc_1", context=FakeContext())
 
     assert result == {"incoming_id": "inc_1", "status": "ready"}
-    assert repo.document.summary.startswith("这份来文")
+    assert repo.document.summary == "这份来文部署专项检查。"
     assert repo.document.ai_classification == "staged_work"
     assert len(extraction.calls) == 1
     assert [file["source_file_id"] for file in extraction.calls[0]["files"]] == ["main", "attachment"]
+    assert [file["is_main_file"] for file in extraction.calls[0]["files"]] == [True, False]
+    assert extraction.calls[0]["attachment_summaries"] == {"attachment": "风险清单附件列出检查事项。"}
     assert extraction.calls[0]["classifications"] == ["staged_work"]
+    assert "minio://main" in classify_calls[0]["markdown"]
+    assert len(classify_calls) == 1
+    assert "minio://attachment" in summary_calls[0]["markdown"]
     assert all(file.markdown_file_url for file in repo.files)
 
 

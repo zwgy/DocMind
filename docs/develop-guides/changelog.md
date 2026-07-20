@@ -7,7 +7,9 @@
 ## v0.7.1 (current)
 
 ### 开发记录
+- 收敛来文主附件与副附件的抽取边界：主附件单独完成分类和业务结构化抽取；副附件不再生成核心业务 item，改为使用无分类字段的专用提示词生成附件级摘要并随抽取运行元数据保存。chat-iframe 按选中附件分别注入上下文：主附件提供来文摘要、分类和业务条目，副附件仅提供自身摘要、文件标识和原文读取定位，多选时保留全部选中附件。
 
+- 优化来文业务结构化抽取的来源定位：`source_quote` 调整为基于原文的模型参考片段，不再要求逐字匹配或因匹配失败丢弃业务条目；来文按附件分别抽取并为每条结果保存附件名、`source_file_id` 和全文/分段位置，小助手仅注入这些定位信息，追问细节时再按定位读取原文。管理端同步将“原文依据”改为“来源定位”，避免把模型概括误展示为逐字引用。
 - 来文管理增加删除入口：列表行与详情抽屉都暴露"删除"按钮，处理中（`parsing`/`extracting`）和已入库知识库（`importing`/`partial`/`indexed`）的来文不开放删除；后端 `DELETE /api/incoming-documents/{incoming_id}` 在事务内校验并按 `incoming_documents → incoming_document_files` 与 `document_business_extraction_runs → results → items` 顺序级联清理，对应 MinIO 原文与 Markdown 在事务外尝试清理并将未删除对象写入 `minioErrors` 供后续兜底；前端用"来源单号后 6 位"作为二次确认，防止误删已确认来文。
 
 ### 开发记录
