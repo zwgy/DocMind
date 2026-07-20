@@ -39,11 +39,6 @@ const artifactPreview = ref<{ name: string; kind: 'image' | 'pdf' | 'text'; url?
 const artifactBusyPath = ref('')
 const artifactError = ref('')
 const displayItems = computed(() => groupMessageDisplayItems(props.messages))
-const selectedAttachmentNames = computed(() =>
-  props.messages
-    .filter((message) => message.type === 'context_summary' && message.contextSummary)
-    .map((message) => message.contextSummary!.file.name)
-)
 const showGeneratingStatus = computed(() => props.streaming && props.messages.some((message) => message.role === 'user'))
 const runTodos = computed(() => {
   const todos = props.agentState?.todos
@@ -281,9 +276,6 @@ onUnmounted(() => {
       <span>默认会带上当前页面和选中文档的结构化结果。</span>
     </div>
     <template v-else>
-    <p v-if="selectedAttachmentNames.length > 1" class="context-summary-selection" :title="selectedAttachmentNames.join(' ｜ ')">
-      {{ selectedAttachmentNames.join(' ｜ ') }}
-    </p>
     <article
       v-for="item in displayItems"
       :key="item.key"
@@ -472,12 +464,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.context-summary-selection {
-  margin: 0 0 10px;
-  color: var(--gray-600);
-  font-size: 14px;
-}
-
 .context-summary-document-title {
   margin: 0 0 6px;
   color: var(--gray-800);

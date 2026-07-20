@@ -133,12 +133,24 @@
           <h3>中国铁路上海局集团有限公司关于重新印发《中国铁路上海局集团有限公司路用客车检修运用管理办法》的通知</h3>
           <p>来文 ID：37908；来文类别：集团公司通知；来文单位：供电部；来文日期：2020-10-20。</p>
           <ol>
-            <li>主文件：上铁辆〔2020〕316号.pdf，source_file_id 为 202010200206</li>
+            <li>主文件：上铁辆〔2020〕316号.pdf，source_file_id 为 202010200206（已选中）</li>
+            <li>附件：附件4.xls，source_file_id 为 202010200207</li>
+            <li>附件：附件5.doc，source_file_id 为 202010200208</li>
           </ol>
           <div class="file-row">
             <div class="icon">PDF</div>
             <div class="name">上铁辆〔2020〕316号.pdf</div>
             <div class="meta">428.76 KB · 已选中</div>
+          </div>
+          <div class="file-row">
+            <div class="icon">XLS</div>
+            <div class="name">附件4.xls</div>
+            <div class="meta">未选中</div>
+          </div>
+          <div class="file-row">
+            <div class="icon">DOC</div>
+            <div class="name">附件5.doc</div>
+            <div class="meta">未选中</div>
           </div>
         </div>
       </section>
@@ -197,6 +209,8 @@ chat.<span class="tk-fn">setPageContent</span>([
   <span class="tk-str">'页面标题：中国铁路上海局集团有限公司关于重新印发…的通知'</span>,
   <span class="tk-str">'来文 ID：37908；来文类别：集团公司通知；来文单位：供电部；来文日期：2020-10-20'</span>,
   <span class="tk-str">'主文件：上铁辆〔2020〕316号.pdf（428.76 KB）'</span>,
+  <span class="tk-str">'附件：附件4.xls'</span>,
+  <span class="tk-str">'附件：附件5.doc'</span>,
 ].<span class="tk-fn">join</span>(<span class="tk-str">'\n'</span>))
 
 <span class="tk-com">// 3. 设置附件列表（被助手默认带入；selected: true 的项会被高亮选中）</span>
@@ -217,9 +231,9 @@ chat.<span class="tk-fn">setFiles</span>([
     <span class="tk-key">source_url</span>: <span class="tk-str">'/chat-iframe/test1/附件4.xls'</span>
   },
   {
-    <span class="tk-key">name</span>:       <span class="tk-str">'附件1～3.doc'</span>,
-    <span class="tk-key">source_file_id</span>: <span class="tk-str">'202010200209'</span>,
-    <span class="tk-key">source_url</span>: <span class="tk-str">'/chat-iframe/test1/附件1～3.doc'</span>
+    <span class="tk-key">name</span>:       <span class="tk-str">'附件5.doc'</span>,
+    <span class="tk-key">source_file_id</span>: <span class="tk-str">'202010200208'</span>,
+    <span class="tk-key">source_url</span>: <span class="tk-str">'/chat-iframe/test1/附件5.doc'</span>
   },
 ])
 
@@ -286,6 +300,8 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
         '页面标题：' + document.title,
         '来文 ID：37908；来文类别：集团公司通知；来文单位：供电部；来文日期：2020-10-20',
         '主文件：上铁辆〔2020〕316号.pdf（428.76 KB）',
+        '附件：附件4.xls',
+        '附件：附件5.doc',
       ].join('\n'))
 
       // 设置附件列表（被助手默认带入；selected: true 的项会被高亮选中）

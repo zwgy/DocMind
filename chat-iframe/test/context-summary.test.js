@@ -16,11 +16,11 @@ const chatMessagesSource = readFileSync(
   new URL('../src/components/ChatMessages.vue', import.meta.url),
   'utf8'
 )
+const chatInputSource = readFileSync(new URL('../src/components/ChatInput.vue', import.meta.url), 'utf8')
 
 test('context summary top area shows document metadata and fills missing values', () => {
   assert.match(chatMessagesSource, /contextSummary\.file\.name/)
-  assert.match(chatMessagesSource, /\{\{ selectedAttachmentNames\.join\(' ｜ '\) \}\}/)
-  assert.doesNotMatch(chatMessagesSource, /已选附件：/)
+  assert.doesNotMatch(chatMessagesSource, /context-summary-selection/)
   assert.match(chatMessagesSource, /file\.is_main_file && item\.message\.contextSummary\.file\.title/)
   assert.doesNotMatch(
     chatMessagesSource,
@@ -32,6 +32,11 @@ test('context summary top area shows document metadata and fills missing values'
   assert.match(chatMessagesSource, /\['incoming-date', '时间', file\.incoming_date \|\| '无'\]/)
   assert.doesNotMatch(chatMessagesSource, /\['document-number', '文号'/)
   assert.doesNotMatch(chatMessagesSource, /\['source-system', '来源'/)
+})
+
+test('selected attachment summaries keep the ask-file list order', () => {
+  assert.match(chatInputSource, /props\.pageFiles\.filter\(\(file\) => selectedPageSourceFileIds\.value\.has\(file\.source_file_id\)\)/)
+  assert.doesNotMatch(chatInputSource, /selected\.sort\(/)
 })
 
 test('buildContextSummaryMessage uses metadata returned by the matched incoming document', () => {

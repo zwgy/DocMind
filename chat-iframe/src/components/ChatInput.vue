@@ -87,12 +87,10 @@ const contextUsageRef = ref<HTMLElement | null>(null)
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const hasPageFiles = computed(() => props.pageFiles.length > 0)
-const selectedPageFiles = computed(() => {
-  const selected = props.pageFiles.filter((file) => selectedPageSourceFileIds.value.has(file.source_file_id))
-  if (!props.selectedPageSourceFileId) return selected
-  // 当前上下文附件要排在第一位，保证顶部摘要和发送给模型的文件上下文一致。
-  return selected.sort((a, b) => Number(b.source_file_id === props.selectedPageSourceFileId) - Number(a.source_file_id === props.selectedPageSourceFileId))
-})
+// 摘要与“问文件”菜单保持同一顺序，主附件通常由宿主页面排在首位。
+const selectedPageFiles = computed(() =>
+  props.pageFiles.filter((file) => selectedPageSourceFileIds.value.has(file.source_file_id))
+)
 const selectedModelLabel = computed(() => {
   return props.models.find((model) => model.value === props.selectedModelSpec)?.label || props.selectedModelSpec || '默认模型'
 })
