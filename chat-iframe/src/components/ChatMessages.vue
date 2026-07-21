@@ -183,6 +183,7 @@ function contextSummaryMetadata(file: IncomingPageFile) {
 
 function contextSummaryItemGroups(message: ChatMessage): ContextSummaryItemGroup[] {
   const summary = message.contextSummary
+  if (!summary?.file.is_main_file) return []
   const groups = new Map<string, ContextSummaryItemGroup>()
   for (const item of summary?.items || []) {
     const itemType = item.item_type || 'unknown'
@@ -302,24 +303,13 @@ onUnmounted(() => {
 
       <template v-else-if="item.message.type === 'context_summary' && item.message.contextSummary">
         <div class="context-summary-card" :class="[contextSummaryTone(item.message), { unavailable: !hasSummaryDetails(item.message) }]">
-          <div class="context-summary-header">
-            <div>
-              <h2>文档摘要</h2>
-            </div>
-          </div>
-          <p
-            v-if="item.message.contextSummary.file.is_main_file && item.message.contextSummary.file.title"
-            class="context-summary-document-title"
-          >
-            {{ item.message.contextSummary.file.title }}
+          <p class="context-summary-document-title">
+            {{ item.message.contextSummary.file.title || '文档摘要' }}
           </p>
-          <p class="context-summary-file" :title="item.message.contextSummary.file.name">
-            <span>{{ item.message.contextSummary.file.name }}</span>
+          <div class="context-summary-metadata">
             <span v-if="extractionClassificationText(item.message.contextSummary.result)" class="classification-badge">
               {{ extractionClassificationText(item.message.contextSummary.result) }}
             </span>
-          </p>
-          <div class="context-summary-metadata">
             <template v-for="[kind, label, value] in contextSummaryMetadata(item.message.contextSummary.file)" :key="kind">
               <span class="context-summary-meta" :class="kind">
                 <span class="context-summary-meta-label">{{ label }}</span>
@@ -332,34 +322,42 @@ onUnmounted(() => {
             <p>{{ summaryEmptyText(item.message) }}</p>
           </div>
           <section v-if="hasSummaryDetails(item.message)" class="context-summary-section">
-            <article v-if="extractionSummaryText(item.message.contextSummary.result)" class="item-row">
+            <article class="item-row context-summary-attachment">
+              <p class="context-summary-file" :title="item.message.contextSummary.file.name">
+                <span>{{ item.message.contextSummary.file.name }}</span>
+              </p>
               <strong>摘要</strong>
-              <blockquote>{{ extractionSummaryText(item.message.contextSummary.result) }}</blockquote>
+              <blockquote v-if="extractionSummaryText(item.message.contextSummary.result)">
+                {{ extractionSummaryText(item.message.contextSummary.result) }}
+              </blockquote>
+              <p v-else class="muted">暂无摘要</p>
+              <details
+                v-for="group in contextSummaryItemGroups(item.message)"
+                :key="group.itemType"
+                class="context-summary-group"
+              >
+                <summary>{{ group.label }}（{{ group.items.length }}）</summary>
+                <article v-for="(summaryItem, index) in group.items" :key="summaryItem.item_id" class="item-row">
+                  <strong>{{ group.label }} {{ index + 1 }}</strong>
+                  <dl v-if="displayExtractionDataEntries(summaryItem.data, summaryItem.item_type, item.message.contextSummary.result).length">
+                    <template v-for="[key, value] in displayExtractionDataEntries(summaryItem.data, summaryItem.item_type, item.message.contextSummary.result)" :key="key">
+                      <dt>{{ key }}</dt>
+                      <dd>{{ displayValue(value) }}</dd>
+                    </template>
+                  </dl>
+                  <blockquote v-if="summaryItem.source_quote">{{ summaryItem.source_quote }}</blockquote>
+                </article>
+              </details>
             </article>
-            <p v-if="!item.message.contextSummary.items.length && !extractionSummaryText(item.message.contextSummary.result)" class="muted">暂无结构化明细</p>
-            <details
-              v-for="group in contextSummaryItemGroups(item.message)"
-              :key="group.itemType"
-              class="context-summary-group"
-            >
-              <summary>{{ group.label }}（{{ group.items.length }}）</summary>
-              <article v-for="(summaryItem, index) in group.items" :key="summaryItem.item_id" class="item-row">
-                <strong>{{ group.label }} {{ index + 1 }}</strong>
-                <dl v-if="displayExtractionDataEntries(summaryItem.data, summaryItem.item_type, item.message.contextSummary.result).length">
-                  <template v-for="[key, value] in displayExtractionDataEntries(summaryItem.data, summaryItem.item_type, item.message.contextSummary.result)" :key="key">
-                    <dt>{{ key }}</dt>
-                    <dd>{{ displayValue(value) }}</dd>
-                  </template>
-                </dl>
-                <blockquote v-if="summaryItem.source_quote">{{ summaryItem.source_quote }}</blockquote>
-              </article>
-            </details>
             <article
               v-for="attachment in supplementaryAttachments(item.message)"
               :key="attachment.file.source_file_id"
               class="item-row context-summary-attachment"
             >
-              <strong>{{ attachment.file.name }}</strong>
+              <p class="context-summary-file" :title="attachment.file.name">
+                <span>{{ attachment.file.name }}</span>
+              </p>
+              <strong>摘要</strong>
               <blockquote v-if="extractionSummaryText(attachment.result)">
                 {{ extractionSummaryText(attachment.result) }}
               </blockquote>
@@ -488,15 +486,10 @@ onUnmounted(() => {
 
 <style scoped>
 .context-summary-document-title {
-  margin: 0 0 6px;
+  margin: 0;
   color: var(--gray-800);
-  font-size: 17px;
+  font-size: 15px;
+  font-weight: 600;
   line-height: 1.45;
-}
-
-.context-summary-attachment {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--gray-200);
 }
 </style>

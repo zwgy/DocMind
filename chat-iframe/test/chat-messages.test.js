@@ -12,7 +12,8 @@ test('context summary renders all extraction items grouped by schema', () => {
 
 test('context summary renders supplementary attachments without duplicating their structured results', () => {
   assert.match(component, /supplementaryAttachments/)
-  assert.match(component, /attachment\.file\.name/)
-  assert.match(component, /\.context-summary-attachment\s*\{[\s\S]*border-top/)
+  assert.match(component, /class="item-row context-summary-attachment"/)
+  assert.match(component, /<strong>摘要<\/strong>/)
+  assert.match(component, /if \(!summary\?\.file\.is_main_file\) return \[\]/)
   assert.doesNotMatch(component, /contextSummaryAttachments/)
 })

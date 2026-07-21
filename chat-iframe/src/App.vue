@@ -69,9 +69,8 @@ function refreshContextSummaries(options: { loading?: boolean; error?: string } 
     : selectedFile.value
       ? [selectedFile.value]
       : []
-  const files = filesForSelectedDocuments(selectedFiles)
   chat.setContextSummaries(
-    files.map((file) => ({
+    selectedFiles.map((file) => ({
       file,
       result: results.value[file.source_file_id] || null,
       ...options

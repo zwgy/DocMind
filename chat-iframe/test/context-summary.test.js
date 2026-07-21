@@ -20,13 +20,8 @@ const chatMessagesSource = readFileSync(
 const chatInputSource = readFileSync(new URL('../src/components/ChatInput.vue', import.meta.url), 'utf8')
 
 test('context summary top area shows document metadata and fills missing values', () => {
-  assert.match(chatMessagesSource, /contextSummary\.file\.name/)
+  assert.match(chatMessagesSource, /contextSummary\.file\.title \|\| '文档摘要'/)
   assert.doesNotMatch(chatMessagesSource, /context-summary-selection/)
-  assert.match(chatMessagesSource, /file\.is_main_file && item\.message\.contextSummary\.file\.title/)
-  assert.doesNotMatch(
-    chatMessagesSource,
-    /contextSummary\.file\.title \|\| item\.message\.contextSummary\.file\.name/
-  )
   assert.match(chatMessagesSource, /class="context-summary-meta"/)
   assert.match(chatMessagesSource, /\['incoming-type', '来文类型', file\.incoming_type \|\| '无'\]/)
   assert.match(chatMessagesSource, /\['source-unit', '发文单位', file\.source_unit \|\| '无'\]/)
