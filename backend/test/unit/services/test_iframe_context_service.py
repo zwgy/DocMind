@@ -6,26 +6,28 @@ from yuxi.services import iframe_context_service as svc
 from yuxi.agents.backends.sandbox import paths as sandbox_paths
 
 
-def test_business_items_keeps_type_for_mixed_schemas():
-    heading, text = svc._business_items_text(
+def test_business_items_groups_mixed_schemas_and_keeps_all_labeled_fields():
+    sections = svc._business_item_sections(
         {
             "display": {
                 "schemaLabels": {"risk_item": "风险事项", "general_item": "通用事项"},
                 "fieldLabels": {
-                    "risk_item": {"risk_name": "风险名称"},
-                    "general_item": {"content": "内容"},
+                    "risk_item": {"risk_name": "风险名称", "department": "涉及部门"},
+                    "general_item": {"content": "事项内容", "time": "相关时间"},
                 },
             },
             "items": [
-                {"item_type": "risk_item", "data": {"risk_name": "超期"}},
-                {"item_type": "general_item", "data": {"content": "补充说明"}},
+                {"item_type": "risk_item", "data": {"risk_name": "超期", "department": "审查部"}},
+                {"item_type": "risk_item", "data": {"risk_name": "漏检", "department": "车辆段"}},
+                {"item_type": "general_item", "data": {"content": "补充说明", "time": "7 月"}},
             ],
         }
     )
 
-    assert heading == "结构化信息"
-    assert "1. 风险事项：风险名称：超期" in text
-    assert "2. 通用事项：内容：补充说明" in text
+    assert sections == [
+        ("风险事项", "1. 风险名称：超期；涉及部门：审查部\n2. 风险名称：漏检；涉及部门：车辆段"),
+        ("通用事项", "1. 事项内容：补充说明；相关时间：7 月"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -194,7 +196,7 @@ async def test_render_iframe_context_keeps_source_file_id_without_injecting_evid
     assert "分类：考评类" in prompt
     assert "来文类型：审查文件；发文单位：审查部；时间：2026-07-21" in prompt
     assert "##### 风险事项（附件）" in prompt
-    assert "1. 风险名称：资质待核验；责任部门：审查部" in prompt
+    assert "1. 风险名称：资质待核验；责任部门：审查部；" in prompt
     assert "周期类型" not in prompt
     assert "资质待核验" in prompt
     assert "Global Finance" not in prompt
@@ -235,7 +237,10 @@ async def test_render_iframe_context_groups_selected_files_from_one_incoming_doc
                             "source_file_id": "main",
                             "is_main_file": True,
                             "summary": "主附件摘要",
-                            "display": {"schemaLabels": {"general_item": "通用事项"}},
+                            "display": {
+                                "schemaLabels": {"general_item": "通用事项"},
+                                "fieldLabels": {"general_item": {"content": "事项内容"}},
+                            },
                             "items": [{"item_type": "general_item", "data": {"content": "主附件事项"}}],
                         },
                         {
@@ -256,8 +261,9 @@ async def test_render_iframe_context_groups_selected_files_from_one_incoming_doc
     assert prompt.count("##### 附件：attachment.pdf") == 1
     assert "主附件摘要" in prompt
     assert "副附件摘要" in prompt
-    assert "##### 通用事项（主附件）" in prompt
-    assert "1. content：主附件事项" in prompt
+    assert prompt.count("##### 附件结构化提取结果") == 1
+    assert "###### 通用事项（主附件）" in prompt
+    assert "1. 事项内容：主附件事项" in prompt
     assert prompt.index("副附件摘要") < prompt.index("主附件事项")
 
 

@@ -67,10 +67,13 @@ IFRAME_CONTEXT_TEMPLATE = """### iframe 页面与附件上下文
   知识库文档定位参数：kb_id="{{ attachment.kb_id }}"，file_id="{{ attachment.file_id }}"。
 {% endif %}
 {% endfor %}
+{% if document.structured_sections %}
+##### 附件结构化提取结果
 {% for section in document.structured_sections %}
-##### {{ section.heading }}（{{ section.role }}）
+###### {{ section.heading }}（{{ section.role }}）
 {{ section["items"] }}
 {% endfor %}
+{% endif %}
 {% if not loop.last %}
 
 ---
@@ -159,25 +162,21 @@ def _summary_from_file(file_info: dict[str, Any]) -> str:
     return _clean_text(file_info.get("summary"))
 
 
-def _business_items_text(file_info: dict[str, Any]) -> tuple[str, str]:
+def _business_item_sections(file_info: dict[str, Any]) -> list[tuple[str, str]]:
     items = file_info.get("items")
     if not isinstance(items, list):
-        return "", ""
+        return []
     items = [item for item in items if isinstance(item, dict)]
     if not items:
-        return "", ""
+        return []
     display = file_info.get("display") if isinstance(file_info.get("display"), dict) else {}
     schema_labels = display.get("schemaLabels") if isinstance(display.get("schemaLabels"), dict) else {}
     field_labels = display.get("fieldLabels") if isinstance(display.get("fieldLabels"), dict) else {}
     current_source_file_id = _clean_text(file_info.get("source_file_id") or file_info.get("incomingFileId"))
-    # 同类事项的 schema 标签放到标题即可；混合类型仍在每项保留标签，避免压缩后丢失业务类别。
-    item_types = {_clean_text(item.get("item_type")) or "unknown" for item in items}
-    single_item_type = len(item_types) == 1
-    heading = _clean_text(schema_labels.get(next(iter(item_types)))) if single_item_type else "结构化信息"
-    if single_item_type and not heading:
-        heading = next(iter(item_types))
-    lines: list[str] = []
-    for index, item in enumerate(items, start=1):
+    # 按稳定的 item_type 分组，避免混合结果退化成带类型前缀的扁平字段 dump。
+    headings: dict[str, str] = {}
+    section_lines: dict[str, list[str]] = {}
+    for item in items:
         item_type = _clean_text(item.get("item_type")) or "unknown"
         data = item.get("data") or {}
         evidence = item.get("evidence")
@@ -214,9 +213,10 @@ def _business_items_text(file_info: dict[str, Any]) -> tuple[str, str]:
             if sources:
                 parts.append(f"来源：{' | '.join(sources)}")
         item_label = _clean_text(schema_labels.get(item_type)) or item_type
-        prefix = f"{index}. " if single_item_type else f"{index}. {item_label}："
-        lines.append(f"{prefix}{'；'.join(parts) if parts else item_label}")
-    return heading, "\n".join(lines)
+        headings.setdefault(item_type, item_label)
+        lines = section_lines.setdefault(item_type, [])
+        lines.append(f"{len(lines) + 1}. {'；'.join(parts) if parts else item_label}")
+    return [(headings[item_type], "\n".join(lines)) for item_type, lines in section_lines.items()]
 
 
 def _build_file_context(file_info: dict[str, Any]) -> dict[str, str]:
@@ -277,11 +277,9 @@ def _build_document_contexts(files: list[Any]) -> list[dict[str, Any]]:
         attachments = [_build_file_context(selected_file) for selected_file in selected_files]
         structured_sections = []
         for selected_file in selected_files:
-            business_heading, business_items = _business_items_text(selected_file)
-            if not business_items:
-                continue
             role = "主附件" if selected_file.get("is_main_file") else "附件"
-            structured_sections.append({"heading": business_heading, "role": role, "items": business_items})
+            for heading, business_items in _business_item_sections(selected_file):
+                structured_sections.append({"heading": heading, "role": role, "items": business_items})
         documents.append(
             {
                 "name": document_name,
