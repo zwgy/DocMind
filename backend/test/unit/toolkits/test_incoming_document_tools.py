@@ -2,6 +2,7 @@ from datetime import date
 from types import SimpleNamespace
 
 import pytest
+from langgraph.prebuilt.tool_node import ToolRuntime
 from pydantic import ValidationError
 
 from yuxi.agents.middlewares.skills import resolve_skill_gated_tools
@@ -71,13 +72,31 @@ def test_tool_schemas_limit_filter_and_source_file_lists():
     with pytest.raises(ValidationError):
         tools.SearchIncomingDocumentsInput(classifications=["分类"] * 51)
     with pytest.raises(ValidationError):
-        tools.ReadIncomingDocumentInput(incoming_id="inc-1", source_file_ids=["file"] * 101)
+        tools.read_incoming_document.args_schema(incoming_id="inc-1", source_file_ids=["file"] * 101)
 
 
 def test_runtime_thread_scope_uses_runtime_configurable_when_context_is_missing():
-    runtime = SimpleNamespace(config={"configurable": {"uid": "user-1", "thread_id": "thread-1"}})
+    runtime = ToolRuntime(
+        state={},
+        tool_call_id="call-1",
+        config={"configurable": {"uid": "user-1", "thread_id": "thread-1"}},
+        context=None,
+        store=None,
+        stream_writer=lambda _: None,
+    )
+    parsed = tools.read_incoming_document._parse_input(
+        {
+            "incoming_id": "inc-1",
+            "source_file_ids": ["file-1"],
+            "include_full_text": True,
+            "runtime": runtime,
+        },
+        "call-1",
+    )
 
-    assert tools._runtime_thread_scope(runtime) == ("user-1", "thread-1")
+    assert parsed["runtime"] is runtime
+    assert "runtime" not in tools.read_incoming_document.tool_call_schema.model_fields
+    assert tools._runtime_thread_scope(parsed["runtime"]) == ("user-1", "thread-1")
 
 
 def test_runtime_thread_scope_accepts_mapping_context():

@@ -55,16 +55,6 @@ class SearchIncomingDocumentsInput(IncomingDocumentFilters):
     page_size: int = Field(default=20, ge=1, le=100, description="每页文档数，最多 100")
 
 
-class ReadIncomingDocumentInput(BaseModel):
-    incoming_id: str = Field(min_length=1, max_length=64, description="来文 ID")
-    source_file_ids: list[SourceFileId] | None = Field(
-        default=None,
-        max_length=100,
-        description="需要写入 sandbox 的附件 source_file_id；读取全文时必填",
-    )
-    include_full_text: bool = Field(default=False, description="是否将选定附件 Markdown 写入当前线程 sandbox")
-
-
 def _iso(value: Any) -> Any:
     return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
 
@@ -220,12 +210,18 @@ async def search_incoming_documents(
     tags=["来文", "读取"],
     display_name="读取来文",
     config_guide=INCOMING_TOOL_CONFIG_GUIDE,
-    args_schema=ReadIncomingDocumentInput,
 )
 async def read_incoming_document(
-    incoming_id: str,
-    source_file_ids: list[str] | None = None,
-    include_full_text: bool = False,
+    incoming_id: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=64),
+        Field(description="来文 ID"),
+    ],
+    source_file_ids: Annotated[
+        list[SourceFileId] | None,
+        Field(max_length=100, description="需要写入 sandbox 的附件 source_file_id；读取全文时必填"),
+    ] = None,
+    include_full_text: Annotated[bool, Field(description="是否将选定附件 Markdown 写入当前线程 sandbox")] = False,
     runtime: ToolRuntime = None,
 ) -> dict[str, Any] | str:
     """读取来文结论、附件和结构化结果；核验原文时再落盘指定附件，并用 read_file 读取返回路径。"""
