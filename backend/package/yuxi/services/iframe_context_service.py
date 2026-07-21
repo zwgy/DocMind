@@ -197,7 +197,6 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
         else:
             lines.append(f"  状态：{extraction_status or match_status or '未知'}")
 
-    # Skill 激活规则在来文区域统一说明；附件这里只提供定位参数，避免重复提示挤占上下文。
     if incoming_id and selected_source_file_id and has_parsed:
         lines.append(
             "  原文定位参数："
@@ -215,11 +214,6 @@ async def _render_files(thread_id: str, uid: str, files: list[Any]) -> str:
     if not file_prompts:
         return ""
     lines = ["【当前来文】"]
-    if any(_clean_text(item.get("incomingId")) for item in file_items):
-        lines.append(
-            "来文处理能力：需要查询、统计或核验附件原文时，使用可用 Skills 列表中的 "
-            "incoming-document 技能；先使用 `read_file` 读取该 Skill 的 SKILL.md 激活能力，再按技能说明调用工具。"
-        )
     lines.extend(file_prompts)
     return "\n".join(lines)
 
@@ -230,8 +224,7 @@ async def render_iframe_context_prompt(thread_id: str, uid: str, iframe_context:
 
     sections = [
         "### iframe 页面与附件上下文",
-        "用户问题可能与当前嵌入页和选中附件有关。优先依据下列摘要回答；"
-        "需要更多信息时按【当前来文】中的来文处理能力说明操作。不要编造尚未解析完成的附件内容。",
+        "用户问题可能与当前嵌入页和选中附件有关。优先依据下列摘要回答；不要编造尚未解析完成的附件内容。",
     ]
     page = iframe_context.get("page")
     if isinstance(page, dict):

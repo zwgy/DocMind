@@ -186,10 +186,8 @@ async def test_render_iframe_context_keeps_source_file_id_without_injecting_evid
     assert "原文定位：附件名=资质附件.xlsx，位置=分块 2，source_file_id=attachment" in prompt
     assert "client-review.pdf（主文件" in prompt
     assert "资质附件.xlsx（附件" in prompt
-    assert "可用 Skills 列表中的 incoming-document 技能" in prompt
-    assert "使用 `read_file` 读取该 Skill 的 SKILL.md" in prompt
-    assert "/home/gem/skills/incoming-document/SKILL.md" not in prompt
-    assert prompt.count("incoming-document") == 1
+    assert "incoming-document" not in prompt
+    assert "SKILL.md" not in prompt
     assert 'incoming_id="inc_1"' in prompt
     assert 'source_file_id="main"' in prompt
     assert "Phase 1" not in prompt
