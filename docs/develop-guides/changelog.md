@@ -236,7 +236,7 @@
 
 ### 修复
 
-- 修复 `incoming-document` Skill 读取来文原文时可能丢失运行时身份的问题：原文落盘现在与沙箱后端一致，优先使用服务端注入的 `runtime.config.configurable` 中的 `uid` 与 `thread_id`；原文读取异常会作为工具失败持久化，避免工具卡片误显示为成功。
+- 修复 `incoming-document` Skill 读取来文原文时可能丢失运行时身份的问题：原文落盘现在与沙箱后端一致，从服务端注入的 runtime config、context 或 state 解析 `uid` 与 `thread_id`；原文读取异常会作为工具失败持久化，chat-iframe 同步保留流式工具结果的失败状态，避免工具卡片误显示为成功。
 - 修复沙盒 `workspace` 隔离粒度：宿主机目录从共享 `saves/threads/shared/workspace` 收敛为用户级 `saves/threads/shared/<user_id>/workspace`
 - 收紧文件系统安全边界：viewer/chat 下载与删除路径统一基于解析后的真实路径做允许目录校验，阻止通过软链接逃逸工作区/线程目录
 - 修复 OIDC 原始用户名绑定中的占位用户解析：解析目标用户 ID 时改为从右侧拆分，避免 `sub` 中包含冒号时把已绑定账号误判成冲突账号
@@ -291,6 +291,7 @@
 - 优化 chat-iframe 来文上下文 token：来文级元数据与 `incoming_id` 仅输出一次，移除与已选附件重复的附件清单；结构化事项使用后端中文 schema/字段标签，过滤空值、原文片段和无效“全文”位置，仅在跨附件或有精确位置时保留来源定位。
 - 优化 chat-iframe 结构化事项提示词：同一 schema 的标题仅输出一次，事项改为数字编号并使用中文冒号分隔字段和值；主附件身份由后端匹配结果传入，结构化信息不再重复附件名称和 `source_file_id`。
 - 重构 chat-iframe 上下文提示词骨架：使用一个完整的 Jinja 模板统一描述网页、来文、附件、结构化事项及多来文循环，代码只准备动态变量并统一渲染；保留现有全局截断规则，便于直接审阅最终提示词结构。
+- 优化 chat-iframe 结构化事项表达：抽取 schema 通过 `primary_fields` 声明事项正文，display 元数据随结果传递；提示词通用地将正文前置、其余字段收为括号属性，未声明主字段的新 schema 仍完整展示全部字段，不依赖具体分类或 item 名称。
 - 前端 Docker 基础镜像不再默认绑定特定镜像代理：Compose 与 Dockerfile 默认使用 Docker Hub，`NODE_ALPINE_IMAGE`、`NGINX_ALPINE_IMAGE` 继续由每台部署机器的 `.env` 或 `.env.prod` 覆盖；开发初始化不再预拉取这两个固定名称的镜像，避免初始化与实际构建使用不同镜像源。
 - 调整聊天首页的智能体切换入口：在无历史对话时，智能体数量 `<= 3` 且 `chat-main` 宽度不小于 `380px` 时继续使用横向 segmented；当智能体数量 `>= 4` 或内容区宽度小于 `380px` 时自动收敛为“当前智能体 + 下拉按钮”形式，避免多智能体或窄屏场景下入口被截断
 - 发布前一致性修复：统一 0.6.0 版本号（backend/package/web）、更新 dev/prod 镜像标签语义（`0.6.0.dev` / `0.6.0`），并为 `/api/system/health` 补充 `version` 字段，提升部署可观测性与发版追溯能力

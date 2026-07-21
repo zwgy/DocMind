@@ -220,7 +220,8 @@ function toolResultChunk(payload: Record<string, unknown>): RunStreamChunk | nul
   return {
     type: 'tool_result',
     toolCallId: String(output?.tool_call_id || data.tool_call_id || output?.id || ''),
-    content: output?.content ?? output
+    content: output?.content ?? output,
+    status: output?.status === 'error' || data.error ? 'error' : 'done'
   }
 }
 

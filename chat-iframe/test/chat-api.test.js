@@ -410,7 +410,7 @@ test('readRunEventStream emits structured reasoning and tool call chunks', async
       name: 'search_docs',
       args: { q: '来文' }
     },
-    { type: 'tool_result', toolCallId: 'tool-1', content: '命中' },
+    { type: 'tool_result', toolCallId: 'tool-1', content: '命中', status: 'done' },
     { type: 'done' }
   ])
 })
@@ -446,7 +446,29 @@ test('readRunEventStream matches tool results by tool_call_id before output id',
       name: 'search_file',
       args: { kb_id: 'kb1' }
     },
-    { type: 'tool_result', toolCallId: 'call-1', content: 'done' }
+    { type: 'tool_result', toolCallId: 'call-1', content: 'done', status: 'done' }
+  ])
+})
+
+test('readRunEventStream preserves failed tool result status', async () => {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        new TextEncoder().encode(
+          'data: {"payload":{"items":[{"status":"stream_event","event":{"method":"tools","data":{"event":"tool-finished","tool_call_id":"call-1","output":{"tool_call_id":"call-1","content":"读取失败","status":"error"}}}}]}}\n\n'
+        )
+      )
+      controller.close()
+    }
+  })
+  const chunks = []
+
+  await readRunEventStream(new Response(stream), {
+    onChunk: (chunk) => chunks.push(chunk)
+  })
+
+  assert.deepEqual(chunks, [
+    { type: 'tool_result', toolCallId: 'call-1', content: '读取失败', status: 'error' }
   ])
 })
 

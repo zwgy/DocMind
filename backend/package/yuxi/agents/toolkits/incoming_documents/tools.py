@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
 from typing import Annotated, Any
 
@@ -145,16 +146,19 @@ def _group_summary(details: list[dict[str, Any]]) -> str:
 def _runtime_thread_scope(runtime: ToolRuntime | None) -> tuple[str, str]:
     """原文落盘必须使用当前运行时会话，查询和统计无需依赖用户权限。"""
     config = getattr(runtime, "config", None)
-    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+    configurable = config.get("configurable", {}) if isinstance(config, Mapping) else {}
     context = getattr(runtime, "context", None)
-    uid = str(configurable.get("uid") or getattr(context, "uid", None) or "").strip()
-    thread_id = str(
-        configurable.get("file_thread_id")
-        or configurable.get("thread_id")
-        or getattr(context, "file_thread_id", None)
-        or getattr(context, "thread_id", None)
-        or ""
-    ).strip()
+    state = getattr(runtime, "state", None)
+
+    def runtime_value(key: str) -> str:
+        for source in (configurable, context, state):
+            value = source.get(key) if isinstance(source, Mapping) else getattr(source, key, None)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    uid = runtime_value("uid")
+    thread_id = runtime_value("file_thread_id") or runtime_value("thread_id")
     if not uid or not thread_id:
         raise ValueError("当前运行时缺少 uid 或 thread_id")
     return uid, thread_id

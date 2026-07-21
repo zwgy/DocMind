@@ -80,6 +80,12 @@ def test_runtime_thread_scope_uses_runtime_configurable_when_context_is_missing(
     assert tools._runtime_thread_scope(runtime) == ("user-1", "thread-1")
 
 
+def test_runtime_thread_scope_accepts_mapping_context():
+    runtime = SimpleNamespace(context={"uid": "user-1", "file_thread_id": "files-thread-1"})
+
+    assert tools._runtime_thread_scope(runtime) == ("user-1", "files-thread-1")
+
+
 def test_item_type_names_are_dynamically_normalized():
     assert tools._normalize_item_types(["风险事项", "task_item", "风险事项"]) == ["risk_item", "task_item"]
     with pytest.raises(ValueError, match="未知条目类型.*当前支持"):
