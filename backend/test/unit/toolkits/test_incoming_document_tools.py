@@ -74,6 +74,12 @@ def test_tool_schemas_limit_filter_and_source_file_lists():
         tools.ReadIncomingDocumentInput(incoming_id="inc-1", source_file_ids=["file"] * 101)
 
 
+def test_runtime_thread_scope_uses_runtime_configurable_when_context_is_missing():
+    runtime = SimpleNamespace(config={"configurable": {"uid": "user-1", "thread_id": "thread-1"}})
+
+    assert tools._runtime_thread_scope(runtime) == ("user-1", "thread-1")
+
+
 def test_item_type_names_are_dynamically_normalized():
     assert tools._normalize_item_types(["风险事项", "task_item", "风险事项"]) == ["risk_item", "task_item"]
     with pytest.raises(ValueError, match="未知条目类型.*当前支持"):
@@ -268,14 +274,13 @@ async def test_read_returns_clear_error_when_markdown_storage_fails(monkeypatch)
     monkeypatch.setattr(tools, "DocumentBusinessExtractionRepository", FakeExtractionRepository)
     monkeypatch.setattr(tools, "IncomingDocumentMarkdownService", FailingMarkdownService)
 
-    result = await _tool_callable(tools.read_incoming_document)(
-        incoming_id="inc-1",
-        source_file_ids=["main"],
-        include_full_text=True,
-        runtime=SimpleNamespace(context=SimpleNamespace(uid="user-1", thread_id="thread-1")),
-    )
-
-    assert result == "读取来文原文失败：对象存储不可用"
+    with pytest.raises(tools.ToolException, match="读取来文原文失败：对象存储不可用"):
+        await _tool_callable(tools.read_incoming_document)(
+            incoming_id="inc-1",
+            source_file_ids=["main"],
+            include_full_text=True,
+            runtime=SimpleNamespace(context=SimpleNamespace(uid="user-1", thread_id="thread-1")),
+        )
 
 
 @pytest.mark.asyncio

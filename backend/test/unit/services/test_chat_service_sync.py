@@ -110,6 +110,27 @@ class _FakeConvRepo:
 
 
 @pytest.mark.asyncio
+async def test_save_tool_message_persists_tool_error_status() -> None:
+    captured = {}
+
+    class FakeConvRepo:
+        async def update_tool_call_output(self, **kwargs):
+            captured.update(kwargs)
+
+    await svc._save_tool_message(
+        FakeConvRepo(),
+        {"tool_call_id": "call-1", "content": "读取来文原文失败", "status": "error"},
+    )
+
+    assert captured == {
+        "langgraph_tool_call_id": "call-1",
+        "tool_output": "读取来文原文失败",
+        "status": "error",
+        "error_message": "读取来文原文失败",
+    }
+
+
+@pytest.mark.asyncio
 async def test_save_messages_from_langgraph_state_handles_dict_tool_call_blocks() -> None:
     class FakeGraph:
         async def aget_state(self, _config):

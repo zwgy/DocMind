@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated, Any
 
+from langchain_core.tools import ToolException
 from langgraph.prebuilt.tool_node import ToolRuntime
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
@@ -143,9 +144,17 @@ def _group_summary(details: list[dict[str, Any]]) -> str:
 
 def _runtime_thread_scope(runtime: ToolRuntime | None) -> tuple[str, str]:
     """原文落盘必须使用当前运行时会话，查询和统计无需依赖用户权限。"""
+    config = getattr(runtime, "config", None)
+    configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     context = getattr(runtime, "context", None)
-    uid = str(getattr(context, "uid", None) or "").strip()
-    thread_id = str(getattr(context, "file_thread_id", None) or getattr(context, "thread_id", None) or "").strip()
+    uid = str(configurable.get("uid") or getattr(context, "uid", None) or "").strip()
+    thread_id = str(
+        configurable.get("file_thread_id")
+        or configurable.get("thread_id")
+        or getattr(context, "file_thread_id", None)
+        or getattr(context, "thread_id", None)
+        or ""
+    ).strip()
     if not uid or not thread_id:
         raise ValueError("当前运行时缺少 uid 或 thread_id")
     return uid, thread_id
@@ -240,7 +249,7 @@ async def read_incoming_document(
                 thread_id=thread_id,
             )
         except (IncomingDocumentMarkdownError, ValueError) as exc:
-            return f"读取来文原文失败：{exc}"
+            raise ToolException(f"读取来文原文失败：{exc}") from exc
 
     return _document_payload(document) | {
         "files": [

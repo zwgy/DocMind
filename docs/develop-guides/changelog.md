@@ -236,6 +236,7 @@
 
 ### 修复
 
+- 修复 `incoming-document` Skill 读取来文原文时可能丢失运行时身份的问题：原文落盘现在与沙箱后端一致，优先使用服务端注入的 `runtime.config.configurable` 中的 `uid` 与 `thread_id`；原文读取异常会作为工具失败持久化，避免工具卡片误显示为成功。
 - 修复沙盒 `workspace` 隔离粒度：宿主机目录从共享 `saves/threads/shared/workspace` 收敛为用户级 `saves/threads/shared/<user_id>/workspace`
 - 收紧文件系统安全边界：viewer/chat 下载与删除路径统一基于解析后的真实路径做允许目录校验，阻止通过软链接逃逸工作区/线程目录
 - 修复 OIDC 原始用户名绑定中的占位用户解析：解析目标用户 ID 时改为从右侧拆分，避免 `sub` 中包含冒号时把已绑定账号误判成冲突账号
