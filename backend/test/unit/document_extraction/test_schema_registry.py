@@ -68,7 +68,8 @@ def test_extraction_schema_display_metadata_uses_schema_labels():
     assert display["schemaLabels"]["management_requirement_item"] == "管理要求"
     assert display["schemaLabels"]["general_item"] == "通用事项"
     assert display["fieldLabels"]["management_requirement_item"]["department"] == "涉及部门"
-    assert display["fieldLabels"]["management_requirement_item"]["source_quote"] == "原文依据"
+    assert display["fieldLabels"]["management_requirement_item"]["period_type"] == "周期类型"
+    assert display["fieldLabels"]["management_requirement_item"]["source_quote"] == "参考片段"
 
 
 def test_management_requirement_accepts_multiple_departments_and_roles():

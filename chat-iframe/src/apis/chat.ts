@@ -119,8 +119,13 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
       : []
   const toContextFile = (file: IncomingPageFile, result: ExtractionResult | null) => {
     const summary = summarizeExtraction(result)
+    const isMainFile = Boolean(
+      file.is_main_file ||
+        result?.files?.some((documentFile) => documentFile.isMainFile && documentFile.sourceFileId === file.source_file_id)
+    )
     return {
       ...file,
+      is_main_file: isMainFile,
       documentTitle: result?.title,
       incomingId: result?.incomingId,
       matchStatus: result?.matchStatus,

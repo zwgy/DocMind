@@ -6,6 +6,28 @@ from yuxi.services import iframe_context_service as svc
 from yuxi.agents.backends.sandbox import paths as sandbox_paths
 
 
+def test_business_items_keeps_type_for_mixed_schemas():
+    heading, text = svc._business_items_text(
+        {
+            "display": {
+                "schemaLabels": {"risk_item": "风险事项", "general_item": "通用事项"},
+                "fieldLabels": {
+                    "risk_item": {"risk_name": "风险名称"},
+                    "general_item": {"content": "内容"},
+                },
+            },
+            "items": [
+                {"item_type": "risk_item", "data": {"risk_name": "超期"}},
+                {"item_type": "general_item", "data": {"content": "补充说明"}},
+            ],
+        }
+    )
+
+    assert heading == "结构化信息"
+    assert "1. 风险事项：风险名称：超期" in text
+    assert "2. 通用事项：内容：补充说明" in text
+
+
 @pytest.mark.asyncio
 async def test_render_iframe_context_inlines_short_page_and_kb_pointer(tmp_path, monkeypatch):
     monkeypatch.setattr(sandbox_paths.conf, "save_dir", str(tmp_path))
@@ -171,9 +193,8 @@ async def test_render_iframe_context_keeps_source_file_id_without_injecting_evid
     assert "客户审查摘要" in prompt
     assert "分类：考评类" in prompt
     assert "来文类型：审查文件；发文单位：审查部；时间：2026-07-21" in prompt
-    assert "结构化信息" in prompt
-    assert "风险事项" in prompt
-    assert "风险名称=资质待核验；责任部门=审查部" in prompt
+    assert "##### 风险事项（附件）" in prompt
+    assert "1. 风险名称：资质待核验；责任部门：审查部" in prompt
     assert "周期类型" not in prompt
     assert "资质待核验" in prompt
     assert "Global Finance" not in prompt
@@ -212,6 +233,7 @@ async def test_render_iframe_context_groups_selected_files_from_one_incoming_doc
                             "name": "main.docx",
                             "incomingId": "inc_1",
                             "source_file_id": "main",
+                            "is_main_file": True,
                             "summary": "主附件摘要",
                             "display": {"schemaLabels": {"general_item": "通用事项"}},
                             "items": [{"item_type": "general_item", "data": {"content": "主附件事项"}}],
@@ -230,10 +252,12 @@ async def test_render_iframe_context_groups_selected_files_from_one_incoming_doc
 
     assert prompt.count("#### 来文：main.docx") == 1
     assert "附件清单：" not in prompt
-    assert prompt.count("##### 附件：main.docx") == 1
+    assert prompt.count("##### 主附件：main.docx") == 1
     assert prompt.count("##### 附件：attachment.pdf") == 1
     assert "主附件摘要" in prompt
     assert "副附件摘要" in prompt
+    assert "##### 通用事项（主附件）" in prompt
+    assert "1. content：主附件事项" in prompt
     assert prompt.index("副附件摘要") < prompt.index("主附件事项")
 
 

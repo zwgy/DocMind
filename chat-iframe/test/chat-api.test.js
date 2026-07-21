@@ -229,8 +229,10 @@ test('buildIframeContext groups selected files from the same incoming document',
 
   assert.equal(context.files.length, 1)
   assert.equal(context.files[0].name, 'main.docx')
+  assert.equal(context.files[0].is_main_file, true)
   assert.equal(context.files[0].selectedFiles.length, 2)
   assert.equal(context.files[0].selectedFiles[1].name, 'attachment.pdf')
+  assert.equal(context.files[0].selectedFiles[1].is_main_file, false)
   assert.equal(context.files[0].documentFiles, undefined)
 })
 

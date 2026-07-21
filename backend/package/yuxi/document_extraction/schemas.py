@@ -258,7 +258,7 @@ class ManagementRequirementItem(BaseModel):
     period_type: ExtractedPeriodType = Field(
         default="未明确",
         description="要求是阶段性、长期性、周期性还是未明确",
-        json_schema_extra={"label": "要求类型"},
+        json_schema_extra={"label": "周期类型"},
     )
     source_quote: str = Field(
         description="帮助后续回读原文的参考片段，必须基于输入文本",
