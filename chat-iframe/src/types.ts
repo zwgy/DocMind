@@ -115,6 +115,7 @@ export type ExtractionResult = {
 }
 
 export type IframeContextFile = IncomingPageFile & {
+  documentTitle?: string
   incomingId?: string
   matchStatus?: string
   extractionStatus?: string
@@ -133,6 +134,7 @@ export type IframeContextFile = IncomingPageFile & {
   schemaIds?: string[]
   display?: ExtractionDisplay
   documentFiles?: IncomingDocumentFileResult[]
+  selectedFiles?: IframeContextFile[]
 }
 
 export type IframeContextPayload = {
@@ -148,6 +150,7 @@ export type ContextSummaryPayload = {
   statusText: string
   matchedCategories: Array<{ name: string; evidence?: string | null }>
   items: ExtractionItem[]
+  attachments: Array<{ file: IncomingPageFile; result: ExtractionResult | null }>
 }
 
 export type ExtractionQueryResponse = {

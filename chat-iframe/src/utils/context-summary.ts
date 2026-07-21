@@ -1,10 +1,42 @@
 import type { ChatMessage, ExtractionResult, IncomingPageFile } from '@/types'
 
-type SummaryInput = {
+export type ContextSummaryInput = {
   file: IncomingPageFile | null
   result: ExtractionResult | null
   loading?: boolean
   error?: string
+}
+
+type SelectedContextSummaryInput = ContextSummaryInput & { file: IncomingPageFile }
+
+type SummaryInput = ContextSummaryInput & {
+  attachments?: SelectedContextSummaryInput[]
+}
+
+export function groupIncomingDocumentFiles(inputs: ContextSummaryInput[]) {
+  // 同一来文的主附件和副附件共用来文级元数据，摘要卡片与模型上下文必须使用同一分组结果。
+  const documents = new Map<string, SelectedContextSummaryInput[]>()
+  for (const input of inputs) {
+    if (!input.file) continue
+    const selectedInput = input as SelectedContextSummaryInput
+    const file = selectedInput.file
+    const key = input.result?.incomingId ||
+      (file.source_function_id && file.source_doc_id
+        ? `${file.source_system || 'production'}:${file.source_function_id}:${file.source_doc_id}`
+        : file.source_file_id)
+    documents.set(key, [...(documents.get(key) || []), selectedInput])
+  }
+  return [...documents.entries()].map(([key, attachments]) => {
+    const primary = attachments.find(({ file, result }) =>
+      Boolean(
+        file?.is_main_file ||
+          result?.files?.some(
+            (documentFile) => documentFile.isMainFile && documentFile.sourceFileId === file?.source_file_id
+          )
+      )
+    ) || attachments[0]
+    return { key, ...primary, attachments }
+  })
 }
 
 function contextSummaryFile(file: IncomingPageFile, result: ExtractionResult | null): IncomingPageFile {
@@ -12,6 +44,9 @@ function contextSummaryFile(file: IncomingPageFile, result: ExtractionResult | n
   return {
     ...file,
     name: file.name,
+    ...(file.is_main_file || result?.files?.some(
+      (documentFile) => documentFile.isMainFile && documentFile.sourceFileId === file.source_file_id
+    ) ? { is_main_file: true } : {}),
     source_system: result?.source_system || file.source_system,
     document_number: result?.document_number || file.document_number,
     title: result?.title || file.title,
@@ -86,6 +121,11 @@ function summaryContent(input: SummaryInput) {
   if (categories.length) lines.push(`分类：${categories.map((item) => item.name).join('、')}`)
   const summary = extractionSummaryText(input.result)
   if (summary) lines.push(`摘要：${summary}`)
+  for (const attachment of input.attachments || []) {
+    if (attachment.file?.source_file_id === input.file?.source_file_id) continue
+    const attachmentSummary = extractionSummaryText(attachment.result)
+    lines.push(`附件：${attachment.file?.name || '未命名附件'}${attachmentSummary ? `；摘要：${attachmentSummary}` : ''}`)
+  }
   const quotes = (input.result?.items || [])
     .map((item) => item.source_quote || '')
     .filter(Boolean)
@@ -113,7 +153,8 @@ export function buildContextSummaryMessage(input: SummaryInput, id = 'context-su
       error: input.error,
       statusText: extractionStatusText(input),
       matchedCategories,
-      items: input.result?.items || []
+      items: input.result?.items || [],
+      attachments: input.attachments || [{ file, result: input.result }]
     }
   }
 }

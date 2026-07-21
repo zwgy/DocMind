@@ -9,3 +9,10 @@ test('context summary renders all extraction items grouped by schema', () => {
   assert.match(component, /<details[\s\S]*class="context-summary-group"/, '分组应支持折叠展示')
   assert.doesNotMatch(component, /contextSummary\.items\.slice\(0,\s*3\)/, '小助手不应只展示前 3 条结构化结果')
 })
+
+test('context summary renders supplementary attachments without duplicating their structured results', () => {
+  assert.match(component, /supplementaryAttachments/)
+  assert.match(component, /attachment\.file\.name/)
+  assert.match(component, /\.context-summary-attachment\s*\{[\s\S]*border-top/)
+  assert.doesNotMatch(component, /contextSummaryAttachments/)
+})

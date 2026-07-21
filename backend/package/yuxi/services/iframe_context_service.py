@@ -147,7 +147,7 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
     incoming_id = _clean_text(file_info.get("incomingId"))
     selected_source_file_id = _clean_text(file_info.get("source_file_id") or file_info.get("incomingFileId"))
     has_parsed = bool(file_info.get("hasParsedMarkdown") or file_info.get("hasMarkdown"))
-    lines = [f"- {name}"]
+    lines = [f"##### 附件：{name}"]
 
     summary = _summary_from_file(file_info)
     if summary:
@@ -173,18 +173,6 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
     if business_items:
         lines.extend(["  结构化信息：", business_items])
 
-    document_files = file_info.get("documentFiles")
-    if isinstance(document_files, list) and document_files:
-        lines.append("  附件清单：")
-        for document_file in document_files:
-            if not isinstance(document_file, dict):
-                continue
-            filename = _clean_text(document_file.get("filename")) or "未命名附件"
-            role = "主文件" if document_file.get("isMainFile") else "附件"
-            status = _clean_text(document_file.get("status")) or "未知"
-            listed_source_file_id = _clean_text(document_file.get("sourceFileId"))
-            lines.append(f"    - {filename}（{role}，{status}，source_file_id={listed_source_file_id}）")
-
     if not summary:
         if match_status == "multiple":
             lines.append("  状态：匹配到多个候选文件，需要先明确具体附件。")
@@ -204,17 +192,43 @@ async def _render_file(thread_id: str, uid: str, file_info: dict[str, Any]) -> s
             f"source_file_id={json.dumps(selected_source_file_id, ensure_ascii=False)}。"
         )
     elif kb_id and file_id and (summary or has_parsed):
-        lines.append(f'  全文读取：open_kb_document(kb_id="{kb_id}", file_id="{file_id}")')
+        lines.append(f'  知识库文档定位参数：kb_id="{kb_id}"，file_id="{file_id}"。')
     return "\n".join(lines)
 
 
 async def _render_files(thread_id: str, uid: str, files: list[Any]) -> str:
-    file_items = [item for item in files if isinstance(item, dict)]
-    file_prompts = [await _render_file(thread_id, uid, item) for item in file_items]
-    if not file_prompts:
+    document_prompts = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        document_name = _clean_text(item.get("documentTitle")) or _clean_text(item.get("name")) or "未命名来文"
+        lines = [f"#### 来文：{document_name}"]
+        document_files = item.get("documentFiles")
+        if isinstance(document_files, list) and document_files:
+            lines.append("附件清单：")
+            for document_file in document_files:
+                if not isinstance(document_file, dict):
+                    continue
+                filename = _clean_text(document_file.get("filename")) or "未命名附件"
+                role = "主文件" if document_file.get("isMainFile") else "附件"
+                status = _clean_text(document_file.get("status")) or "未知"
+                listed_source_file_id = _clean_text(document_file.get("sourceFileId"))
+                lines.append(f"- {filename}（{role}，{status}，source_file_id={listed_source_file_id}）")
+        selected_files = item.get("selectedFiles")
+        if not isinstance(selected_files, list):
+            selected_files = [item]
+        lines.extend(
+            [
+                await _render_file(thread_id, uid, selected_file)
+                for selected_file in selected_files
+                if isinstance(selected_file, dict)
+            ]
+        )
+        document_prompts.append("\n".join(lines))
+    if not document_prompts:
         return ""
     lines = ["【当前来文】"]
-    lines.extend(file_prompts)
+    lines.append("\n\n---\n\n".join(document_prompts))
     return "\n".join(lines)
 
 

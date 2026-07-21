@@ -1,6 +1,7 @@
 import { normalizeChatMessage } from '../utils/chat-message.ts'
 import { attachmentValidationError, imageValidationError } from '../utils/attachment-limits.ts'
 import { createClientId } from '../utils/client-id.ts'
+import { groupIncomingDocumentFiles } from '../utils/context-summary.ts'
 import { apiUrl } from './api-url.ts'
 import type {
   ChatMessage,
@@ -126,15 +127,11 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
     : input.selectedFile
       ? [input.selectedFile]
       : []
-  const documents = new Map<string, IframeContextPayload['files'][number]>()
-  for (const file of files) {
-    const result =
-      input.extractionResults?.[file.source_file_id] ||
-      (file.source_file_id === input.selectedFile?.source_file_id ? input.extractionResult : null)
+  const toContextFile = (file: IncomingPageFile, result: ExtractionResult | null) => {
     const summary = summarizeExtraction(result)
-    const entry = {
+    return {
       ...file,
-      name: result?.title || file.name,
+      documentTitle: result?.title,
       incomingId: result?.incomingId,
       matchStatus: result?.matchStatus,
       extractionStatus: result?.extractionStatus,
@@ -155,10 +152,19 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
       display: result?.display,
       documentFiles: result?.files
     }
-    // 同一来文的多个附件共享一份摘要和正式结果，不能重复注入系统提示词。
-    documents.set(result?.incomingId || file.source_file_id, entry)
   }
-  context.files = [...documents.values()]
+  const selectedFiles = files.map((file) => ({
+    file,
+    result:
+      input.extractionResults?.[file.source_file_id] ||
+      (file.source_file_id === input.selectedFile?.source_file_id ? input.extractionResult || null : null)
+  }))
+  context.files = groupIncomingDocumentFiles(selectedFiles).map(({ file, result, attachments }) => ({
+    ...toContextFile(file!, result),
+    selectedFiles: attachments.map(({ file: attachment, result: attachmentResult }) =>
+      toContextFile(attachment!, attachmentResult)
+    )
+  }))
   return context
 }
 

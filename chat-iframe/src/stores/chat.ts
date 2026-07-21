@@ -19,7 +19,7 @@ import {
 } from '@/apis/chat'
 import { listChatModels } from '@/apis/models'
 import { appendRunChunkSegment, normalizeChatArtifacts } from '@/utils/chat-message'
-import { buildContextSummaryMessage } from '@/utils/context-summary'
+import { buildContextSummaryMessage, groupIncomingDocumentFiles } from '@/utils/context-summary'
 import { splitStreamingText } from '@/utils/streaming-text'
 import { attachmentValidationError } from '@/utils/attachment-limits'
 import type { ChatArtifact, ChatMessage, ChatThread, ExtractionResult, IncomingPageFile, ModelOption, PageContent, RunStreamChunk } from '@/types'
@@ -242,8 +242,8 @@ export const useChatStore = defineStore('chat', {
       this.setContextSummaries([input])
     },
     setContextSummaries(inputs: Array<{ file: IncomingPageFile | null; result: ExtractionResult | null; loading?: boolean; error?: string }>) {
-      this.contextSummaryMessages = inputs
-        .map((input) => buildContextSummaryMessage(input, `context-summary-${input.file?.source_file_id || 'current'}`))
+      this.contextSummaryMessages = groupIncomingDocumentFiles(inputs)
+        .map((input) => buildContextSummaryMessage(input, `context-summary-${input.key}`))
         .filter((message): message is ChatMessage => Boolean(message))
     },
     async bootstrap(token?: string, agentId?: string, conversationScopeKey?: string) {

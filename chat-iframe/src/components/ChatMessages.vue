@@ -204,7 +204,19 @@ function contextSummaryItemGroups(message: ChatMessage): ContextSummaryItemGroup
 
 function hasSummaryDetails(message: ChatMessage) {
   const summary = message.contextSummary
-  return Boolean(summary?.matchedCategories.length || summary?.items.length || extractionSummaryText(summary?.result))
+  return Boolean(
+    summary?.matchedCategories.length ||
+      summary?.items.length ||
+      extractionSummaryText(summary?.result) ||
+      summary?.attachments.some((attachment) => extractionSummaryText(attachment.result))
+  )
+}
+
+function supplementaryAttachments(message: ChatMessage) {
+  const summary = message.contextSummary
+  return (summary?.attachments || []).filter(
+    (attachment) => attachment.file.source_file_id !== summary?.file.source_file_id
+  )
 }
 
 function isSummaryReady(message: ChatMessage) {
@@ -342,6 +354,17 @@ onUnmounted(() => {
                 <blockquote v-if="summaryItem.source_quote">{{ summaryItem.source_quote }}</blockquote>
               </article>
             </details>
+            <article
+              v-for="attachment in supplementaryAttachments(item.message)"
+              :key="attachment.file.source_file_id"
+              class="item-row context-summary-attachment"
+            >
+              <strong>{{ attachment.file.name }}</strong>
+              <blockquote v-if="extractionSummaryText(attachment.result)">
+                {{ extractionSummaryText(attachment.result) }}
+              </blockquote>
+              <p v-else class="muted">暂无摘要</p>
+            </article>
           </section>
         </div>
       </template>
@@ -469,5 +492,11 @@ onUnmounted(() => {
   color: var(--gray-800);
   font-size: 17px;
   line-height: 1.45;
+}
+
+.context-summary-attachment {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--gray-200);
 }
 </style>

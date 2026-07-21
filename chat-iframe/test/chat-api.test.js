@@ -200,6 +200,40 @@ test('buildIframeContext carries enabled page and all selected files', () => {
   assert.equal(context.files[1].matchStatus, 'pending_sync')
 })
 
+test('buildIframeContext groups selected files from the same incoming document', () => {
+  const context = buildIframeContext({
+    text: 'Summarize',
+    includePage: false,
+    includeFile: true,
+    selectedPageFiles: [
+      { name: 'main.docx', source_file_id: 'S001' },
+      { name: 'attachment.pdf', source_file_id: 'S002' }
+    ],
+    extractionResults: {
+      S001: {
+        incomingId: 'inc-1',
+        files: [
+          { sourceFileId: 'S001', filename: 'main.docx', isMainFile: true, status: 'parsed' },
+          { sourceFileId: 'S002', filename: 'attachment.pdf', isMainFile: false, status: 'parsed' }
+        ]
+      },
+      S002: {
+        incomingId: 'inc-1',
+        files: [
+          { sourceFileId: 'S001', filename: 'main.docx', isMainFile: true, status: 'parsed' },
+          { sourceFileId: 'S002', filename: 'attachment.pdf', isMainFile: false, status: 'parsed' }
+        ]
+      }
+    }
+  })
+
+  assert.equal(context.files.length, 1)
+  assert.equal(context.files[0].name, 'main.docx')
+  assert.equal(context.files[0].selectedFiles.length, 2)
+  assert.equal(context.files[0].selectedFiles[1].name, 'attachment.pdf')
+  assert.equal(context.files[0].documentFiles.length, 2)
+})
+
 test('buildIframeContext omits disabled page and files', () => {
   const context = buildIframeContext({
     text: 'Summarize',

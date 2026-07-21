@@ -64,11 +64,12 @@ function cacheExtractionResults(files: IncomingPageFile[], items: ExtractionResu
 }
 
 function refreshContextSummaries(options: { loading?: boolean; error?: string } = {}) {
-  const files = selectedPageFiles.value.length
+  const selectedFiles = selectedPageFiles.value.length
     ? selectedPageFiles.value
     : selectedFile.value
       ? [selectedFile.value]
       : []
+  const files = filesForSelectedDocuments(selectedFiles)
   chat.setContextSummaries(
     files.map((file) => ({
       file,

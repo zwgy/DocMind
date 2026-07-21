@@ -8,6 +8,7 @@ import {
   extractionClassificationText,
   extractionItemTypeText,
   extractionStatusText,
+  groupIncomingDocumentFiles,
   matchedExtractionCategories
 } from '../src/utils/context-summary.ts'
 
@@ -114,6 +115,41 @@ test('buildContextSummaryMessage supports a stable id for each selected attachme
 
   assert.equal(message?.id, 'context-summary-S003')
   assert.equal(message?.contextSummary?.file.name, '附件4.xls')
+})
+
+test('groupIncomingDocumentFiles combines a document into one card and keeps every attachment', () => {
+  const groups = groupIncomingDocumentFiles([
+    {
+      file: { name: '附件4.xls', source_file_id: 'S004', source_doc_id: 'DOC-1', source_function_id: 'incoming' },
+      result: {
+        incomingId: 'inc-1',
+        matchStatus: 'matched',
+        extractionStatus: 'ready',
+        summary: '附件摘要',
+        files: [
+          { sourceFileId: 'S001', filename: '主附件.docx', isMainFile: true },
+          { sourceFileId: 'S004', filename: '附件4.xls' }
+        ]
+      }
+    },
+    {
+      file: { name: '主附件.docx', source_file_id: 'S001', source_doc_id: 'DOC-1', source_function_id: 'incoming' },
+      result: {
+        incomingId: 'inc-1',
+        matchStatus: 'matched',
+        extractionStatus: 'ready',
+        summary: '主附件摘要',
+        files: [
+          { sourceFileId: 'S001', filename: '主附件.docx', isMainFile: true },
+          { sourceFileId: 'S004', filename: '附件4.xls' }
+        ]
+      }
+    }
+  ])
+
+  assert.equal(groups.length, 1)
+  assert.equal(groups[0].file.name, '主附件.docx')
+  assert.equal(groups[0].attachments.length, 2)
 })
 
 test('buildContextSummaryMessage keeps backend summary when extraction items are empty', () => {

@@ -32,7 +32,8 @@ async def test_render_iframe_context_inlines_short_page_and_kb_pointer(tmp_path,
     assert "Detail page" in prompt
     assert "Page body" in prompt
     assert "Risk summary" in prompt
-    assert 'open_kb_document(kb_id="kb1", file_id="file1")' in prompt
+    assert '知识库文档定位参数：kb_id="kb1"，file_id="file1"。' in prompt
+    assert "open_kb_document" not in prompt
 
 
 @pytest.mark.asyncio
@@ -191,3 +192,68 @@ async def test_render_iframe_context_keeps_source_file_id_without_injecting_evid
     assert 'incoming_id="inc_1"' in prompt
     assert 'source_file_id="main"' in prompt
     assert "Phase 1" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_render_iframe_context_groups_selected_files_from_one_incoming_document():
+    prompt = await svc.render_iframe_context_prompt(
+        thread_id="thread-1",
+        uid="user-1",
+        iframe_context={
+            "files": [
+                {
+                    "name": "main.docx",
+                    "incomingId": "inc_1",
+                    "source_file_id": "main",
+                    "documentFiles": [
+                        {"sourceFileId": "main", "filename": "main.docx", "isMainFile": True, "status": "parsed"},
+                        {
+                            "sourceFileId": "attachment",
+                            "filename": "attachment.pdf",
+                            "isMainFile": False,
+                            "status": "parsed",
+                        },
+                    ],
+                    "selectedFiles": [
+                        {
+                            "name": "main.docx",
+                            "incomingId": "inc_1",
+                            "source_file_id": "main",
+                            "summary": "主附件摘要",
+                        },
+                        {
+                            "name": "attachment.pdf",
+                            "incomingId": "inc_1",
+                            "source_file_id": "attachment",
+                            "summary": "副附件摘要",
+                        },
+                    ],
+                },
+            ]
+        },
+    )
+
+    assert prompt.count("#### 来文：main.docx") == 1
+    assert prompt.count("附件清单：") == 1
+    assert prompt.count("##### 附件：main.docx") == 1
+    assert prompt.count("##### 附件：attachment.pdf") == 1
+    assert "主附件摘要" in prompt
+    assert "副附件摘要" in prompt
+
+
+@pytest.mark.asyncio
+async def test_render_iframe_context_separates_different_incoming_documents():
+    prompt = await svc.render_iframe_context_prompt(
+        thread_id="thread-1",
+        uid="user-1",
+        iframe_context={
+            "files": [
+                {"name": "first.docx", "documentTitle": "来文一", "incomingId": "inc_1"},
+                {"name": "second.docx", "documentTitle": "来文二", "incomingId": "inc_2"},
+            ]
+        },
+    )
+
+    assert "#### 来文：来文一" in prompt
+    assert "#### 来文：来文二" in prompt
+    assert "\n\n---\n\n" in prompt
