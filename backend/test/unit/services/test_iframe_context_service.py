@@ -128,40 +128,32 @@ async def test_render_iframe_context_keeps_source_file_id_without_injecting_evid
                     "extractionStatus": "ready",
                     "hasMarkdown": True,
                     "summary": "客户审查摘要",
-                    "classification": "assessment",
                     "classificationLabel": "考评类",
-                    "additionalClassifications": [
-                        {
-                            "classification": "risk_management",
-                            "classificationLabel": "风险管理类",
-                            "confidence": 0.91,
-                            "evidence": "需复核 Global Finance 的资质。",
-                        }
-                    ],
-                    "documentFiles": [
-                        {
-                            "sourceFileId": "main",
-                            "filename": "client-review.pdf",
-                            "isMainFile": True,
-                            "status": "parsed",
+                    "incoming_type": "审查文件",
+                    "source_unit": "审查部",
+                    "incoming_date": "2026-07-21",
+                    "display": {
+                        "schemaLabels": {"risk_item": "风险事项"},
+                        "fieldLabels": {
+                            "risk_item": {"risk_name": "风险名称", "department": "责任部门", "period_type": "周期类型"}
                         },
-                        {
-                            "sourceFileId": "attachment",
-                            "filename": "资质附件.xlsx",
-                            "isMainFile": False,
-                            "status": "parsed",
-                        },
-                    ],
+                    },
                     "items": [
                         {
                             "item_type": "risk_item",
                             "data": {
                                 "risk_name": "资质待核验",
                                 "department": "审查部",
+                                "period_type": "未明确",
                                 "source_quote": "需复核 Global Finance 的资质。",
                             },
                             "source_quote": "需复核 Global Finance 的资质。",
                             "evidence": [
+                                {
+                                    "source_file_id": "main",
+                                    "file_name": "client-review.pdf",
+                                    "source_location": "全文",
+                                },
                                 {
                                     "source_file_id": "attachment",
                                     "file_name": "资质附件.xlsx",
@@ -177,20 +169,21 @@ async def test_render_iframe_context_keeps_source_file_id_without_injecting_evid
     )
 
     assert "客户审查摘要" in prompt
-    assert "主分类：考评类" in prompt
-    assert "附加分类" in prompt
-    assert "风险管理类（置信度 0.91）" in prompt
+    assert "分类：考评类" in prompt
+    assert "来文类型：审查文件；发文单位：审查部；时间：2026-07-21" in prompt
     assert "结构化信息" in prompt
-    assert "risk_item" in prompt
+    assert "风险事项" in prompt
+    assert "风险名称=资质待核验；责任部门=审查部" in prompt
+    assert "周期类型" not in prompt
     assert "资质待核验" in prompt
     assert "Global Finance" not in prompt
-    assert "原文定位：附件名=资质附件.xlsx，位置=分块 2，source_file_id=attachment" in prompt
-    assert "client-review.pdf（主文件" in prompt
-    assert "资质附件.xlsx（附件" in prompt
+    assert "位置=全文" not in prompt
+    assert "来源：来源附件=资质附件.xlsx（source_file_id=attachment）；位置=分块 2" in prompt
+    assert "附件清单" not in prompt
     assert "incoming-document" not in prompt
     assert "SKILL.md" not in prompt
-    assert 'incoming_id="inc_1"' in prompt
-    assert 'source_file_id="main"' in prompt
+    assert "incoming_id=inc_1" in prompt
+    assert "##### 附件：client-review.pdf（source_file_id=main）" in prompt
     assert "Phase 1" not in prompt
 
 
@@ -220,6 +213,8 @@ async def test_render_iframe_context_groups_selected_files_from_one_incoming_doc
                             "incomingId": "inc_1",
                             "source_file_id": "main",
                             "summary": "主附件摘要",
+                            "display": {"schemaLabels": {"general_item": "通用事项"}},
+                            "items": [{"item_type": "general_item", "data": {"content": "主附件事项"}}],
                         },
                         {
                             "name": "attachment.pdf",
@@ -234,11 +229,12 @@ async def test_render_iframe_context_groups_selected_files_from_one_incoming_doc
     )
 
     assert prompt.count("#### 来文：main.docx") == 1
-    assert prompt.count("附件清单：") == 1
+    assert "附件清单：" not in prompt
     assert prompt.count("##### 附件：main.docx") == 1
     assert prompt.count("##### 附件：attachment.pdf") == 1
     assert "主附件摘要" in prompt
     assert "副附件摘要" in prompt
+    assert prompt.index("副附件摘要") < prompt.index("主附件事项")
 
 
 @pytest.mark.asyncio

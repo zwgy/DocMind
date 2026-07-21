@@ -80,17 +80,7 @@ async function parseResponse<T>(response: Response, fallbackMessage: string): Pr
 function summarizeExtraction(result?: ExtractionResult | null) {
   if (!result) return ''
   if (result.matchStatus !== 'matched' || result.extractionStatus !== 'ready') return ''
-  const summary = String(result.summary || '').trim()
-  // 摘要与分类用于普通问答；原文依据由后端按需读取，不能预先挤占本地模型上下文。
-  const lines: string[] = summary
-    ? [summary]
-    : [`匹配状态：${result.matchStatus}`, `抽取状态：${result.extractionStatus}`]
-  if (result.classification) lines.push(`主分类：${result.classification}`)
-  const categories = Object.entries(result.categories || {})
-    .filter(([, value]) => value?.matched)
-    .map(([key]) => `${result.display?.categoryLabels?.[key] || key}：命中`)
-  if (categories.length) lines.push(`分类：${categories.join('；')}`)
-  return lines.join('\n')
+  return String(result.summary || '').trim()
 }
 
 export function buildChatQuery(input: ChatContextInput) {
@@ -142,15 +132,14 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
       runId: result?.runId,
       summary: summary || undefined,
       summaryTruncated: Boolean(summary && summary.length >= 1200),
-      classification: result?.classification,
-      aiClassificationEvidence: result?.aiClassificationEvidence,
-      categories: result?.categories,
-      additionalClassifications: result?.additionalClassifications,
+      classificationLabel: result?.display?.classificationLabel || result?.classification,
+      title: result?.title || file.title,
+      incoming_type: result?.incoming_type || file.incoming_type,
+      source_unit: result?.source_unit || file.source_unit,
+      incoming_date: result?.incoming_date || file.incoming_date,
       // 所有事项都保留，以便模型按 item 的 source_file_id 精确读取原文；后端渲染提示词时会移除原文片段。
       items: result?.items || [],
-      schemaIds: result?.schemaIds,
       display: result?.display,
-      documentFiles: result?.files
     }
   }
   const selectedFiles = files.map((file) => ({

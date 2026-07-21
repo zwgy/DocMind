@@ -126,6 +126,7 @@ export type IframeContextFile = IncomingPageFile & {
   runId?: string | null
   summary?: string
   summaryTruncated?: boolean
+  classificationLabel?: string | null
   classification?: string | null
   aiClassificationEvidence?: string | null
   categories?: Record<string, ExtractionCategory>

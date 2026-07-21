@@ -194,9 +194,9 @@ test('buildIframeContext carries enabled page and all selected files', () => {
   assert.equal(context.page.title, 'Detail page')
   assert.equal(context.files.length, 2)
   assert.equal(context.files[0].kbId, 'kb1')
-  assert.equal(context.files[0].documentFiles.length, 2)
-  assert.equal(context.files[0].additionalClassifications[0].confidence, 0.91)
-  assert.equal(context.files[0].summary.includes('risk'), true)
+  assert.equal(context.files[0].documentFiles, undefined)
+  assert.equal(context.files[0].additionalClassifications, undefined)
+  assert.equal(context.files[0].summary, undefined)
   assert.equal(context.files[1].matchStatus, 'pending_sync')
 })
 
@@ -231,7 +231,7 @@ test('buildIframeContext groups selected files from the same incoming document',
   assert.equal(context.files[0].name, 'main.docx')
   assert.equal(context.files[0].selectedFiles.length, 2)
   assert.equal(context.files[0].selectedFiles[1].name, 'attachment.pdf')
-  assert.equal(context.files[0].documentFiles.length, 2)
+  assert.equal(context.files[0].documentFiles, undefined)
 })
 
 test('buildIframeContext omits disabled page and files', () => {
@@ -278,6 +278,12 @@ test('buildIframeContext keeps all structured items for source file targeting', 
         extractionStatus: 'ready',
         summary: 'Full document summary',
         classification: '风险管理类',
+        incomingId: 'inc-1',
+        title: '来文标题',
+        incoming_type: '集团公司文件',
+        source_unit: '安全科',
+        incoming_date: '2020-10-20',
+        display: { classificationLabel: '风险管理类' },
         categories: { risk: { matched: true, evidence: 'Risk evidence' } },
         items: [
           { item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' },
@@ -290,7 +296,12 @@ test('buildIframeContext keeps all structured items for source file targeting', 
 
   assert.match(context.files[0].summary, /Full document summary/)
   assert.doesNotMatch(context.files[0].summary, /Source quote/)
-  assert.match(context.files[0].summary, /主分类：风险管理类/)
+  assert.doesNotMatch(context.files[0].summary, /主分类：风险管理类/)
+  assert.equal(context.files[0].classificationLabel, '风险管理类')
+  assert.equal(context.files[0].title, '来文标题')
+  assert.equal(context.files[0].incoming_type, '集团公司文件')
+  assert.equal(context.files[0].source_unit, '安全科')
+  assert.equal(context.files[0].incoming_date, '2020-10-20')
   assert.deepEqual(context.files[0].items, [
     { item_id: 'i1', item_type: 'risk', source_quote: 'Source quote' },
     { item_id: 'i2', item_type: 'risk', source_quote: 'Second risk' },
@@ -551,9 +562,9 @@ test('buildIframeContext keeps all selected files without changing the query', (
   assert.equal(buildChatQuery(input), '只看附件风险')
   assert.equal(context.files.length, 2)
   assert.equal(context.files[0].fileId, 'file1')
-  assert.doesNotMatch(context.files[0].summary, /付款超期/)
-  assert.deepEqual(context.files[0].categories, { risk: { matched: true, evidence: '超期' } })
-  assert.deepEqual(context.files[0].schemaIds, ['risk_item'])
+  assert.equal(context.files[0].summary, undefined)
+  assert.equal(context.files[0].categories, undefined)
+  assert.equal(context.files[0].schemaIds, undefined)
   assert.deepEqual(context.files[0].items, [{ source_quote: '付款超期' }])
   assert.equal(context.files[1].name, '报价.pdf')
   assert.equal(context.files[1].summary, undefined)
