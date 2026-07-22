@@ -69,6 +69,18 @@ def _metadata_thread_id(value: Any) -> str | None:
     return None
 
 
+def _is_internal_summary_event(*values: Any) -> bool:
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        # LangChain 的摘要模型调用显式写入该标记；在这里过滤可避免内部压缩文本进入任何客户端流或会话消息。
+        if value.get("lc_source") == "summarization":
+            return True
+        if _is_internal_summary_event(*(value.get(key) for key in ("metadata", "config", "configurable"))):
+            return True
+    return False
+
+
 def _subagent_route_for_namespace(
     routes: dict[tuple[str, ...], dict[str, str]], namespace: list[str]
 ) -> dict[str, str] | None:
@@ -213,6 +225,8 @@ class BaseAgent:
             context=context,
             config=input_config,
         ):
+            if _is_internal_summary_event(metadata):
+                continue
             yield msg, metadata
 
     async def _stream_input_with_state(self, graph_input, input_context=None, **kwargs):
@@ -252,6 +266,8 @@ class BaseAgent:
                 if method == "messages":
                     msg, metadata = data
                     metadata = dict(metadata or {})
+                    if _is_internal_summary_event(metadata, params):
+                        continue
                     actual_thread_id = (
                         _metadata_thread_id(metadata) or _metadata_thread_id(params) or _metadata_thread_id(data)
                     )

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass
 
 from deepagents.backends.composite import (
@@ -10,6 +12,9 @@ from deepagents.backends.composite import (
 )
 from deepagents.backends.protocol import FileInfo, GlobResult
 from deepagents.middleware.filesystem import FilesystemMiddleware
+from langchain_core.messages import ToolMessage
+from langchain_core.messages.utils import count_tokens_approximately
+from langgraph.types import Command
 
 from yuxi.agents.skills.service import normalize_string_list
 from yuxi.utils.paths import VIRTUAL_PATH_CONVERSATION_HISTORY, VIRTUAL_PATH_LARGE_TOOL_RESULTS, VIRTUAL_PATH_OUTPUTS
@@ -18,6 +23,98 @@ from .sandbox import ProvisionerSandboxBackend
 from .skills_backend import SelectedSkillsReadonlyBackend
 
 _TOOL_RESULT_EVICTION_EXEMPT_TOOLS = frozenset({"read_file", "open_kb_document"})
+_TOOL_RESULT_SAVED_MARKER = "yuxi_tool_result_saved"
+
+
+def _tool_result_text(message: ToolMessage) -> str:
+    if isinstance(message.content, str):
+        return message.content
+    if isinstance(message.content, list):
+        return "\n".join(
+            item if isinstance(item, str) else str(item.get("text", ""))
+            for item in message.content
+            if isinstance(item, str) or isinstance(item, dict)
+        )
+    return str(message.content)
+
+
+def _tool_result_path(tool_call_id: str, content: str) -> str:
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", tool_call_id).strip(".-") or "unknown"
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+    return f"{VIRTUAL_PATH_LARGE_TOOL_RESULTS}/{safe_id}-{digest}.txt"
+
+
+def _path_matches_content_hash(path: str, content: str) -> bool:
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+    return path.endswith(f"-{digest}.txt")
+
+
+def write_text_idempotently(backend, path: str, content: str) -> bool:
+    """内容哈希路径已存在时，只有内容完全一致才可视为此前写入成功。"""
+    result = backend.write(path, content)
+    if result is not None and not getattr(result, "error", None):
+        return True
+    error = str(getattr(result, "error", "")).lower()
+    return "already exists" in error and _path_matches_content_hash(path, content)
+
+
+async def awrite_text_idempotently(backend, path: str, content: str) -> bool:
+    result = await backend.awrite(path, content)
+    if result is not None and not getattr(result, "error", None):
+        return True
+    error = str(getattr(result, "error", "")).lower()
+    return "already exists" in error and _path_matches_content_hash(path, content)
+
+
+def _tool_result_receipt(message: ToolMessage, path: str, tokens: int) -> ToolMessage:
+    additional_kwargs = {**message.additional_kwargs, _TOOL_RESULT_SAVED_MARKER: True}
+    return message.model_copy(
+        update={
+            "content": (
+                "[Tool result saved]\n"
+                f"Tool: {message.name or 'unknown'}\n"
+                f"Approx tokens: {tokens}\n"
+                f"Full output path: {path}\n"
+                "Use read_file with offset and limit when the full result is needed."
+            ),
+            "additional_kwargs": additional_kwargs,
+        }
+    )
+
+
+def _tool_result_persistence_error(message: ToolMessage) -> ToolMessage:
+    # The raw result has not been made recoverable.  Returning it would put an
+    # unbounded payload back into checkpoint state and silently violate the budget.
+    return message.model_copy(
+        update={
+            "content": "Tool result was too large and could not be persisted. Retry the tool call.",
+            "status": "error",
+        }
+    )
+
+
+def _source_window_retry(message: ToolMessage, tool_call: dict, token_limit: int) -> ToolMessage:
+    """源文件已有权威副本，超限时要求缩小原有窗口，不能再写出一份副本。"""
+    tokens = int(count_tokens_approximately([message], use_usage_metadata_scaling=False))
+    if tokens <= token_limit:
+        return message
+
+    args = tool_call.get("args") if isinstance(tool_call.get("args"), dict) else {}
+    try:
+        requested_limit = max(int(args.get("limit") or 1), 1)
+    except (TypeError, ValueError):
+        requested_limit = 1
+    suggested_limit = max(1, requested_limit * token_limit // tokens)
+    return message.model_copy(
+        update={
+            "content": (
+                f"Source file window is about {tokens} tokens, above the configured inline limit "
+                f"({token_limit} tokens). Retry read_file with the same path and offset, using "
+                f"limit no greater than {suggested_limit}."
+            ),
+            "status": "error",
+        }
+    )
 
 
 def _coerce_glob_result(result) -> GlobResult:
@@ -91,25 +188,90 @@ class CustomCompositeBackend(CompositeBackend):
 class YuxiFilesystemMiddleware(FilesystemMiddleware):
     """Filesystem middleware that budgets large tool outputs before they hit model context."""
 
+    def _should_offload(self, message: ToolMessage) -> tuple[str, int] | None:
+        if self._tool_token_limit_before_evict is None:
+            return None
+        if message.additional_kwargs.get(_TOOL_RESULT_SAVED_MARKER):
+            return None
+        content = _tool_result_text(message)
+        tokens = int(count_tokens_approximately([message], use_usage_metadata_scaling=False))
+        return (content, tokens) if tokens > self._tool_token_limit_before_evict else None
+
+    def _offload_message(self, message: ToolMessage, backend) -> ToolMessage:
+        candidate = self._should_offload(message)
+        if candidate is None:
+            return message
+        content, tokens = candidate
+        path = _tool_result_path(message.tool_call_id or "unknown", content)
+        if not write_text_idempotently(backend, path, content):
+            return _tool_result_persistence_error(message)
+        return _tool_result_receipt(message, path, tokens)
+
+    async def _aoffload_message(self, message: ToolMessage, backend) -> ToolMessage:
+        candidate = self._should_offload(message)
+        if candidate is None:
+            return message
+        content, tokens = candidate
+        path = _tool_result_path(message.tool_call_id or "unknown", content)
+        if not await awrite_text_idempotently(backend, path, content):
+            return _tool_result_persistence_error(message)
+        return _tool_result_receipt(message, path, tokens)
+
+    def _process_result(self, tool_result, runtime):
+        backend = self._get_backend(runtime)
+        if isinstance(tool_result, ToolMessage):
+            return self._offload_message(tool_result, backend)
+        if not isinstance(tool_result, Command) or tool_result.update is None:
+            return tool_result
+        messages = [
+            self._offload_message(message, backend) if isinstance(message, ToolMessage) else message
+            for message in tool_result.update.get("messages", [])
+        ]
+        return Command(
+            goto=tool_result.goto,
+            graph=tool_result.graph,
+            update={**tool_result.update, "messages": messages},
+        )
+
+    async def _aprocess_result(self, tool_result, runtime):
+        backend = self._get_backend(runtime)
+        if isinstance(tool_result, ToolMessage):
+            return await self._aoffload_message(tool_result, backend)
+        if not isinstance(tool_result, Command) or tool_result.update is None:
+            return tool_result
+        messages = [
+            await self._aoffload_message(message, backend) if isinstance(message, ToolMessage) else message
+            for message in tool_result.update.get("messages", [])
+        ]
+        return Command(
+            goto=tool_result.goto,
+            graph=tool_result.graph,
+            update={**tool_result.update, "messages": messages},
+        )
+
     def wrap_tool_call(self, request, handler):
         tool_result = handler(request)
 
         if self._tool_token_limit_before_evict is None:
             return tool_result
+        if request.tool_call["name"] == "read_file" and isinstance(tool_result, ToolMessage):
+            return _source_window_retry(tool_result, request.tool_call, self._tool_token_limit_before_evict)
         if request.tool_call["name"] in _TOOL_RESULT_EVICTION_EXEMPT_TOOLS:
             return tool_result
 
-        return self._intercept_large_tool_result(tool_result, request.runtime)
+        return self._process_result(tool_result, request.runtime)
 
     async def awrap_tool_call(self, request, handler):
         tool_result = await handler(request)
 
         if self._tool_token_limit_before_evict is None:
             return tool_result
+        if request.tool_call["name"] == "read_file" and isinstance(tool_result, ToolMessage):
+            return _source_window_retry(tool_result, request.tool_call, self._tool_token_limit_before_evict)
         if request.tool_call["name"] in _TOOL_RESULT_EVICTION_EXEMPT_TOOLS:
             return tool_result
 
-        return await self._aintercept_large_tool_result(tool_result, request.runtime)
+        return await self._aprocess_result(tool_result, request.runtime)
 
 
 @dataclass(frozen=True)

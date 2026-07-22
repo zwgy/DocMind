@@ -49,6 +49,12 @@ class Config(BaseModel):
         description="内容审查LLM模型",
     )
 
+    context_safety_tokens: int = Field(
+        default=1024,
+        gt=0,
+        description="模型未配置专用安全缓冲时使用的上下文 Token 缓冲",
+    )
+
     sandbox_provider: str = Field(default="provisioner", description="沙箱提供者")
     sandbox_provisioner_url: str = Field(default="http://sandbox-provisioner:8002", description="沙箱服务地址")
     sandbox_virtual_path_prefix: str = Field(default="/home/gem/user-data", description="沙箱用户目录前缀")

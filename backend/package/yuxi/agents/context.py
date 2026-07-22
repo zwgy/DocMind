@@ -9,10 +9,7 @@ from yuxi.agents.backends.sandbox.paths import sandbox_workspace_agents_prompt_f
 from yuxi.utils.logging_config import logger
 
 WORKSPACE_AGENTS_PROMPT_MAX_BYTES = 64 * 1024
-DEFAULT_SUMMARY_THRESHOLD_K = 100  # 100K tokens
-DEFAULT_SUMMARY_TRIGGER_FRACTION = 0.7
-DEFAULT_SUMMARY_KEEP_MESSAGES = 10
-DEFAULT_SUMMARY_TOOL_RESULT_TOKEN_LIMIT = 500
+_REMOVED_CONTEXT_FIELDS = frozenset({"summary_threshold", "summary_tool_result_token_limit"})
 DEFAULT_MAX_EXECUTION_STEPS = 300
 DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS = 3
 DEFAULT_YUXI_SUMMARY_PROMPT = """你是对话上下文压缩助手。
@@ -115,13 +112,15 @@ def filter_config_by_role(
         for f in fields(schema)
         if f.metadata.get("auth") and not _role_can_access(str(f.metadata.get("auth")), role)
     }
-    if not restricted_fields:
+    if not restricted_fields and not _REMOVED_CONTEXT_FIELDS:
         return dict(config_json)
 
     filtered = dict(config_json)
     context = filtered.get("context")
     if isinstance(context, dict):
-        filtered["context"] = {key: value for key, value in context.items() if key not in restricted_fields}
+        filtered["context"] = {
+            key: value for key, value in context.items() if key not in restricted_fields | _REMOVED_CONTEXT_FIELDS
+        }
     return filtered
 
 
@@ -222,31 +221,6 @@ class BaseContext:
         },
     )
 
-    summary_threshold: int = field(
-        default=DEFAULT_SUMMARY_THRESHOLD_K,
-        metadata={
-            "name": "上下文摘要触发阈值 (K)",
-            "description": (
-                f"当上下文超过该绝对阈值或模型窗口的 70% 时启用摘要，以较早者为准。单位为 K，默认值为 "
-                f"{DEFAULT_SUMMARY_THRESHOLD_K}K。"
-            ),
-            "type": "number",
-            "auth": "admin",
-        },
-    )
-
-    summary_keep_messages: int = field(
-        default=DEFAULT_SUMMARY_KEEP_MESSAGES,
-        metadata={
-            "name": "摘要后保留消息数",
-            "description": (
-                f"上下文摘要触发后，除摘要消息外保留最近的消息数量，默认 {DEFAULT_SUMMARY_KEEP_MESSAGES} 条。"
-            ),
-            "type": "number",
-            "auth": "admin",
-        },
-    )
-
     summary_prompt: str = field(
         default=DEFAULT_YUXI_SUMMARY_PROMPT,
         metadata={
@@ -258,13 +232,13 @@ class BaseContext:
         },
     )
 
-    summary_tool_result_token_limit: int = field(
-        default=DEFAULT_SUMMARY_TOOL_RESULT_TOKEN_LIMIT,
+    tool_token_limit: int = field(
+        default=DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS,
         metadata={
-            "name": "摘要工具结果预览上限",
+            "name": "单个工具结果内联上限(K)",
             "description": (
-                "上下文摘要清洗历史工具结果时，会将完整结果写入 outputs，并用路径和不超过该 token "
-                f"数的预览替换 ToolMessage 内容，默认 {DEFAULT_SUMMARY_TOOL_RESULT_TOKEN_LIMIT}。"
+                "单个普通工具结果进入工作上下文前允许内联的最大 Token 数；"
+                "最终请求仍会按模型输入预算再次收敛。"
             ),
             "type": "number",
             "auth": "admin",

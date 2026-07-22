@@ -6,11 +6,15 @@
 
 ## v0.7.1 (current)
 
+### 上下文管理
+
+- 完善预算驱动的上下文恢复：被裁剪的完整交互段会先写入线程隔离的不可变 JSONL 归档清单，并把最新路径随私有摘要原子提交；摘要模型超出目标时按最终请求预算收敛并标记 `degraded`。模型重试不再吞掉 `ContextOverflowError` 或把它伪装为助手回复，而是交由摘要恢复后仅重试一次。
+
 ### 开发记录
 - 修复聊天上下文用量展示：进度条统一以模型真实窗口为上限，自动摘要阈值改为独立的“估算”提示；chat-iframe 的用户消息和助手消息复制统一在 Clipboard API 被 HTTP 嵌入页拒绝时降级到原生复制，且仅在实际成功后显示完成状态。
 - 修复 Web 与 chat-iframe 在开发联调时因 Vite HMR WebSocket 短暂失联而整页刷新、丢失内存状态的问题：连接诊断日志确认触发链路后，默认开发 Compose 改为与正式环境共用 Vite 静态构建加 Nginx 托管；chat-iframe 仅在开发 Compose 中只读挂载示例和测试附件，生产镜像继续清理调试资源。前端改动需重建对应服务，后端热重载保持不变。
 - 修复工具元数据加载会错误读取原始 `args_schema` 的问题：展示参数改为使用 LangChain 已排除框架注入参数的 `tool_call_schema`，兼容 Pydantic v1/v2 模型及原生 JSON Schema，避免来文读取工具的 `ToolRuntime` 中 `Callable` 字段中断智能助手对话。
-- 修复本地 32K 模型在多次工具调用后空白结束的问题：模型缓存的 `context_length` 会写入 LangChain profile，主 Agent 与子 Agent 在管理员绝对阈值或模型窗口 70% 中较早者触发摘要；OpenAI 兼容服务返回空正文且 `finish_reason=length` 时转为标准上下文溢出并复用现有压缩重试。来文原文模式不再重复返回整套结构化结果，已知来文与附件 ID 时直接将 Markdown 写入当前线程 outputs，并由 `present_artifacts` 交付，不再为单纯文件交付把全文读入模型上下文。
+- 修复本地模型在多次工具调用后空白结束的问题：模型缓存的完整窗口、最大输出和安全缓冲会写入 LangChain profile，主 Agent 与子 Agent 在最终请求超出可用输入预算时再压缩，而不是按窗口百分比提前触发；OpenAI 兼容服务返回空正文且 `finish_reason=length` 时转为标准上下文溢出并进入恢复流程。来文原文模式不再重复返回整套结构化结果，已知来文与附件 ID 时直接将 Markdown 写入当前线程 outputs，并由 `present_artifacts` 交付，不再为单纯文件交付把全文读入模型上下文。
 - 模型配置弹窗新增仅适用于 Chat 模型的上下文长度（Token）输入与后端取值说明；服务端统一校验为正整数并移除 Embedding、Rerank 的无效上下文配置。远端模型没有返回上下文时，管理员可按 Ollama、GPUStack 等当前推理实例的实际部署上限手动配置。
 - 修正 chat-iframe 的来文附件上下文展示：多选附件分别保留摘要卡片并按问文件列表顺序展示，副附件标题始终使用自身文件名；来文管理附件摘要支持悬停查看全文，并使操作列与多行摘要顶部对齐。
 - 来文管理详情接口将副附件摘要随附件对象返回；附件展开列表和详情抽屉仅展示副附件自身摘要，主附件继续复用已有来文摘要，避免重复信息。
@@ -106,7 +110,7 @@
 - 修复 HTML 预览 iframe 高度问题：侧边预览模式改为 `height: 100%` 适应父容器，避免底部内容裁切；全屏预览模式移除 `min-height: calc(80vh - 40px)`，避免短内容下方白边；iframe 设为 `display: block` 消除行内基线间隙导致的底部白边；全屏渲染改用独立 `srcdoc`（不注入 `zoom`）按 100% 显示，侧边预览仍保持 0.75 缩放。
 - 对话消息图片支持点击全屏预览：对话中用户上传的图片支持点击放大查看，复用文件预览的全屏蒙层交互（Teleport 蒙层，点击图片/空白处或按 Esc 关闭），不引入额外依赖。
 - 新增 Agent token usage 状态快照，在状态面板中作为普通可折叠分组展示完整 `messages`、当前传给 LLM 的 `messages`、system/tools 构成、输入构成堆叠条和上下文窗口占用估算。
-- 优化 Agent 上下文压缩：Yuxi 的 DeepAgents summary adapter 在生成 summary 与写入 conversation history 时，不再改写 `AIMessage.tool_calls` 或 provider tool metadata，只逐条替换被摘要掉的旧 `ToolMessage.content`；`summary_keep_messages` 保留窗口原样传给模型，不再额外清洗最近消息；完整工具输出写入 `outputs/large_tool_results`，文件名使用工具名与内容 hash 生成，上下文只保留完整路径和最多 `summary_tool_result_token_limit` tokens 的预览，未触发 summary 的常规模型调用不做额外 ToolMessage 清洗；Summary 阈值判断改为使用 Yuxi 自己的近似 token 计算结果，不再根据 provider `usage_metadata.total_tokens` 或 usage scaling 提前触发；首次写入 `conversation_history` 前读取旧文件的 sandbox 404 会按 `file_not_found` 处理，不再产生误导性 warning；`present_artifacts` 会拒绝展示 `large_tool_results` 与 `conversation_history` 等工具调用阶段文件。新增管理员可配置项 `summary_keep_messages`、`summary_prompt`、`summary_tool_result_token_limit` 与 `max_execution_steps`，分别控制摘要后保留消息数、摘要提示词、summary 阶段工具结果预览上限和 LangGraph `recursion_limit`。
+- 重构 Agent 上下文预算：删除 70% 摘要触发线和 15% 保留比例，模型配置显式保存完整上下文、最大输出和可选安全缓冲；调用前按最终系统提示词、工具定义与消息计算可用输入预算。项目自有摘要中间件仅在超预算时压缩完整历史交互段，并将摘要保存为私有状态，不再依赖 DeepAgents 的私有摘要实现。
 - 收敛普通聊天模型加载链路：`select_model` 保留旧 `.call()` 调用契约，内部改为通过 LangChain chat model adapter 复用 Agent 侧模型加载器，统一 OpenAI-compatible、Anthropic 与 Gemini 等 provider 的运行时适配；移除旧 `OpenAIBase` wrapper，默认重试策略迁移为 LangChain provider 参数。
 - 统一 Redis 客户端管理：新增 `yuxi.storage.redis` 作为 Redis 配置、短生命周期同步客户端、共享异步客户端与 ARQ RedisSettings 的唯一基础设施入口；运行队列、系统配置快照同步、模型缓存和 worker 不再各自散落读取 `REDIS_URL` 或直接创建 Redis 客户端，Redis 连接失败日志统一使用脱敏 URL。
 - 新增系统配置 Redis 快照同步：管理员保存配置时仍以 `saves/config/base.toml` 作为唯一持久化来源，成功写入后将可运行时同步的公开配置字段写入 `yuxi:runtime_config`；API 与 worker 进程在启动时各拉起一个后台同步线程，按 5 秒间隔从快照刷新内存值，读取端按普通属性访问、无需感知，Redis 不可用时继续使用当前内存值。`save_dir` 是启动期内部路径配置，不在管理员配置中展示、不从 `base.toml` 读取、不写入 Redis 快照且不支持通过管理员配置接口修改；sandbox 相关配置仍属于启动期敏感配置，运行中的已初始化组件不承诺完整热更新，修改后仍需重启保证生效；移除已无运行时调用点的 `enable_reranker` 与 `default_agent_id` 配置字段。

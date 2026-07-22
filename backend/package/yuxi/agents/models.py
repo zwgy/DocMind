@@ -71,6 +71,14 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
         context_length = int(info.context_length) if info.context_length else None
     except (TypeError, ValueError):
         context_length = None
+    try:
+        max_completion_tokens = int(info.max_completion_tokens) if info.max_completion_tokens else None
+    except (TypeError, ValueError):
+        max_completion_tokens = None
+    try:
+        context_safety_tokens = int(info.context_safety_tokens) if info.context_safety_tokens else None
+    except (TypeError, ValueError):
+        context_safety_tokens = None
 
     logger.debug(f"Loading model {fully_specified_name} with provider_type={info.provider_type}")
 
@@ -100,7 +108,14 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
             **kwargs,
         )
 
+    profile = dict(model.profile or {})
     if context_length and context_length > 0:
-        # 保留供应商自动识别的能力字段，只用本地模型缓存补齐真实上下文窗口。
-        model.profile = dict(model.profile or {}) | {"max_input_tokens": context_length}
+        # 本地配置描述的是服务实例实际可接收的完整窗口，不能按摘要比例改写为输入窗口。
+        profile["max_input_tokens"] = context_length
+    if max_completion_tokens and max_completion_tokens > 0:
+        profile["max_output_tokens"] = max_completion_tokens
+    if context_safety_tokens and context_safety_tokens > 0:
+        profile["context_safety_tokens"] = context_safety_tokens
+    if profile:
+        model.profile = profile
     return model

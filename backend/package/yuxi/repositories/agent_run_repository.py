@@ -23,6 +23,19 @@ class AgentRunRepository:
         result = await self.db.execute(select(AgentRun).where(AgentRun.request_id == request_id))
         return result.scalar_one_or_none()
 
+    async def get_active_run_by_checkpoint_thread(self, checkpoint_thread_id: str) -> AgentRun | None:
+        """查询仍可能写入同一 LangGraph checkpoint 的 run。"""
+        result = await self.db.execute(
+            select(AgentRun)
+            .where(
+                AgentRun.checkpoint_thread_id == checkpoint_thread_id,
+                AgentRun.status.notin_(TERMINAL_RUN_STATUSES),
+            )
+            .order_by(AgentRun.created_at.asc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def get_resume_run(self, parent_run_id: str, resume_request_id: str) -> AgentRun | None:
         result = await self.db.execute(
             select(AgentRun).where(

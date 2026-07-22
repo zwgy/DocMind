@@ -422,6 +422,10 @@ async def test_create_agent_run_persists_input_before_enqueue(monkeypatch: pytes
             del request_id
             return None
 
+        async def get_active_run_by_checkpoint_thread(self, checkpoint_thread_id: str):
+            assert checkpoint_thread_id == "thread-1"
+            return None
+
         async def create_run(self, **kwargs):
             assert kwargs["request_id"] == "req-1"
             assert kwargs["conversation_id"] == 1
@@ -438,7 +442,7 @@ async def test_create_agent_run_persists_input_before_enqueue(monkeypatch: pytes
         def __init__(self, db_session):
             self.db = db_session
 
-        async def get_conversation_by_thread_id(self, thread_id: str):
+        async def get_conversation_by_thread_id_for_update(self, thread_id: str):
             del thread_id
             return SimpleNamespace(id=1, uid="user-1", status="active", agent_id="default")
 
@@ -547,6 +551,10 @@ async def test_create_resume_run_marks_input_message_source(monkeypatch: pytest.
             assert request_id == "resume-req"
             return None
 
+        async def get_active_run_by_checkpoint_thread(self, checkpoint_thread_id: str):
+            assert checkpoint_thread_id == "thread-1"
+            return None
+
         async def create_run(self, **kwargs):
             assert kwargs["run_type"] == "resume"
             assert kwargs["parent_run_id"] == "parent-run"
@@ -563,7 +571,7 @@ async def test_create_resume_run_marks_input_message_source(monkeypatch: pytest.
         def __init__(self, db_session):
             self.db = db_session
 
-        async def get_conversation_by_thread_id(self, thread_id: str):
+        async def get_conversation_by_thread_id_for_update(self, thread_id: str):
             del thread_id
             return SimpleNamespace(id=1, uid="user-1", status="active", agent_id="default")
 
@@ -890,7 +898,7 @@ def _patch_common_run_repos(
         def __init__(self, db_session):
             del db_session
 
-        async def get_conversation_by_thread_id(self, thread_id: str):
+        async def get_conversation_by_thread_id_for_update(self, thread_id: str):
             del thread_id
             return SimpleNamespace(id=1, uid="user-1", status="active", agent_id="default")
 
@@ -916,9 +924,54 @@ def _patch_common_run_repos(
     monkeypatch.setattr(agent_run_service.agent_manager, "get_agent", lambda backend_id: _FakeBackend())
     monkeypatch.setattr(agent_run_service, "AgentRepository", AgentRepo)
     monkeypatch.setattr(agent_run_service, "ConversationRepository", ConvRepo)
-    monkeypatch.setattr(agent_run_service, "AgentRunRepository", run_repo_cls)
+    if hasattr(run_repo_cls, "get_active_run_by_checkpoint_thread"):
+        run_repo_factory = run_repo_cls
+    else:
+
+        class RunRepoWithActiveCheckpointCheck(run_repo_cls):
+            async def get_active_run_by_checkpoint_thread(self, checkpoint_thread_id: str):
+                del checkpoint_thread_id
+                return None
+
+        run_repo_factory = RunRepoWithActiveCheckpointCheck
+
+    monkeypatch.setattr(agent_run_service, "AgentRunRepository", run_repo_factory)
     monkeypatch.setattr(agent_run_service, "get_arq_pool", fake_get_arq_pool)
     return FakeDB()
+
+
+@pytest.mark.asyncio
+async def test_create_agent_run_rejects_second_active_checkpoint_thread(monkeypatch: pytest.MonkeyPatch):
+    class RunRepo:
+        def __init__(self, db_session):
+            del db_session
+
+        async def get_run_by_request_id(self, request_id: str):
+            assert request_id == "new-request"
+            return None
+
+        async def get_active_run_by_checkpoint_thread(self, checkpoint_thread_id: str):
+            assert checkpoint_thread_id == "thread-1"
+            return SimpleNamespace(id="running-run")
+
+        async def create_run(self, **_kwargs):
+            raise AssertionError("active checkpoint must not create another run")
+
+    db = _patch_common_run_repos(monkeypatch, RunRepo)
+
+    with pytest.raises(agent_run_service.HTTPException) as exc_info:
+        await agent_run_service.create_agent_run_view(
+            query="hello",
+            agent_id="default",
+            thread_id="thread-1",
+            meta={"request_id": "new-request"},
+            image_content=None,
+            current_uid="user-1",
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["run_id"] == "running-run"
 
 
 @pytest.mark.asyncio

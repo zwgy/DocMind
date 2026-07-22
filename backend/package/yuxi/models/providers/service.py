@@ -37,6 +37,19 @@ def _validate_provider_id(provider_id: str) -> None:
         raise ValueError("provider_id 只能包含字母、数字、下划线和中划线，长度 2-100")
 
 
+def _normalize_positive_int(value: Any, *, field_name: str, model_id: str) -> int:
+    """规范模型 Token 限制，避免布尔值或小数被静默转换为可运行配置。"""
+    if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
+        raise ValueError(f"模型 {model_id} 的 {field_name} 必须是正整数")
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"模型 {model_id} 的 {field_name} 必须是正整数") from exc
+    if normalized <= 0:
+        raise ValueError(f"模型 {model_id} 的 {field_name} 必须是正整数")
+    return normalized
+
+
 def _normalize_model_item(model: dict[str, Any]) -> dict[str, Any]:
     """规范化模型配置对象，校验运行所需字段。"""
     model_id = str(model.get("id") or "").strip()
@@ -59,20 +72,33 @@ def _normalize_model_item(model: dict[str, Any]) -> dict[str, Any]:
     normalized["display_name"] = str(model.get("display_name") or model.get("name") or model_id)
     normalized["extra"] = _normalize_dict(model.get("extra"))
 
-    # 仅 Chat 模型会将此值传给 Agent 的上下文压缩逻辑
-    context_length = model.get("context_length") if model_type == "chat" else None
-    if context_length not in (None, ""):
-        if isinstance(context_length, bool) or (
-            isinstance(context_length, float) and not context_length.is_integer()
+    # 仅 Chat 模型保留上下文预算。非 Chat 模型没有生成阶段，保留这些字段会让运行时误认为可调用。
+    context_budget_fields = ("context_length", "max_completion_tokens", "context_safety_tokens")
+    if model_type != "chat":
+        for field_name in context_budget_fields:
+            normalized.pop(field_name, None)
+    else:
+        for field_name in context_budget_fields:
+            value = model.get(field_name)
+            if value not in (None, ""):
+                normalized[field_name] = _normalize_positive_int(
+                    value,
+                    field_name=field_name,
+                    model_id=model_id,
+                )
+
+        context_length = normalized.get("context_length")
+        max_completion_tokens = normalized.get("max_completion_tokens")
+        context_safety_tokens = normalized.get("context_safety_tokens")
+        if (
+            context_length is not None
+            and max_completion_tokens is not None
+            and context_safety_tokens is not None
+            and context_length <= max_completion_tokens + context_safety_tokens
         ):
-            raise ValueError(f"模型 {model_id} 的 context_length 必须是正整数")
-        try:
-            context_length = int(context_length)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"模型 {model_id} 的 context_length 必须是正整数") from exc
-        if context_length <= 0:
-            raise ValueError(f"模型 {model_id} 的 context_length 必须是正整数")
-        normalized["context_length"] = context_length
+            raise ValueError(
+                f"模型 {model_id} 的 context_length 必须大于 max_completion_tokens 与 context_safety_tokens 之和"
+            )
 
     if model_type == "embedding":
         dimension = model.get("dimension")

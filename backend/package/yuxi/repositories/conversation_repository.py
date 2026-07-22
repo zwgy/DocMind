@@ -73,6 +73,13 @@ class ConversationRepository:
         result = await self.db.execute(select(Conversation).where(Conversation.thread_id == thread_id))
         return result.scalar_one_or_none()
 
+    async def get_conversation_by_thread_id_for_update(self, thread_id: str) -> Conversation | None:
+        """在创建 run 的同一事务中锁定会话，串行化同一线程的写入决定。"""
+        result = await self.db.execute(
+            select(Conversation).where(Conversation.thread_id == thread_id).with_for_update()
+        )
+        return result.scalar_one_or_none()
+
     async def _get_conversation_by_id(self, conversation_id: int) -> Conversation | None:
         result = await self.db.execute(select(Conversation).where(Conversation.id == conversation_id))
         return result.scalar_one_or_none()

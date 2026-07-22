@@ -18,6 +18,11 @@ filter_config_by_role = context_module.filter_config_by_role
 normalize_agent_context_config = context_module.normalize_agent_context_config
 
 
+def test_percent_based_summary_constants_are_removed():
+    assert not hasattr(context_module, "DEFAULT_SUMMARY_TRIGGER_FRACTION")
+    assert not hasattr(context_module, "DEFAULT_SUMMARY_KEEP_FRACTION")
+
+
 @dataclass(kw_only=True)
 class ChatBotContext(BaseContext):
     subagents: list[str] | None = field(default=None, metadata={"kind": "subagents"})
@@ -34,6 +39,7 @@ def test_get_configurable_items_filters_admin_fields_for_user():
     assert "system_prompt" in items
     assert "summary_threshold" not in items
     assert "summary_keep_messages" not in items
+    assert "summary_keep_fraction" not in items
     assert "summary_prompt" not in items
     assert "summary_tool_result_token_limit" not in items
     assert "max_execution_steps" not in items
@@ -43,10 +49,12 @@ def test_get_configurable_items_allows_admin_and_superadmin_fields():
     admin_items = BaseContext.get_configurable_items(user_role="admin")
     superadmin_items = SuperAdminOnlyContext.get_configurable_items(user_role="superadmin")
 
-    assert "summary_threshold" in admin_items
-    assert "summary_keep_messages" in admin_items
+    assert "summary_threshold" not in admin_items
+    assert "summary_keep_messages" not in admin_items
+    assert "summary_keep_fraction" not in admin_items
     assert "summary_prompt" in admin_items
-    assert "summary_tool_result_token_limit" in admin_items
+    assert "summary_tool_result_token_limit" not in admin_items
+    assert "tool_token_limit" in admin_items
     assert "max_execution_steps" in admin_items
     assert "secret_setting" in superadmin_items
 
@@ -56,7 +64,6 @@ def test_filter_config_by_role_removes_unauthorized_context_values():
         "context": {
             "system_prompt": "visible",
             "summary_threshold": 10,
-            "summary_keep_messages": 8,
             "summary_prompt": "custom summary",
             "summary_tool_result_token_limit": 500,
             "max_execution_steps": 50,
@@ -71,12 +78,11 @@ def test_filter_config_by_role_removes_unauthorized_context_values():
     assert config_json["context"]["summary_threshold"] == 10
 
 
-def test_filter_config_by_role_keeps_admin_context_values_for_admin():
+def test_filter_config_by_role_discards_removed_summary_context_values_for_admin():
     filtered = filter_config_by_role(
         {
             "context": {
                 "summary_threshold": 10,
-                "summary_keep_messages": 8,
                 "summary_prompt": "custom summary",
                 "summary_tool_result_token_limit": 500,
                 "max_execution_steps": 50,
@@ -87,15 +93,7 @@ def test_filter_config_by_role_keeps_admin_context_values_for_admin():
         context_schema=SuperAdminOnlyContext,
     )
 
-    assert filtered == {
-        "context": {
-            "summary_threshold": 10,
-            "summary_keep_messages": 8,
-            "summary_prompt": "custom summary",
-            "summary_tool_result_token_limit": 500,
-            "max_execution_steps": 50,
-        }
-    }
+    assert filtered == {"context": {"summary_prompt": "custom summary", "max_execution_steps": 50}}
 
 
 @pytest.mark.asyncio
@@ -179,7 +177,6 @@ async def test_normalize_agent_context_config_expands_null_and_filters_explicit_
             "skills": [],
             "subagents": ["research-agent", "missing"],
             "summary_threshold": 10,
-            "summary_keep_messages": 8,
             "summary_prompt": "custom summary",
             "summary_tool_result_token_limit": 500,
             "max_execution_steps": 50,
@@ -196,6 +193,7 @@ async def test_normalize_agent_context_config_expands_null_and_filters_explicit_
     assert normalized["subagents"] == ["research-agent"]
     assert "summary_threshold" not in normalized
     assert "summary_keep_messages" not in normalized
+    assert "summary_keep_fraction" not in normalized
     assert "summary_prompt" not in normalized
     assert "summary_tool_result_token_limit" not in normalized
     assert "max_execution_steps" not in normalized

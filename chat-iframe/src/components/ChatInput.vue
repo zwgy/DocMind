@@ -133,11 +133,11 @@ const contextUsage = computed(() => {
   const usage = props.tokenUsage
   if (!usage) return null
   const reportedTokens = reportedInputTokens(usage)
-  const used = reportedTokens ?? tokenNumber(usage.llm_input_tokens)
+  const used = tokenNumber(usage.prompt_tokens) ?? reportedTokens ?? tokenNumber(usage.llm_input_tokens)
   if (used === null) return null
-  const summaryTrigger = tokenNumber(usage.summary_trigger_tokens)
   const contextWindow = tokenNumber(usage.context_window)
-  const limit = contextWindow || Math.max(used, 1)
+  const promptBudget = tokenNumber(usage.prompt_budget)
+  const limit = promptBudget || Math.max(used, 1)
   const summaryTokens = usage.summary_active ? tokenNumber(usage.summary_message_tokens) || 0 : 0
   const llmMessageTokens = tokenNumber(usage.llm_messages_tokens) || 0
   const messageCount = Math.max((tokenNumber(usage.llm_message_count) || 0) - (usage.summary_active ? 1 : 0), 0)
@@ -153,10 +153,10 @@ const contextUsage = computed(() => {
   return {
     used,
     limit,
-    percent: contextWindow ? Math.min(Math.round((used / limit) * 100), 100) : null,
+    percent: promptBudget ? Math.min(Math.round((used / limit) * 100), 100) : null,
     sourceLabel: reportedTokens === null ? '估算' : '模型服务报告',
-    remaining: contextWindow ? Math.max(limit - used, 0) : null,
-    summaryTrigger,
+    remaining: promptBudget ? Math.max(limit - used, 0) : null,
+    contextWindow,
     segments: segments
       .map((segment) => {
         const value = Math.min(segment.value, Math.max(available, 0))
@@ -462,8 +462,8 @@ watch(text, resizeTextarea)
               <div class="context-usage-legend">
                 <span v-for="segment in contextUsage.segments" :key="segment.key"><i :class="`is-${segment.key}`"></i>{{ segment.label }}<template v-if="segment.messageCount"> ({{ segment.messageCount }})</template> {{ formatTokenCount(segment.value) }}</span>
               </div>
-              <small>{{ contextUsage.sourceLabel }}{{ contextUsage.remaining === null ? '' : ` · 模型窗口剩余 ${formatTokenCount(contextUsage.remaining)}` }}</small>
-              <small v-if="contextUsage.summaryTrigger">自动摘要阈值（估算）· {{ formatTokenCount(contextUsage.summaryTrigger) }}</small>
+              <small>{{ contextUsage.sourceLabel }}{{ contextUsage.remaining === null ? '' : ` · 可用输入预算剩余 ${formatTokenCount(contextUsage.remaining)}` }}</small>
+              <small v-if="contextUsage.contextWindow">模型完整上下文 · {{ formatTokenCount(contextUsage.contextWindow) }}</small>
             </section>
           </div>
           <div ref="modelMenuRef" class="model-menu-wrapper">

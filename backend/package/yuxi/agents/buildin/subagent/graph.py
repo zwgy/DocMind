@@ -2,7 +2,7 @@ from typing import Any
 
 from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelRetryMiddleware, TodoListMiddleware
+from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 
 from yuxi.agents import BaseAgent, BaseState, load_chat_model, resolve_chat_model_spec
@@ -10,15 +10,16 @@ from yuxi.agents.backends import create_agent_filesystem_middleware
 from yuxi.agents.buildin.chatbot.prompt import TODO_MID_PROMPT, build_prompt_with_context
 from yuxi.agents.buildin.subagent.context import SubAgentContext
 from yuxi.agents.context import (
-    DEFAULT_SUMMARY_KEEP_MESSAGES,
-    DEFAULT_SUMMARY_THRESHOLD_K,
-    DEFAULT_SUMMARY_TRIGGER_FRACTION,
-    DEFAULT_SUMMARY_TOOL_RESULT_TOKEN_LIMIT,
     DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS,
     DEFAULT_YUXI_SUMMARY_PROMPT,
     prepare_agent_runtime_context,
 )
-from yuxi.agents.middlewares import TokenUsageMiddleware, create_summary_middleware, save_attachments_to_fs
+from yuxi.agents.middlewares import (
+    TokenUsageMiddleware,
+    create_model_retry_middleware,
+    create_summary_middleware,
+    save_attachments_to_fs,
+)
 from yuxi.agents.middlewares.skills import SkillsMiddleware
 from yuxi.agents.toolkits.service import resolve_configured_runtime_tools
 
@@ -46,25 +47,11 @@ class _SubAgentToolFilterMiddleware(AgentMiddleware[Any, Any, Any]):
 
 
 async def _build_middlewares(context):
-    summary_trigger_tokens = getattr(context, "summary_threshold", DEFAULT_SUMMARY_THRESHOLD_K) * 1024
-    summary_keep_messages = getattr(context, "summary_keep_messages", DEFAULT_SUMMARY_KEEP_MESSAGES)
     summary_prompt = getattr(context, "summary_prompt", None) or DEFAULT_YUXI_SUMMARY_PROMPT
-    summary_tool_result_token_limit = getattr(
-        context,
-        "summary_tool_result_token_limit",
-        DEFAULT_SUMMARY_TOOL_RESULT_TOKEN_LIMIT,
-    )
     model_spec = resolve_chat_model_spec(context.model)
     summary_middleware = create_summary_middleware(
         model=load_chat_model(fully_specified_name=model_spec),
-        trigger=[
-            ("tokens", summary_trigger_tokens),
-            ("fraction", DEFAULT_SUMMARY_TRIGGER_FRACTION),
-        ],
-        keep=("messages", summary_keep_messages),
         summary_prompt=summary_prompt,
-        trim_tokens_to_summarize=4000,
-        tool_result_offload_token_limit=summary_tool_result_token_limit,
     )
 
     return [
@@ -74,12 +61,12 @@ async def _build_middlewares(context):
         ),
         save_attachments_to_fs,
         SkillsMiddleware(),
-        summary_middleware,
         TodoListMiddleware(system_prompt=TODO_MID_PROMPT),
         PatchToolCallsMiddleware(),
         _SubAgentToolFilterMiddleware(),
+        summary_middleware,
         TokenUsageMiddleware(),
-        ModelRetryMiddleware(),
+        create_model_retry_middleware(),
     ]
 
 

@@ -62,6 +62,8 @@ const editingModel = ref({
   protocol_override: null,
   base_url_override: null,
   context_length: null,
+  max_completion_tokens: null,
+  context_safety_tokens: null,
   dimension: null,
   batch_size: null,
   supported_parameters: [],
@@ -461,6 +463,8 @@ const normalizeModel = (model = {}) => ({
   protocol_override: model.protocol_override || null,
   base_url_override: model.base_url_override || null,
   context_length: model.context_length || null,
+  max_completion_tokens: model.max_completion_tokens || null,
+  context_safety_tokens: model.context_safety_tokens || null,
   dimension: model.dimension || null,
   batch_size: model.batch_size || null,
   supported_parameters: model.supported_parameters || [],
@@ -544,6 +548,8 @@ const openCreateModal = (provider) => {
     protocol_override: null,
     base_url_override: null,
     context_length: null,
+    max_completion_tokens: null,
+    context_safety_tokens: null,
     dimension: null,
     batch_size: null,
     supported_parameters: [],
@@ -1089,12 +1095,40 @@ defineExpose({
             </small>
           </label>
         </div>
+        <div class="form-row" v-if="editingModel.type === 'chat'">
+          <label class="form-label">
+            <span>最大输出 Token</span>
+            <a-input-number
+              v-model:value="editingModel.max_completion_tokens"
+              :min="1"
+              :precision="0"
+              :step="1024"
+              placeholder="例如 4096"
+            />
+            <small class="context-length-help">
+              单次回答和隐藏推理 Token 的总预留；未配置时，Agent 不会发送无法验证安全性的请求。
+            </small>
+          </label>
+          <label class="form-label">
+            <span>上下文安全缓冲 Token</span>
+            <a-input-number
+              v-model:value="editingModel.context_safety_tokens"
+              :min="1"
+              :precision="0"
+              :step="128"
+              placeholder="留空使用部署默认值"
+            />
+            <small class="context-length-help">
+              用于吸收消息协议和 Token 计数误差；可按当前模型服务的实际误差校准。
+            </small>
+          </label>
+        </div>
         <details v-if="editingModel.type === 'chat'" class="context-length-guide">
           <summary>如何填写上下文长度？</summary>
           <div class="context-length-guide-content">
             <p>
               模型架构上限是模型理论能力；推理服务部署上限是当前实例实际可接受的窗口；本系统会在部署上限的
-              70% 或摘要阈值中较早处开始压缩，这就是应用可安全使用的输入范围。
+              最大输出预留与安全缓冲后开始计算可用输入预算；只有最终请求落在该预算内才会发送给模型。
             </p>
             <p>此处填写“推理服务部署上限”，单位为 Token，不填写模型宣传的理论上限。</p>
             <ul>

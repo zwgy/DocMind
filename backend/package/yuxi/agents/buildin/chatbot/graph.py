@@ -1,20 +1,17 @@
 from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelRetryMiddleware, TodoListMiddleware
+from langchain.agents.middleware import TodoListMiddleware
 
 from yuxi.agents import BaseAgent, load_chat_model, resolve_chat_model_spec
 from yuxi.agents.backends import create_agent_filesystem_middleware
 from yuxi.agents.context import (
-    DEFAULT_SUMMARY_KEEP_MESSAGES,
-    DEFAULT_SUMMARY_THRESHOLD_K,
-    DEFAULT_SUMMARY_TRIGGER_FRACTION,
-    DEFAULT_SUMMARY_TOOL_RESULT_TOKEN_LIMIT,
     DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS,
     DEFAULT_YUXI_SUMMARY_PROMPT,
     prepare_agent_runtime_context,
 )
 from yuxi.agents.middlewares import (
     TokenUsageMiddleware,
+    create_model_retry_middleware,
     create_summary_middleware,
     save_attachments_to_fs,
 )
@@ -29,27 +26,11 @@ from .state import ChatBotState
 
 async def _build_middlewares(context):
     """构建中间件列表"""
-    # summary middleware
-    # 绝对阈值保留管理员配置；模型窗口达到 70% 时更早触发，避免 32K 模型等不到默认 100K 阈值。
-    summary_trigger_tokens = getattr(context, "summary_threshold", DEFAULT_SUMMARY_THRESHOLD_K) * 1024
-    summary_keep_messages = getattr(context, "summary_keep_messages", DEFAULT_SUMMARY_KEEP_MESSAGES)
     summary_prompt = getattr(context, "summary_prompt", None) or DEFAULT_YUXI_SUMMARY_PROMPT
-    summary_tool_result_token_limit = getattr(
-        context,
-        "summary_tool_result_token_limit",
-        DEFAULT_SUMMARY_TOOL_RESULT_TOKEN_LIMIT,
-    )
     model_spec = resolve_chat_model_spec(context.model)
     summary_middleware = create_summary_middleware(
         model=load_chat_model(fully_specified_name=model_spec),
-        trigger=[
-            ("tokens", summary_trigger_tokens),
-            ("fraction", DEFAULT_SUMMARY_TRIGGER_FRACTION),
-        ],
-        keep=("messages", summary_keep_messages),
         summary_prompt=summary_prompt,
-        trim_tokens_to_summarize=4000,
-        tool_result_offload_token_limit=summary_tool_result_token_limit,
     )
 
     middlewares = [
@@ -59,6 +40,8 @@ async def _build_middlewares(context):
         ),
         save_attachments_to_fs,
         SkillsMiddleware(),
+        TodoListMiddleware(system_prompt=TODO_MID_PROMPT),
+        PatchToolCallsMiddleware(),
     ]
     subagent_middleware = await create_subagent_task_middleware(context)
     if subagent_middleware:
@@ -66,10 +49,8 @@ async def _build_middlewares(context):
     middlewares.extend(
         [
             summary_middleware,
-            TodoListMiddleware(system_prompt=TODO_MID_PROMPT),
-            PatchToolCallsMiddleware(),
             TokenUsageMiddleware(),
-            ModelRetryMiddleware(max_retries=getattr(context, "model_retry_times", 2)),
+            create_model_retry_middleware(max_retries=getattr(context, "model_retry_times", 2)),
         ]
     )
     return middlewares

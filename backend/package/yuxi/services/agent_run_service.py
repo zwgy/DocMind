@@ -261,7 +261,7 @@ async def create_agent_run(
         raise HTTPException(status_code=422, detail="thread_id 不能为空")
 
     conv_repo = ConversationRepository(db)
-    conversation = await conv_repo.get_conversation_by_thread_id(thread_id)
+    conversation = await conv_repo.get_conversation_by_thread_id_for_update(thread_id)
     if not conversation or conversation.uid != str(current_uid) or conversation.status == "deleted":
         raise HTTPException(status_code=404, detail="对话线程不存在")
     if conversation.agent_id != agent_id:
@@ -284,6 +284,7 @@ async def create_agent_run(
     request_id = str(resume_request_id or (meta or {}).get("request_id") or uuid.uuid4())
     config = {"thread_id": thread_id, "agent_id": agent_id}
     run_repo = AgentRunRepository(db)
+    resolved_checkpoint_thread_id = checkpoint_thread_id or thread_id
     # chat：快照本次实际模型；resume：沿用被恢复运行的原始模型，保证单次运行模型一致。
     resolved_model_spec = (
         _resolve_effective_model_spec(model_spec, agent_item, agent_backend) if resolved_run_type == "chat" else None
@@ -306,6 +307,12 @@ async def create_agent_run(
         return existing, False
     if existing and existing.uid != str(current_uid):
         raise HTTPException(status_code=409, detail="request_id 冲突")
+    active_run = await run_repo.get_active_run_by_checkpoint_thread(resolved_checkpoint_thread_id)
+    if active_run:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "该会话已有运行中的任务", "run_id": active_run.id},
+        )
 
     run_id = str(uuid.uuid4())
     input_payload = {
@@ -342,7 +349,7 @@ async def create_agent_run(
             parent_agent_run_id=parent_agent_run_id,
             run_type=resolved_run_type,
             resume_request_id=resume_request_id,
-            checkpoint_thread_id=checkpoint_thread_id or thread_id,
+            checkpoint_thread_id=resolved_checkpoint_thread_id,
         )
         if persist_input_message:
             input_content = query or json.dumps(resume, ensure_ascii=False)

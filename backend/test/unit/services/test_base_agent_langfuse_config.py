@@ -21,6 +21,26 @@ class _FakeGraph:
         return {"messages": []}
 
 
+class _EventGraph(_FakeGraph):
+    async def astream_events(self, payload, *, context, config, version):
+        del payload, context, config, version
+
+        async def events():
+            yield {
+                "method": "messages",
+                "params": {
+                    "namespace": [],
+                    "data": ({"content": "internal summary"}, {"metadata": {"lc_source": "summarization"}}),
+                },
+            }
+            yield {
+                "method": "messages",
+                "params": {"namespace": [], "data": ({"content": "visible answer"}, {"node": "model"})},
+            }
+
+        return events()
+
+
 class _TestAgent(BaseAgent):
     name = "test_agent"
     description = "test"
@@ -32,6 +52,17 @@ class _TestAgent(BaseAgent):
 
 
 _TestAgent.__module__ = "yuxi.agents.tests.fake"
+
+
+class _EventTestAgent(_TestAgent):
+    async def get_graph(self, **kwargs):
+        del kwargs
+        if getattr(self, "_graph", None) is None:
+            self._graph = _EventGraph()
+        return self._graph
+
+
+_EventTestAgent.__module__ = "yuxi.agents.tests.fake"
 
 
 @pytest.mark.asyncio
@@ -92,3 +123,24 @@ async def test_base_agent_uses_configured_max_execution_steps():
 
     graph = await agent.get_graph()
     assert graph.last_invoke_config["recursion_limit"] == 42
+
+
+@pytest.mark.asyncio
+async def test_base_agent_hides_internal_summary_messages_from_state_stream():
+    agent = _EventTestAgent()
+
+    events = []
+    async for mode, payload in agent.stream_messages_with_state(
+        ["hello"], input_context={"uid": "user-1", "thread_id": "thread-1"}
+    ):
+        events.append((mode, payload))
+
+    assert events == [
+        (
+            "messages",
+            (
+                {"content": "visible answer"},
+                {"node": "model", "namespace": [], "stream_event": {"method": "messages", "namespace": []}},
+            ),
+        )
+    ]

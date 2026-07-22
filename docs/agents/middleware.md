@@ -25,10 +25,10 @@
 | `save_attachments_to_fs` / `AttachmentMiddleware` | 从 LangGraph state 的 `uploads` 读取附件路径，把可读路径注入系统提示，提示模型按需使用 `read_file` |
 | `SkillsMiddleware` | 注入可见 Skill 的提示段，监听读取 `SKILL.md` 后的 Skill 激活，并按依赖追加工具和 MCP 工具；知识库工具由内置 `knowledge-base` Skill 按需加载 |
 | `YuxiSubAgentMiddleware` | 仅主 Agent 在存在可见子智能体时挂载，提供 `task` 工具调用真实子 Agent graph |
-| `YuxiSummarizationMiddleware` | 基于 DeepAgents `SummarizationMiddleware` 做长上下文压缩，并清洗被摘要历史里的工具结果 |
+| `YuxiSummarizationMiddleware` | 按最终请求预算压缩完整历史交互段，归档原文并维护私有摘要状态 |
 | `TodoListMiddleware` | 提供待办状态，让前端状态面板可展示 Agent 运行进度 |
 | `PatchToolCallsMiddleware` | 修正部分工具调用消息形态，提升工具调用兼容性 |
-| `ModelRetryMiddleware` | 在模型调用失败时按配置重试 |
+| `ModelRetryMiddleware` | 在暂态模型调用失败时按配置重试；上下文溢出直接交由摘要恢复 |
 | `TokenUsageMiddleware` | 在 LangGraph state 写入本轮 token 使用快照，供前端状态面板查看 |
 
 `SubAgentBackend` 使用同一组核心能力，但不会挂载 `YuxiSubAgentMiddleware`，并额外过滤 `present_artifacts`、`ask_user_question`、`install_skill` 等不适合子智能体直接使用的工具。
@@ -64,22 +64,20 @@
 
 ## Summary 上下文压缩
 
-长对话压缩由 Yuxi 封装的 `YuxiSummarizationMiddleware` 负责。它基于 DeepAgents 的 `SummarizationMiddleware`，但针对 Yuxi 的知识库检索和工具调用结果做了额外处理。
+长对话压缩由项目自有的 `YuxiSummarizationMiddleware` 负责。它以最终模型请求的预算为唯一边界，不使用窗口百分比或固定保留消息数。
 
 触发条件来自 Agent Context：
 
 | 字段 | 说明 |
 | --- | --- |
-| `summary_threshold` | 上下文超过该 K token 绝对阈值后触发摘要；模型窗口达到 70% 时会更早触发 |
-| `summary_keep_messages` | 摘要后保留最近消息数 |
+| `tool_token_limit` | 单个普通工具结果进入工作上下文前的内联上限（K Token） |
 | `summary_prompt` | 摘要模型使用的提示词 |
-| `summary_tool_result_token_limit` | 被摘要历史中工具结果的预览 token 上限 |
 
-模型缓存中的 `context_length` 会写入 LangChain model profile。触发判断使用 Yuxi 自己对系统提示词、消息和工具定义的近似 token 计算结果，并取绝对阈值与模型窗口 70% 中较早者；不使用模型返回的 `usage_metadata.total_tokens` 作为触发依据，避免 provider 的计费口径、累计口径或异常上报导致短对话过早压缩。OpenAI 兼容服务若返回空正文且 `finish_reason=length`，会转换为标准上下文溢出异常，由现有 Summary 链路压缩并重试一次。
+模型缓存中的完整窗口、最大输出和安全缓冲会写入 LangChain model profile。每次调用均对最终系统提示词、消息和工具定义计数，以“完整窗口 − 输出预留 − 安全缓冲”得到可用输入预算；超预算时才压缩最早的完整交互段。OpenAI 兼容服务若返回空正文且 `finish_reason=length`，会转换为标准上下文溢出异常，由预算摘要链路重新组装后重试。
 
-触发后，中间件会把较早的消息压缩成一条 summary message，并保留最近窗口内的原始消息。对被摘要掉的历史工具结果，它不会把完整 `ToolMessage.content` 直接送进 summary prompt，而是先写入当前 Agent 可见的 `outputs/large_tool_results`，再用工具名、近似 token 数、完整结果路径和有限预览替换工具结果内容。
+触发后，中间件先把将要裁剪的完整交互段写入当前线程 `outputs/conversation_history` 下的不可变 JSONL 清单，再把私有滚动摘要、最新归档路径和最近原始消息通过一次 `Overwrite` 原子提交。普通大型工具结果会写入 `outputs/large_tool_results` 并以回执替换；已有权威来源的 `read_file` 和 `open_kb_document` 窗口只会缩小为来源回执，不会产生第二份副本。
 
-这对知识库检索尤其重要：`query_kb`、`open_kb_document`、`find_kb_document` 等工具可能返回较长的片段、引用和文档内容。Summary 阶段保留“查过什么、结果在哪里、关键预览是什么”，同时避免把大量检索原文反复卷入摘要，减少上下文污染和 token 压力。
+这对知识库检索尤其重要：`query_kb`、`open_kb_document`、`find_kb_document` 等工具可能返回较长的片段、引用和文档内容。摘要保留任务结论、文件路径和待核验事项；需要原始细节时一律复用 `read_file(offset, limit)`，避免把检索原文反复卷入工作上下文。
 
 未触发 summary 的常规模型调用不会额外清洗最近窗口内的工具结果；常规工具结果预算主要由文件系统中间件在工具返回阶段处理。
 

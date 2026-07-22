@@ -1108,8 +1108,8 @@ const tokenUsageStackTotal = computed(() => {
     .reduce((sum, segment) => sum + segment.value, 0)
 })
 const tokenUsageStackLimit = computed(() => {
-  const contextWindow = toFiniteNumber(currentTokenUsage.value?.context_window)
-  if (contextWindow && contextWindow > 0) return contextWindow
+  const promptBudget = toFiniteNumber(currentTokenUsage.value?.prompt_budget)
+  if (promptBudget && promptBudget > 0) return promptBudget
 
   return Math.max(tokenUsageStackTotal.value, 1)
 })
@@ -1147,16 +1147,16 @@ const tokenUsageMetaRows = computed(() => {
   const rows = []
   if (toFiniteNumber(usage.context_window)) {
     rows.push({
-      key: 'context',
-      label: '窗口/剩余',
-      value: `${formatTokenCount(usage.context_window)} / ${formatTokenCount(usage.remaining_context_tokens)}`
+      key: 'context-window',
+      label: '模型上下文',
+      value: formatTokenCount(usage.context_window)
     })
   }
-  if (toFiniteNumber(usage.summary_trigger_tokens)) {
+  if (toFiniteNumber(usage.prompt_budget)) {
     rows.push({
-      key: 'summary-trigger',
-      label: '自动摘要阈值（估算）',
-      value: formatTokenCount(usage.summary_trigger_tokens)
+      key: 'input-budget',
+      label: '可用输入预算/剩余',
+      value: `${formatTokenCount(usage.prompt_budget)} / ${formatTokenCount(usage.remaining_input_tokens)}`
     })
   }
   return rows

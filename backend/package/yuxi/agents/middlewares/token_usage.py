@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, NotRequired, TypedDict
 
@@ -18,7 +19,23 @@ from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.types import Command
 
-from yuxi.agents.context import DEFAULT_SUMMARY_TRIGGER_FRACTION
+from yuxi.config import config as system_config
+
+
+class ContextBudgetConfigurationError(ValueError):
+    """模型限制不完整或互相冲突时，在发送请求前阻止不可恢复的调用。"""
+
+
+@dataclass(frozen=True)
+class ResolvedContextBudget:
+    """一次模型调用使用的标准化上下文预算。"""
+
+    context_window: int
+    max_completion_tokens: int
+    effective_output_reserve: int
+    context_safety_tokens: int
+    prompt_budget: int
+    counter: str = "approximate"
 
 
 class TokenUsagePayload(TypedDict, total=False):
@@ -36,10 +53,16 @@ class TokenUsagePayload(TypedDict, total=False):
     tool_count: int
     context_window: int | None
     context_usage_ratio: float | None
-    remaining_context_tokens: int | None
+    max_completion_tokens: int | None
+    context_safety_tokens: int | None
+    prompt_budget: int | None
+    prompt_tokens: int
+    fixed_overhead_tokens: int
+    working_messages_tokens: int
+    remaining_input_tokens: int | None
+    prompt_deficit_tokens: int
     summary_active: bool
     summary_message_tokens: int
-    summary_trigger_tokens: int | None
     model_usage: dict[str, int]
     counter: str
     estimate: bool
@@ -62,22 +85,67 @@ def _safe_int(value: Any) -> int | None:
     return None
 
 
-def _model_context_window(model: Any) -> int | None:
+def _profile_positive_int(model: Any, field_name: str) -> int | None:
     profile = getattr(model, "profile", None)
     if not isinstance(profile, Mapping):
         return None
-    max_input_tokens = profile.get("max_input_tokens")
-    return max_input_tokens if isinstance(max_input_tokens, int) and max_input_tokens > 0 else None
+    return _safe_int(profile.get(field_name)) if (_safe_int(profile.get(field_name)) or 0) > 0 else None
 
 
-def _summary_trigger_tokens(runtime_context: Any, context_window: int | None) -> int | None:
-    threshold = _safe_int(getattr(runtime_context, "summary_threshold", None))
-    if threshold is None or threshold <= 0:
+def _request_output_limit(model_settings: Any) -> int | None:
+    if not isinstance(model_settings, Mapping):
         return None
-    configured_tokens = threshold * 1024
-    if context_window:
-        return min(configured_tokens, max(1, int(context_window * DEFAULT_SUMMARY_TRIGGER_FRACTION)))
-    return configured_tokens
+    for field_name in ("max_completion_tokens", "max_tokens"):
+        value = model_settings.get(field_name)
+        if value is None:
+            continue
+        normalized = _safe_int(value)
+        if normalized is None or normalized <= 0:
+            raise ContextBudgetConfigurationError(f"本次调用的 {field_name} 必须是正整数")
+        return normalized
+    return None
+
+
+def resolve_context_budget(request: ModelRequest | Any) -> ResolvedContextBudget:
+    """解析完整窗口、输出预留和缓冲，作为所有调用前预算判断的唯一入口。"""
+    model = getattr(request, "model", None)
+    context_window = _profile_positive_int(model, "max_input_tokens")
+    max_completion_tokens = _profile_positive_int(model, "max_output_tokens")
+    context_safety_tokens = _profile_positive_int(model, "context_safety_tokens")
+    if context_safety_tokens is None:
+        context_safety_tokens = int(system_config.context_safety_tokens)
+
+    missing = [
+        field_name
+        for field_name, value in (
+            ("context_window", context_window),
+            ("max_completion_tokens", max_completion_tokens),
+        )
+        if value is None
+    ]
+    if missing:
+        model_name = getattr(model, "model_name", None) or getattr(model, "model", None) or type(model).__name__
+        raise ContextBudgetConfigurationError(
+            f"模型 {model_name} 缺少上下文预算配置: {', '.join(missing)}"
+        )
+
+    explicit_output_limit = _request_output_limit(getattr(request, "model_settings", None))
+    effective_output_reserve = (
+        min(explicit_output_limit, max_completion_tokens) if explicit_output_limit else max_completion_tokens
+    )
+    prompt_budget = context_window - effective_output_reserve - context_safety_tokens
+    if prompt_budget <= 0:
+        model_name = getattr(model, "model_name", None) or getattr(model, "model", None) or type(model).__name__
+        raise ContextBudgetConfigurationError(
+            f"模型 {model_name} 的 context_window 必须大于 max_completion_tokens 与 context_safety_tokens 之和"
+        )
+    return ResolvedContextBudget(
+        context_window=context_window,
+        max_completion_tokens=max_completion_tokens,
+        effective_output_reserve=effective_output_reserve,
+        context_safety_tokens=context_safety_tokens,
+        prompt_budget=prompt_budget,
+    )
 
 
 def _raise_on_empty_length_response(response: ModelResponse) -> None:
@@ -140,19 +208,10 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
         tools_tokens = self._count_tokens([], tools=tools) if tools else 0
         llm_input_tokens = self._count_tokens([*system_messages, *llm_messages], tools=tools)
 
-        context_window = _model_context_window(request.model)
-        context_usage_ratio = None
-        remaining_context_tokens = None
-        if context_window:
-            context_usage_ratio = min(1.0, round(llm_input_tokens / context_window, 4))
-            remaining_context_tokens = max(context_window - llm_input_tokens, 0)
+        budget = resolve_context_budget(request)
+        context_usage_ratio = min(1.0, round(llm_input_tokens / budget.prompt_budget, 4))
 
         summary_message = llm_messages[0] if llm_messages and _is_summary_message(llm_messages[0]) else None
-        summary_trigger_tokens = _summary_trigger_tokens(
-            getattr(request.runtime, "context", None),
-            context_window,
-        )
-
         return {
             "state_message_count": len(next_state_messages),
             "state_message_count_before_call": len(state_messages),
@@ -164,12 +223,18 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
             "system_tokens": system_tokens,
             "tools_tokens": tools_tokens,
             "tool_count": len(tools),
-            "context_window": context_window,
+            "context_window": budget.context_window,
             "context_usage_ratio": context_usage_ratio,
-            "remaining_context_tokens": remaining_context_tokens,
+            "max_completion_tokens": budget.max_completion_tokens,
+            "context_safety_tokens": budget.context_safety_tokens,
+            "prompt_budget": budget.prompt_budget,
+            "prompt_tokens": llm_input_tokens,
+            "fixed_overhead_tokens": system_tokens + tools_tokens,
+            "working_messages_tokens": llm_messages_tokens,
+            "remaining_input_tokens": max(budget.prompt_budget - llm_input_tokens, 0),
+            "prompt_deficit_tokens": max(llm_input_tokens - budget.prompt_budget, 0),
             "summary_active": summary_message is not None,
             "summary_message_tokens": self._count_tokens([summary_message]) if summary_message else 0,
-            "summary_trigger_tokens": summary_trigger_tokens,
             "model_usage": _model_usage_from_response(response),
             "counter": "langchain.count_tokens_approximately",
             "estimate": True,
@@ -181,6 +246,7 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ExtendedModelResponse:
+        resolve_context_budget(request)
         response = handler(request)
         return ExtendedModelResponse(
             model_response=response,
@@ -192,6 +258,7 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ExtendedModelResponse:
+        resolve_context_budget(request)
         response = await handler(request)
         return ExtendedModelResponse(
             model_response=response,

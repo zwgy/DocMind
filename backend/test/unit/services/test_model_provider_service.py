@@ -43,6 +43,45 @@ def test_normalize_payload_normalizes_model_context_length():
     assert payload["enabled_models"][0]["context_length"] == 32768
 
 
+def test_normalize_payload_normalizes_chat_context_budget_limits():
+    payload = _normalize_payload(
+        {
+            "provider_id": "ollama-local",
+            "display_name": "Ollama Local",
+            "base_url": "http://localhost:11434/v1",
+            "enabled_models": [
+                {
+                    "id": "qwen3.6:35b",
+                    "type": "chat",
+                    "context_length": "32768",
+                    "max_completion_tokens": "4096",
+                    "context_safety_tokens": "768",
+                }
+            ],
+        }
+    )
+
+    model = payload["enabled_models"][0]
+    assert model["max_completion_tokens"] == 4096
+    assert model["context_safety_tokens"] == 768
+
+
+@pytest.mark.parametrize("field_name", ["max_completion_tokens", "context_safety_tokens"])
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "invalid"])
+def test_normalize_payload_rejects_invalid_chat_context_budget_limits(field_name, value):
+    with pytest.raises(ValueError, match=f"{field_name} 必须是正整数"):
+        _normalize_payload(
+            {
+                "provider_id": "ollama-local",
+                "display_name": "Ollama Local",
+                "base_url": "http://localhost:11434/v1",
+                "enabled_models": [
+                    {"id": "qwen3.6:35b", "type": "chat", field_name: value}
+                ],
+            }
+        )
+
+
 @pytest.mark.parametrize("model_type", ["embedding", "rerank"])
 def test_normalize_payload_removes_context_length_from_non_chat_models(model_type):
     payload = _normalize_payload(

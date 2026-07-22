@@ -29,6 +29,8 @@ def _chat_model_info(
     model_id: str,
     provider_type: str = "openai",
     context_length: int | None = None,
+    max_completion_tokens: int | None = None,
+    context_safety_tokens: int | None = None,
 ) -> ModelInfo:
     return ModelInfo(
         provider_id=provider_id,
@@ -39,6 +41,8 @@ def _chat_model_info(
         base_url="https://example.com/v1",
         provider_type=provider_type,
         context_length=context_length,
+        max_completion_tokens=max_completion_tokens,
+        context_safety_tokens=context_safety_tokens,
     )
 
 
@@ -193,6 +197,8 @@ def test_load_chat_model_keeps_non_siliconflow_openai_streaming(monkeypatch):
                 "openai-compatible",
                 "namespace/chat-model",
                 context_length=32768,
+                max_completion_tokens=4096,
+                context_safety_tokens=512,
             )
             if spec == "openai-compatible:namespace/chat-model"
             else None
@@ -204,6 +210,8 @@ def test_load_chat_model_keeps_non_siliconflow_openai_streaming(monkeypatch):
 
     assert model.disable_streaming is False
     assert model.profile["max_input_tokens"] == 32768
+    assert model.profile["max_output_tokens"] == 4096
+    assert model.profile["context_safety_tokens"] == 512
     assert explicit.disable_streaming is True
 
 

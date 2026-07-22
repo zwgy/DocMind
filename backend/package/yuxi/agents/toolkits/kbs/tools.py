@@ -1,11 +1,15 @@
 """知识库工具模块"""
 
 import inspect
+import json
 from typing import Any
 
+from langchain_core.messages import ToolMessage
+from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.prebuilt.tool_node import ToolRuntime
 from pydantic import BaseModel, Field
 
+from yuxi.agents.context import DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS
 from yuxi.agents.toolkits.registry import tool
 from yuxi.knowledge.base import KnowledgeBase
 from yuxi.knowledge.schemas import (
@@ -157,6 +161,76 @@ OpenKBDocumentInput = OpenInputSchema
 FindKBDocumentInput = FindInputSchema
 
 
+def _configured_tool_inline_limit(runtime: ToolRuntime | None) -> int:
+    """源文件窗口不做二次落盘，但必须遵守 Agent 配置的单项内联上限。"""
+    context = getattr(runtime, "context", None)
+    raw_limit = getattr(context, "tool_token_limit", DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS)
+    try:
+        limit_k = int(raw_limit)
+    except (TypeError, ValueError):
+        limit_k = DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS
+    return max(limit_k, 1) * 1024
+
+
+def _open_window_token_count(window: dict[str, Any]) -> int:
+    content = json.dumps(window, ensure_ascii=False, separators=(",", ":"))
+    message = ToolMessage(content=content, name="open_kb_document", tool_call_id="window")
+    return int(count_tokens_approximately([message], use_usage_metadata_scaling=False))
+
+
+def _bounded_open_window(
+    window: dict[str, Any],
+    *,
+    kb_id: str,
+    file_id: str,
+    token_limit: int,
+) -> dict[str, Any]:
+    """保留完整行和 continuation，避免单个源文件窗口挤占后续模型请求。"""
+    if _open_window_token_count(window) <= token_limit:
+        return window
+
+    offset = int(window.get("offset") or 0)
+    total_lines = int(window.get("total_lines") or 0)
+    lines = str(window.get("content") or "").splitlines()
+
+    def candidate(line_count: int) -> dict[str, Any]:
+        end = offset + line_count
+        return {
+            **window,
+            "start_line": offset + 1 if line_count else 0,
+            "end_line": end if line_count else 0,
+            "offset": offset,
+            "window_size": line_count,
+            "has_more_before": offset > 0,
+            "has_more_after": end < total_lines,
+            "next_offset": end if end < total_lines else None,
+            "content": "\n".join(lines[:line_count]),
+        }
+
+    low, high = 0, len(lines)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if _open_window_token_count(candidate(middle)) <= token_limit:
+            low = middle
+        else:
+            high = middle - 1
+
+    if low:
+        return candidate(low)
+
+    # 第一行本身已超限时不能返回原文，否则“源文件豁免”会破坏预算边界。
+    # 该文件仍可通过更小的按行窗口继续读取；本轮只保留可恢复的定位信息。
+    return {
+        **candidate(0),
+        "start_line": offset + 1 if offset < total_lines else 0,
+        "content": (
+            f"Source line {offset + 1} in knowledge document {kb_id}/{file_id} exceeds the "
+            f"configured inline limit ({token_limit} tokens). Retry open_kb_document with a "
+            "smaller window_size or use find_kb_document to locate a narrower range."
+        ),
+    }
+
+
 async def _resolve_visible_knowledge_bases_for_query(runtime: ToolRuntime | None) -> list[dict[str, Any]]:
     if runtime is None:
         return []
@@ -292,6 +366,12 @@ async def open_kb_document(
             normalized_file_id,
             offset=start_offset,
             limit=window_size,
+        )
+        window = _bounded_open_window(
+            window,
+            kb_id=normalized_kb_id,
+            file_id=normalized_file_id,
+            token_limit=_configured_tool_inline_limit(runtime),
         )
         return OpenOutputSchema(kb_id=normalized_kb_id, file_id=normalized_file_id, **window).model_dump()
 

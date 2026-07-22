@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from types import MethodType, SimpleNamespace
 
@@ -12,6 +13,7 @@ from yuxi.agents.backends.composite import (
     CustomCompositeBackend,
     create_agent_composite_backend,
     create_agent_filesystem_middleware,
+    write_text_idempotently,
 )
 from yuxi.agents.backends.sandbox import resolve_virtual_path, sandbox_id_for_thread
 from yuxi.agents.backends.sandbox.backend import ProvisionerSandboxBackend
@@ -120,6 +122,18 @@ def test_create_agent_filesystem_middleware_uses_outputs_for_internal_artifacts(
     assert middleware._conversation_history_prefix == VIRTUAL_PATH_CONVERSATION_HISTORY
 
 
+def test_idempotent_write_accepts_existing_deterministic_hash_path() -> None:
+    class _Backend:
+        def write(self, _path: str, _content: str):
+            return SimpleNamespace(error="already exists")
+
+    content = "same"
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+    path = f"/outputs/a-{digest}.txt"
+    assert write_text_idempotently(_Backend(), path, content) is True
+    assert write_text_idempotently(_Backend(), path, "different") is False
+
+
 def test_filesystem_middleware_evicts_large_non_read_file_tool_result() -> None:
     class _Backend:
         artifacts_root = "/"
@@ -142,13 +156,35 @@ def test_filesystem_middleware_evicts_large_non_read_file_tool_result() -> None:
         lambda _: ToolMessage(content=content, name="grep", tool_call_id="call-grep"),
     )
 
-    assert backend.writes == [(f"{VIRTUAL_PATH_LARGE_TOOL_RESULTS}/call-grep", content)]
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+    path = f"{VIRTUAL_PATH_LARGE_TOOL_RESULTS}/call-grep-{digest}.txt"
+    assert backend.writes == [(path, content)]
     assert isinstance(result, ToolMessage)
     assert len(result.content) < len(content)
-    assert f"{VIRTUAL_PATH_LARGE_TOOL_RESULTS}/call-grep" in result.content
+    assert path in result.content
 
 
-def test_filesystem_middleware_keeps_read_file_result_inline_to_avoid_evict_loop() -> None:
+def test_filesystem_middleware_returns_bounded_error_when_persistence_fails() -> None:
+    class _Backend:
+        artifacts_root = "/"
+
+        def write(self, _path: str, _content: str):
+            return SimpleNamespace(error="storage unavailable")
+
+    middleware = create_agent_filesystem_middleware(tool_token_limit_before_evict=1)
+    middleware.backend = _Backend()
+    request = SimpleNamespace(tool_call={"name": "grep"}, runtime=SimpleNamespace())
+
+    result = middleware.wrap_tool_call(
+        request,
+        lambda _: ToolMessage(content="x" * 10_000, name="grep", tool_call_id="call-grep"),
+    )
+
+    assert result.status == "error"
+    assert len(result.content) < 200
+
+
+def test_filesystem_middleware_requires_smaller_read_file_window_to_avoid_evict_loop() -> None:
     class _Backend:
         artifacts_root = "/"
 
@@ -162,7 +198,10 @@ def test_filesystem_middleware_keeps_read_file_result_inline_to_avoid_evict_loop
     backend = _Backend()
     middleware = create_agent_filesystem_middleware(tool_token_limit_before_evict=1)
     middleware.backend = backend
-    request = SimpleNamespace(tool_call={"name": "read_file"}, runtime=SimpleNamespace())
+    request = SimpleNamespace(
+        tool_call={"name": "read_file", "args": {"path": "/outputs/result.txt", "offset": 0, "limit": 100}},
+        runtime=SimpleNamespace(),
+    )
     content = "x" * 100
 
     result = middleware.wrap_tool_call(
@@ -171,7 +210,9 @@ def test_filesystem_middleware_keeps_read_file_result_inline_to_avoid_evict_loop
     )
 
     assert backend.writes == []
-    assert result.content == content
+    assert result.status == "error"
+    assert "Retry read_file" in result.content
+    assert content not in result.content
 
 
 def test_custom_composite_glob_only_searches_routes_from_root() -> None:

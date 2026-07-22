@@ -82,10 +82,8 @@ class MyAgent(BaseAgent):
 | `knowledges` | 关联知识库 |
 | `mcps` | 启用的 MCP 服务器 |
 | `skills` | 关联 Skills |
-| `summary_threshold` | 摘要绝对触发阈值；模型窗口达到 70% 时会更早触发 |
 | `summary_prompt` | 摘要触发时使用的提示词 |
-| `summary_keep_messages` | 摘要后保留的最近消息数 |
-| `summary_tool_result_token_limit` | 摘要阶段工具结果预览上限 |
+| `tool_token_limit` | 单个普通工具结果的内联上限（K Token） |
 | `max_execution_steps` | 单次运行最大执行步数 |
 | `thread_id` / `uid` | 运行期标识，不作为页面配置项暴露 |
 
@@ -224,7 +222,7 @@ config_json.context + runtime ids -> context_schema instance
 - 主模型选择：`context.model`
 - 系统提示词拼接：`context.system_prompt`
 - 可调用子智能体列表：`context.subagents`
-- 摘要绝对阈值：`context.summary_threshold`；实际触发点取该值与模型窗口 70% 中较早者
+- 摘要由最终请求的可用输入预算决定：完整窗口减去最大输出预留和安全缓冲后，超预算才压缩完整历史交互段
 
 因此 Graph 不是和 Context 解耦的。相反，Graph 的构造本身就依赖 Context。普通 Agent 在归一化后的 `context.subagents` 非空时会挂载 Yuxi 的 task middleware；`SubAgentBackend` 自身隐藏并清空 `subagents` 字段，因此子智能体不会继续调用子智能体。
 

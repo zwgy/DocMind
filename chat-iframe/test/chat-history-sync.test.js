@@ -11,7 +11,7 @@ test('selectThread restores persisted token usage with message history', async (
       return Response.json({ history: [{ id: 'answer', type: 'ai', content: 'answer' }] })
     }
     if (url === '/api/chat/thread/thread-history/state') {
-      return Response.json({ agent_state: { token_usage: { llm_input_tokens: 1200, summary_trigger_tokens: 102400 } } })
+      return Response.json({ agent_state: { token_usage: { prompt_tokens: 1200, prompt_budget: 102400 } } })
     }
     return Response.json({})
   }
@@ -20,7 +20,7 @@ test('selectThread restores persisted token usage with message history', async (
   await chat.selectThread('thread-history', 'token-1')
 
   assert.equal(chat.messages[0].content, 'answer')
-  assert.deepEqual(chat.agentState?.token_usage, { llm_input_tokens: 1200, summary_trigger_tokens: 102400 })
+  assert.deepEqual(chat.agentState?.token_usage, { prompt_tokens: 1200, prompt_budget: 102400 })
 })
 
 test('terminal run replaces its optimistic turn with server history ids', async () => {
@@ -48,7 +48,7 @@ test('terminal run replaces its optimistic turn with server history ids', async 
       })
     }
     if (url === '/api/chat/thread/thread-1/state') {
-      return Response.json({ agent_state: { token_usage: { llm_input_tokens: 1200, summary_trigger_tokens: 102400 } } })
+      return Response.json({ agent_state: { token_usage: { prompt_tokens: 1200, prompt_budget: 102400 } } })
     }
     return Response.json({})
   }
@@ -65,7 +65,7 @@ test('terminal run replaces its optimistic turn with server history ids', async 
   assert.deepEqual(chat.messages.map((message) => message.id), ['server-user', 'server-assistant'])
   assert.equal(chat.messages[1].content, 'official answer')
   assert.equal(chat.messages[1].modelName, 'Qwen3.6')
-  assert.deepEqual(chat.agentState?.token_usage, { llm_input_tokens: 1200, summary_trigger_tokens: 102400 })
+  assert.deepEqual(chat.agentState?.token_usage, { prompt_tokens: 1200, prompt_budget: 102400 })
 })
 
 test('terminal run keeps a complete streamed answer until delayed history catches up', async () => {

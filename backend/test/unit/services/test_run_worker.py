@@ -82,6 +82,38 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, run_obj: SimpleNamespace):
 
 
 @pytest.mark.asyncio
+async def test_checkpoint_advisory_lock_holds_dedicated_connection_until_stream_finishes() -> None:
+    calls: list[str] = []
+
+    class _Connection:
+        async def __aenter__(self):
+            calls.append("connect")
+            return self
+
+        async def __aexit__(self, *_args):
+            calls.append("close")
+
+        async def execute(self, statement, _params):
+            calls.append(str(statement))
+            return SimpleNamespace(scalar=lambda: True)
+
+    connection = _Connection()
+    bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"), connect=lambda: connection)
+    db = SimpleNamespace(bind=bind, get_bind=lambda: bind)
+
+    async with run_worker._checkpoint_advisory_lock(db, "thread-1"):
+        calls.append("stream")
+
+    assert calls == [
+        "connect",
+        "SELECT pg_try_advisory_lock(:key)",
+        "stream",
+        "SELECT pg_advisory_unlock(:key)",
+        "close",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_process_agent_run_non_retryable_error_marks_failed(monkeypatch: pytest.MonkeyPatch):
     run_obj = _build_run()
     _patch_common(monkeypatch, run_obj)
