@@ -348,19 +348,146 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
             raise ContextBudgetConfigurationError("历史上下文无法安全归档到线程文件")
         return path
 
-    def _create_summary(self, previous_summary: str, messages: list[AnyMessage], target_tokens: int) -> str:
-        response = self.model.invoke(self._render_summary_prompt(previous_summary, messages, target_tokens))
-        summary = _summary_text(response)
-        if not summary:
-            raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
-        return summary
+    @staticmethod
+    def _trim_summary_text(summary: str, target_tokens: int) -> tuple[str, bool]:
+        if target_tokens <= 0:
+            raise ContextBudgetConfigurationError("没有可用于滚动摘要的输入预算")
+        if int(count_tokens_approximately([SystemMessage(content=summary)])) <= target_tokens:
+            return summary, False
 
-    async def _acreate_summary(self, previous_summary: str, messages: list[AnyMessage], target_tokens: int) -> str:
-        response = await self.model.ainvoke(self._render_summary_prompt(previous_summary, messages, target_tokens))
-        summary = _summary_text(response)
-        if not summary:
-            raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
-        return summary
+        low, high = 0, len(summary)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if int(count_tokens_approximately([SystemMessage(content=summary[:middle])])) <= target_tokens:
+                low = middle
+            else:
+                high = middle - 1
+        return summary[:low].rstrip(), True
+
+    def _largest_summary_piece(
+        self,
+        previous_summary: str,
+        segment: list[AnyMessage],
+        target_tokens: int,
+        budget: ResolvedContextBudget,
+    ) -> tuple[str, str]:
+        text = get_buffer_string(_messages_safe_for_summary(segment))
+        low, high = 1, len(text)
+        best = 0
+        while low <= high:
+            middle = (low + high) // 2
+            prompt = self._render_summary_prompt(
+                previous_summary,
+                [SystemMessage(content=text[:middle])],
+                target_tokens,
+            )
+            if int(count_tokens_approximately([SystemMessage(content=prompt)])) <= budget.prompt_budget:
+                best = middle
+                low = middle + 1
+            else:
+                high = middle - 1
+        if best == 0:
+            raise ContextBudgetConfigurationError("摘要提示词和私有摘要已耗尽摘要模型输入预算")
+        return text[:best], text[best:]
+
+    def _create_summary(
+        self,
+        previous_summary: str,
+        messages: list[AnyMessage],
+        target_tokens: int,
+        budget: ResolvedContextBudget,
+    ) -> tuple[str, bool]:
+        """Merge protocol-safe segments without letting the summary request exceed its own budget."""
+        summary = previous_summary
+        degraded = False
+        pending: list[AnyMessage] = []
+        for segment in _message_segments(messages):
+            candidate = [*pending, *segment]
+            prompt = self._render_summary_prompt(summary, candidate, target_tokens)
+            if int(count_tokens_approximately([SystemMessage(content=prompt)])) <= budget.prompt_budget:
+                pending = candidate
+                continue
+            if pending:
+                response = self.model.invoke(self._render_summary_prompt(summary, pending, target_tokens))
+                summary = _summary_text(response)
+                if not summary:
+                    raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
+                summary, shortened = self._trim_summary_text(summary, target_tokens)
+                degraded = degraded or shortened
+                pending = list(segment)
+                continue
+            remaining = list(segment)
+            while remaining:
+                piece, rest = self._largest_summary_piece(summary, remaining, target_tokens, budget)
+                response = self.model.invoke(
+                    self._render_summary_prompt(summary, [SystemMessage(content=piece)], target_tokens)
+                )
+                summary = _summary_text(response)
+                if not summary:
+                    raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
+                summary, shortened = self._trim_summary_text(summary, target_tokens)
+                degraded = degraded or shortened
+                if not rest:
+                    remaining = []
+                else:
+                    remaining = [SystemMessage(content=rest)]
+        if pending:
+            response = self.model.invoke(self._render_summary_prompt(summary, pending, target_tokens))
+            summary = _summary_text(response)
+            if not summary:
+                raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
+            summary, shortened = self._trim_summary_text(summary, target_tokens)
+            degraded = degraded or shortened
+        return summary, degraded
+
+    async def _acreate_summary(
+        self,
+        previous_summary: str,
+        messages: list[AnyMessage],
+        target_tokens: int,
+        budget: ResolvedContextBudget,
+    ) -> tuple[str, bool]:
+        summary = previous_summary
+        degraded = False
+        pending: list[AnyMessage] = []
+        for segment in _message_segments(messages):
+            candidate = [*pending, *segment]
+            prompt = self._render_summary_prompt(summary, candidate, target_tokens)
+            if int(count_tokens_approximately([SystemMessage(content=prompt)])) <= budget.prompt_budget:
+                pending = candidate
+                continue
+            if pending:
+                response = await self.model.ainvoke(self._render_summary_prompt(summary, pending, target_tokens))
+                summary = _summary_text(response)
+                if not summary:
+                    raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
+                summary, shortened = self._trim_summary_text(summary, target_tokens)
+                degraded = degraded or shortened
+                pending = list(segment)
+                continue
+            remaining = list(segment)
+            while remaining:
+                piece, rest = self._largest_summary_piece(summary, remaining, target_tokens, budget)
+                response = await self.model.ainvoke(
+                    self._render_summary_prompt(summary, [SystemMessage(content=piece)], target_tokens)
+                )
+                summary = _summary_text(response)
+                if not summary:
+                    raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
+                summary, shortened = self._trim_summary_text(summary, target_tokens)
+                degraded = degraded or shortened
+                if not rest:
+                    remaining = []
+                else:
+                    remaining = [SystemMessage(content=rest)]
+        if pending:
+            response = await self.model.ainvoke(self._render_summary_prompt(summary, pending, target_tokens))
+            summary = _summary_text(response)
+            if not summary:
+                raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
+            summary, shortened = self._trim_summary_text(summary, target_tokens)
+            degraded = degraded or shortened
+        return summary, degraded
 
     @staticmethod
     def _current_human_input_index(messages: list[AnyMessage]) -> int | None:
@@ -544,7 +671,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                 messages=compacted,
                 revision=next_revision,
             )
-            generated_summary = self._create_summary(summary, compacted, target_tokens)
+            generated_summary, generated_degraded = self._create_summary(summary, compacted, target_tokens, budget)
             summary, summary_quality = self._fit_summary_to_budget(
                 request,
                 survivors=survivors,
@@ -563,7 +690,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                     "archive_path": archive_path,
                     "previous_revision": int(state.get("context_revision") or 0),
                     "summary_updated": True,
-                    "summary_quality": summary_quality,
+                    "summary_quality": "degraded" if generated_degraded else summary_quality,
                 }
 
         raise ContextBudgetConfigurationError(
@@ -612,7 +739,12 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                 messages=compacted,
                 revision=next_revision,
             )
-            generated_summary = await self._acreate_summary(summary, compacted, target_tokens)
+            generated_summary, generated_degraded = await self._acreate_summary(
+                summary,
+                compacted,
+                target_tokens,
+                budget,
+            )
             summary, summary_quality = self._fit_summary_to_budget(
                 request,
                 survivors=survivors,
@@ -631,7 +763,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                     "archive_path": archive_path,
                     "previous_revision": int(state.get("context_revision") or 0),
                     "summary_updated": True,
-                    "summary_quality": summary_quality,
+                    "summary_quality": "degraded" if generated_degraded else summary_quality,
                 }
 
         raise ContextBudgetConfigurationError(

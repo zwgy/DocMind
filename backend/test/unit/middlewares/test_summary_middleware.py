@@ -121,7 +121,7 @@ def test_compaction_keeps_tool_call_and_result_in_the_same_archived_turn() -> No
     middleware.wrap_model_call(request, handler)
 
     assert captured["messages"] == [messages[-1]]
-    assert "tool result" in model.prompts[0]
+    assert "tool result" in "\n".join(model.prompts)
 
 
 @pytest.mark.unit
@@ -177,8 +177,9 @@ def test_old_multimodal_content_is_archived_without_entering_summary_prompt(arch
 
     middleware.wrap_model_call(request, lambda _prepared: ModelResponse(result=[AIMessage(content="answer")]))
 
-    assert image_data not in model.prompts[0]
-    assert "Multimodal content is preserved" in model.prompts[0]
+    summary_prompts = "\n".join(model.prompts)
+    assert image_data not in summary_prompts
+    assert "Multimodal content is preserved" in summary_prompts
     assert image_data in archive_backend.writes[0][1]
 
 
