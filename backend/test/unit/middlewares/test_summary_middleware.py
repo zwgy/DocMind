@@ -127,6 +127,26 @@ def test_compaction_keeps_tool_call_and_result_in_the_same_archived_turn() -> No
 
 
 @pytest.mark.unit
+def test_failed_main_call_does_not_commit_compaction_state(archive_backend: _ArchiveBackend) -> None:
+    messages = [
+        HumanMessage(content="old user " + "x" * 2400, id="user-old"),
+        AIMessage(content="old assistant", id="assistant-old"),
+        HumanMessage(content="current user", id="user-current"),
+    ]
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    def failing_handler(_prepared: ModelRequest):
+        raise RuntimeError("primary model failed")
+
+    with pytest.raises(RuntimeError, match="primary model failed"):
+        middleware.wrap_model_call(request, failing_handler)
+
+    # 原始历史可先幂等归档，但异常没有返回 Command，因此 checkpoint 不会提交裁剪或私有摘要状态。
+    assert len(archive_backend.writes) == 1
+
+
+@pytest.mark.unit
 def test_oversized_summary_is_bounded_and_marked_degraded() -> None:
     class OversizedSummaryModel(_SummaryModel):
         def invoke(self, prompt: str):
