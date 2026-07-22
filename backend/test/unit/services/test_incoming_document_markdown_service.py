@@ -67,11 +67,11 @@ async def test_materialize_writes_only_selected_markdown_to_owned_thread(tmp_pat
         {
             "source_file_id": "attachment",
             "filename": "附件.xlsx",
-            "markdown_path": "/home/gem/user-data/uploads/incoming-documents/inc-1/file-row-2.md",
+            "markdown_path": "/home/gem/user-data/outputs/incoming-documents/inc-1/file-row-2.md",
         }
     ]
     host_path = (
-        tmp_path / "threads" / "thread-1" / "user-data" / "uploads" / "incoming-documents" / "inc-1" / "file-row-2.md"
+        tmp_path / "threads" / "thread-1" / "user-data" / "outputs" / "incoming-documents" / "inc-1" / "file-row-2.md"
     )
     assert host_path.read_text(encoding="utf-8") == "# 附件内容"
     assert "minio" not in str(result)

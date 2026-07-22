@@ -232,13 +232,6 @@ async def read_incoming_document(
     document = await incoming_repo.get_by_incoming_id(incoming_id)
     if document is None:
         return f"来文不存在: {incoming_id}"
-    files = await incoming_repo.list_files(incoming_id)
-    extraction = (
-        await DocumentBusinessExtractionRepository().get_latest_by_incoming_id(incoming_id)
-        if document.status == "ready"
-        else None
-    )
-    markdown_files = []
     if include_full_text:
         try:
             uid, thread_id = _runtime_thread_scope(runtime)
@@ -250,6 +243,15 @@ async def read_incoming_document(
             )
         except (IncomingDocumentMarkdownError, ValueError) as exc:
             raise ToolException(f"读取来文原文失败：{exc}") from exc
+        # 原文模式只负责把指定附件交付到会话目录，避免重复返回与文件无关的整套结构化结果。
+        return {"incoming_id": incoming_id, "markdown_files": markdown_files}
+
+    extraction = (
+        await DocumentBusinessExtractionRepository().get_latest_by_incoming_id(incoming_id)
+        if document.status == "ready"
+        else None
+    )
+    files = await incoming_repo.list_files(incoming_id)
 
     return _document_payload(document) | {
         "files": [
@@ -267,7 +269,7 @@ async def read_incoming_document(
         "schema_ids": (extraction or {}).get("schema_ids") or [],
         "classification_labels": document_category_label_mapping(),
         "item_type_labels": _item_type_labels(),
-        "markdown_files": markdown_files,
+        "markdown_files": [],
     }
 
 

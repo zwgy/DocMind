@@ -16,10 +16,11 @@ description: "查询、读取、统计和综合解读已接入系统的来文。
 ## 可用工具
 
 - `search_incoming_documents`：按来文日期、主分类、条目类型、标题、文号或附件名分页查找来文。
-- `read_incoming_document`：读取一份来文的整体结论、附件清单和正式结构化结果；指定附件后可将 Markdown 写入当前会话目录。
+- `read_incoming_document`：`include_full_text=false` 时读取来文整体结论、附件清单和正式结构化结果；`include_full_text=true` 时只将指定附件的 Markdown 写入当前会话目录并返回路径。
 - `get_incoming_document_statistics`：按与查询相同的条件统计来文，并按分类、条目类型和月份聚合。
 - `ask_user_question`：搜索命中多份来文或关键范围不明确时，请用户选择。
 - `read_file`：读取 `read_incoming_document` 返回的 `markdown_path`，用于核验附件原文。
+- `present_artifacts`：把已写入当前线程 outputs 的 Markdown 文件作为交付物展示给用户。
 
 条目类型参数支持内部 ID 或当前中文名称。工具返回的 `item_type_labels` 是当前有效映射；未知类型不要猜测，应依据工具返回的支持列表修正查询。
 
@@ -43,7 +44,7 @@ description: "查询、读取、统计和综合解读已接入系统的来文。
    ```
 
 4. 搜索只命中一份，或用户选定一份后，再使用真实 `incoming_id` 读取详情。命中多份时调用 `ask_user_question`，选项必须来自搜索结果并携带真实 `incoming_id`；不要自行选择。
-5. 只有信息不足、用户要求原文依据、具体附件内容或必须核验细节时，才从附件清单选择真实 `source_file_id`：
+5. 用户要求交付 Markdown 文件，或需要原文依据、具体附件内容、核验细节时，从页面上下文或附件清单选择真实 `source_file_id`。如果页面上下文已经提供真实 `incoming_id` 和 `source_file_id`，直接调用原文模式，不要先重复读取来文详情：
 
    ```text
    read_incoming_document(
@@ -53,7 +54,9 @@ description: "查询、读取、统计和综合解读已接入系统的来文。
    )
    ```
 
-6. 上一步返回 `markdown_path` 后，使用 `read_file` 分段读取。多个附件分别读取，并保留文件名边界。
+6. 上一步返回 `markdown_path` 后：
+   - 用户只要求“转换成 Markdown 文件发我”时，直接调用 `present_artifacts` 交付该路径，不要调用 `read_file` 把全文送入模型上下文。
+   - 用户要求解读、引用或核验原文时，才使用 `read_file` 分段读取；多个附件分别读取，并保留文件名边界。
 
 ### B. 来文检索
 

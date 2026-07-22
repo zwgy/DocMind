@@ -132,6 +132,20 @@ def test_create_summary_middleware_uses_deepagents_with_yuxi_outputs_root() -> N
 
 
 @pytest.mark.unit
+def test_summary_middleware_uses_earlier_model_fraction_trigger() -> None:
+    model = _DummyModel()
+    model.profile = {"max_input_tokens": 32768}
+    middleware = create_summary_middleware(
+        model=model,
+        trigger=[("tokens", 100 * 1024), ("fraction", 0.7)],
+        keep=("messages", 10),
+    )
+
+    assert middleware._should_summarize([], 22_936) is False
+    assert middleware._should_summarize([], 22_937) is True
+
+
+@pytest.mark.unit
 def test_create_summary_middleware_passes_custom_summary_prompt() -> None:
     model = _RecordingModel()
     middleware = create_summary_middleware(

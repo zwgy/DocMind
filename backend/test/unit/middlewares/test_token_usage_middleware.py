@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from langchain.agents.middleware.types import ExtendedModelResponse, ModelResponse
+from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from yuxi.agents.middlewares.token_usage import TokenUsageMiddleware
@@ -57,7 +58,7 @@ async def test_token_usage_middleware_records_request_and_state_tokens() -> None
     assert token_usage["tool_count"] == 1
     assert token_usage["context_window"] == 2000
     assert token_usage["remaining_context_tokens"] == 2000 - token_usage["llm_input_tokens"]
-    assert token_usage["summary_trigger_tokens"] == 2048
+    assert token_usage["summary_trigger_tokens"] == 1400
     assert "summary_keep_tokens" not in token_usage
     assert token_usage["model_usage"] == {"input_tokens": 12, "output_tokens": 5, "total_tokens": 17}
     assert token_usage["estimate"] is True
@@ -89,3 +90,22 @@ async def test_token_usage_middleware_detects_effective_summary_message() -> Non
     assert token_usage["summary_message_tokens"] > 0
     assert token_usage["context_window"] is None
     assert token_usage["context_usage_ratio"] is None
+
+
+@pytest.mark.asyncio
+async def test_token_usage_middleware_turns_empty_length_response_into_context_overflow() -> None:
+    middleware = TokenUsageMiddleware()
+    request = SimpleNamespace(
+        model=SimpleNamespace(profile={"max_input_tokens": 32768}),
+        state={"messages": [HumanMessage(content="读取附件原文")]},
+        messages=[HumanMessage(content="读取附件原文")],
+        system_message=None,
+        tools=[],
+        runtime=SimpleNamespace(context=SimpleNamespace(summary_threshold=100)),
+    )
+
+    async def handler(_request):
+        return ModelResponse(result=[AIMessage(content="", response_metadata={"finish_reason": "length"})])
+
+    with pytest.raises(ContextOverflowError, match="上下文上限"):
+        await middleware.awrap_model_call(request, handler)

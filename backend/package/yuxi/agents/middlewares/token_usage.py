@@ -13,9 +13,12 @@ from langchain.agents.middleware.types import (
     ModelRequest,
     ModelResponse,
 )
+from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.types import Command
+
+from yuxi.agents.context import DEFAULT_SUMMARY_TRIGGER_FRACTION
 
 
 class TokenUsagePayload(TypedDict, total=False):
@@ -67,11 +70,28 @@ def _model_context_window(model: Any) -> int | None:
     return max_input_tokens if isinstance(max_input_tokens, int) and max_input_tokens > 0 else None
 
 
-def _summary_trigger_tokens(runtime_context: Any) -> int | None:
+def _summary_trigger_tokens(runtime_context: Any, context_window: int | None) -> int | None:
     threshold = _safe_int(getattr(runtime_context, "summary_threshold", None))
     if threshold is None or threshold <= 0:
         return None
-    return threshold * 1024
+    configured_tokens = threshold * 1024
+    if context_window:
+        return min(configured_tokens, max(1, int(context_window * DEFAULT_SUMMARY_TRIGGER_FRACTION)))
+    return configured_tokens
+
+
+def _raise_on_empty_length_response(response: ModelResponse) -> None:
+    for message in reversed(response.result):
+        if not isinstance(message, AIMessage):
+            continue
+        if (
+            message.response_metadata.get("finish_reason") == "length"
+            and not message.content
+            and not message.tool_calls
+        ):
+            # OpenAI 兼容服务可能用空响应表示上下文耗尽；转成标准异常后，现有摘要中间件会压缩并重试一次。
+            raise ContextOverflowError("模型在生成可见正文前已达到上下文上限")
+        return
 
 
 def _is_summary_message(message: AnyMessage) -> bool:
@@ -105,6 +125,7 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
         return int(self.token_counter(message_list))
 
     def _build_snapshot(self, request: ModelRequest, response: ModelResponse) -> TokenUsagePayload:
+        _raise_on_empty_length_response(response)
         state_messages = list(request.state.get("messages") or [])
         llm_messages = list(request.messages or [])
         system_messages = [request.system_message] if request.system_message is not None else []
@@ -127,7 +148,10 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
             remaining_context_tokens = max(context_window - llm_input_tokens, 0)
 
         summary_message = llm_messages[0] if llm_messages and _is_summary_message(llm_messages[0]) else None
-        summary_trigger_tokens = _summary_trigger_tokens(getattr(request.runtime, "context", None))
+        summary_trigger_tokens = _summary_trigger_tokens(
+            getattr(request.runtime, "context", None),
+            context_window,
+        )
 
         return {
             "state_message_count": len(next_state_messages),

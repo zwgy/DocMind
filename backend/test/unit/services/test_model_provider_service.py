@@ -30,6 +30,34 @@ def test_normalize_payload_accepts_enabled_chat_model():
     assert payload["enabled_models"][0]["display_name"] == "anthropic/claude-sonnet-4.5"
 
 
+def test_normalize_payload_normalizes_model_context_length():
+    payload = _normalize_payload(
+        {
+            "provider_id": "ollama-local",
+            "display_name": "Ollama Local",
+            "base_url": "http://localhost:11434/v1",
+            "enabled_models": [{"id": "qwen3.6:35b", "type": "chat", "context_length": "32768"}],
+        }
+    )
+
+    assert payload["enabled_models"][0]["context_length"] == 32768
+
+
+@pytest.mark.parametrize("context_length", [0, -1, 1.5, True, "invalid"])
+def test_normalize_payload_rejects_invalid_model_context_length(context_length):
+    with pytest.raises(ValueError, match="context_length 必须是正整数"):
+        _normalize_payload(
+            {
+                "provider_id": "ollama-local",
+                "display_name": "Ollama Local",
+                "base_url": "http://localhost:11434/v1",
+                "enabled_models": [
+                    {"id": "qwen3.6:35b", "type": "chat", "context_length": context_length}
+                ],
+            }
+        )
+
+
 def test_normalize_payload_rejects_unknown_enabled_model_type():
     with pytest.raises(ValueError, match="type 必须是"):
         _normalize_payload(

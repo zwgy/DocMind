@@ -160,7 +160,7 @@ async def test_search_returns_document_summary_without_full_details_or_urls(monk
 
 
 @pytest.mark.asyncio
-async def test_read_returns_all_files_groups_and_selected_markdown_path(monkeypatch):
+async def test_read_full_text_returns_only_selected_markdown_path(monkeypatch):
     class FakeIncomingRepository:
         async def get_by_incoming_id(self, incoming_id):
             assert incoming_id == "inc-1"
@@ -185,19 +185,9 @@ async def test_read_returns_all_files_groups_and_selected_markdown_path(monkeypa
                 ),
             ]
 
-    class FakeExtractionRepository:
+    class UnexpectedExtractionRepository:
         async def get_latest_by_incoming_id(self, incoming_id):
-            assert incoming_id == "inc-1"
-            return {
-                "schema_ids": ["risk_item"],
-                "items": [
-                    {
-                        "item_type": "risk_item",
-                        "data": {"risk_name": "逾期"},
-                        "evidence": [{"source_file_id": "attachment", "quote": "已逾期"}],
-                    }
-                ],
-            }
+            raise AssertionError(f"原文交付不应读取结构化结果: {incoming_id}")
 
     class FakeMarkdownService:
         def __init__(self, repo):
@@ -214,12 +204,12 @@ async def test_read_returns_all_files_groups_and_selected_markdown_path(monkeypa
                 {
                     "source_file_id": "attachment",
                     "filename": "附件.xlsx",
-                    "markdown_path": "/home/gem/user-data/uploads/incoming-documents/inc-1/file-2.md",
+                    "markdown_path": "/home/gem/user-data/outputs/incoming-documents/inc-1/file-2.md",
                 }
             ]
 
     monkeypatch.setattr(tools, "IncomingDocumentRepository", FakeIncomingRepository)
-    monkeypatch.setattr(tools, "DocumentBusinessExtractionRepository", FakeExtractionRepository)
+    monkeypatch.setattr(tools, "DocumentBusinessExtractionRepository", UnexpectedExtractionRepository)
     monkeypatch.setattr(tools, "IncomingDocumentMarkdownService", FakeMarkdownService)
 
     result = await _tool_callable(tools.read_incoming_document)(
@@ -229,9 +219,8 @@ async def test_read_returns_all_files_groups_and_selected_markdown_path(monkeypa
         runtime=SimpleNamespace(context=SimpleNamespace(uid="user-1", thread_id="thread-1")),
     )
 
-    assert len(result["files"]) == 2
-    assert result["result_groups"][0]["item_type_label"] == "风险事项"
-    assert result["result_groups"][0]["details"][0]["evidence"][0]["source_file_id"] == "attachment"
+    assert set(result) == {"incoming_id", "markdown_files"}
+    assert result["incoming_id"] == "inc-1"
     assert result["markdown_files"][0]["markdown_path"].startswith("/home/gem/user-data/")
     assert "reader_tool" not in str(result)
     assert "minio://" not in str(result)

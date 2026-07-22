@@ -1074,6 +1074,51 @@ defineExpose({
         </div>
 
         <div class="form-row">
+          <label class="form-label full-width">
+            <span>上下文长度（Token）</span>
+            <a-input-number
+              v-model:value="editingModel.context_length"
+              class="context-length-input"
+              :min="1"
+              :precision="0"
+              :step="1024"
+              placeholder="例如 32768"
+            />
+            <small class="context-length-help">
+              填写推理服务实际部署上限；远端模型上下文显示“-”时请手动填写。
+            </small>
+          </label>
+        </div>
+        <details class="context-length-guide">
+          <summary>如何填写上下文长度？</summary>
+          <div class="context-length-guide-content">
+            <p>
+              模型架构上限是模型理论能力；推理服务部署上限是当前实例实际可接受的窗口；本系统会在部署上限的
+              70% 或摘要阈值中较早处开始压缩，这就是应用可安全使用的输入范围。
+            </p>
+            <p>此处填写“推理服务部署上限”，单位为 Token，不填写模型宣传的理论上限。</p>
+            <ul>
+              <li>
+                Ollama：先运行 <code>ollama ps</code> 确认模型已加载，再从
+                <code>GET /api/ps</code> 对应模型的 <code>context_length</code> 读取实际值；<code
+                  >ollama show</code
+                >
+                只作模型架构参考。
+              </li>
+              <li>
+                GPUStack：查看部署的后端参数：vLLM 使用 <code>--max-model-len</code>、SGLang 使用
+                <code>--context-length</code>、MindIE 使用 <code>--max-seq-len</code>、llama-box
+                使用 <code>--ctx-size</code>。
+              </li>
+              <li>
+                其他 OpenAI 兼容服务：仅在确认
+                <code>/models</code> 返回值代表实际部署配置时采用；否则按服务部署参数手动填写。
+              </li>
+            </ul>
+          </div>
+        </details>
+
+        <div class="form-row">
           <label class="form-label" v-if="editingModel.type === 'embedding'">
             <span>维度</span>
             <a-input-number v-model:value="editingModel.dimension" :min="1" />
@@ -1426,6 +1471,47 @@ defineExpose({
     color: var(--gray-700);
     font-size: 12px;
     font-weight: 500;
+  }
+}
+
+.context-length-input {
+  width: 100%;
+}
+
+.context-length-help,
+.context-length-guide {
+  color: var(--gray-500);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.context-length-guide {
+  padding: 10px 12px;
+  background: var(--gray-50);
+  border-radius: 6px;
+
+  summary {
+    color: var(--gray-700);
+    font-weight: 500;
+    cursor: pointer;
+  }
+}
+
+.context-length-guide-content {
+  margin-top: 8px;
+
+  p {
+    margin: 0 0 6px;
+  }
+
+  ul {
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  code {
+    font-family: monospace;
+    color: var(--gray-700);
   }
 }
 

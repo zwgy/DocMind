@@ -24,7 +24,12 @@ def _model_info(model_type: str) -> ModelInfo:
     )
 
 
-def _chat_model_info(provider_id: str, model_id: str, provider_type: str = "openai") -> ModelInfo:
+def _chat_model_info(
+    provider_id: str,
+    model_id: str,
+    provider_type: str = "openai",
+    context_length: int | None = None,
+) -> ModelInfo:
     return ModelInfo(
         provider_id=provider_id,
         model_id=model_id,
@@ -33,6 +38,7 @@ def _chat_model_info(provider_id: str, model_id: str, provider_type: str = "open
         api_key="test-key",
         base_url="https://example.com/v1",
         provider_type=provider_type,
+        context_length=context_length,
     )
 
 
@@ -110,9 +116,11 @@ def test_select_model_wraps_langchain_model_and_expands_model_params(monkeypatch
 
     monkeypatch.setattr(
         "yuxi.models.chat.model_cache.get_model_info",
-        lambda spec: _chat_model_info("test-provider", "namespace/chat-model")
-        if spec == "test-provider:namespace/chat-model"
-        else None,
+        lambda spec: (
+            _chat_model_info("test-provider", "namespace/chat-model")
+            if spec == "test-provider:namespace/chat-model"
+            else None
+        ),
     )
 
     def fake_load_chat_model(spec, **kwargs):
@@ -142,9 +150,11 @@ def test_select_model_maps_anthropic_max_completion_tokens(monkeypatch):
 
     monkeypatch.setattr(
         "yuxi.models.chat.model_cache.get_model_info",
-        lambda spec: _chat_model_info("anthropic", "mimo-v2.5", provider_type="anthropic")
-        if spec == "anthropic:mimo-v2.5"
-        else None,
+        lambda spec: (
+            _chat_model_info("anthropic", "mimo-v2.5", provider_type="anthropic")
+            if spec == "anthropic:mimo-v2.5"
+            else None
+        ),
     )
     monkeypatch.setattr(
         "yuxi.models.chat.load_chat_model",
@@ -161,9 +171,11 @@ def test_load_chat_model_uses_toolcall_chunk_fix_for_openai_compatible(monkeypat
 
     monkeypatch.setattr(
         "yuxi.agents.models.model_cache.get_model_info",
-        lambda spec: _chat_model_info("siliconflow-cn", "deepseek-ai/DeepSeek-V4-Flash")
-        if spec == "siliconflow-cn:deepseek-ai/DeepSeek-V4-Flash"
-        else None,
+        lambda spec: (
+            _chat_model_info("siliconflow-cn", "deepseek-ai/DeepSeek-V4-Flash")
+            if spec == "siliconflow-cn:deepseek-ai/DeepSeek-V4-Flash"
+            else None
+        ),
     )
 
     model = load_chat_model("siliconflow-cn:deepseek-ai/DeepSeek-V4-Flash")
@@ -176,15 +188,22 @@ def test_load_chat_model_uses_toolcall_chunk_fix_for_openai_compatible(monkeypat
 def test_load_chat_model_keeps_non_siliconflow_openai_streaming(monkeypatch):
     monkeypatch.setattr(
         "yuxi.agents.models.model_cache.get_model_info",
-        lambda spec: _chat_model_info("openai-compatible", "namespace/chat-model")
-        if spec == "openai-compatible:namespace/chat-model"
-        else None,
+        lambda spec: (
+            _chat_model_info(
+                "openai-compatible",
+                "namespace/chat-model",
+                context_length=32768,
+            )
+            if spec == "openai-compatible:namespace/chat-model"
+            else None
+        ),
     )
 
     model = load_chat_model("openai-compatible:namespace/chat-model")
     explicit = load_chat_model("openai-compatible:namespace/chat-model", disable_streaming=True)
 
     assert model.disable_streaming is False
+    assert model.profile["max_input_tokens"] == 32768
     assert explicit.disable_streaming is True
 
 

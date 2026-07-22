@@ -12,6 +12,7 @@ from yuxi.agents.buildin.subagent.context import SubAgentContext
 from yuxi.agents.context import (
     DEFAULT_SUMMARY_KEEP_MESSAGES,
     DEFAULT_SUMMARY_THRESHOLD_K,
+    DEFAULT_SUMMARY_TRIGGER_FRACTION,
     DEFAULT_SUMMARY_TOOL_RESULT_TOKEN_LIMIT,
     DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS,
     DEFAULT_YUXI_SUMMARY_PROMPT,
@@ -56,7 +57,10 @@ async def _build_middlewares(context):
     model_spec = resolve_chat_model_spec(context.model)
     summary_middleware = create_summary_middleware(
         model=load_chat_model(fully_specified_name=model_spec),
-        trigger=("tokens", summary_trigger_tokens),
+        trigger=[
+            ("tokens", summary_trigger_tokens),
+            ("fraction", DEFAULT_SUMMARY_TRIGGER_FRACTION),
+        ],
         keep=("messages", summary_keep_messages),
         summary_prompt=summary_prompt,
         trim_tokens_to_summarize=4000,
@@ -74,8 +78,8 @@ async def _build_middlewares(context):
         TodoListMiddleware(system_prompt=TODO_MID_PROMPT),
         PatchToolCallsMiddleware(),
         _SubAgentToolFilterMiddleware(),
-        ModelRetryMiddleware(),
         TokenUsageMiddleware(),
+        ModelRetryMiddleware(),
     ]
 
 

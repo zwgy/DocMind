@@ -10,6 +10,7 @@ from yuxi.utils.logging_config import logger
 
 WORKSPACE_AGENTS_PROMPT_MAX_BYTES = 64 * 1024
 DEFAULT_SUMMARY_THRESHOLD_K = 100  # 100K tokens
+DEFAULT_SUMMARY_TRIGGER_FRACTION = 0.7
 DEFAULT_SUMMARY_KEEP_MESSAGES = 10
 DEFAULT_SUMMARY_TOOL_RESULT_TOKEN_LIMIT = 500
 DEFAULT_MAX_EXECUTION_STEPS = 300
@@ -226,7 +227,7 @@ class BaseContext:
         metadata={
             "name": "上下文摘要触发阈值 (K)",
             "description": (
-                f"当上下文大小超过该值时，启用摘要功能以优化上下文使用。单位为 K，默认值为 "
+                f"当上下文超过该绝对阈值或模型窗口的 70% 时启用摘要，以较早者为准。单位为 K，默认值为 "
                 f"{DEFAULT_SUMMARY_THRESHOLD_K}K。"
             ),
             "type": "number",

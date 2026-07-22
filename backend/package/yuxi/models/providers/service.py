@@ -59,6 +59,20 @@ def _normalize_model_item(model: dict[str, Any]) -> dict[str, Any]:
     normalized["display_name"] = str(model.get("display_name") or model.get("name") or model_id)
     normalized["extra"] = _normalize_dict(model.get("extra"))
 
+    context_length = model.get("context_length")
+    if context_length not in (None, ""):
+        if isinstance(context_length, bool) or (
+            isinstance(context_length, float) and not context_length.is_integer()
+        ):
+            raise ValueError(f"模型 {model_id} 的 context_length 必须是正整数")
+        try:
+            context_length = int(context_length)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"模型 {model_id} 的 context_length 必须是正整数") from exc
+        if context_length <= 0:
+            raise ValueError(f"模型 {model_id} 的 context_length 必须是正整数")
+        normalized["context_length"] = context_length
+
     if model_type == "embedding":
         dimension = model.get("dimension")
         if dimension not in (None, ""):

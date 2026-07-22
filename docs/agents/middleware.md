@@ -70,12 +70,12 @@
 
 | 字段 | 说明 |
 | --- | --- |
-| `summary_threshold` | 上下文超过该 K token 阈值后触发摘要 |
+| `summary_threshold` | 上下文超过该 K token 绝对阈值后触发摘要；模型窗口达到 70% 时会更早触发 |
 | `summary_keep_messages` | 摘要后保留最近消息数 |
 | `summary_prompt` | 摘要模型使用的提示词 |
 | `summary_tool_result_token_limit` | 被摘要历史中工具结果的预览 token 上限 |
 
-触发判断使用 Yuxi 自己的近似 token 计算结果，不使用模型返回的 `usage_metadata.total_tokens` 作为触发依据，避免 provider 的计费口径、累计口径或异常上报导致短对话过早压缩。
+模型缓存中的 `context_length` 会写入 LangChain model profile。触发判断使用 Yuxi 自己对系统提示词、消息和工具定义的近似 token 计算结果，并取绝对阈值与模型窗口 70% 中较早者；不使用模型返回的 `usage_metadata.total_tokens` 作为触发依据，避免 provider 的计费口径、累计口径或异常上报导致短对话过早压缩。OpenAI 兼容服务若返回空正文且 `finish_reason=length`，会转换为标准上下文溢出异常，由现有 Summary 链路压缩并重试一次。
 
 触发后，中间件会把较早的消息压缩成一条 summary message，并保留最近窗口内的原始消息。对被摘要掉的历史工具结果，它不会把完整 `ToolMessage.content` 直接送进 summary prompt，而是先写入当前 Agent 可见的 `outputs/large_tool_results`，再用工具名、近似 token 数、完整结果路径和有限预览替换工具结果内容。
 

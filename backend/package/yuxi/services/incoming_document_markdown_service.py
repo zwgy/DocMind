@@ -5,7 +5,7 @@ from pathlib import Path
 from minio.error import MinioException
 from urllib3.exceptions import HTTPError
 
-from yuxi.agents.backends.sandbox import ensure_thread_dirs, sandbox_uploads_dir, virtual_path_for_thread_file
+from yuxi.agents.backends.sandbox import ensure_thread_dirs, sandbox_outputs_dir, virtual_path_for_thread_file
 from yuxi.knowledge.utils import parse_minio_url
 from yuxi.repositories.conversation_repository import ConversationRepository
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
@@ -62,7 +62,7 @@ class IncomingDocumentMarkdownService:
             raise ValueError(f"来文附件不存在: {', '.join(missing)}")
 
         ensure_thread_dirs(thread_id, uid)
-        target_dir = sandbox_uploads_dir(thread_id) / "incoming-documents" / document.incoming_id
+        target_dir = sandbox_outputs_dir(thread_id) / "incoming-documents" / document.incoming_id
         target_dir.mkdir(parents=True, exist_ok=True)
         result = []
         for source_file_id in normalized_file_ids:

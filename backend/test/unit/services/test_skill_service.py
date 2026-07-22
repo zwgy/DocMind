@@ -304,6 +304,7 @@ def test_incoming_document_builtin_skill_spec():
         "read_incoming_document",
         "get_incoming_document_statistics",
         "ask_user_question",
+        "present_artifacts",
     ]
     assert (incoming_document["source_dir"] / "SKILL.md").exists()
 

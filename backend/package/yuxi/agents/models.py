@@ -67,31 +67,40 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
 
     api_key = info.api_key
     base_url = get_docker_safe_url(info.base_url)
+    try:
+        context_length = int(info.context_length) if info.context_length else None
+    except (TypeError, ValueError):
+        context_length = None
 
     logger.debug(f"Loading model {fully_specified_name} with provider_type={info.provider_type}")
 
     if info.provider_type == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
-        return ChatAnthropic(
+        model = ChatAnthropic(
             model=info.model_id,
             api_key=SecretStr(api_key),
             base_url=base_url,
             **kwargs,
         )
-    if info.provider_type == "gemini":
+    elif info.provider_type == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        return ChatGoogleGenerativeAI(
+        model = ChatGoogleGenerativeAI(
             model=info.model_id,
             google_api_key=SecretStr(api_key),
             **kwargs,
         )
+    else:
+        model = _ToolCallChunkFixChatOpenAI(
+            model=info.model_id,
+            api_key=SecretStr(api_key),
+            base_url=base_url,
+            stream_usage=True,
+            **kwargs,
+        )
 
-    return _ToolCallChunkFixChatOpenAI(
-        model=info.model_id,
-        api_key=SecretStr(api_key),
-        base_url=base_url,
-        stream_usage=True,
-        **kwargs,
-    )
+    if context_length and context_length > 0:
+        # 保留供应商自动识别的能力字段，只用本地模型缓存补齐真实上下文窗口。
+        model.profile = dict(model.profile or {}) | {"max_input_tokens": context_length}
+    return model
