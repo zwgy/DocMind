@@ -157,6 +157,8 @@ services:
       args:
         NODE_ALPINE_IMAGE: ${NODE_ALPINE_IMAGE:-node:24-alpine}
         NGINX_ALPINE_IMAGE: ${NGINX_ALPINE_IMAGE:-nginx:alpine}
+        VITE_MINIO_CONSOLE_URL: ${VITE_MINIO_CONSOLE_URL:-http://localhost:9001}
+        VITE_MILVUS_WEBUI_URL: ${VITE_MILVUS_WEBUI_URL:-http://localhost:9091/webui/}
     image: yuxi-web:${YUXI_VERSION:-0.7.1.dev0}
     container_name: web-prod
     ports:

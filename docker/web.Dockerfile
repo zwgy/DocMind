@@ -30,6 +30,12 @@ EXPOSE 5173
 FROM ${NODE_ALPINE_IMAGE} AS build-stage
 WORKDIR /app
 
+# Vite 只在构建时读取前端变量；静态镜像不能依赖容器启动后的 environment 注入。
+ARG VITE_MINIO_CONSOLE_URL
+ARG VITE_MILVUS_WEBUI_URL
+ENV VITE_MINIO_CONSOLE_URL=${VITE_MINIO_CONSOLE_URL}
+ENV VITE_MILVUS_WEBUI_URL=${VITE_MILVUS_WEBUI_URL}
+
 # 安装 pnpm
 RUN npm install -g pnpm@latest
 

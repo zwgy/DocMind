@@ -215,4 +215,4 @@ Write-Host ""
 Write-Host "🎉 Initialization complete!" -ForegroundColor Green
 Write-Host "==========================" -ForegroundColor Green
 Write-Host "You can now run: .\scripts\manage.ps1 dev deploy" -ForegroundColor Cyan
-Write-Host "This will start all services in development mode with hot-reload enabled." -ForegroundColor Cyan
+Write-Host "Backend hot-reload is enabled; frontend services use stable static builds." -ForegroundColor Cyan

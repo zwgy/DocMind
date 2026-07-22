@@ -70,7 +70,6 @@ def test_node_images_share_version_24_and_keep_required_os_variants():
     api = (ROOT / "docker" / "api.Dockerfile").read_text(encoding="utf-8")
     web = (ROOT / "docker" / "web.Dockerfile").read_text(encoding="utf-8")
     iframe = (ROOT / "docker" / "chat-iframe.Dockerfile").read_text(encoding="utf-8")
-    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
     assert "node:24-slim" in api
     assert "node:24-alpine" in web
@@ -78,5 +77,22 @@ def test_node_images_share_version_24_and_keep_required_os_variants():
     assert "node:20-alpine" not in iframe
     assert "pnpm@10.11.0 --registry=https://registry.npmmirror.com" in iframe
     assert "corepack pnpm" not in iframe
-    assert "command: pnpm exec vite --host 0.0.0.0 --port 5174" in compose
-    assert "command: corepack pnpm exec vite --host 0.0.0.0 --port 5174" not in compose
+
+
+def test_frontend_compose_uses_static_runtime_without_hmr():
+    """业务联调页面必须走静态服务，避免 HMR 断线后自动整页刷新。"""
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    production = (ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
+    iframe = (ROOT / "docker" / "chat-iframe.Dockerfile").read_text(encoding="utf-8")
+
+    assert compose.count("target: production") >= 2
+    assert '- "5173:80"' in compose
+    assert '- "${CHAT_IFRAME_DEV_HOST_PORT:-5174}:80"' in compose
+    assert "pnpm run server" not in compose
+    assert "pnpm exec vite --host" not in compose
+    assert "./chat-iframe/public/example.html:/usr/share/nginx/html/chat-iframe/example.html:ro" in compose
+    assert "FROM ${NGINX_ALPINE_IMAGE} AS production" in iframe
+    assert "ARG VITE_MINIO_CONSOLE_URL" in (ROOT / "docker" / "web.Dockerfile").read_text(encoding="utf-8")
+    assert "VITE_MINIO_CONSOLE_URL:" in compose
+    assert "VITE_MINIO_CONSOLE_URL:" in production
+    assert production.count("target: production") >= 2

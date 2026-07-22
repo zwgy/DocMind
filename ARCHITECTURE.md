@@ -8,7 +8,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 
 开发与运行拓扑以 `docker-compose.yml` 为准。核心开发服务包括：
 
-- `web-dev`：Vue/Vite 前端，挂载 `web/src` 并热重载。
+- `web-dev`、`chat-iframe-dev`：由 Vite 构建、Nginx 托管的静态前端；开发联调不加载 HMR 客户端，前端修改后重建对应服务。
 - `api-dev`：FastAPI API 服务，挂载 `backend/server` 和 `backend/package` 并热重载。
 - `worker-dev`：ARQ 后台任务 worker，处理智能体运行等异步任务。
 - `sandbox-provisioner`：为智能体工具执行提供沙盒环境。
@@ -62,7 +62,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 
 ## 架构不变量
 
-- Docker Compose 是开发环境的事实来源。开发时优先检查容器、日志和热重载，不要默认要求本地裸跑服务。
+- Docker Compose 是开发环境的事实来源。开发时优先检查容器和日志；后端依靠挂载源码热重载，前端依靠重建静态镜像更新，不要默认要求本地裸跑服务。
 - HTTP 路由层应保持薄；领域流程放在 `yuxi.services`，持久化查询放在 `yuxi.repositories`。
 - 前端 API 调用应集中在 `web/src/apis`，组件不要散落拼接后端 URL。
 - 智能体能力通过 context、middleware、toolkits、backends 组合；知识库通过工具访问，不要把知识库、MCP、Skills 或沙盒逻辑硬编码进单个页面或路由。

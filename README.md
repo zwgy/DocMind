@@ -85,7 +85,7 @@ bash scripts/manage.sh dev deploy
 
 **3. 访问平台**
 
-管理脚本会先校验 Compose 配置，再构建镜像并后台启动服务。等待启动完成后，浏览器打开 `http://localhost:5173`，使用初始化时生成的管理员账户登录即可。嵌入式助手开发服务位于 `http://localhost:5174/chat-iframe/`。
+管理脚本会先校验 Compose 配置，再构建镜像并后台启动服务。等待启动完成后，浏览器打开 `http://localhost:5173`，使用初始化时生成的管理员账户登录即可。嵌入式助手开发服务位于 `http://localhost:5174/chat-iframe/`。两个前端开发服务均使用稳定的 Nginx 静态资源；修改前端代码后执行 `docker compose up -d --build web chat-iframe` 更新对应镜像。
 
 > 💡 不需要知识库 / 知识图谱等重依赖时，可使用 `make up-lite` 以 LITE 轻量模式启动，加快冷启动速度。更多部署说明见 [项目文档](https://xerrors.github.io/Yuxi)。
 

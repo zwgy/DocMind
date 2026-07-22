@@ -1,7 +1,7 @@
 
 # 项目目录结构 (Project Overview)
 
-Yuxi 是一个基于大模型的智能知识库与知识图谱智能体开发平台，融合了 RAG 技术与知识图谱技术，基于 LangGraph v1 + Vue.js + FastAPI + LightRAG 架构构建。项目完全通过 Docker Compose 进行管理，支持热重载开发。
+Yuxi 是一个基于大模型的智能知识库与知识图谱智能体开发平台，融合了 RAG 技术与知识图谱技术，基于 LangGraph v1 + Vue.js + FastAPI + LightRAG 架构构建。项目完全通过 Docker Compose 进行管理；后端支持热重载，前端默认使用稳定的静态构建进行联调。
 
 架构代码地图见 [ARCHITECTURE.md](ARCHITECTURE.md)。修改不熟悉的模块前，先阅读其中的后端、前端、运行链路和架构不变量说明，再用符号搜索定位具体实现；该文档只维护相对稳定的系统边界，不替代细节文档或源码注释。
 
@@ -97,7 +97,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 **核心原则**:
 
-1. 由于 api-dev 和 web-dev 服务均配置了热重载 (hot-reloading)，本地修改代码后无需重启容器，服务会自动更新。应该先检查项目是否已经在后台启动（`docker ps`），查看日志（`docker logs api-dev --tail 100`）具体的可以阅读 [docker-compose.yml](docker-compose.yml).
+1. `api-dev` 和 `worker-dev` 挂载后端源码并支持热重载；`web-dev` 与 `chat-iframe-dev` 默认运行 Vite 构建后的 Nginx 静态资源，避免 HMR 连接抖动刷新业务页面。修改前端后使用 `docker compose up -d --build web chat-iframe` 重建受影响服务。开始调试前先检查 `docker ps` 和相关容器日志，具体定义见 [docker-compose.yml](docker-compose.yml)。
 2. 开发完成之后必须进行 检查 -> 测试 -> Lint，以及端到端测试，测试脚本不完善时应完善脚本。
 3. 测试规范务必遵守 [testing-guidelines.md](docs/develop-guides/testing-guidelines.md) 中的规范，测试脚本务必放在 backend/test 目录下，并且在提交前确保测试通过。
 4. 非常重要！千万不要使用过度的防御/回退机制来掩盖设计上的缺陷，良好的软件应该在预设的条件下运行，其余情况均应该及时发现问题/错误并修复，而不是通过增加冗余代码来掩盖问题。

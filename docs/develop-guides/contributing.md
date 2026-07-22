@@ -42,7 +42,7 @@ docker ps
 docker logs api-dev --tail 100
 ```
 
-`api-dev` 和 `web-dev` 默认支持热重载。通常情况下，本地修改代码后不需要重启容器。
+`api-dev` 和 `worker-dev` 默认支持后端热重载。`web-dev` 与 `chat-iframe-dev` 使用静态 Nginx 运行，修改前端代码后执行 `docker compose up -d --build web chat-iframe` 重建受影响服务；这可避免 Vite HMR 断线刷新正在联调的业务页面。
 
 如需进一步了解服务定义，可查看 [docker-compose.yml](../../docker-compose.yml)。
 
