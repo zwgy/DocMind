@@ -43,6 +43,20 @@ def test_normalize_payload_normalizes_model_context_length():
     assert payload["enabled_models"][0]["context_length"] == 32768
 
 
+@pytest.mark.parametrize("model_type", ["embedding", "rerank"])
+def test_normalize_payload_removes_context_length_from_non_chat_models(model_type):
+    payload = _normalize_payload(
+        {
+            "provider_id": "local-models",
+            "display_name": "Local Models",
+            "base_url": "http://localhost:11434/v1",
+            "enabled_models": [{"id": "test-model", "type": model_type, "context_length": 32768}],
+        }
+    )
+
+    assert "context_length" not in payload["enabled_models"][0]
+
+
 @pytest.mark.parametrize("context_length", [0, -1, 1.5, True, "invalid"])
 def test_normalize_payload_rejects_invalid_model_context_length(context_length):
     with pytest.raises(ValueError, match="context_length 必须是正整数"):

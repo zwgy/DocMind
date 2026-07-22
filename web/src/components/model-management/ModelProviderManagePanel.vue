@@ -1073,7 +1073,7 @@ defineExpose({
           </label>
         </div>
 
-        <div class="form-row">
+        <div class="form-row" v-if="editingModel.type === 'chat'">
           <label class="form-label full-width">
             <span>上下文长度（Token）</span>
             <a-input-number
@@ -1089,7 +1089,7 @@ defineExpose({
             </small>
           </label>
         </div>
-        <details class="context-length-guide">
+        <details v-if="editingModel.type === 'chat'" class="context-length-guide">
           <summary>如何填写上下文长度？</summary>
           <div class="context-length-guide-content">
             <p>

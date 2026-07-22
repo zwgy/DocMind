@@ -59,7 +59,8 @@ def _normalize_model_item(model: dict[str, Any]) -> dict[str, Any]:
     normalized["display_name"] = str(model.get("display_name") or model.get("name") or model_id)
     normalized["extra"] = _normalize_dict(model.get("extra"))
 
-    context_length = model.get("context_length")
+    # 仅 Chat 模型会将此值传给 Agent 的上下文压缩逻辑
+    context_length = model.get("context_length") if model_type == "chat" else None
     if context_length not in (None, ""):
         if isinstance(context_length, bool) or (
             isinstance(context_length, float) and not context_length.is_integer()
