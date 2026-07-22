@@ -161,7 +161,9 @@ def test_oversized_summary_is_bounded_and_marked_degraded() -> None:
 
 
 @pytest.mark.unit
-def test_summary_rechecks_segment_after_previous_batch_expands() -> None:
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_summary_rechecks_segment_after_previous_batch_expands(asynchronous: bool) -> None:
     class BudgetBoundedSummaryModel(_SummaryModel):
         def invoke(self, prompt: str):
             self.prompts.append(prompt)
@@ -173,12 +175,16 @@ def test_summary_rechecks_segment_after_previous_batch_expands() -> None:
     request = request.override(model=model)
     middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
 
-    summary, degraded = middleware._create_summary(
+    arguments = (
         "",
         [HumanMessage(content="a" * 800), HumanMessage(content="b" * 800)],
-        target_tokens=200,
-        budget=resolve_context_budget(request),
+        200,
+        resolve_context_budget(request),
     )
+    if asynchronous:
+        summary, degraded = await middleware._acreate_summary(*arguments)
+    else:
+        summary, degraded = middleware._create_summary(*arguments)
 
     assert summary
     assert degraded
