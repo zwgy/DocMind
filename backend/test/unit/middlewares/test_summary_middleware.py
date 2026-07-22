@@ -159,6 +159,29 @@ def test_oversized_summary_is_bounded_and_marked_degraded() -> None:
 
 
 @pytest.mark.unit
+def test_thousand_turn_history_commits_a_bounded_checkpoint(archive_backend: _ArchiveBackend) -> None:
+    messages = [
+        message
+        for turn in range(1_000)
+        for message in (
+            HumanMessage(content=f"question {turn}", id=f"user-{turn}"),
+            AIMessage(content=f"answer {turn}", id=f"assistant-{turn}"),
+        )
+    ]
+    messages.append(HumanMessage(content="current question", id="current-user"))
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    result = middleware.wrap_model_call(request, lambda _prepared: ModelResponse(result=[AIMessage(content="answer")]))
+
+    update = result.command.update
+    assert len(update["messages"].value) < 100
+    assert update["context_compacted_through"] != ""
+    assert update["context_archive_path"].endswith(".jsonl")
+    assert len(archive_backend.writes[0][1].splitlines()) > 1_000
+
+
+@pytest.mark.unit
 def test_old_multimodal_content_is_archived_without_entering_summary_prompt(archive_backend: _ArchiveBackend) -> None:
     image_data = "base64-image-data" * 1_000
     messages = [
