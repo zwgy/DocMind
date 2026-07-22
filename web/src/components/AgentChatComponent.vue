@@ -1108,9 +1108,6 @@ const tokenUsageStackTotal = computed(() => {
     .reduce((sum, segment) => sum + segment.value, 0)
 })
 const tokenUsageStackLimit = computed(() => {
-  const summaryTriggerTokens = toFiniteNumber(currentTokenUsage.value?.summary_trigger_tokens)
-  if (summaryTriggerTokens && summaryTriggerTokens > 0) return summaryTriggerTokens
-
   const contextWindow = toFiniteNumber(currentTokenUsage.value?.context_window)
   if (contextWindow && contextWindow > 0) return contextWindow
 
@@ -1123,9 +1120,9 @@ const tokenUsageHeaderPercentLabel = computed(() => {
   return `${Math.round(percent)}%`
 })
 const tokenUsageStackHeadLabel = computed(() => {
-  const summaryTriggerTokens = toFiniteNumber(currentTokenUsage.value?.summary_trigger_tokens)
-  if (summaryTriggerTokens && summaryTriggerTokens > 0) {
-    return `${formatTokenCount(tokenUsageStackTotal.value)} / ${formatTokenCount(summaryTriggerTokens)} Token`
+  const contextWindow = toFiniteNumber(currentTokenUsage.value?.context_window)
+  if (contextWindow && contextWindow > 0) {
+    return `${formatTokenCount(tokenUsageStackTotal.value)} / ${formatTokenCount(contextWindow)} Token`
   }
   return `${formatTokenCount(tokenUsageStackTotal.value)} Token`
 })
@@ -1153,6 +1150,13 @@ const tokenUsageMetaRows = computed(() => {
       key: 'context',
       label: '窗口/剩余',
       value: `${formatTokenCount(usage.context_window)} / ${formatTokenCount(usage.remaining_context_tokens)}`
+    })
+  }
+  if (toFiniteNumber(usage.summary_trigger_tokens)) {
+    rows.push({
+      key: 'summary-trigger',
+      label: '自动摘要阈值（估算）',
+      value: formatTokenCount(usage.summary_trigger_tokens)
     })
   }
   return rows

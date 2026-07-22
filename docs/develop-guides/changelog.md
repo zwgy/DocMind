@@ -7,6 +7,7 @@
 ## v0.7.1 (current)
 
 ### 开发记录
+- 修复聊天上下文用量展示：进度条统一以模型真实窗口为上限，自动摘要阈值改为独立的“估算”提示；chat-iframe 的用户消息和助手消息复制统一在 Clipboard API 被 HTTP 嵌入页拒绝时降级到原生复制，且仅在实际成功后显示完成状态。
 - 修复 Web 与 chat-iframe 在开发联调时因 Vite HMR WebSocket 短暂失联而整页刷新、丢失内存状态的问题：连接诊断日志确认触发链路后，默认开发 Compose 改为与正式环境共用 Vite 静态构建加 Nginx 托管；chat-iframe 仅在开发 Compose 中只读挂载示例和测试附件，生产镜像继续清理调试资源。前端改动需重建对应服务，后端热重载保持不变。
 - 修复工具元数据加载会错误读取原始 `args_schema` 的问题：展示参数改为使用 LangChain 已排除框架注入参数的 `tool_call_schema`，兼容 Pydantic v1/v2 模型及原生 JSON Schema，避免来文读取工具的 `ToolRuntime` 中 `Callable` 字段中断智能助手对话。
 - 修复本地 32K 模型在多次工具调用后空白结束的问题：模型缓存的 `context_length` 会写入 LangChain profile，主 Agent 与子 Agent 在管理员绝对阈值或模型窗口 70% 中较早者触发摘要；OpenAI 兼容服务返回空正文且 `finish_reason=length` 时转为标准上下文溢出并复用现有压缩重试。来文原文模式不再重复返回整套结构化结果，已知来文与附件 ID 时直接将 Markdown 写入当前线程 outputs，并由 `present_artifacts` 交付，不再为单纯文件交付把全文读入模型上下文。

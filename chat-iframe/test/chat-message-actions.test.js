@@ -3,10 +3,12 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const source = readFileSync(new URL('../src/components/ChatMessages.vue', import.meta.url), 'utf8')
+const refsSource = readFileSync(new URL('../src/components/MessageRefs.vue', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/assets/css/app.css', import.meta.url), 'utf8')
 
 test('user message actions keep copy, image preview and attachment state visible', () => {
-  assert.match(source, /navigator\.clipboard\?\.writeText\(message\.content\)/)
+  assert.match(source, /copyToClipboard\(message\.content\)/)
+  assert.match(refsSource, /copyToClipboard\(text\)/)
   assert.match(source, /window\.addEventListener\('keydown', closeImagePreviewOnEscape\)/)
   assert.match(source, /event\.key === 'Escape'/)
   assert.match(source, /role="dialog" aria-modal="true" aria-label="图片预览"/)

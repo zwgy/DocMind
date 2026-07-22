@@ -132,11 +132,12 @@ function formatTokenCount(value: number) {
 const contextUsage = computed(() => {
   const usage = props.tokenUsage
   if (!usage) return null
-  const used = reportedInputTokens(usage) ?? tokenNumber(usage.llm_input_tokens)
+  const reportedTokens = reportedInputTokens(usage)
+  const used = reportedTokens ?? tokenNumber(usage.llm_input_tokens)
   if (used === null) return null
   const summaryTrigger = tokenNumber(usage.summary_trigger_tokens)
   const contextWindow = tokenNumber(usage.context_window)
-  const limit = summaryTrigger || contextWindow || Math.max(used, 1)
+  const limit = contextWindow || Math.max(used, 1)
   const summaryTokens = usage.summary_active ? tokenNumber(usage.summary_message_tokens) || 0 : 0
   const llmMessageTokens = tokenNumber(usage.llm_messages_tokens) || 0
   const messageCount = Math.max((tokenNumber(usage.llm_message_count) || 0) - (usage.summary_active ? 1 : 0), 0)
@@ -152,9 +153,10 @@ const contextUsage = computed(() => {
   return {
     used,
     limit,
-    percent: Math.min(Math.round((used / limit) * 100), 100),
-    limitLabel: summaryTrigger ? '摘要阈值' : contextWindow ? '模型窗口' : '本次输入',
-    remaining: summaryTrigger || contextWindow ? Math.max(limit - used, 0) : null,
+    percent: contextWindow ? Math.min(Math.round((used / limit) * 100), 100) : null,
+    sourceLabel: reportedTokens === null ? '估算' : '模型服务报告',
+    remaining: contextWindow ? Math.max(limit - used, 0) : null,
+    summaryTrigger,
     segments: segments
       .map((segment) => {
         const value = Math.min(segment.value, Math.max(available, 0))
@@ -442,7 +444,7 @@ watch(text, resizeTextarea)
             <button
               type="button"
               class="context-usage-button"
-              :class="{ warning: contextUsage.percent >= 80 }"
+              :class="{ warning: contextUsage.percent !== null && contextUsage.percent >= 80 }"
               :aria-expanded="showContextUsage"
               title="查看本次模型调用的上下文用量"
               @click="showContextUsage = !showContextUsage"
@@ -451,14 +453,17 @@ watch(text, resizeTextarea)
             </button>
             <section v-if="showContextUsage" class="context-usage-popover" aria-label="上下文用量">
               <strong>上下文用量</strong>
-              <span>{{ formatTokenCount(contextUsage.used) }} / {{ formatTokenCount(contextUsage.limit) }} Token（{{ contextUsage.percent }}%）</span>
+              <span>
+                {{ formatTokenCount(contextUsage.used) }}<template v-if="contextUsage.remaining !== null"> / {{ formatTokenCount(contextUsage.limit) }} Token（{{ contextUsage.percent }}%）</template><template v-else> Token</template>
+              </span>
               <div class="context-usage-bar" aria-label="上下文 Token 构成">
                 <i v-for="segment in contextUsage.segments" :key="segment.key" :class="`is-${segment.key}`" :style="{ width: segment.percent }"></i>
               </div>
               <div class="context-usage-legend">
                 <span v-for="segment in contextUsage.segments" :key="segment.key"><i :class="`is-${segment.key}`"></i>{{ segment.label }}<template v-if="segment.messageCount"> ({{ segment.messageCount }})</template> {{ formatTokenCount(segment.value) }}</span>
               </div>
-              <small>{{ contextUsage.limitLabel }}{{ contextUsage.remaining === null ? '' : ` · 剩余 ${formatTokenCount(contextUsage.remaining)}` }}</small>
+              <small>{{ contextUsage.sourceLabel }}{{ contextUsage.remaining === null ? '' : ` · 模型窗口剩余 ${formatTokenCount(contextUsage.remaining)}` }}</small>
+              <small v-if="contextUsage.summaryTrigger">自动摘要阈值（估算）· {{ formatTokenCount(contextUsage.summaryTrigger) }}</small>
             </section>
           </div>
           <div ref="modelMenuRef" class="model-menu-wrapper">

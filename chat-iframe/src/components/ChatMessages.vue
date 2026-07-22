@@ -14,6 +14,7 @@ import {
 } from '@/utils/context-summary'
 import { groupMessageDisplayItems } from '@/utils/message-display'
 import { extractFinalAnswerSources } from '@/utils/tool-calls'
+import { copyToClipboard } from '@/utils/clipboard'
 
 const props = withDefaults(
   defineProps<{
@@ -94,7 +95,7 @@ function isImageAttachment(type?: string) {
 }
 
 async function copyUserMessage(message: ChatMessage) {
-  await navigator.clipboard?.writeText(message.content)
+  if (!(await copyToClipboard(message.content))) return
   copiedUserMessageId.value = message.id
   window.setTimeout(() => {
     if (copiedUserMessageId.value === message.id) copiedUserMessageId.value = ''

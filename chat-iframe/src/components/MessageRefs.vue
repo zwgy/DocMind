@@ -3,6 +3,7 @@ import { BookOpen, Check, ChevronDown, Copy, ThumbsDown, ThumbsUp } from 'lucide
 import { computed, nextTick, ref } from 'vue'
 import type { ChatMessage } from '@/types'
 import KbResultGroupedList from '@/components/KbResultGroupedList.vue'
+import { copyToClipboard } from '@/utils/clipboard'
 import type { ChatSources } from '@/utils/tool-calls'
 
 const props = withDefaults(defineProps<{ message: ChatMessage; sources?: ChatSources }>(), {
@@ -22,7 +23,7 @@ const feedbackLocked = computed(() => Boolean(props.message.feedback || props.me
 const sourceCount = computed(() => props.sources.knowledgeChunks.length + props.sources.webSources.length)
 
 async function copyText(text: string) {
-  await navigator.clipboard?.writeText(text)
+  if (!(await copyToClipboard(text))) return
   copied.value = true
   window.setTimeout(() => {
     copied.value = false
