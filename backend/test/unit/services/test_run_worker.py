@@ -114,6 +114,33 @@ async def test_checkpoint_advisory_lock_holds_dedicated_connection_until_stream_
 
 
 @pytest.mark.asyncio
+async def test_busy_checkpoint_lock_does_not_start_agent_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    run_obj = _build_run()
+    _patch_common(monkeypatch, run_obj)
+
+    @asynccontextmanager
+    async def busy_lock(_db, checkpoint_thread_id: str):
+        assert checkpoint_thread_id == "thread-1"
+        raise run_worker.RetryableRunError("checkpoint thread is busy")
+        yield
+
+    async def fake_noop(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(run_worker, "_checkpoint_advisory_lock", busy_lock)
+    monkeypatch.setattr(run_worker, "append_run_event", fake_noop)
+    monkeypatch.setattr(run_worker, "mark_run_terminal", fake_noop)
+    monkeypatch.setattr(
+        run_worker,
+        "stream_agent_chat",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("busy lock must prevent agent execution")),
+    )
+
+    with pytest.raises(run_worker.RetryableRunError, match="checkpoint thread is busy"):
+        await run_worker.process_agent_run({"job_try": 1}, "run-1")
+
+
+@pytest.mark.asyncio
 async def test_process_agent_run_non_retryable_error_marks_failed(monkeypatch: pytest.MonkeyPatch):
     run_obj = _build_run()
     _patch_common(monkeypatch, run_obj)

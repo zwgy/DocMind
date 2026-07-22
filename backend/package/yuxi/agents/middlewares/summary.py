@@ -36,6 +36,7 @@ from yuxi.agents.backends.composite import (
     create_agent_composite_backend,
     write_text_idempotently,
 )
+from yuxi.utils.logging_config import logger
 from yuxi.utils.paths import VIRTUAL_PATH_CONVERSATION_HISTORY
 
 _SOURCE_WINDOW_TOOL_NAMES = frozenset({"read_file", "open_kb_document"})
@@ -677,14 +678,31 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                 messages=compacted,
                 revision=next_revision,
             )
-            generated_summary, generated_degraded = self._create_summary(summary, compacted, target_tokens, budget)
-            summary, summary_quality = self._fit_summary_to_budget(
-                request,
-                survivors=survivors,
-                prefix=_archive_summary_prefix(archive_path),
-                generated=generated_summary,
-                budget=budget,
-            )
+            archive_prefix = _archive_summary_prefix(archive_path)
+            try:
+                generated_summary, generated_degraded = self._create_summary(summary, compacted, target_tokens, budget)
+                summary, summary_quality = self._fit_summary_to_budget(
+                    request,
+                    survivors=survivors,
+                    prefix=archive_prefix,
+                    generated=generated_summary,
+                    budget=budget,
+                )
+            except ContextBudgetConfigurationError:
+                raise
+            except Exception:
+                # 归档已成功且前缀本身通过预算计算；摘要模型不可用时保留旧摘要的可容纳部分，
+                # 使主模型仍可借助归档索引继续，而不是把一次压缩失败扩大成整轮对话失败。
+                logger.exception("摘要模型失败，改用归档回执继续本次对话")
+                summary, _ = self._fit_summary_to_budget(
+                    request,
+                    survivors=survivors,
+                    prefix=archive_prefix,
+                    generated=summary,
+                    budget=budget,
+                )
+                generated_degraded = True
+                summary_quality = "degraded"
             prepared = self._request_with_summary(request, messages=survivors, summary=summary)
             if self._request_tokens(prepared) <= budget.prompt_budget:
                 last_compacted = compacted[-1]
@@ -745,19 +763,35 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                 messages=compacted,
                 revision=next_revision,
             )
-            generated_summary, generated_degraded = await self._acreate_summary(
-                summary,
-                compacted,
-                target_tokens,
-                budget,
-            )
-            summary, summary_quality = self._fit_summary_to_budget(
-                request,
-                survivors=survivors,
-                prefix=_archive_summary_prefix(archive_path),
-                generated=generated_summary,
-                budget=budget,
-            )
+            archive_prefix = _archive_summary_prefix(archive_path)
+            try:
+                generated_summary, generated_degraded = await self._acreate_summary(
+                    summary,
+                    compacted,
+                    target_tokens,
+                    budget,
+                )
+                summary, summary_quality = self._fit_summary_to_budget(
+                    request,
+                    survivors=survivors,
+                    prefix=archive_prefix,
+                    generated=generated_summary,
+                    budget=budget,
+                )
+            except ContextBudgetConfigurationError:
+                raise
+            except Exception:
+                # 同步路径相同：只有归档与预算收敛已成立，才允许不依赖摘要模型继续。
+                logger.exception("摘要模型失败，改用归档回执继续本次对话")
+                summary, _ = self._fit_summary_to_budget(
+                    request,
+                    survivors=survivors,
+                    prefix=archive_prefix,
+                    generated=summary,
+                    budget=budget,
+                )
+                generated_degraded = True
+                summary_quality = "degraded"
             prepared = self._request_with_summary(request, messages=survivors, summary=summary)
             if self._request_tokens(prepared) <= budget.prompt_budget:
                 last_compacted = compacted[-1]

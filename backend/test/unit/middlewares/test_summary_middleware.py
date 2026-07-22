@@ -183,6 +183,45 @@ def test_oversized_summary_is_bounded_and_marked_degraded() -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("asynchronous", [False, True])
+async def test_summary_generation_failure_uses_archive_receipt(
+    asynchronous: bool, archive_backend: _ArchiveBackend
+) -> None:
+    class FailingSummaryModel(_SummaryModel):
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            raise RuntimeError("summary model unavailable")
+
+    messages = [
+        HumanMessage(content="old user " + "x" * 2_400, id="user-old"),
+        AIMessage(content="old assistant", id="assistant-old"),
+        HumanMessage(content="current user", id="user-current"),
+    ]
+    model = FailingSummaryModel()
+    _, request = _request(messages)
+    request = request.override(model=model)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    captured = {}
+
+    def handler(prepared: ModelRequest):
+        captured["request"] = prepared
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    async def async_handler(prepared: ModelRequest):
+        return handler(prepared)
+
+    if asynchronous:
+        result = await middleware.awrap_model_call(request, async_handler)
+    else:
+        result = middleware.wrap_model_call(request, handler)
+
+    assert len(archive_backend.writes) == 1
+    assert result.command.update["context_summary_quality"] == "degraded"
+    assert "private_context_archive" in captured["request"].system_message.text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
 async def test_summary_rechecks_segment_after_previous_batch_expands(asynchronous: bool) -> None:
     class BudgetBoundedSummaryModel(_SummaryModel):
         def invoke(self, prompt: str):
