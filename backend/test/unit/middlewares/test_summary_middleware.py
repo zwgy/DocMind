@@ -6,10 +6,12 @@ import pytest
 from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest, ModelResponse
 from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.types import Command, Overwrite
 
 from yuxi.agents.middlewares import summary as summary_module
 from yuxi.agents.middlewares.summary import YuxiSummarizationMiddleware, create_summary_middleware
+from yuxi.agents.middlewares.token_usage import resolve_context_budget
 
 
 class _SummaryModel:
@@ -156,6 +158,31 @@ def test_oversized_summary_is_bounded_and_marked_degraded() -> None:
 
     assert middleware._request_tokens(captured["request"]) <= 420
     assert result.command.update["context_summary_quality"] == "degraded"
+
+
+@pytest.mark.unit
+def test_summary_rechecks_segment_after_previous_batch_expands() -> None:
+    class BudgetBoundedSummaryModel(_SummaryModel):
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            assert int(count_tokens_approximately([SystemMessage(content=prompt)])) <= 420
+            return SimpleNamespace(text="摘要" * 500)
+
+    _, request = _request([])
+    model = BudgetBoundedSummaryModel()
+    request = request.override(model=model)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    summary, degraded = middleware._create_summary(
+        "",
+        [HumanMessage(content="a" * 800), HumanMessage(content="b" * 800)],
+        target_tokens=200,
+        budget=resolve_context_budget(request),
+    )
+
+    assert summary
+    assert degraded
+    assert len(model.prompts) > 2
 
 
 @pytest.mark.unit

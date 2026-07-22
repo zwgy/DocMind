@@ -414,8 +414,11 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                     raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
                 summary, shortened = self._trim_summary_text(summary, target_tokens)
                 degraded = degraded or shortened
-                pending = list(segment)
-                continue
+                pending = []
+                prompt = self._render_summary_prompt(summary, segment, target_tokens)
+                if int(count_tokens_approximately([SystemMessage(content=prompt)])) <= budget.prompt_budget:
+                    pending = list(segment)
+                    continue
             remaining = list(segment)
             while remaining:
                 piece, rest = self._largest_summary_piece(summary, remaining, target_tokens, budget)
@@ -463,8 +466,11 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                     raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
                 summary, shortened = self._trim_summary_text(summary, target_tokens)
                 degraded = degraded or shortened
-                pending = list(segment)
-                continue
+                pending = []
+                prompt = self._render_summary_prompt(summary, segment, target_tokens)
+                if int(count_tokens_approximately([SystemMessage(content=prompt)])) <= budget.prompt_budget:
+                    pending = list(segment)
+                    continue
             remaining = list(segment)
             while remaining:
                 piece, rest = self._largest_summary_piece(summary, remaining, target_tokens, budget)
