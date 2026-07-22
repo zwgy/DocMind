@@ -38,6 +38,34 @@ class _ToolCallChunkFixChatOpenAI(ChatOpenAI):
             yield chunk
 
 
+def _apply_configured_output_limit(
+    provider_type: str,
+    configured_limit: int | None,
+    kwargs: dict,
+) -> dict:
+    """让实际请求和上下文预算共用同一个输出上限。"""
+    if not configured_limit or configured_limit <= 0:
+        return kwargs
+
+    requested_limits = [configured_limit]
+    for field_name in ("max_completion_tokens", "max_tokens", "max_tokens_to_sample"):
+        value = kwargs.get(field_name)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            requested_limits.append(value)
+    output_limit = min(requested_limits)
+    bounded_kwargs = dict(kwargs)
+    for field_name in ("max_completion_tokens", "max_tokens", "max_tokens_to_sample"):
+        bounded_kwargs.pop(field_name, None)
+
+    if provider_type == "anthropic":
+        bounded_kwargs["max_tokens_to_sample"] = output_limit
+    elif provider_type == "gemini":
+        bounded_kwargs["max_tokens"] = output_limit
+    else:
+        bounded_kwargs["max_completion_tokens"] = output_limit
+    return bounded_kwargs
+
+
 def resolve_chat_model_spec(model_spec: str | None, *, fallback: str | None = None) -> str:
     """解析空模型配置，不吞掉已经配置但无效的模型值。
 
@@ -79,6 +107,7 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
         context_safety_tokens = int(info.context_safety_tokens) if info.context_safety_tokens else None
     except (TypeError, ValueError):
         context_safety_tokens = None
+    kwargs = _apply_configured_output_limit(info.provider_type, max_completion_tokens, kwargs)
 
     logger.debug(f"Loading model {fully_specified_name} with provider_type={info.provider_type}")
 
