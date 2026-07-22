@@ -1,12 +1,32 @@
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
+
+function hmrConnectionDiagnostics(): Plugin {
+  let nextClientId = 0
+  return {
+    name: 'hmr-connection-diagnostics',
+    configureServer(server) {
+      server.ws.on('connection', (socket, request) => {
+        const clientId = ++nextClientId
+        const remoteAddress = request.socket.remoteAddress || 'unknown'
+        server.config.logger.info(`[hmr] client=${clientId} connected remote=${remoteAddress}`)
+        socket.on('close', (code, reason) => {
+          // 关闭码可区分页面主动卸载与异常断线，避免再从界面闪烁反推责任方。
+          server.config.logger.warn(
+            `[hmr] client=${clientId} disconnected code=${code} reason=${reason.toString() || '-'}`
+          )
+        })
+      })
+    }
+  }
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
     base: env.VITE_BASE_PATH || '/chat-iframe/',
-    plugins: [vue()],
+    plugins: [vue(), hmrConnectionDiagnostics()],
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url))
