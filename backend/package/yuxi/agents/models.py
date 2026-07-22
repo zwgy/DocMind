@@ -38,34 +38,6 @@ class _ToolCallChunkFixChatOpenAI(ChatOpenAI):
             yield chunk
 
 
-def _apply_configured_output_limit(
-    provider_type: str,
-    configured_limit: int | None,
-    kwargs: dict,
-) -> dict:
-    """让实际请求和上下文预算共用同一个输出上限。"""
-    if not configured_limit or configured_limit <= 0:
-        return kwargs
-
-    requested_limits = [configured_limit]
-    for field_name in ("max_completion_tokens", "max_tokens", "max_tokens_to_sample"):
-        value = kwargs.get(field_name)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            requested_limits.append(value)
-    output_limit = min(requested_limits)
-    bounded_kwargs = dict(kwargs)
-    for field_name in ("max_completion_tokens", "max_tokens", "max_tokens_to_sample"):
-        bounded_kwargs.pop(field_name, None)
-
-    if provider_type == "anthropic":
-        bounded_kwargs["max_tokens_to_sample"] = output_limit
-    elif provider_type == "gemini":
-        bounded_kwargs["max_tokens"] = output_limit
-    else:
-        bounded_kwargs["max_completion_tokens"] = output_limit
-    return bounded_kwargs
-
-
 def resolve_chat_model_spec(model_spec: str | None, *, fallback: str | None = None) -> str:
     """解析空模型配置，不吞掉已经配置但无效的模型值。
 
@@ -100,15 +72,15 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
     except (TypeError, ValueError):
         context_length = None
     try:
-        max_completion_tokens = int(info.max_completion_tokens) if info.max_completion_tokens else None
+        min_output_reserve_tokens = (
+            int(info.min_output_reserve_tokens) if info.min_output_reserve_tokens else None
+        )
     except (TypeError, ValueError):
-        max_completion_tokens = None
+        min_output_reserve_tokens = None
     try:
         context_safety_tokens = int(info.context_safety_tokens) if info.context_safety_tokens else None
     except (TypeError, ValueError):
         context_safety_tokens = None
-    kwargs = _apply_configured_output_limit(info.provider_type, max_completion_tokens, kwargs)
-
     logger.debug(f"Loading model {fully_specified_name} with provider_type={info.provider_type}")
 
     if info.provider_type == "anthropic":
@@ -141,8 +113,8 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
     if context_length and context_length > 0:
         # 本地配置描述的是服务实例实际可接收的完整窗口，不能按摘要比例改写为输入窗口。
         profile["max_input_tokens"] = context_length
-    if max_completion_tokens and max_completion_tokens > 0:
-        profile["max_output_tokens"] = max_completion_tokens
+    # 预留只决定何时收缩输入；普通调用不把它转成模型输出上限，避免复杂任务被截断。
+    profile["min_output_reserve_tokens"] = min_output_reserve_tokens or sys_config.min_output_reserve_tokens
     if context_safety_tokens and context_safety_tokens > 0:
         profile["context_safety_tokens"] = context_safety_tokens
     if profile:

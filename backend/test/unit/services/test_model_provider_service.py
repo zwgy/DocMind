@@ -54,7 +54,7 @@ def test_normalize_payload_normalizes_chat_context_budget_limits():
                     "id": "qwen3.6:35b",
                     "type": "chat",
                     "context_length": "32768",
-                    "max_completion_tokens": "4096",
+                    "min_output_reserve_tokens": "4096",
                     "context_safety_tokens": "768",
                 }
             ],
@@ -62,11 +62,33 @@ def test_normalize_payload_normalizes_chat_context_budget_limits():
     )
 
     model = payload["enabled_models"][0]
-    assert model["max_completion_tokens"] == 4096
+    assert model["min_output_reserve_tokens"] == 4096
     assert model["context_safety_tokens"] == 768
 
 
-@pytest.mark.parametrize("field_name", ["max_completion_tokens", "context_safety_tokens"])
+def test_normalize_payload_migrates_manual_legacy_output_limit_to_reserve():
+    payload = _normalize_payload(
+        {
+            "provider_id": "ollama-local",
+            "display_name": "Ollama Local",
+            "base_url": "http://localhost:11434/v1",
+            "enabled_models": [
+                {
+                    "id": "qwen3.6:35b",
+                    "type": "chat",
+                    "source": "manual",
+                    "max_completion_tokens": 4096,
+                }
+            ],
+        }
+    )
+
+    model = payload["enabled_models"][0]
+    assert model["min_output_reserve_tokens"] == 4096
+    assert "max_completion_tokens" not in model
+
+
+@pytest.mark.parametrize("field_name", ["min_output_reserve_tokens", "context_safety_tokens"])
 @pytest.mark.parametrize("value", [0, -1, 1.5, True, "invalid"])
 def test_normalize_payload_rejects_invalid_chat_context_budget_limits(field_name, value):
     with pytest.raises(ValueError, match=f"{field_name} 必须是正整数"):
@@ -158,7 +180,7 @@ def test_normalize_remote_model_preserves_detailed_model_config():
     assert model["display_name"] == "Xiaomi: MiMo-V2-Omni"
     assert model["type"] == "chat"
     assert model["input_modalities"] == ["text", "audio", "image", "video"]
-    assert model["max_completion_tokens"] == 65536
+    assert "max_completion_tokens" not in model
     assert model["raw_metadata"]["supported_parameters"] == ["temperature", "tools"]
 
 

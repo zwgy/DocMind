@@ -38,7 +38,7 @@ class ModelInfo:
     headers: dict[str, str] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
     context_length: int | None = None
-    max_completion_tokens: int | None = None
+    min_output_reserve_tokens: int | None = None
     context_safety_tokens: int | None = None
 
     # Embedding 专属
@@ -61,7 +61,7 @@ class ModelInfo:
             "headers": self.headers,
             "extra": self.extra,
             "context_length": self.context_length,
-            "max_completion_tokens": self.max_completion_tokens,
+            "min_output_reserve_tokens": self.min_output_reserve_tokens,
             "context_safety_tokens": self.context_safety_tokens,
             "dimension": self.dimension,
             "batch_size": self.batch_size,
@@ -80,7 +80,9 @@ class ModelInfo:
             headers=data.get("headers", {}),
             extra=data.get("extra", {}),
             context_length=data.get("context_length"),
-            max_completion_tokens=data.get("max_completion_tokens"),
+            min_output_reserve_tokens=(
+                data.get("min_output_reserve_tokens") or data.get("max_completion_tokens")
+            ),
             context_safety_tokens=data.get("context_safety_tokens"),
             dimension=data.get("dimension"),
             batch_size=data.get("batch_size", 40),
@@ -166,7 +168,10 @@ class ModelCache:
                     headers=dict(provider.headers_json or {}),
                     extra=dict(provider.extra_json or {}),
                     context_length=model.get("context_length"),
-                    max_completion_tokens=model.get("max_completion_tokens"),
+                    min_output_reserve_tokens=(
+                        model.get("min_output_reserve_tokens")
+                        or (model.get("max_completion_tokens") if model.get("source") == "manual" else None)
+                    ),
                     context_safety_tokens=model.get("context_safety_tokens"),
                     dimension=model.get("dimension"),
                     batch_size=model.get("batch_size", 40),

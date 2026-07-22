@@ -62,7 +62,7 @@ const editingModel = ref({
   protocol_override: null,
   base_url_override: null,
   context_length: null,
-  max_completion_tokens: null,
+  min_output_reserve_tokens: null,
   context_safety_tokens: null,
   dimension: null,
   batch_size: null,
@@ -463,7 +463,7 @@ const normalizeModel = (model = {}) => ({
   protocol_override: model.protocol_override || null,
   base_url_override: model.base_url_override || null,
   context_length: model.context_length || null,
-  max_completion_tokens: model.max_completion_tokens || null,
+  min_output_reserve_tokens: model.min_output_reserve_tokens || null,
   context_safety_tokens: model.context_safety_tokens || null,
   dimension: model.dimension || null,
   batch_size: model.batch_size || null,
@@ -548,7 +548,7 @@ const openCreateModal = (provider) => {
     protocol_override: null,
     base_url_override: null,
     context_length: null,
-    max_completion_tokens: null,
+    min_output_reserve_tokens: null,
     context_safety_tokens: null,
     dimension: null,
     batch_size: null,
@@ -1097,16 +1097,16 @@ defineExpose({
         </div>
         <div class="form-row" v-if="editingModel.type === 'chat'">
           <label class="form-label">
-            <span>最大输出 Token</span>
+            <span>最低输出预留 Token</span>
             <a-input-number
-              v-model:value="editingModel.max_completion_tokens"
+              v-model:value="editingModel.min_output_reserve_tokens"
               :min="1"
               :precision="0"
               :step="1024"
               placeholder="例如 4096"
             />
             <small class="context-length-help">
-              单次回答和隐藏推理 Token 的总预留；未配置时，Agent 不会发送无法验证安全性的请求。
+              仅用于决定何时压缩输入，不会限制模型实际输出；留空时使用部署默认值。
             </small>
           </label>
           <label class="form-label">

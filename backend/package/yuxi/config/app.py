@@ -54,6 +54,11 @@ class Config(BaseModel):
         gt=0,
         description="模型未配置专用安全缓冲时使用的上下文 Token 缓冲",
     )
+    min_output_reserve_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description="模型未配置专用预留时，触发输入压缩前必须保留的最小输出 Token 空间",
+    )
 
     sandbox_provider: str = Field(default="provisioner", description="沙箱提供者")
     sandbox_provisioner_url: str = Field(default="http://sandbox-provisioner:8002", description="沙箱服务地址")

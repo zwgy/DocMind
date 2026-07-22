@@ -31,7 +31,7 @@ class ResolvedContextBudget:
     """一次模型调用使用的标准化上下文预算。"""
 
     context_window: int
-    max_completion_tokens: int
+    min_output_reserve_tokens: int
     effective_output_reserve: int
     context_safety_tokens: int
     prompt_budget: int
@@ -53,7 +53,7 @@ class TokenUsagePayload(TypedDict, total=False):
     tool_count: int
     context_window: int | None
     context_usage_ratio: float | None
-    max_completion_tokens: int | None
+    min_output_reserve_tokens: int | None
     context_safety_tokens: int | None
     prompt_budget: int | None
     prompt_tokens: int
@@ -110,7 +110,9 @@ def resolve_context_budget(request: ModelRequest | Any) -> ResolvedContextBudget
     """解析完整窗口、输出预留和缓冲，作为所有调用前预算判断的唯一入口。"""
     model = getattr(request, "model", None)
     context_window = _profile_positive_int(model, "max_input_tokens")
-    max_completion_tokens = _profile_positive_int(model, "max_output_tokens")
+    min_output_reserve_tokens = _profile_positive_int(model, "min_output_reserve_tokens")
+    if min_output_reserve_tokens is None:
+        min_output_reserve_tokens = int(system_config.min_output_reserve_tokens)
     context_safety_tokens = _profile_positive_int(model, "context_safety_tokens")
     if context_safety_tokens is None:
         context_safety_tokens = int(system_config.context_safety_tokens)
@@ -119,7 +121,6 @@ def resolve_context_budget(request: ModelRequest | Any) -> ResolvedContextBudget
         field_name
         for field_name, value in (
             ("context_window", context_window),
-            ("max_completion_tokens", max_completion_tokens),
         )
         if value is None
     ]
@@ -130,18 +131,16 @@ def resolve_context_budget(request: ModelRequest | Any) -> ResolvedContextBudget
         )
 
     explicit_output_limit = _request_output_limit(getattr(request, "model_settings", None))
-    effective_output_reserve = (
-        min(explicit_output_limit, max_completion_tokens) if explicit_output_limit else max_completion_tokens
-    )
+    effective_output_reserve = max(min_output_reserve_tokens, explicit_output_limit or 0)
     prompt_budget = context_window - effective_output_reserve - context_safety_tokens
     if prompt_budget <= 0:
         model_name = getattr(model, "model_name", None) or getattr(model, "model", None) or type(model).__name__
         raise ContextBudgetConfigurationError(
-            f"模型 {model_name} 的 context_window 必须大于 max_completion_tokens 与 context_safety_tokens 之和"
+            f"模型 {model_name} 的 context_window 必须大于 min_output_reserve_tokens 与 context_safety_tokens 之和"
         )
     return ResolvedContextBudget(
         context_window=context_window,
-        max_completion_tokens=max_completion_tokens,
+        min_output_reserve_tokens=min_output_reserve_tokens,
         effective_output_reserve=effective_output_reserve,
         context_safety_tokens=context_safety_tokens,
         prompt_budget=prompt_budget,
@@ -225,7 +224,7 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
             "tool_count": len(tools),
             "context_window": budget.context_window,
             "context_usage_ratio": context_usage_ratio,
-            "max_completion_tokens": budget.max_completion_tokens,
+            "min_output_reserve_tokens": budget.min_output_reserve_tokens,
             "context_safety_tokens": budget.context_safety_tokens,
             "prompt_budget": budget.prompt_budget,
             "prompt_tokens": llm_input_tokens,

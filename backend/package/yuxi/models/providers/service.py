@@ -73,13 +73,22 @@ def _normalize_model_item(model: dict[str, Any]) -> dict[str, Any]:
     normalized["extra"] = _normalize_dict(model.get("extra"))
 
     # 仅 Chat 模型保留上下文预算。非 Chat 模型没有生成阶段，保留这些字段会让运行时误认为可调用。
-    context_budget_fields = ("context_length", "max_completion_tokens", "context_safety_tokens")
+    context_budget_fields = ("context_length", "min_output_reserve_tokens", "context_safety_tokens")
     if model_type != "chat":
         for field_name in context_budget_fields:
             normalized.pop(field_name, None)
+        normalized.pop("max_completion_tokens", None)
     else:
+        # 旧字段曾被错误地命名为最大输出。手工模型保存时迁移为输入压缩预留，
+        # 远端目录的 max_completion_tokens 则是供应商能力元数据，不能误当作预留。
+        if source == "manual" and not normalized.get("min_output_reserve_tokens"):
+            legacy_reserve = normalized.pop("max_completion_tokens", None)
+            if legacy_reserve not in (None, ""):
+                normalized["min_output_reserve_tokens"] = legacy_reserve
+        else:
+            normalized.pop("max_completion_tokens", None)
         for field_name in context_budget_fields:
-            value = model.get(field_name)
+            value = normalized.get(field_name)
             if value not in (None, ""):
                 normalized[field_name] = _normalize_positive_int(
                     value,
@@ -88,16 +97,16 @@ def _normalize_model_item(model: dict[str, Any]) -> dict[str, Any]:
                 )
 
         context_length = normalized.get("context_length")
-        max_completion_tokens = normalized.get("max_completion_tokens")
+        min_output_reserve_tokens = normalized.get("min_output_reserve_tokens")
         context_safety_tokens = normalized.get("context_safety_tokens")
         if (
             context_length is not None
-            and max_completion_tokens is not None
+            and min_output_reserve_tokens is not None
             and context_safety_tokens is not None
-            and context_length <= max_completion_tokens + context_safety_tokens
+            and context_length <= min_output_reserve_tokens + context_safety_tokens
         ):
             raise ValueError(
-                f"模型 {model_id} 的 context_length 必须大于 max_completion_tokens 与 context_safety_tokens 之和"
+                f"模型 {model_id} 的 context_length 必须大于 min_output_reserve_tokens 与 context_safety_tokens 之和"
             )
 
     if model_type == "embedding":
@@ -252,7 +261,6 @@ def _normalize_remote_model(raw_model: dict[str, Any], model_type: str = "chat")
         "display_name": raw_model.get("name") or model_id,
         "description": raw_model.get("description"),
         "context_length": raw_model.get("context_length") or top_provider.get("context_length"),
-        "max_completion_tokens": top_provider.get("max_completion_tokens"),
         "input_modalities": architecture.get("input_modalities") or [],
         "output_modalities": architecture.get("output_modalities") or [],
         "supported_parameters": raw_model.get("supported_parameters") or [],

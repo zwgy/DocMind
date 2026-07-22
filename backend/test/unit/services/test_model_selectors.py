@@ -4,7 +4,7 @@ import httpx
 import pytest
 import requests
 
-from yuxi.agents.models import _apply_configured_output_limit, load_chat_model, resolve_chat_model_spec
+from yuxi.agents.models import load_chat_model, resolve_chat_model_spec
 from yuxi.models.chat import LangChainChatAdapter, select_model
 from yuxi.models.embed import OtherEmbedding, select_embedding_model
 from yuxi.models.rerank import OpenAIReranker, get_reranker
@@ -29,7 +29,7 @@ def _chat_model_info(
     model_id: str,
     provider_type: str = "openai",
     context_length: int | None = None,
-    max_completion_tokens: int | None = None,
+    min_output_reserve_tokens: int | None = None,
     context_safety_tokens: int | None = None,
 ) -> ModelInfo:
     return ModelInfo(
@@ -41,23 +41,9 @@ def _chat_model_info(
         base_url="https://example.com/v1",
         provider_type=provider_type,
         context_length=context_length,
-        max_completion_tokens=max_completion_tokens,
+        min_output_reserve_tokens=min_output_reserve_tokens,
         context_safety_tokens=context_safety_tokens,
     )
-
-
-@pytest.mark.parametrize(
-    ("provider_type", "expected_field"),
-    [("openai", "max_completion_tokens"), ("anthropic", "max_tokens_to_sample"), ("gemini", "max_tokens")],
-)
-def test_configured_output_limit_uses_provider_request_parameter(provider_type, expected_field):
-    kwargs = _apply_configured_output_limit(
-        provider_type,
-        4096,
-        {"temperature": 0.2, "max_tokens": 8192},
-    )
-
-    assert kwargs == {"temperature": 0.2, expected_field: 4096}
 
 
 def _capture_embed_warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -211,7 +197,7 @@ def test_load_chat_model_keeps_non_siliconflow_openai_streaming(monkeypatch):
                 "openai-compatible",
                 "namespace/chat-model",
                 context_length=32768,
-                max_completion_tokens=4096,
+                min_output_reserve_tokens=4096,
                 context_safety_tokens=512,
             )
             if spec == "openai-compatible:namespace/chat-model"
@@ -225,13 +211,13 @@ def test_load_chat_model_keeps_non_siliconflow_openai_streaming(monkeypatch):
     higher_output = load_chat_model("openai-compatible:namespace/chat-model", max_tokens=8192)
 
     assert model.disable_streaming is False
-    assert model._default_params["max_completion_tokens"] == 4096
+    assert "max_completion_tokens" not in model._default_params
     assert model.profile["max_input_tokens"] == 32768
-    assert model.profile["max_output_tokens"] == 4096
+    assert model.profile["min_output_reserve_tokens"] == 4096
     assert model.profile["context_safety_tokens"] == 512
     assert explicit.disable_streaming is True
     assert lower_output._default_params["max_completion_tokens"] == 1024
-    assert higher_output._default_params["max_completion_tokens"] == 4096
+    assert higher_output._default_params["max_completion_tokens"] == 8192
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,7 @@ from yuxi.agents.middlewares.token_usage import resolve_context_budget
 
 
 class _SummaryModel:
-    profile = {"max_input_tokens": 600, "max_output_tokens": 100, "context_safety_tokens": 80}
+    profile = {"max_input_tokens": 600, "min_output_reserve_tokens": 100, "context_safety_tokens": 80}
 
     def __init__(self) -> None:
         self.prompts: list[str] = []

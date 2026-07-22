@@ -8,7 +8,6 @@ from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from yuxi.agents.middlewares.token_usage import (
-    ContextBudgetConfigurationError,
     TokenUsageMiddleware,
     resolve_context_budget,
 )
@@ -31,7 +30,7 @@ async def test_token_usage_middleware_records_request_and_state_tokens() -> None
     }
     request = SimpleNamespace(
         model=SimpleNamespace(
-            profile={"max_input_tokens": 2000, "max_output_tokens": 500, "context_safety_tokens": 100}
+            profile={"max_input_tokens": 2000, "min_output_reserve_tokens": 500, "context_safety_tokens": 100}
         ),
         state={"messages": [HumanMessage(content="old message")]},
         messages=[HumanMessage(content="current message")],
@@ -64,7 +63,7 @@ async def test_token_usage_middleware_records_request_and_state_tokens() -> None
     assert token_usage["tool_count"] == 1
     assert token_usage["context_window"] == 2000
     assert token_usage["prompt_budget"] == 1400
-    assert token_usage["max_completion_tokens"] == 500
+    assert token_usage["min_output_reserve_tokens"] == 500
     assert token_usage["context_safety_tokens"] == 100
     assert token_usage["remaining_input_tokens"] == 1400 - token_usage["prompt_tokens"]
     assert token_usage["prompt_deficit_tokens"] == 0
@@ -82,7 +81,7 @@ async def test_token_usage_middleware_detects_effective_summary_message() -> Non
     )
     request = SimpleNamespace(
         model=SimpleNamespace(
-            profile={"max_input_tokens": 2000, "max_output_tokens": 500, "context_safety_tokens": 100}
+            profile={"max_input_tokens": 2000, "min_output_reserve_tokens": 500, "context_safety_tokens": 100}
         ),
         state={"messages": [HumanMessage(content="raw history")]},
         messages=[summary_message, HumanMessage(content="recent user turn")],
@@ -108,7 +107,7 @@ async def test_token_usage_middleware_turns_empty_length_response_into_context_o
     middleware = TokenUsageMiddleware()
     request = SimpleNamespace(
         model=SimpleNamespace(
-            profile={"max_input_tokens": 32768, "max_output_tokens": 4096, "context_safety_tokens": 512}
+            profile={"max_input_tokens": 32768, "min_output_reserve_tokens": 4096, "context_safety_tokens": 512}
         ),
         state={"messages": [HumanMessage(content="读取附件原文")]},
         messages=[HumanMessage(content="读取附件原文")],
@@ -124,10 +123,10 @@ async def test_token_usage_middleware_turns_empty_length_response_into_context_o
         await middleware.awrap_model_call(request, handler)
 
 
-def test_resolve_context_budget_uses_explicit_output_limit_without_exceeding_model_limit() -> None:
+def test_resolve_context_budget_preserves_minimum_reserve_for_smaller_explicit_output_limit() -> None:
     request = SimpleNamespace(
         model=SimpleNamespace(
-            profile={"max_input_tokens": 32768, "max_output_tokens": 4096, "context_safety_tokens": 512}
+            profile={"max_input_tokens": 32768, "min_output_reserve_tokens": 4096, "context_safety_tokens": 512}
         ),
         model_settings={"max_tokens": 1024},
     )
@@ -135,14 +134,30 @@ def test_resolve_context_budget_uses_explicit_output_limit_without_exceeding_mod
     budget = resolve_context_budget(request)
 
     assert budget.context_window == 32768
-    assert budget.max_completion_tokens == 4096
-    assert budget.effective_output_reserve == 1024
+    assert budget.min_output_reserve_tokens == 4096
+    assert budget.effective_output_reserve == 4096
     assert budget.context_safety_tokens == 512
-    assert budget.prompt_budget == 31232
+    assert budget.prompt_budget == 28160
 
 
-def test_resolve_context_budget_rejects_missing_model_output_limit() -> None:
+def test_resolve_context_budget_expands_reserve_for_larger_explicit_output_limit() -> None:
+    request = SimpleNamespace(
+        model=SimpleNamespace(
+            profile={"max_input_tokens": 32768, "min_output_reserve_tokens": 4096, "context_safety_tokens": 512}
+        ),
+        model_settings={"max_tokens": 8192},
+    )
+
+    budget = resolve_context_budget(request)
+
+    assert budget.effective_output_reserve == 8192
+    assert budget.prompt_budget == 24064
+
+
+def test_resolve_context_budget_uses_deployment_default_output_reserve() -> None:
     request = SimpleNamespace(model=SimpleNamespace(profile={"max_input_tokens": 32768}), model_settings={})
 
-    with pytest.raises(ContextBudgetConfigurationError, match="max_completion_tokens"):
-        resolve_context_budget(request)
+    budget = resolve_context_budget(request)
+
+    assert budget.min_output_reserve_tokens == 4096
+    assert budget.prompt_budget == 27648
