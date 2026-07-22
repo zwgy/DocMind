@@ -1,5 +1,7 @@
 from typing import Any
 
+from langchain_core.utils.pydantic import model_json_schema
+
 from yuxi.utils import logger
 
 # 工具元数据缓存
@@ -17,10 +19,10 @@ def _extract_tool_info(tool_obj) -> dict:
         "args": [],
     }
 
-    if hasattr(tool_obj, "args_schema") and tool_obj.args_schema:
-        schema = tool_obj.args_schema
-        if hasattr(schema, "schema"):
-            schema = schema.schema()
+    schema = tool_obj.tool_call_schema
+    if schema:
+        # 展示元数据只能包含模型可传入的参数，不能把 ToolRuntime 等框架注入参数暴露给 Pydantic。
+        schema = schema if isinstance(schema, dict) else model_json_schema(schema)
         for arg_name, arg_info in schema.get("properties", {}).items():
             info["args"].append(
                 {
