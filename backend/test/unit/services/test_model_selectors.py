@@ -31,6 +31,7 @@ def _chat_model_info(
     context_length: int | None = None,
     min_output_reserve_tokens: int | None = None,
     context_safety_tokens: int | None = None,
+    extra: dict | None = None,
 ) -> ModelInfo:
     return ModelInfo(
         provider_id=provider_id,
@@ -43,6 +44,7 @@ def _chat_model_info(
         context_length=context_length,
         min_output_reserve_tokens=min_output_reserve_tokens,
         context_safety_tokens=context_safety_tokens,
+        extra=extra or {},
     )
 
 
@@ -218,6 +220,28 @@ def test_load_chat_model_keeps_non_siliconflow_openai_streaming(monkeypatch):
     assert explicit.disable_streaming is True
     assert lower_output._default_params["max_completion_tokens"] == 1024
     assert higher_output._default_params["max_completion_tokens"] == 8192
+
+
+def test_load_chat_model_applies_model_parameters_and_allows_explicit_override(monkeypatch):
+    monkeypatch.setattr(
+        "yuxi.agents.models.model_cache.get_model_info",
+        lambda spec: (
+            _chat_model_info(
+                "ollama-local",
+                "qwen3.6:35b",
+                extra={"parameters": {"reasoning_effort": "none", "temperature": 0.2}},
+            )
+            if spec == "ollama-local:qwen3.6:35b"
+            else None
+        ),
+    )
+
+    configured = load_chat_model("ollama-local:qwen3.6:35b")
+    overridden = load_chat_model("ollama-local:qwen3.6:35b", reasoning_effort="medium")
+
+    assert configured.reasoning_effort == "none"
+    assert configured.temperature == 0.2
+    assert overridden.reasoning_effort == "medium"
 
 
 @pytest.mark.asyncio

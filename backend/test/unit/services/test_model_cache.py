@@ -67,6 +67,39 @@ def test_model_cache_prefers_model_base_url_override(monkeypatch):
     assert saved_cache["alibaba:qwen3-rerank"].context_safety_tokens is None
 
 
+def test_model_cache_merges_provider_and_model_runtime_parameters(monkeypatch):
+    saved_cache = {}
+
+    class Provider:
+        is_enabled = True
+        provider_id = "ollama-local"
+        api_key = "ollama"
+        api_key_env = None
+        provider_type = "openai"
+        base_url = "http://localhost:11434/v1"
+        embedding_base_url = None
+        rerank_base_url = None
+        headers_json = {}
+        extra_json = {"timeout": 60, "parameters": {"temperature": 0.2}}
+        enabled_models = [
+            {
+                "id": "qwen3.6:35b",
+                "type": "chat",
+                "extra": {"parameters": {"reasoning_effort": "none"}},
+            }
+        ]
+
+    cache = ModelCache()
+    monkeypatch.setattr(cache, "_save_cache", lambda data: saved_cache.update(data))
+
+    cache.rebuild([Provider()])
+
+    assert saved_cache["ollama-local:qwen3.6:35b"].extra == {
+        "timeout": 60,
+        "parameters": {"temperature": 0.2, "reasoning_effort": "none"},
+    }
+
+
 def test_model_cache_loads_from_redis_and_uses_local_ttl(monkeypatch: pytest.MonkeyPatch):
     redis = _FakeRedis()
     _patch_redis(monkeypatch, redis)

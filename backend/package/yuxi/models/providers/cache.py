@@ -156,6 +156,15 @@ class ModelCache:
             for model in provider.enabled_models or []:
                 model_type = model.get("type", "chat")
                 base_url = model.get("base_url_override") or self._get_base_url_for_type(provider, model_type)
+                # 供应商参数作为共同默认值，模型参数按模型覆盖，避免同一服务上的不同模型被迫共享推理策略。
+                provider_extra = dict(provider.extra_json or {})
+                model_extra = dict(model.get("extra") or {})
+                extra = {**provider_extra, **model_extra}
+                if "parameters" in provider_extra or "parameters" in model_extra:
+                    extra["parameters"] = {
+                        **dict(provider_extra.get("parameters") or {}),
+                        **dict(model_extra.get("parameters") or {}),
+                    }
 
                 info = ModelInfo(
                     provider_id=provider.provider_id,
@@ -166,7 +175,7 @@ class ModelCache:
                     base_url=base_url,
                     provider_type=provider.provider_type,
                     headers=dict(provider.headers_json or {}),
-                    extra=dict(provider.extra_json or {}),
+                    extra=extra,
                     context_length=model.get("context_length"),
                     min_output_reserve_tokens=(
                         model.get("min_output_reserve_tokens")

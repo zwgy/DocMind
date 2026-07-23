@@ -66,6 +66,43 @@ def test_normalize_payload_normalizes_chat_context_budget_limits():
     assert model["context_safety_tokens"] == 768
 
 
+def test_normalize_payload_preserves_model_runtime_parameters():
+    payload = _normalize_payload(
+        {
+            "provider_id": "ollama-local",
+            "display_name": "Ollama Local",
+            "base_url": "http://localhost:11434/v1",
+            "enabled_models": [
+                {
+                    "id": "qwen3.6:35b",
+                    "type": "chat",
+                    "extra": {"parameters": {"reasoning_effort": "none"}},
+                }
+            ],
+        }
+    )
+
+    assert payload["enabled_models"][0]["extra"]["parameters"] == {"reasoning_effort": "none"}
+
+
+def test_normalize_payload_rejects_non_object_model_runtime_parameters():
+    with pytest.raises(ValueError, match="extra.parameters 必须是对象"):
+        _normalize_payload(
+            {
+                "provider_id": "ollama-local",
+                "display_name": "Ollama Local",
+                "base_url": "http://localhost:11434/v1",
+                "enabled_models": [
+                    {
+                        "id": "qwen3.6:35b",
+                        "type": "chat",
+                        "extra": {"parameters": "reasoning_effort=none"},
+                    }
+                ],
+            }
+        )
+
+
 def test_normalize_payload_migrates_manual_legacy_output_limit_to_reserve():
     payload = _normalize_payload(
         {

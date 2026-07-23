@@ -81,6 +81,10 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
         context_safety_tokens = int(info.context_safety_tokens) if info.context_safety_tokens else None
     except (TypeError, ValueError):
         context_safety_tokens = None
+    # 模型级参数用于承载供应商支持的运行选项（如 reasoning_effort），避免按模型名称硬编码。
+    # 调用方显式参数优先，便于摘要、测试等特定调用按需覆盖模型默认值。
+    model_kwargs = dict(info.extra.get("parameters") or {})
+    model_kwargs.update(kwargs)
     logger.debug(f"Loading model {fully_specified_name} with provider_type={info.provider_type}")
 
     if info.provider_type == "anthropic":
@@ -90,7 +94,7 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
             model=info.model_id,
             api_key=SecretStr(api_key),
             base_url=base_url,
-            **kwargs,
+            **model_kwargs,
         )
     elif info.provider_type == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -98,7 +102,7 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
         model = ChatGoogleGenerativeAI(
             model=info.model_id,
             google_api_key=SecretStr(api_key),
-            **kwargs,
+            **model_kwargs,
         )
     else:
         model = _ToolCallChunkFixChatOpenAI(
@@ -106,7 +110,7 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
             api_key=SecretStr(api_key),
             base_url=base_url,
             stream_usage=True,
-            **kwargs,
+            **model_kwargs,
         )
 
     profile = dict(model.profile or {})

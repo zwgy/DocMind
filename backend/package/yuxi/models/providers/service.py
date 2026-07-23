@@ -71,6 +71,9 @@ def _normalize_model_item(model: dict[str, Any]) -> dict[str, Any]:
     normalized["source"] = source
     normalized["display_name"] = str(model.get("display_name") or model.get("name") or model_id)
     normalized["extra"] = _normalize_dict(model.get("extra"))
+    parameters = normalized["extra"].get("parameters")
+    if parameters is not None and not isinstance(parameters, dict):
+        raise ValueError(f"模型 {model_id} 的 extra.parameters 必须是对象")
 
     # 仅 Chat 模型保留上下文预算。非 Chat 模型没有生成阶段，保留这些字段会让运行时误认为可调用。
     context_budget_fields = ("context_length", "min_output_reserve_tokens", "context_safety_tokens")

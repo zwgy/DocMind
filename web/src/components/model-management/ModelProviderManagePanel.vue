@@ -70,6 +70,13 @@ const editingModel = ref({
   extra: {}
 })
 
+const reasoningEffortOptions = [
+  { value: 'none', label: '关闭（优先响应速度）' },
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' }
+]
+
 // Models modal state (per provider)
 const showModelsModal = ref(false)
 const currentProviderForModels = ref(null)
@@ -468,7 +475,10 @@ const normalizeModel = (model = {}) => ({
   dimension: model.dimension || null,
   batch_size: model.batch_size || null,
   supported_parameters: model.supported_parameters || [],
-  extra: model.extra || {}
+  extra: {
+    ...(model.extra || {}),
+    parameters: { ...(model.extra?.parameters || {}) }
+  }
 })
 
 const testModelConnection = async (providerId, model) => {
@@ -553,7 +563,7 @@ const openCreateModal = (provider) => {
     dimension: null,
     batch_size: null,
     supported_parameters: [],
-    extra: {}
+    extra: { parameters: {} }
   })
   isCreating.value = true
   showModelModal.value = true
@@ -1120,6 +1130,20 @@ defineExpose({
             />
             <small class="context-length-help">
               用于吸收消息协议和 Token 计数误差；可按当前模型服务的实际误差校准。
+            </small>
+          </label>
+        </div>
+        <div class="form-row" v-if="editingModel.type === 'chat'">
+          <label class="form-label full-width">
+            <span>生成前思考</span>
+            <a-select
+              v-model:value="editingModel.extra.parameters.reasoning_effort"
+              :options="reasoningEffortOptions"
+              placeholder="跟随模型服务"
+              allow-clear
+            />
+            <small class="context-length-help">
+              仅在模型服务支持 reasoning_effort 时配置；关闭可缩短首字符和工具调用等待时间。
             </small>
           </label>
         </div>
