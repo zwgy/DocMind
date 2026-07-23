@@ -19,6 +19,11 @@ class _SummaryModel:
 
     def __init__(self) -> None:
         self.prompts: list[str] = []
+        self.bound_configs: list[dict] = []
+
+    def with_config(self, **config):
+        self.bound_configs.append(config)
+        return self
 
     def invoke(self, prompt: str):
         self.prompts.append(prompt)
@@ -61,10 +66,12 @@ def _request(messages):
 
 @pytest.mark.unit
 def test_factory_uses_project_owned_budget_middleware() -> None:
-    middleware = create_summary_middleware(model=_SummaryModel(), summary_prompt="summary\n{messages}")
+    model = _SummaryModel()
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
 
     assert isinstance(middleware, YuxiSummarizationMiddleware)
     assert not hasattr(middleware, "_lc_helper")
+    assert model.bound_configs == [{"metadata": {"lc_source": "summarization"}}]
 
 
 @pytest.mark.unit

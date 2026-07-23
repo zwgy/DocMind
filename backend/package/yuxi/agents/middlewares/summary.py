@@ -235,9 +235,11 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
 
     state_schema = ContextSummaryState
 
-    def __init__(self, model: str | BaseChatModel, *, summary_prompt: str) -> None:
+    def __init__(self, model: BaseChatModel, *, summary_prompt: str) -> None:
         super().__init__()
-        self.model = model
+        # 摘要调用会作为嵌套模型事件出现在同一条流中。显式标记来源后，统一流出口
+        # 才能过滤其内部文本，避免私有摘要被误当作用户可见回复发送到前端。
+        self.model = model.with_config(metadata={"lc_source": "summarization"})
         self.summary_prompt = summary_prompt
 
     @staticmethod
@@ -893,7 +895,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
 
 
 def create_summary_middleware(
-    model: str | BaseChatModel,
+    model: BaseChatModel,
     *,
     summary_prompt: str,
 ) -> YuxiSummarizationMiddleware:
