@@ -18,12 +18,17 @@ from langchain.agents.middleware.types import (
 from langchain.chat_models import BaseChatModel
 from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AnyMessage, SystemMessage, ToolMessage
-from langchain_core.messages.utils import count_tokens_approximately, get_buffer_string
+from langchain_core.messages.utils import get_buffer_string
 from langgraph.types import Command, Overwrite
 
 from yuxi.agents.middlewares.token_usage import (
+    ACTIVE_CONTEXT_SUMMARY_STATE_KEY,
+    BASE_SYSTEM_MESSAGE_STATE_KEY,
     ContextBudgetConfigurationError,
+    ContextWindowExceededError,
     ResolvedContextBudget,
+    estimate_messages_tokens,
+    estimate_model_request,
     resolve_context_budget,
 )
 from yuxi.agents.backends.composite import (
@@ -124,7 +129,7 @@ def _messages_safe_for_summary(messages: list[AnyMessage]) -> list[AnyMessage]:
 
 
 def _tool_result_tokens(message: ToolMessage) -> int:
-    return int(count_tokens_approximately([message], use_usage_metadata_scaling=False))
+    return estimate_messages_tokens([message])
 
 
 def _source_window_receipt(messages: list[AnyMessage], message: ToolMessage) -> ToolMessage:
@@ -244,8 +249,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
 
     @staticmethod
     def _request_tokens(request: ModelRequest) -> int:
-        system_messages = [request.system_message] if request.system_message is not None else []
-        return int(count_tokens_approximately([*system_messages, *request.messages], tools=request.tools or []))
+        return estimate_model_request(request).admission
 
     @staticmethod
     def _summary_system_message(system_message: SystemMessage | None, summary: str) -> SystemMessage | None:
@@ -269,7 +273,16 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         summary: str,
     ) -> ModelRequest:
         system_message = self._summary_system_message(request.system_message, summary)
-        return request.override(messages=messages, system_message=system_message)
+        state = dict(request.state)
+        if summary:
+            # 这两个键只在本次中间件调用链中传递，用于把私有摘要从系统提示词估算中拆出；
+            # 它们不会写入返回 Command，因此不会污染持久化图状态。
+            state[ACTIVE_CONTEXT_SUMMARY_STATE_KEY] = summary
+            state[BASE_SYSTEM_MESSAGE_STATE_KEY] = request.system_message
+        else:
+            state.pop(ACTIVE_CONTEXT_SUMMARY_STATE_KEY, None)
+            state.pop(BASE_SYSTEM_MESSAGE_STATE_KEY, None)
+        return request.override(messages=messages, system_message=system_message, state=state)
 
     def _render_summary_prompt(self, previous_summary: str, messages: list[AnyMessage], target_tokens: int) -> str:
         history = get_buffer_string(_messages_safe_for_summary(messages))
@@ -355,13 +368,13 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
     def _trim_summary_text(summary: str, target_tokens: int) -> tuple[str, bool]:
         if target_tokens <= 0:
             raise ContextBudgetConfigurationError("没有可用于滚动摘要的输入预算")
-        if int(count_tokens_approximately([SystemMessage(content=summary)])) <= target_tokens:
+        if estimate_messages_tokens([SystemMessage(content=summary)]) <= target_tokens:
             return summary, False
 
         low, high = 0, len(summary)
         while low < high:
             middle = (low + high + 1) // 2
-            if int(count_tokens_approximately([SystemMessage(content=summary[:middle])])) <= target_tokens:
+            if estimate_messages_tokens([SystemMessage(content=summary[:middle])]) <= target_tokens:
                 low = middle
             else:
                 high = middle - 1
@@ -384,7 +397,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                 [SystemMessage(content=text[:middle])],
                 target_tokens,
             )
-            if int(count_tokens_approximately([SystemMessage(content=prompt)])) <= budget.prompt_budget:
+            if estimate_messages_tokens([SystemMessage(content=prompt)]) <= budget.prompt_budget:
                 best = middle
                 low = middle + 1
             else:
@@ -407,7 +420,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         for segment in _message_segments(messages):
             candidate = [*pending, *segment]
             prompt = self._render_summary_prompt(summary, candidate, target_tokens)
-            if int(count_tokens_approximately([SystemMessage(content=prompt)])) <= budget.prompt_budget:
+            if estimate_messages_tokens([SystemMessage(content=prompt)]) <= budget.prompt_budget:
                 pending = candidate
                 continue
             if pending:
@@ -419,7 +432,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                 degraded = degraded or shortened
                 pending = []
                 prompt = self._render_summary_prompt(summary, segment, target_tokens)
-                if int(count_tokens_approximately([SystemMessage(content=prompt)])) <= budget.prompt_budget:
+                if estimate_messages_tokens([SystemMessage(content=prompt)]) <= budget.prompt_budget:
                     pending = list(segment)
                     continue
             remaining = list(segment)
@@ -459,7 +472,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         for segment in _message_segments(messages):
             candidate = [*pending, *segment]
             prompt = self._render_summary_prompt(summary, candidate, target_tokens)
-            if int(count_tokens_approximately([SystemMessage(content=prompt)])) <= budget.prompt_budget:
+            if estimate_messages_tokens([SystemMessage(content=prompt)]) <= budget.prompt_budget:
                 pending = candidate
                 continue
             if pending:
@@ -471,7 +484,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                 degraded = degraded or shortened
                 pending = []
                 prompt = self._render_summary_prompt(summary, segment, target_tokens)
-                if int(count_tokens_approximately([SystemMessage(content=prompt)])) <= budget.prompt_budget:
+                if estimate_messages_tokens([SystemMessage(content=prompt)]) <= budget.prompt_budget:
                     pending = list(segment)
                     continue
             remaining = list(segment)
@@ -516,7 +529,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         if index is None:
             return messages, False
         message = messages[index]
-        tokens = int(count_tokens_approximately([message], use_usage_metadata_scaling=False))
+        tokens = estimate_messages_tokens([message])
         if tokens <= budget.prompt_budget:
             return messages, False
 
@@ -538,7 +551,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         if index is None:
             return messages, False
         message = messages[index]
-        tokens = int(count_tokens_approximately([message], use_usage_metadata_scaling=False))
+        tokens = estimate_messages_tokens([message])
         if tokens <= budget.prompt_budget:
             return messages, False
 
@@ -636,7 +649,13 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
             changed = True
         return messages, changed
 
-    def _build_plan(self, request: ModelRequest, *, force_compaction: bool = False) -> _CompactionPlan | None:
+    def _build_plan(
+        self,
+        request: ModelRequest,
+        *,
+        force_compaction: bool = False,
+        compact_all_history: bool = False,
+    ) -> _CompactionPlan | None:
         budget = resolve_context_budget(request)
         state = request.state
         summary = str(state.get("context_summary") or "").strip()
@@ -667,7 +686,11 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         # The latest segment contains the current user turn or an unfinished protocol;
         # retain it intact and compact only completed earlier segments.
         while len(remaining_segments) > 1:
-            compacted.extend(remaining_segments.pop(0))
+            if compact_all_history:
+                compacted = [message for segment in remaining_segments[:-1] for message in segment]
+                remaining_segments = remaining_segments[-1:]
+            else:
+                compacted.extend(remaining_segments.pop(0))
             survivors = [message for segment in remaining_segments for message in segment]
             next_revision = int(state.get("context_revision") or 0) + 1
             archive_path = _archive_manifest_path(compacted, next_revision)
@@ -718,12 +741,18 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                     "summary_updated": True,
                     "summary_quality": "degraded" if generated_degraded else summary_quality,
                 }
+            if compact_all_history:
+                break
 
-        raise ContextBudgetConfigurationError(
-            "最终请求仍超过模型可用输入预算，且不存在可安全压缩的完整历史交互段"
-        )
+        raise ContextBudgetConfigurationError("最终请求仍超过模型可用输入预算，且不存在可安全压缩的完整历史交互段")
 
-    async def _abuild_plan(self, request: ModelRequest, *, force_compaction: bool = False) -> _CompactionPlan | None:
+    async def _abuild_plan(
+        self,
+        request: ModelRequest,
+        *,
+        force_compaction: bool = False,
+        compact_all_history: bool = False,
+    ) -> _CompactionPlan | None:
         budget = resolve_context_budget(request)
         state = request.state
         summary = str(state.get("context_summary") or "").strip()
@@ -752,7 +781,11 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         compacted: list[AnyMessage] = []
         remaining_segments = _message_segments(survivors)
         while len(remaining_segments) > 1:
-            compacted.extend(remaining_segments.pop(0))
+            if compact_all_history:
+                compacted = [message for segment in remaining_segments[:-1] for message in segment]
+                remaining_segments = remaining_segments[-1:]
+            else:
+                compacted.extend(remaining_segments.pop(0))
             survivors = [message for segment in remaining_segments for message in segment]
             next_revision = int(state.get("context_revision") or 0) + 1
             archive_path = _archive_manifest_path(compacted, next_revision)
@@ -807,10 +840,10 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                     "summary_updated": True,
                     "summary_quality": "degraded" if generated_degraded else summary_quality,
                 }
+            if compact_all_history:
+                break
 
-        raise ContextBudgetConfigurationError(
-            "最终请求仍超过模型可用输入预算，且不存在可安全压缩的完整历史交互段"
-        )
+        raise ContextBudgetConfigurationError("最终请求仍超过模型可用输入预算，且不存在可安全压缩的完整历史交互段")
 
     @staticmethod
     def _response_and_update(response: ModelResponse | ExtendedModelResponse) -> tuple[ModelResponse, dict[str, Any]]:
@@ -859,17 +892,33 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse | ExtendedModelResponse:
         plan = self._build_plan(request)
-        prepared = plan["request"] if plan else self._request_with_summary(
-            request,
-            messages=list(request.messages),
-            summary=str(request.state.get("context_summary") or "").strip(),
+        prepared = (
+            plan["request"]
+            if plan
+            else self._request_with_summary(
+                request,
+                messages=list(request.messages),
+                summary=str(request.state.get("context_summary") or "").strip(),
+            )
         )
         try:
             return self._commit_plan(handler(prepared), plan)
+        except ContextWindowExceededError as exc:
+            # 空正文 length 已携带真实 usage；本次重试先应用校准包络，避免再按旧估算只压缩一段。
+            recovery_request = request.override(
+                state={**request.state, "token_usage": exc.token_usage},
+            )
+            recovery_plan = self._build_plan(recovery_request, force_compaction=True)
+            if recovery_plan is None:
+                raise
+            return self._commit_plan(handler(recovery_plan["request"]), recovery_plan)
         except ContextOverflowError:
-            # A provider can reject a request despite a conservative count.  Retry once
-            # through the same planner; no state is committed until a model call succeeds.
-            recovery_plan = self._build_plan(request, force_compaction=True)
+            # 无 usage 时无法推断误差，只能压缩全部已完成历史并重试一次。
+            recovery_plan = self._build_plan(
+                request,
+                force_compaction=True,
+                compact_all_history=True,
+            )
             if recovery_plan is None:
                 raise
             return self._commit_plan(handler(recovery_plan["request"]), recovery_plan)
@@ -880,15 +929,31 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse | ExtendedModelResponse:
         plan = await self._abuild_plan(request)
-        prepared = plan["request"] if plan else self._request_with_summary(
-            request,
-            messages=list(request.messages),
-            summary=str(request.state.get("context_summary") or "").strip(),
+        prepared = (
+            plan["request"]
+            if plan
+            else self._request_with_summary(
+                request,
+                messages=list(request.messages),
+                summary=str(request.state.get("context_summary") or "").strip(),
+            )
         )
         try:
             return self._commit_plan(await handler(prepared), plan)
+        except ContextWindowExceededError as exc:
+            recovery_request = request.override(
+                state={**request.state, "token_usage": exc.token_usage},
+            )
+            recovery_plan = await self._abuild_plan(recovery_request, force_compaction=True)
+            if recovery_plan is None:
+                raise
+            return self._commit_plan(await handler(recovery_plan["request"]), recovery_plan)
         except ContextOverflowError:
-            recovery_plan = await self._abuild_plan(request, force_compaction=True)
+            recovery_plan = await self._abuild_plan(
+                request,
+                force_compaction=True,
+                compact_all_history=True,
+            )
             if recovery_plan is None:
                 raise
             return self._commit_plan(await handler(recovery_plan["request"]), recovery_plan)

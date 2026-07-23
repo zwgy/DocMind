@@ -250,10 +250,10 @@
                   <div class="token-usage-content">
                     <div class="token-usage-stack">
                       <div class="token-usage-stack-head">
-                        <span>当前上下文</span>
+                        <span>上次模型输入 · {{ tokenUsageView?.sourceLabel }}</span>
                         <strong>{{ tokenUsageStackHeadLabel }}</strong>
                       </div>
-                      <div class="token-usage-stack-track" aria-label="Token 构成">
+                      <div class="token-usage-stack-track" aria-label="本地估算 Token 构成">
                         <div
                           v-for="segment in tokenUsageBarSegments"
                           :key="segment.key"
@@ -610,6 +610,7 @@ import FallbackAvatar from '@/components/common/FallbackAvatar.vue'
 import { enrichTaskToolCalls, parseToolCallArgs } from '@/components/ToolCallingResult/toolRegistry'
 import { getConversationDisplayItems } from '@/utils/messageGrouping'
 import { makeChildThreadId } from '@/utils/subagentThread'
+import { buildTokenUsageView, formatTokenCount } from '@/utils/tokenUsage'
 
 // ==================== PROPS & EMITS ====================
 const props = defineProps({
@@ -997,166 +998,70 @@ const supportsFiles = computed(() => {
 const currentAgentState = computed(() => {
   return currentChatId.value ? getThreadState(currentChatId.value)?.agentState || null : null
 })
-const toFiniteNumber = (value) => {
-  const numeric = Number(value)
-  return Number.isFinite(numeric) ? numeric : null
-}
-const TOKEN_COUNT_K_UNIT = 1024
-const formatTokenCount = (value) => {
-  const numeric = toFiniteNumber(value)
-  if (numeric === null) return '-'
-  if (numeric >= TOKEN_COUNT_K_UNIT) {
-    const digits = numeric >= TOKEN_COUNT_K_UNIT * 10 ? 1 : 2
-    return `${(numeric / TOKEN_COUNT_K_UNIT).toFixed(digits).replace(/\.0+$/, '')}k`
-  }
-  return String(Math.round(numeric))
-}
 const currentTokenUsage = computed(() => {
   const usage = currentAgentState.value?.token_usage
   return usage && typeof usage === 'object' && !Array.isArray(usage) ? usage : null
 })
-const tokenUsageSegments = computed(() => {
-  const usage = currentTokenUsage.value
-  if (!usage) return []
-
-  const summaryTokens = usage.summary_active
-    ? Math.max(toFiniteNumber(usage.summary_message_tokens) || 0, 0)
-    : 0
-  const llmMessageTokens = Math.max(toFiniteNumber(usage.llm_messages_tokens) || 0, 0)
-  const stateMessageTokensBeforeCall = Math.max(
-    toFiniteNumber(usage.state_messages_tokens_before_call ?? usage.state_messages_tokens) || 0,
-    0
-  )
-  const messageTokens = Math.max(llmMessageTokens - summaryTokens, 0)
-  const cutMessageTokens = Math.max(stateMessageTokensBeforeCall - llmMessageTokens, 0)
-  const llmMessageCount = Math.max(toFiniteNumber(usage.llm_message_count) || 0, 0)
-  const displayMessageCount = Math.max(llmMessageCount - (usage.summary_active ? 1 : 0), 0)
-  const stateMessageCountBeforeCall = Math.max(
-    toFiniteNumber(usage.state_message_count_before_call ?? usage.state_message_count) || 0,
-    0
-  )
-  const cutMessageCount = Math.max(stateMessageCountBeforeCall - llmMessageCount, 0)
-  const systemTokens = Math.max(toFiniteNumber(usage.system_tokens) || 0, 0)
-  const toolsTokens = Math.max(toFiniteNumber(usage.tools_tokens) || 0, 0)
-  const inputTokens = Math.max(toFiniteNumber(usage.llm_input_tokens) || 0, 0)
-  const rawSegments = [
-    {
-      key: 'cut',
-      label: '已压缩',
-      value: cutMessageTokens,
-      messageCount: cutMessageCount,
-      tone: 'is-cut'
-    },
-    {
-      key: 'messages',
-      label: '消息',
-      value: messageTokens,
-      messageCount: displayMessageCount,
-      tone: 'is-messages'
-    },
-    {
-      key: 'summary',
-      label: '摘要',
-      value: summaryTokens,
-      messageCount: usage.summary_active ? 1 : 0,
-      tone: 'is-summary'
-    },
-    {
-      key: 'system',
-      label: '系统',
-      value: systemTokens,
-      tone: 'is-system'
-    },
-    {
-      key: 'tools',
-      label: `工具 (${usage.tool_count || 0})`,
-      value: toolsTokens,
-      tone: 'is-tools'
-    }
-  ].filter((segment) => segment.value > 0)
-
-  const accountedInputTokens = llmMessageTokens + systemTokens + toolsTokens
-  if (inputTokens > accountedInputTokens) {
-    rawSegments.push({
-      key: 'overhead',
-      label: '其他',
-      value: inputTokens - accountedInputTokens,
-      tone: 'is-overhead'
-    })
-  }
-
-  const segmentTotal = rawSegments.reduce((sum, segment) => sum + segment.value, 0)
-  const total = Math.max(cutMessageTokens + inputTokens, segmentTotal, 1)
-  return rawSegments.map((segment) => {
-    const ratio = segment.value / total
-    return {
-      ...segment,
-      percent: `${Math.max(0, Math.min(ratio * 100, 100)).toFixed(2)}%`,
-      valueLabel: segment.messageCount
-        ? `${formatTokenCount(segment.value)} (${segment.messageCount}条)`
-        : formatTokenCount(segment.value)
-    }
-  })
-})
-const tokenUsageStackTotal = computed(() => {
-  const reportedInputTokens = toFiniteNumber(currentTokenUsage.value?.model_usage?.input_tokens)
-  if (reportedInputTokens !== null) return Math.max(reportedInputTokens, 0)
-  const inputTokens = toFiniteNumber(currentTokenUsage.value?.llm_input_tokens)
-  if (inputTokens !== null) return Math.max(inputTokens, 0)
-  return tokenUsageSegments.value
-    .filter((segment) => segment.key !== 'cut')
-    .reduce((sum, segment) => sum + segment.value, 0)
-})
-const tokenUsageStackLimit = computed(() => {
-  const promptBudget = toFiniteNumber(currentTokenUsage.value?.prompt_budget)
-  if (promptBudget && promptBudget > 0) return promptBudget
-
-  return Math.max(tokenUsageStackTotal.value, 1)
-})
+const tokenUsageView = computed(() => buildTokenUsageView(currentTokenUsage.value))
+const tokenUsageSegments = computed(() => tokenUsageView.value?.segments || [])
+const tokenUsageStackTotal = computed(() => tokenUsageView.value?.used || 0)
 const tokenUsageHeaderPercentLabel = computed(() => {
-  const limit = Math.max(tokenUsageStackLimit.value, 1)
-  const percent = Math.max(0, Math.min((tokenUsageStackTotal.value / limit) * 100, 100))
+  const percent = tokenUsageView.value?.percent
+  if (percent === null || percent === undefined) return '-'
   if (percent > 0 && percent < 1) return '<1%'
   return `${Math.round(percent)}%`
 })
 const tokenUsageStackHeadLabel = computed(() => {
-  const contextWindow = toFiniteNumber(currentTokenUsage.value?.context_window)
+  const contextWindow = tokenUsageView.value?.contextWindow
   if (contextWindow && contextWindow > 0) {
     return `${formatTokenCount(tokenUsageStackTotal.value)} / ${formatTokenCount(contextWindow)} Token`
   }
   return `${formatTokenCount(tokenUsageStackTotal.value)} Token`
 })
-const tokenUsageBarSegments = computed(() => {
-  const limit = Math.max(tokenUsageStackLimit.value, 1)
-  let remaining = limit
-  return tokenUsageSegments.value
-    .filter((segment) => segment.key !== 'cut')
-    .map((segment) => {
-      const value = Math.min(segment.value, Math.max(remaining, 0))
-      remaining -= value
-      return {
-        ...segment,
-        percent: `${Math.max(0, Math.min((value / limit) * 100, 100)).toFixed(2)}%`
-      }
-    })
-    .filter((segment) => segment.value > 0 && segment.percent !== '0.00%')
-})
+const tokenUsageBarSegments = computed(() => tokenUsageSegments.value)
+const signedTokenCount = (value) => {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '-'
+  return `${numeric > 0 ? '+' : ''}${formatTokenCount(numeric)}`
+}
 const tokenUsageMetaRows = computed(() => {
-  const usage = currentTokenUsage.value
-  if (!usage) return []
+  const view = tokenUsageView.value
+  if (!view) return []
   const rows = []
-  if (toFiniteNumber(usage.context_window)) {
+  rows.push({
+    key: 'source',
+    label: '计数来源',
+    value: view.sourceLabel
+  })
+  if (view.contextWindow) {
     rows.push({
       key: 'context-window',
       label: '模型上下文',
-      value: formatTokenCount(usage.context_window)
+      value: formatTokenCount(view.contextWindow)
     })
   }
-  if (toFiniteNumber(usage.prompt_budget)) {
+  if (view.promptBudget) {
     rows.push({
       key: 'input-budget',
-      label: '可用输入预算/剩余',
-      value: `${formatTokenCount(usage.prompt_budget)} / ${formatTokenCount(usage.remaining_input_tokens)}`
+      label: '安全输入预算',
+      value: formatTokenCount(view.promptBudget)
+    })
+  }
+  if (view.budgetDelta !== null) {
+    rows.push({
+      key: 'input-budget-delta',
+      label: '距安全预算',
+      value:
+        view.budgetDelta >= 0
+          ? `剩余 ${formatTokenCount(view.budgetDelta)}`
+          : `超出 ${formatTokenCount(Math.abs(view.budgetDelta))}`
+    })
+  }
+  if (view.correction !== null) {
+    rows.push({
+      key: 'protocol-correction',
+      label: '模型协议/模板校正',
+      value: signedTokenCount(view.correction)
     })
   }
   return rows

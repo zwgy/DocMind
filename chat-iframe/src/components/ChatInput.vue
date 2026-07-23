@@ -23,6 +23,7 @@ import {
   imageValidationError
 } from '@/utils/attachment-limits'
 import { autosizeTextarea } from '@/utils/textarea-autosize'
+import { buildTokenUsageView, formatTokenCount } from '@/utils/token-usage'
 
 const props = withDefaults(
   defineProps<{
@@ -109,63 +110,7 @@ const fileButtonText = computed(() => {
   if (!hasPageFiles.value || !selectedPageFiles.value.length) return '问文件'
   return `问文件(${selectedPageFiles.value.length})`
 })
-function tokenNumber(value: unknown) {
-  const number = Number(value)
-  return Number.isFinite(number) && number >= 0 ? number : null
-}
-
-function reportedInputTokens(usage: Record<string, unknown>) {
-  const modelUsage = usage.model_usage
-  return modelUsage && typeof modelUsage === 'object' && !Array.isArray(modelUsage)
-    ? tokenNumber((modelUsage as Record<string, unknown>).input_tokens)
-    : null
-}
-
-const TOKEN_COUNT_K_UNIT = 1024
-
-function formatTokenCount(value: number) {
-  if (value < TOKEN_COUNT_K_UNIT) return String(Math.round(value))
-  const digits = value >= TOKEN_COUNT_K_UNIT * 10 ? 1 : 2
-  return `${(value / TOKEN_COUNT_K_UNIT).toFixed(digits).replace(/\.0+$/, '')}k`
-}
-
-const contextUsage = computed(() => {
-  const usage = props.tokenUsage
-  if (!usage) return null
-  const reportedTokens = reportedInputTokens(usage)
-  const used = tokenNumber(usage.prompt_tokens) ?? reportedTokens ?? tokenNumber(usage.llm_input_tokens)
-  if (used === null) return null
-  const contextWindow = tokenNumber(usage.context_window)
-  const promptBudget = tokenNumber(usage.prompt_budget)
-  const limit = promptBudget || Math.max(used, 1)
-  const summaryTokens = usage.summary_active ? tokenNumber(usage.summary_message_tokens) || 0 : 0
-  const llmMessageTokens = tokenNumber(usage.llm_messages_tokens) || 0
-  const messageCount = Math.max((tokenNumber(usage.llm_message_count) || 0) - (usage.summary_active ? 1 : 0), 0)
-  const segments = [
-    { key: 'messages', label: '消息', value: Math.max(llmMessageTokens - summaryTokens, 0), messageCount },
-    { key: 'summary', label: '摘要', value: summaryTokens, messageCount: 0 },
-    { key: 'system', label: '系统', value: tokenNumber(usage.system_tokens) || 0, messageCount: 0 },
-    { key: 'tools', label: `工具 (${tokenNumber(usage.tool_count) || 0})`, value: tokenNumber(usage.tools_tokens) || 0, messageCount: 0 }
-  ].filter((segment) => segment.value > 0)
-  const accounted = segments.reduce((total, segment) => total + segment.value, 0)
-  if (used > accounted) segments.push({ key: 'other', label: '其他', value: used - accounted, messageCount: 0 })
-  let available = limit
-  return {
-    used,
-    limit,
-    percent: promptBudget ? Math.min(Math.round((used / limit) * 100), 100) : null,
-    sourceLabel: reportedTokens === null ? '估算' : '模型服务报告',
-    remaining: promptBudget ? Math.max(limit - used, 0) : null,
-    contextWindow,
-    segments: segments
-      .map((segment) => {
-        const value = Math.min(segment.value, Math.max(available, 0))
-        available -= value
-        return { ...segment, value, percent: `${Math.min((value / limit) * 100, 100)}%` }
-      })
-      .filter((segment) => segment.value > 0)
-  }
-})
+const contextUsage = computed(() => buildTokenUsageView(props.tokenUsage))
 
 watch(
   () => props.pageFiles.map((file) => `${file.source_file_id}:${file.selected ? '1' : '0'}`).join('|'),
@@ -452,18 +397,36 @@ watch(text, resizeTextarea)
               <Gauge :size="16" />
             </button>
             <section v-if="showContextUsage" class="context-usage-popover" aria-label="上下文用量">
-              <strong>上下文用量</strong>
+              <strong>上次模型输入 · {{ contextUsage.sourceLabel }}</strong>
               <span>
-                {{ formatTokenCount(contextUsage.used) }}<template v-if="contextUsage.remaining !== null"> / {{ formatTokenCount(contextUsage.limit) }} Token（{{ contextUsage.percent }}%）</template><template v-else> Token</template>
+                {{ formatTokenCount(contextUsage.used)
+                }}<template v-if="contextUsage.contextWindow">
+                  / {{ formatTokenCount(contextUsage.contextWindow) }} Token（{{
+                    contextUsage.percent
+                  }}%）</template
+                ><template v-else> Token</template>
               </span>
-              <div class="context-usage-bar" aria-label="上下文 Token 构成">
-                <i v-for="segment in contextUsage.segments" :key="segment.key" :class="`is-${segment.key}`" :style="{ width: segment.percent }"></i>
+              <div class="context-usage-bar" aria-label="本地估算 Token 构成">
+                <i
+                  v-for="segment in contextUsage.segments"
+                  :key="segment.key"
+                  :class="`is-${segment.key}`"
+                  :style="{ width: segment.percent }"
+                ></i>
               </div>
               <div class="context-usage-legend">
-                <span v-for="segment in contextUsage.segments" :key="segment.key"><i :class="`is-${segment.key}`"></i>{{ segment.label }}<template v-if="segment.messageCount"> ({{ segment.messageCount }})</template> {{ formatTokenCount(segment.value) }}</span>
+                <span v-for="segment in contextUsage.segments" :key="segment.key"
+                  ><i :class="`is-${segment.key}`"></i>{{ segment.label }}
+                  {{ formatTokenCount(segment.value) }}</span
+                >
               </div>
-              <small>{{ contextUsage.sourceLabel }}{{ contextUsage.remaining === null ? '' : ` · 可用输入预算剩余 ${formatTokenCount(contextUsage.remaining)}` }}</small>
-              <small v-if="contextUsage.contextWindow">模型完整上下文 · {{ formatTokenCount(contextUsage.contextWindow) }}</small>
+              <small v-if="contextUsage.promptBudget"
+                >安全输入预算 · {{ formatTokenCount(contextUsage.promptBudget) }}，余量
+                {{ formatTokenCount(contextUsage.budgetDelta) }}</small
+              >
+              <small v-if="contextUsage.correction !== null"
+                >模型协议/模板校正 · {{ formatTokenCount(contextUsage.correction) }}</small
+              >
             </section>
           </div>
           <div ref="modelMenuRef" class="model-menu-wrapper">

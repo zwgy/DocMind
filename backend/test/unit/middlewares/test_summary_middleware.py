@@ -11,7 +11,11 @@ from langgraph.types import Command, Overwrite
 
 from yuxi.agents.middlewares import summary as summary_module
 from yuxi.agents.middlewares.summary import YuxiSummarizationMiddleware, create_summary_middleware
-from yuxi.agents.middlewares.token_usage import resolve_context_budget
+from yuxi.agents.middlewares.token_usage import (
+    ContextWindowExceededError,
+    estimate_model_request,
+    resolve_context_budget,
+)
 
 
 class _SummaryModel:
@@ -428,3 +432,85 @@ def test_provider_overflow_forces_one_safe_history_compaction_before_retry() -> 
     assert calls == 2
     assert model.prompts
     assert "已归档旧对话：用户要完成项目文档。" in result.command.update["context_summary"]
+
+
+@pytest.mark.unit
+def test_provider_overflow_without_usage_compacts_all_completed_history() -> None:
+    messages = [
+        HumanMessage(content="old user one", id="user-old-1"),
+        AIMessage(content="old answer one", id="assistant-old-1"),
+        HumanMessage(content="old user two", id="user-old-2"),
+        AIMessage(content="old answer two", id="assistant-old-2"),
+        HumanMessage(content="current user", id="user-current"),
+    ]
+    model = _SummaryModel()
+    model.profile = {"max_input_tokens": 2_000, "min_output_reserve_tokens": 500, "context_safety_tokens": 100}
+    _, request = _request(messages)
+    request = request.override(model=model)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    calls = 0
+
+    def handler(prepared: ModelRequest):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ContextOverflowError("provider rejected without usage")
+        assert prepared.messages == [messages[-1]]
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    middleware.wrap_model_call(request, handler)
+
+    assert calls == 2
+    assert len(model.prompts) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_measured_overflow_uses_calibration_until_request_fits(asynchronous: bool) -> None:
+    messages = [
+        HumanMessage(content="old user one " + "x" * 800, id="user-old-1"),
+        AIMessage(content="old answer one", id="assistant-old-1"),
+        HumanMessage(content="old user two " + "x" * 800, id="user-old-2"),
+        AIMessage(content="old answer two", id="assistant-old-2"),
+        HumanMessage(content="current user", id="user-current"),
+    ]
+    model = _SummaryModel()
+    model.profile = {"max_input_tokens": 2_000, "min_output_reserve_tokens": 500, "context_safety_tokens": 100}
+    _, request = _request(messages)
+    request = request.override(model=model)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    initial = estimate_model_request(request)
+    budget = resolve_context_budget(request)
+    assert initial.admission < budget.prompt_budget
+    actual_input = budget.prompt_budget + 100
+    calls = 0
+
+    def handler(prepared: ModelRequest):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ContextWindowExceededError(
+                "measured overflow",
+                {
+                    "calibration_key": initial.calibration_key,
+                    "calibration_samples": 1,
+                    "max_positive_error": max(actual_input - initial.baseline, 0),
+                    "max_ratio": max(actual_input / initial.baseline, 1.0),
+                },
+            )
+        assert prepared.messages[-1] == messages[-1]
+        assert len(prepared.messages) < len(messages)
+        assert middleware._request_tokens(prepared) <= budget.prompt_budget
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    async def async_handler(prepared: ModelRequest):
+        return handler(prepared)
+
+    if asynchronous:
+        await middleware.awrap_model_call(request, async_handler)
+    else:
+        middleware.wrap_model_call(request, handler)
+
+    assert calls == 2
+    assert model.prompts

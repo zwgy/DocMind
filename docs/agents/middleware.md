@@ -29,7 +29,7 @@
 | `TodoListMiddleware` | 提供待办状态，让前端状态面板可展示 Agent 运行进度 |
 | `PatchToolCallsMiddleware` | 修正部分工具调用消息形态，提升工具调用兼容性 |
 | `ModelRetryMiddleware` | 在暂态模型调用失败时按配置重试；上下文溢出直接交由摘要恢复 |
-| `TokenUsageMiddleware` | 在 LangGraph state 写入本轮 token 使用快照，供前端状态面板查看 |
+| `TokenUsageMiddleware` | 写入供应商 usage 与本地估算误差包络，供下一轮准入和前端状态面板使用 |
 
 `SubAgentBackend` 使用同一组核心能力，但不会挂载 `YuxiSubAgentMiddleware`，并额外过滤 `present_artifacts`、`ask_user_question`、`install_skill` 等不适合子智能体直接使用的工具。
 
@@ -73,13 +73,19 @@
 | `tool_token_limit` | 单个普通工具结果进入工作上下文前的内联上限（K Token） |
 | `summary_prompt` | 摘要模型使用的提示词 |
 
-模型缓存中的完整窗口、最低输出预留和安全缓冲会写入 LangChain model profile。每次调用均对最终系统提示词、消息和工具定义计数，以“完整窗口 − 输出预留 − 安全缓冲”得到可用输入预算；超预算时才压缩最早的完整交互段。最低输出预留只决定压缩阈值，不会限制模型生成；OpenAI 兼容服务若返回空正文且 `finish_reason=length`，会转换为标准上下文溢出异常，由预算摘要链路重新组装后重试。
+模型缓存中的完整窗口、最低输出预留和安全缓冲会写入 LangChain model profile。每次调用均对最终系统提示词、消息和工具定义做 Unicode/JSON 感知的本地保守估算，以“完整窗口 − 输出预留 − 安全缓冲”得到可用输入预算；超预算时才压缩最早的完整交互段。最低输出预留只决定压缩阈值，不会限制模型生成。
+
+Token 计数不会调用 `/tokenize` 或其他远程预检接口，因此不会额外延迟首 Token。新会话先使用本地保守估算；模型成功响应后，`TokenUsageMiddleware` 用供应商返回的输入 usage 记录当前估算的最大正误差和最大倍率，后续相同模型、部署地址、请求协议与工具 Schema 使用校准后的保守值。模型或工具 Schema 改变会重置校准，消息、附件和私有摘要正文变化只会重新计算本地基线。缺少 usage 的模型仍可使用，但只能保持本地估算口径。
+
+OpenAI 兼容服务若返回空正文且 `finish_reason=length`，TokenUsage 会先保留本次 usage，再把携带校准快照的上下文异常交给 Summary；Summary 持续压缩完整历史交互段，低于输入预算后只重试一次。明确溢出但没有 usage 时会一次性压缩所有可安全压缩的旧历史再重试；固定系统提示词、工具 Schema 和当前输入仍无法容纳时直接返回容量错误。带正文的 `length` 只有在实测输入与输出已接近完整窗口时才记为上下文触顶，否则按普通输出截断处理。
 
 触发后，中间件先把将要裁剪的完整交互段写入当前线程 `outputs/conversation_history` 下的不可变 JSONL 清单，再把私有滚动摘要、最新归档路径和最近原始消息通过一次 `Overwrite` 原子提交。普通大型工具结果会写入 `outputs/large_tool_results` 并以回执替换；已有权威来源的 `read_file` 和 `open_kb_document` 窗口只会缩小为来源回执，不会产生第二份副本。
 
 这对知识库检索尤其重要：`query_kb`、`open_kb_document`、`find_kb_document` 等工具可能返回较长的片段、引用和文档内容。摘要保留任务结论、文件路径和待核验事项；需要原始细节时一律复用 `read_file(offset, limit)`，避免把检索原文反复卷入工作上下文。
 
 未触发 summary 的常规模型调用不会额外清洗最近窗口内的工具结果；常规工具结果预算主要由文件系统中间件在工具返回阶段处理。
+
+前端“上次模型输入”优先显示供应商实测总量，否则显示 usage 校准估算或首次保守估算；“消息、私有摘要、系统、工具”始终只是本地估算构成。供应商实测总量与分项估算之差单独显示为“模型协议/模板校正”，不会伪装成某个分项的精确值。
 
 ## 自定义中间件
 

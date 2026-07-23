@@ -1,11 +1,14 @@
-"""Token usage observation middleware for Yuxi agents."""
+"""Token usage observation and calibrated context admission for Yuxi agents."""
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, NotRequired, TypedDict
+import hashlib
+import json
+import math
+from typing import Any, Literal, NotRequired, TypedDict
 
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -15,15 +18,28 @@ from langchain.agents.middleware.types import (
     ModelResponse,
 )
 from langchain_core.exceptions import ContextOverflowError
-from langchain_core.messages import AIMessage, AnyMessage
+from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, convert_to_openai_messages
 from langchain_core.messages.utils import count_tokens_approximately
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.types import Command
 
 from yuxi.config import config as system_config
 
+_REQUEST_PROTOCOL_VERSION = "langchain-openai-messages-v1"
+ACTIVE_CONTEXT_SUMMARY_STATE_KEY = "_active_context_summary"
+BASE_SYSTEM_MESSAGE_STATE_KEY = "_base_system_message"
+
 
 class ContextBudgetConfigurationError(ValueError):
     """模型限制不完整或互相冲突时，在发送请求前阻止不可恢复的调用。"""
+
+
+class ContextWindowExceededError(ContextOverflowError):
+    """携带本次 usage 快照，让外层摘要中间件可以按实测误差恢复。"""
+
+    def __init__(self, message: str, token_usage: TokenUsagePayload) -> None:
+        super().__init__(message)
+        self.token_usage = token_usage
 
 
 @dataclass(frozen=True)
@@ -35,37 +51,45 @@ class ResolvedContextBudget:
     effective_output_reserve: int
     context_safety_tokens: int
     prompt_budget: int
-    counter: str = "approximate"
+    counter: str = "calibrated_approximate"
+
+
+class TokenBreakdown(TypedDict):
+    """仅用于解释输入构成的本地近似值。"""
+
+    messages: int
+    private_summary: int
+    system: int
+    tools: int
 
 
 class TokenUsagePayload(TypedDict, total=False):
-    """Serializable token usage snapshot stored in LangGraph state."""
+    """存入 LangGraph state 的单一 Token 使用口径。"""
 
-    state_message_count: int
-    state_message_count_before_call: int
-    state_messages_tokens: int
-    state_messages_tokens_before_call: int
-    llm_message_count: int
-    llm_messages_tokens: int
-    llm_input_tokens: int
-    system_tokens: int
-    tools_tokens: int
+    input_tokens: int
+    input_source: Literal["provider_usage", "calibrated_estimate", "fallback_estimate"]
+    provider_input_tokens: int | None
+    provider_output_tokens: int | None
+    baseline_input_tokens: int
+    fallback_input_tokens: int
+    estimated_input_tokens: int
+    breakdown_estimate: TokenBreakdown
+    protocol_correction_tokens: int | None
+    max_positive_error: int
+    max_ratio: float
+    calibration_samples: int
+    calibration_key: str
+    context_window: int
+    context_usage_ratio: float
+    min_output_reserve_tokens: int
+    effective_output_reserve: int
+    context_safety_tokens: int
+    prompt_budget: int
+    input_budget_delta: int
+    context_remaining_after_input: int
     tool_count: int
-    context_window: int | None
-    context_usage_ratio: float | None
-    min_output_reserve_tokens: int | None
-    context_safety_tokens: int | None
-    prompt_budget: int | None
-    prompt_tokens: int
-    fixed_overhead_tokens: int
-    working_messages_tokens: int
-    remaining_input_tokens: int | None
-    prompt_deficit_tokens: int
     summary_active: bool
-    summary_message_tokens: int
-    model_usage: dict[str, int]
-    counter: str
-    estimate: bool
+    near_context_limit: bool
     measured_at: str
 
 
@@ -73,6 +97,21 @@ class TokenUsageState(AgentState):
     """Agent state extension with the latest token usage snapshot."""
 
     token_usage: NotRequired[TokenUsagePayload]
+
+
+@dataclass(frozen=True)
+class RequestTokenEstimate:
+    """一次最终模型请求的本地估算与当前校准包络。"""
+
+    baseline: int
+    fallback: int
+    admission: int
+    source: Literal["calibrated_estimate", "fallback_estimate"]
+    breakdown: TokenBreakdown
+    calibration_key: str
+    max_positive_error: int
+    max_ratio: float
+    calibration_samples: int
 
 
 def _safe_int(value: Any) -> int | None:
@@ -89,7 +128,8 @@ def _profile_positive_int(model: Any, field_name: str) -> int | None:
     profile = getattr(model, "profile", None)
     if not isinstance(profile, Mapping):
         return None
-    return _safe_int(profile.get(field_name)) if (_safe_int(profile.get(field_name)) or 0) > 0 else None
+    value = _safe_int(profile.get(field_name))
+    return value if (value or 0) > 0 else None
 
 
 def _request_output_limit(model_settings: Any) -> int | None:
@@ -117,18 +157,9 @@ def resolve_context_budget(request: ModelRequest | Any) -> ResolvedContextBudget
     if context_safety_tokens is None:
         context_safety_tokens = int(system_config.context_safety_tokens)
 
-    missing = [
-        field_name
-        for field_name, value in (
-            ("context_window", context_window),
-        )
-        if value is None
-    ]
-    if missing:
+    if context_window is None:
         model_name = getattr(model, "model_name", None) or getattr(model, "model", None) or type(model).__name__
-        raise ContextBudgetConfigurationError(
-            f"模型 {model_name} 缺少上下文预算配置: {', '.join(missing)}"
-        )
+        raise ContextBudgetConfigurationError(f"模型 {model_name} 缺少上下文预算配置: context_window")
 
     explicit_output_limit = _request_output_limit(getattr(request, "model_settings", None))
     effective_output_reserve = max(min_output_reserve_tokens, explicit_output_limit or 0)
@@ -147,96 +178,233 @@ def resolve_context_budget(request: ModelRequest | Any) -> ResolvedContextBudget
     )
 
 
-def _raise_on_empty_length_response(response: ModelResponse) -> None:
+def _without_inline_images(value: Any) -> Any:
+    """序列化估算不能把图片 Base64 字节误当作文本 Token。"""
+    if isinstance(value, list):
+        return [_without_inline_images(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if value.get("type") in {"image", "image_url"}:
+        return {"type": value.get("type"), "image": "<inline-image>"}
+    return {key: _without_inline_images(item) for key, item in value.items()}
+
+
+def _openai_tools(tools: Iterable[Any]) -> list[dict[str, Any]]:
+    return [convert_to_openai_tool(tool) for tool in tools]
+
+
+def _serialized_request(messages: list[AnyMessage], tools: list[Any]) -> tuple[str, list[dict[str, Any]]]:
+    converted_tools = _openai_tools(tools)
+    payload = {
+        "messages": _without_inline_images(convert_to_openai_messages(messages)),
+        "tools": converted_tools,
+    }
+    return (
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str),
+        converted_tools,
+    )
+
+
+def estimate_messages_tokens(
+    messages: Iterable[Any],
+    *,
+    tools: list[Any] | None = None,
+    token_counter: Callable[..., int] = count_tokens_approximately,
+) -> int:
+    """对任意消息片段做无网络、Unicode/JSON 感知的保守估算。"""
+    message_list = list(messages)
+    tool_list = list(tools or [])
+    baseline = int(token_counter(message_list, tools=tool_list))
+    serialized, _ = _serialized_request(message_list, tool_list)
+    ascii_chars = sum(character.isascii() for character in serialized)
+    non_ascii_chars = len(serialized) - ascii_chars
+    # 英文按四字符估算会严重低估中文和 JSON 协议；这里取三种启发式的最大值，
+    # 只用于安全准入，不把它伪装成模型 tokenizer 的精确结果。
+    unicode_estimate = math.ceil(ascii_chars / 4 + non_ascii_chars)
+    serialization_estimate = math.ceil(len(serialized) / 2)
+    return max(baseline, unicode_estimate, serialization_estimate)
+
+
+def _calibration_key(request: ModelRequest, converted_tools: list[dict[str, Any]]) -> str:
+    model = request.model
+    model_name = getattr(model, "model_name", None) or getattr(model, "model", None) or type(model).__name__
+    base_url = getattr(model, "openai_api_base", None) or getattr(model, "base_url", None) or ""
+    descriptor = {
+        "model": str(model_name),
+        "model_type": f"{type(model).__module__}.{type(model).__qualname__}",
+        "base_url": str(base_url).rstrip("/"),
+        "protocol": _REQUEST_PROTOCOL_VERSION,
+        "tools": converted_tools,
+    }
+    serialized = json.dumps(descriptor, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _breakdown(
+    request: ModelRequest,
+    token_counter: Callable[..., int],
+) -> TokenBreakdown:
+    state = request.state
+    private_summary = str(state.get(ACTIVE_CONTEXT_SUMMARY_STATE_KEY) or "")
+    base_system_message = state.get(BASE_SYSTEM_MESSAGE_STATE_KEY)
+    system_messages = [base_system_message] if isinstance(base_system_message, SystemMessage) else []
+    if not system_messages and not private_summary and request.system_message is not None:
+        system_messages = [request.system_message]
+    tools = list(request.tools or [])
+    return {
+        "messages": int(token_counter(list(request.messages or []))),
+        "private_summary": (int(token_counter([SystemMessage(content=private_summary)])) if private_summary else 0),
+        "system": int(token_counter(system_messages)) if system_messages else 0,
+        "tools": int(token_counter([], tools=tools)) if tools else 0,
+    }
+
+
+def estimate_model_request(
+    request: ModelRequest,
+    *,
+    token_counter: Callable[..., int] = count_tokens_approximately,
+) -> RequestTokenEstimate:
+    """估算最终请求，并应用同一会话、同一请求结构的历史 usage 校准。"""
+    messages = [
+        *([request.system_message] if request.system_message is not None else []),
+        *list(request.messages or []),
+    ]
+    tools = list(request.tools or [])
+    baseline = int(token_counter(messages, tools=tools))
+    serialized, converted_tools = _serialized_request(messages, tools)
+    ascii_chars = sum(character.isascii() for character in serialized)
+    non_ascii_chars = len(serialized) - ascii_chars
+    fallback = max(
+        baseline,
+        math.ceil(ascii_chars / 4 + non_ascii_chars),
+        math.ceil(len(serialized) / 2),
+    )
+    calibration_key = _calibration_key(request, converted_tools)
+    previous = request.state.get("token_usage")
+    valid_previous = (
+        isinstance(previous, Mapping)
+        and previous.get("calibration_key") == calibration_key
+        and (_safe_int(previous.get("calibration_samples")) or 0) > 0
+    )
+    max_positive_error = max(_safe_int(previous.get("max_positive_error")) or 0, 0) if valid_previous else 0
+    previous_ratio = previous.get("max_ratio") if valid_previous else None
+    max_ratio = float(previous_ratio) if isinstance(previous_ratio, int | float) else 1.0
+    max_ratio = max(max_ratio, 1.0)
+    calibration_samples = _safe_int(previous.get("calibration_samples")) or 0 if valid_previous else 0
+    # 绝对误差保护较固定的模板/工具开销，倍率保护随正文增长的分词误差；取最大值
+    # 可以避免一次较小的新样本把已经观察到的高风险低估重新放行。
+    admission = max(
+        fallback,
+        baseline + max_positive_error,
+        math.ceil(baseline * max_ratio),
+    )
+    return RequestTokenEstimate(
+        baseline=baseline,
+        fallback=fallback,
+        admission=admission,
+        source="calibrated_estimate" if valid_previous else "fallback_estimate",
+        breakdown=_breakdown(request, token_counter),
+        calibration_key=calibration_key,
+        max_positive_error=max_positive_error,
+        max_ratio=max_ratio,
+        calibration_samples=calibration_samples,
+    )
+
+
+def _model_usage_from_response(response: ModelResponse) -> tuple[int | None, int | None]:
+    for message in reversed(response.result):
+        if not isinstance(message, AIMessage) or not isinstance(message.usage_metadata, Mapping):
+            continue
+        input_tokens = _safe_int(message.usage_metadata.get("input_tokens"))
+        output_tokens = _safe_int(message.usage_metadata.get("output_tokens"))
+        total_tokens = _safe_int(message.usage_metadata.get("total_tokens"))
+        if (input_tokens or 0) <= 0:
+            return None, output_tokens if (output_tokens or 0) >= 0 else None
+        if total_tokens is not None and output_tokens is not None and total_tokens < input_tokens + output_tokens:
+            return None, None
+        return input_tokens, output_tokens if (output_tokens or 0) >= 0 else None
+    return None, None
+
+
+def _finish_reason(response: ModelResponse) -> str | None:
+    for message in reversed(response.result):
+        if isinstance(message, AIMessage):
+            value = message.response_metadata.get("finish_reason")
+            return value if isinstance(value, str) else None
+    return None
+
+
+def _is_empty_length_response(response: ModelResponse) -> bool:
     for message in reversed(response.result):
         if not isinstance(message, AIMessage):
             continue
-        if (
+        return (
             message.response_metadata.get("finish_reason") == "length"
             and not message.content
             and not message.tool_calls
-        ):
-            # OpenAI 兼容服务可能用空响应表示上下文耗尽；转成标准异常后，现有摘要中间件会压缩并重试一次。
-            raise ContextOverflowError("模型在生成可见正文前已达到上下文上限")
-        return
-
-
-def _is_summary_message(message: AnyMessage) -> bool:
-    return getattr(message, "additional_kwargs", {}).get("lc_source") == "summarization"
-
-
-def _model_usage_from_response(response: ModelResponse) -> dict[str, int]:
-    for message in reversed(response.result):
-        if not isinstance(message, AIMessage):
-            continue
-        usage = getattr(message, "usage_metadata", None)
-        if not isinstance(usage, Mapping):
-            continue
-        return {str(key): value for key, value in usage.items() if isinstance(value, int)}
-    return {}
+        )
+    return False
 
 
 class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
-    """Record approximate context token usage for the current model request."""
+    """Record provider usage and calibrate the next request without a preflight network call."""
 
     state_schema = TokenUsageState
 
-    def __init__(self, token_counter=count_tokens_approximately) -> None:
+    def __init__(self, token_counter: Callable[..., int] = count_tokens_approximately) -> None:
         super().__init__()
         self.token_counter = token_counter
 
-    def _count_tokens(self, messages: Iterable[Any], *, tools: list[Any] | None = None) -> int:
-        message_list = list(messages)
-        if tools is not None:
-            return int(self.token_counter(message_list, tools=tools))
-        return int(self.token_counter(message_list))
-
     def _build_snapshot(self, request: ModelRequest, response: ModelResponse) -> TokenUsagePayload:
-        _raise_on_empty_length_response(response)
-        state_messages = list(request.state.get("messages") or [])
-        llm_messages = list(request.messages or [])
-        system_messages = [request.system_message] if request.system_message is not None else []
-        tools = list(request.tools or [])
-        response_messages = list(response.result or [])
+        estimate = estimate_model_request(request, token_counter=self.token_counter)
+        provider_input, provider_output = _model_usage_from_response(response)
+        max_positive_error = estimate.max_positive_error
+        max_ratio = estimate.max_ratio
+        calibration_samples = estimate.calibration_samples
+        if provider_input is not None and estimate.baseline > 0:
+            max_positive_error = max(max_positive_error, provider_input - estimate.baseline, 0)
+            max_ratio = max(max_ratio, provider_input / estimate.baseline, 1.0)
+            calibration_samples += 1
 
-        state_tokens_before_call = self._count_tokens(state_messages)
-        next_state_messages = [*state_messages, *response_messages]
-        state_messages_tokens = self._count_tokens(next_state_messages)
-        llm_messages_tokens = self._count_tokens(llm_messages)
-        system_tokens = self._count_tokens(system_messages)
-        tools_tokens = self._count_tokens([], tools=tools) if tools else 0
-        llm_input_tokens = self._count_tokens([*system_messages, *llm_messages], tools=tools)
-
+        input_tokens = provider_input if provider_input is not None else estimate.admission
+        input_source: Literal["provider_usage", "calibrated_estimate", "fallback_estimate"] = (
+            "provider_usage" if provider_input is not None else estimate.source
+        )
         budget = resolve_context_budget(request)
-        context_usage_ratio = min(1.0, round(llm_input_tokens / budget.prompt_budget, 4))
-
-        summary_message = llm_messages[0] if llm_messages and _is_summary_message(llm_messages[0]) else None
+        estimated_input_tokens = sum(estimate.breakdown.values())
+        near_context_limit = (
+            _finish_reason(response) == "length"
+            and provider_input is not None
+            and provider_output is not None
+            and provider_input + provider_output >= budget.context_window - budget.context_safety_tokens
+        )
         return {
-            "state_message_count": len(next_state_messages),
-            "state_message_count_before_call": len(state_messages),
-            "state_messages_tokens": state_messages_tokens,
-            "state_messages_tokens_before_call": state_tokens_before_call,
-            "llm_message_count": len(llm_messages),
-            "llm_messages_tokens": llm_messages_tokens,
-            "llm_input_tokens": llm_input_tokens,
-            "system_tokens": system_tokens,
-            "tools_tokens": tools_tokens,
-            "tool_count": len(tools),
+            "input_tokens": input_tokens,
+            "input_source": input_source,
+            "provider_input_tokens": provider_input,
+            "provider_output_tokens": provider_output,
+            "baseline_input_tokens": estimate.baseline,
+            "fallback_input_tokens": estimate.fallback,
+            "estimated_input_tokens": estimated_input_tokens,
+            "breakdown_estimate": estimate.breakdown,
+            "protocol_correction_tokens": (
+                provider_input - estimated_input_tokens if provider_input is not None else None
+            ),
+            "max_positive_error": max_positive_error,
+            "max_ratio": round(max_ratio, 6),
+            "calibration_samples": calibration_samples,
+            "calibration_key": estimate.calibration_key,
             "context_window": budget.context_window,
-            "context_usage_ratio": context_usage_ratio,
+            "context_usage_ratio": round(input_tokens / budget.context_window, 4),
             "min_output_reserve_tokens": budget.min_output_reserve_tokens,
+            "effective_output_reserve": budget.effective_output_reserve,
             "context_safety_tokens": budget.context_safety_tokens,
             "prompt_budget": budget.prompt_budget,
-            "prompt_tokens": llm_input_tokens,
-            "fixed_overhead_tokens": system_tokens + tools_tokens,
-            "working_messages_tokens": llm_messages_tokens,
-            "remaining_input_tokens": max(budget.prompt_budget - llm_input_tokens, 0),
-            "prompt_deficit_tokens": max(llm_input_tokens - budget.prompt_budget, 0),
-            "summary_active": summary_message is not None,
-            "summary_message_tokens": self._count_tokens([summary_message]) if summary_message else 0,
-            "model_usage": _model_usage_from_response(response),
-            "counter": "langchain.count_tokens_approximately",
-            "estimate": True,
+            "input_budget_delta": budget.prompt_budget - input_tokens,
+            "context_remaining_after_input": budget.context_window - input_tokens,
+            "tool_count": len(request.tools or []),
+            "summary_active": bool(request.state.get(ACTIVE_CONTEXT_SUMMARY_STATE_KEY)),
+            "near_context_limit": near_context_limit,
             "measured_at": datetime.now(UTC).isoformat(),
         }
 
@@ -247,9 +415,16 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
     ) -> ExtendedModelResponse:
         resolve_context_budget(request)
         response = handler(request)
+        # 必须先生成快照再判断空正文 length，否则本次真实 usage 会随异常一起丢失。
+        snapshot = self._build_snapshot(request, response)
+        if _is_empty_length_response(response):
+            raise ContextWindowExceededError(
+                "模型在生成可见正文前已达到上下文上限",
+                snapshot,
+            )
         return ExtendedModelResponse(
             model_response=response,
-            command=Command(update={"token_usage": self._build_snapshot(request, response)}),
+            command=Command(update={"token_usage": snapshot}),
         )
 
     async def awrap_model_call(
@@ -259,7 +434,14 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
     ) -> ExtendedModelResponse:
         resolve_context_budget(request)
         response = await handler(request)
+        # 异步链路与同步链路保持相同顺序，恢复逻辑才能使用同一份实测校准。
+        snapshot = self._build_snapshot(request, response)
+        if _is_empty_length_response(response):
+            raise ContextWindowExceededError(
+                "模型在生成可见正文前已达到上下文上限",
+                snapshot,
+            )
         return ExtendedModelResponse(
             model_response=response,
-            command=Command(update={"token_usage": self._build_snapshot(request, response)}),
+            command=Command(update={"token_usage": snapshot}),
         )
