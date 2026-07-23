@@ -54,3 +54,10 @@ test('renderMarkdown recognizes common language aliases and keeps SVG as safe ou
   assert.doesNotMatch(html, /<script>/)
   assert.doesNotMatch(html, /<svg[^>]*onload=/)
 })
+
+test('renderMarkdown repairs emphasis directly followed by model text', async () => {
+  const html = await renderMarkdown('**附件5共计14项物资。**其中第10项需要复核。')
+
+  assert.match(html, /<strong>附件5共计14项物资。<\/strong> 其中第10项需要复核。/)
+  assert.doesNotMatch(html, /\*\*/)
+})

@@ -346,6 +346,25 @@ test('readRunEventStream emits text deltas from compact run SSE events', async (
   assert.equal(finished, true)
 })
 
+test('readRunEventStream preserves compaction status from the queued run envelope', async () => {
+  const response = new Response(
+    [
+      'event: custom',
+      'data: {"payload":{"name":"yuxi.stream_event","chunk":{"status":"stream_event","event":{"method":"custom","data":{"type":"context_compaction","status":"started"}}}}}',
+      '',
+      '',
+    ].join('\n')
+  )
+  const statuses = []
+
+  await readRunEventStream(response, {
+    onStatus: (status) => statuses.push(status)
+  })
+
+  assert.equal(statuses[0].event.data.type, 'context_compaction')
+  assert.equal(statuses[0].event.data.status, 'started')
+})
+
 test('readRunEventStream emits text from backend compact payload items', async () => {
   const encoder = new TextEncoder()
   const stream = new ReadableStream({

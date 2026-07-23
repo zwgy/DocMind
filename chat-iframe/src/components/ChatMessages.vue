@@ -335,7 +335,7 @@ async function scrollToBottom() {
   })
 }
 
-watch([displayItems, showGeneratingStatus, showRunProgress], scrollToBottom, {
+watch([displayItems, showGeneratingStatus, showRunProgress, () => props.compacting], scrollToBottom, {
   flush: 'post',
   deep: true
 })

@@ -35,6 +35,13 @@ test('selected attachment summaries keep the ask-file list order', () => {
   assert.doesNotMatch(chatInputSource, /selected\.sort\(/)
 })
 
+test('compaction status change scrolls its waiting text into view', () => {
+  assert.match(
+    chatMessagesSource,
+    /watch\(\[displayItems, showGeneratingStatus, showRunProgress, \(\) => props\.compacting\]/
+  )
+})
+
 test('buildContextSummaryMessage uses metadata returned by the matched incoming document', () => {
   const message = buildContextSummaryMessage({
     file,

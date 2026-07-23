@@ -187,6 +187,16 @@ const markdown = new MarkdownIt({
   .use(katexPlugin, { throwOnError: false, errorColor: '#cc0000', trust: false })
   .use(taskLists, { enabled: false, label: false, labelAfter: false })
 
+// 本地模型偶尔会输出 `**重点**正文`。CommonMark 会把它视为普通文本；只修正规则明确的
+// 行内 token，避免改动代码围栏等原样内容。
+markdown.core.ruler.before('inline', 'normalize-local-model-emphasis', (state) => {
+  for (const token of state.tokens) {
+    if (token.type === 'inline') {
+      token.content = token.content.replace(/(\*\*[^*\n]+?\*\*)(?=[\p{L}\p{N}])/gu, '$1 ')
+    }
+  }
+})
+
 const defaultFenceRenderer = markdown.renderer.rules.fence!
 markdown.renderer.rules.fence = (tokens, index, options, environment, self) => {
   const token = tokens[index]
