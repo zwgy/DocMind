@@ -42,7 +42,8 @@ IFRAME_CONTEXT_TEMPLATE = """### iframe 页面与附件上下文
 `source_file_id`，并设置 `include_full_text=true`；得到工具返回的 `markdown_path` 后，
 才能使用 `read_file` 读取。不得猜测文件路径，也不得使用 `execute`、`glob`、`ls`
 在文件系统中搜索来文附件。摘要和结构化结果不是逐字原文；原文读取失败时应明确说明，
-不得将摘要改写成原文或据此补充责任主体等事实。
+不得将摘要改写成原文或据此补充责任主体、条款号等事实。用户要求条款号或逐字引用时，
+工具返回内容必须同时包含对应条款号和原文，否则应继续读取相关范围或明确说明尚未核验。
 {% for document in documents %}
 #### 来文：{{ document.name }}{{ "（incoming_id=" ~ document.incoming_id ~ "）" if document.incoming_id else "" }}
 {% if document.classification %}
