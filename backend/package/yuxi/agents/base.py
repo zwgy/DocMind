@@ -11,6 +11,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver, aiosqlite
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.stream.transformers import CustomTransformer
 from langgraph.types import Command
 
 from yuxi import config as sys_config
@@ -252,6 +253,9 @@ class BaseAgent:
             context=context,
             config=input_config,
             version="v3",
+            # 摘要中间件只通过 custom 流发送开始/结束状态；正文仍走 messages，
+            # 这样前端能提示“正在压缩”而不会接触私有摘要内容。
+            transformers=[CustomTransformer],
         )
         subagent_routes: dict[tuple[str, ...], dict[str, str]] = {}
         route_task = asyncio.create_task(_collect_subagent_routes(run, context.thread_id, subagent_routes))
@@ -280,7 +284,7 @@ class BaseAgent:
                     yield "messages", (msg, metadata)
                 elif method == "values" and not namespace:
                     yield "values", data
-                elif method in {"tasks", "tools", "lifecycle"}:
+                elif method in {"tasks", "tools", "lifecycle", "custom"}:
                     if method == "tools":
                         data = _normalize_tool_event_data(data)
                     event_payload = {

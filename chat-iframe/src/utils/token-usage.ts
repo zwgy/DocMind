@@ -40,16 +40,16 @@ export function buildTokenUsageView(usage: Record<string, unknown> | null | unde
       ? (usage.breakdown_estimate as Record<string, unknown>)
       : {}
   const rawSegments = [
-    { key: 'messages', label: '消息（估算）', value: nonNegativeNumber(breakdown.messages) || 0 },
+    { key: 'messages', label: '对话消息', value: nonNegativeNumber(breakdown.messages) || 0 },
     {
       key: 'summary',
-      label: '摘要（估算）',
+      label: '历史摘要',
       value: nonNegativeNumber(breakdown.private_summary) || 0
     },
-    { key: 'system', label: '系统（估算）', value: nonNegativeNumber(breakdown.system) || 0 },
+    { key: 'system', label: '系统说明', value: nonNegativeNumber(breakdown.system) || 0 },
     {
       key: 'tools',
-      label: `工具（估算，${nonNegativeNumber(usage.tool_count) || 0}）`,
+      label: `可用工具（${nonNegativeNumber(usage.tool_count) || 0} 个）`,
       value: nonNegativeNumber(breakdown.tools) || 0
     }
   ].filter((segment) => segment.value > 0)
@@ -58,9 +58,9 @@ export function buildTokenUsageView(usage: Record<string, unknown> | null | unde
     1
   )
   const sourceLabels: Record<string, string> = {
-    provider_usage: '模型服务实测',
-    calibrated_estimate: 'usage 校准估算',
-    fallback_estimate: '首次保守估算'
+    provider_usage: '实际用量',
+    calibrated_estimate: '校准后的估算',
+    fallback_estimate: '首次预估'
   }
 
   // 与主站保持同一契约：总量可以实测，消息/摘要/系统/工具分项始终只是本地估算。
@@ -70,11 +70,12 @@ export function buildTokenUsageView(usage: Record<string, unknown> | null | unde
     promptBudget,
     budgetDelta,
     correction,
+    hasSummary: rawSegments.some((segment) => segment.key === 'summary'),
     percent:
       contextWindow && contextWindow > 0
         ? Math.max(0, Math.min(Math.round((used / contextWindow) * 100), 100))
         : null,
-    sourceLabel: sourceLabels[String(usage.input_source || '')] || '本地估算',
+    sourceLabel: sourceLabels[String(usage.input_source || '')] || '本地预估',
     segments: rawSegments.map((segment) => ({
       ...segment,
       percent: `${((segment.value / compositionTotal) * 100).toFixed(2)}%`

@@ -93,7 +93,11 @@ const selectedPageFiles = computed(() =>
   props.pageFiles.filter((file) => selectedPageSourceFileIds.value.has(file.source_file_id))
 )
 const selectedModelLabel = computed(() => {
-  return props.models.find((model) => model.value === props.selectedModelSpec)?.label || props.selectedModelSpec || '默认模型'
+  return (
+    props.models.find((model) => model.value === props.selectedModelSpec)?.label ||
+    props.selectedModelSpec ||
+    '默认模型'
+  )
 })
 const filteredModelGroups = computed(() => {
   const keyword = modelSearch.value.trim().toLowerCase()
@@ -113,11 +117,14 @@ const fileButtonText = computed(() => {
 const contextUsage = computed(() => buildTokenUsageView(props.tokenUsage))
 
 watch(
-  () => props.pageFiles.map((file) => `${file.source_file_id}:${file.selected ? '1' : '0'}`).join('|'),
+  () =>
+    props.pageFiles.map((file) => `${file.source_file_id}:${file.selected ? '1' : '0'}`).join('|'),
   () => {
     const currentIds = new Set(props.pageFiles.map((file) => file.source_file_id))
     const next = new Set([...selectedPageSourceFileIds.value].filter((id) => currentIds.has(id)))
-    const selected = props.pageFiles.filter((file) => file.selected).map((file) => file.source_file_id)
+    const selected = props.pageFiles
+      .filter((file) => file.selected)
+      .map((file) => file.source_file_id)
     if (!next.size && selected.length) selected.forEach((id) => next.add(id))
     selectedPageSourceFileIds.value = next
     syncAskFile()
@@ -167,8 +174,12 @@ function submit() {
 
 function appendDraftFiles(fileList?: FileList | File[]) {
   const incoming = Array.from(fileList || [])
-  const existing = new Set(draftAttachmentFiles.value.map((file) => `${file.name}:${file.size}:${file.lastModified}`))
-  const next = incoming.filter((file) => !existing.has(`${file.name}:${file.size}:${file.lastModified}`))
+  const existing = new Set(
+    draftAttachmentFiles.value.map((file) => `${file.name}:${file.size}:${file.lastModified}`)
+  )
+  const next = incoming.filter(
+    (file) => !existing.has(`${file.name}:${file.size}:${file.lastModified}`)
+  )
   const error = attachmentValidationError(next, draftAttachmentFiles.value.length)
   if (error) {
     attachmentError.value = error
@@ -202,7 +213,9 @@ function removeFile(index: number) {
 }
 
 function removeDraftFile(index: number) {
-  draftAttachmentFiles.value = draftAttachmentFiles.value.filter((_, itemIndex) => itemIndex !== index)
+  draftAttachmentFiles.value = draftAttachmentFiles.value.filter(
+    (_, itemIndex) => itemIndex !== index
+  )
 }
 
 function formatFileSize(size: number) {
@@ -268,10 +281,14 @@ function onDropFiles(event: DragEvent) {
 }
 
 function handleOutsideClick(event: MouseEvent) {
-  if (fileMenuRef.value && !fileMenuRef.value.contains(event.target as Node)) showFileMenu.value = false
-  if (modelMenuRef.value && !modelMenuRef.value.contains(event.target as Node)) showModelMenu.value = false
-  if (attachmentMenuRef.value && !attachmentMenuRef.value.contains(event.target as Node)) showAttachmentMenu.value = false
-  if (contextUsageRef.value && !contextUsageRef.value.contains(event.target as Node)) showContextUsage.value = false
+  if (fileMenuRef.value && !fileMenuRef.value.contains(event.target as Node))
+    showFileMenu.value = false
+  if (modelMenuRef.value && !modelMenuRef.value.contains(event.target as Node))
+    showModelMenu.value = false
+  if (attachmentMenuRef.value && !attachmentMenuRef.value.contains(event.target as Node))
+    showAttachmentMenu.value = false
+  if (contextUsageRef.value && !contextUsageRef.value.contains(event.target as Node))
+    showContextUsage.value = false
 }
 
 onMounted(() => {
@@ -381,7 +398,13 @@ watch(text, resizeTextarea)
               </button>
             </div>
             <input class="hidden-file-input" type="file" multiple @change="onFileChange" />
-            <input ref="imageInputRef" class="hidden-file-input" type="file" :accept="IMAGE_ACCEPT" @change="onImageChange" />
+            <input
+              ref="imageInputRef"
+              class="hidden-file-input"
+              type="file"
+              :accept="IMAGE_ACCEPT"
+              @change="onImageChange"
+            />
           </div>
         </div>
         <div class="send-tools">
@@ -397,8 +420,11 @@ watch(text, resizeTextarea)
               <Gauge :size="16" />
             </button>
             <section v-if="showContextUsage" class="context-usage-popover" aria-label="上下文用量">
-              <strong>上次模型输入 · {{ contextUsage.sourceLabel }}</strong>
-              <span>
+              <header class="context-usage-heading">
+                <strong>本轮上下文用量</strong>
+                <small>{{ contextUsage.sourceLabel }}</small>
+              </header>
+              <span class="context-usage-total">
                 {{ formatTokenCount(contextUsage.used)
                 }}<template v-if="contextUsage.contextWindow">
                   / {{ formatTokenCount(contextUsage.contextWindow) }} Token（{{
@@ -406,7 +432,11 @@ watch(text, resizeTextarea)
                   }}%）</template
                 ><template v-else> Token</template>
               </span>
-              <div class="context-usage-bar" aria-label="本地估算 Token 构成">
+              <small v-if="contextUsage.hasSummary" class="context-usage-summary-note">
+                已自动压缩较早的对话，关键信息保存在“历史摘要”中。
+              </small>
+              <small>以下分类为估算值，仅用于了解上下文构成。</small>
+              <div class="context-usage-bar" aria-label="估算的上下文构成">
                 <i
                   v-for="segment in contextUsage.segments"
                   :key="segment.key"
@@ -415,18 +445,27 @@ watch(text, resizeTextarea)
                 ></i>
               </div>
               <div class="context-usage-legend">
-                <span v-for="segment in contextUsage.segments" :key="segment.key"
-                  ><i :class="`is-${segment.key}`"></i>{{ segment.label }}
-                  {{ formatTokenCount(segment.value) }}</span
-                >
+                <span v-for="segment in contextUsage.segments" :key="segment.key">
+                  <span><i :class="`is-${segment.key}`"></i>{{ segment.label }}</span>
+                  <strong>{{ formatTokenCount(segment.value) }} Token</strong>
+                </span>
               </div>
-              <small v-if="contextUsage.promptBudget"
-                >安全输入预算 · {{ formatTokenCount(contextUsage.promptBudget) }}，余量
-                {{ formatTokenCount(contextUsage.budgetDelta) }}</small
-              >
-              <small v-if="contextUsage.correction !== null"
-                >模型协议/模板校正 · {{ formatTokenCount(contextUsage.correction) }}</small
-              >
+              <div class="context-usage-meta">
+                <span v-if="contextUsage.promptBudget">
+                  <small>本轮安全输入上限</small>
+                  <strong>{{ formatTokenCount(contextUsage.promptBudget) }} Token</strong>
+                </span>
+                <span v-if="contextUsage.budgetDelta !== null">
+                  <small>{{
+                    contextUsage.budgetDelta >= 0 ? '当前可用余量' : '已超出安全上限'
+                  }}</small>
+                  <strong>{{ formatTokenCount(Math.abs(contextUsage.budgetDelta)) }} Token</strong>
+                </span>
+                <span v-if="contextUsage.correction !== null">
+                  <small>模型格式等额外开销</small>
+                  <strong>{{ formatTokenCount(contextUsage.correction) }} Token</strong>
+                </span>
+              </div>
             </section>
           </div>
           <div ref="modelMenuRef" class="model-menu-wrapper">
@@ -461,18 +500,39 @@ watch(text, resizeTextarea)
               <p v-if="!filteredModelGroups.length" class="popover-empty">没有匹配模型</p>
             </div>
           </div>
-          <button v-if="streaming" class="send-button" type="button" title="停止" @click="$emit('stop')">
+          <button
+            v-if="streaming"
+            class="send-button"
+            type="button"
+            title="停止"
+            @click="$emit('stop')"
+          >
             <Square :size="16" />
           </button>
-          <button v-else class="send-button" type="submit" :disabled="disabled || !text.trim()" title="发送">
+          <button
+            v-else
+            class="send-button"
+            type="submit"
+            :disabled="disabled || !text.trim()"
+            title="发送"
+          >
             <SendHorizontal :size="18" />
           </button>
         </div>
       </div>
     </div>
 
-    <div v-if="showAttachmentModal" class="attachment-modal-mask" @click.self="closeAttachmentModal">
-      <section class="attachment-modal" role="dialog" aria-modal="true" aria-labelledby="attachmentModalTitle">
+    <div
+      v-if="showAttachmentModal"
+      class="attachment-modal-mask"
+      @click.self="closeAttachmentModal"
+    >
+      <section
+        class="attachment-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="attachmentModalTitle"
+      >
         <header class="attachment-modal-header">
           <h2 id="attachmentModalTitle">添加附件</h2>
           <button type="button" title="关闭" @click="closeAttachmentModal">
@@ -488,10 +548,17 @@ watch(text, resizeTextarea)
         >
           <input class="dropzone-file-input" type="file" multiple @change="onFileChange" />
           <strong>点击或拖拽文件到此处上传</strong>
-          <span>{{ ATTACHMENT_LIMIT_TEXT }}；Word、PDF 和图片等可解析文档会在发送时转为 Markdown。</span>
+          <span
+            >{{ ATTACHMENT_LIMIT_TEXT }}；Word、PDF 和图片等可解析文档会在发送时转为
+            Markdown。</span
+          >
         </label>
         <div v-if="draftAttachmentFiles.length" class="attachment-draft-list">
-          <div v-for="(file, index) in draftAttachmentFiles" :key="`${file.name}-${file.size}-${index}`" class="attachment-draft-item">
+          <div
+            v-for="(file, index) in draftAttachmentFiles"
+            :key="`${file.name}-${file.size}-${index}`"
+            class="attachment-draft-item"
+          >
             <div class="attachment-draft-icon">
               <FileText :size="17" />
             </div>
@@ -509,7 +576,13 @@ watch(text, resizeTextarea)
         </div>
         <footer class="attachment-modal-footer">
           <button type="button" class="secondary" @click="closeAttachmentModal">取消</button>
-          <button type="button" :disabled="!draftAttachmentFiles.length" @click="confirmAttachmentModal">添加附件</button>
+          <button
+            type="button"
+            :disabled="!draftAttachmentFiles.length"
+            @click="confirmAttachmentModal"
+          >
+            添加附件
+          </button>
         </footer>
       </section>
     </div>

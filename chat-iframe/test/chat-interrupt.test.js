@@ -12,7 +12,8 @@ test('interrupt answer resumes the original parent run', async () => {
       resumePayload = JSON.parse(options.body)
       return Response.json({ id: 'resume-run' })
     }
-    if (url === '/api/agent/thread/thread-1/active_run') return Response.json({ run: { id: 'resume-run', status: 'running' } })
+    if (url === '/api/agent/thread/thread-1/active_run')
+      return Response.json({ run: { id: 'resume-run', status: 'running' } })
     if (url === '/api/agent/runs/resume-run') return Response.json({ run: { status: 'running' } })
     if (url.startsWith('/api/agent/runs/resume-run/events')) {
       return new Response('event: end\ndata: {"payload":{"status":"completed"}}\nid: 1-0\n\n')
@@ -40,4 +41,29 @@ test('interrupt answer resumes the original parent run', async () => {
   assert.equal(resumePayload.parent_run_id, 'parent-run')
   assert.deepEqual(resumePayload.resume, { 'q-1': 'yes' })
   assert.equal(runtime.pendingInterrupt, null)
+})
+
+test('context compaction stream event only changes the waiting status', () => {
+  setActivePinia(createPinia())
+  const chat = useChatStore()
+  const runtime = chat.ensureRuntime('thread-1')
+
+  chat.consumeRunStatus(runtime, {
+    status: 'stream_event',
+    event: {
+      method: 'custom',
+      data: { type: 'context_compaction', status: 'started' }
+    }
+  })
+  assert.equal(runtime.isCompacting, true)
+
+  chat.consumeRunStatus(runtime, {
+    status: 'stream_event',
+    event: {
+      method: 'custom',
+      data: { type: 'context_compaction', status: 'finished' }
+    }
+  })
+  assert.equal(runtime.isCompacting, false)
+  assert.equal(runtime.messages.length, 0)
 })

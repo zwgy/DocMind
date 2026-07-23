@@ -22,8 +22,9 @@ class _FakeGraph:
 
 
 class _EventGraph(_FakeGraph):
-    async def astream_events(self, payload, *, context, config, version):
+    async def astream_events(self, payload, *, context, config, version, transformers):
         del payload, context, config, version
+        self.transformers = transformers
 
         async def events():
             yield {
@@ -36,6 +37,13 @@ class _EventGraph(_FakeGraph):
             yield {
                 "method": "messages",
                 "params": {"namespace": [], "data": ({"content": "visible answer"}, {"node": "model"})},
+            }
+            yield {
+                "method": "custom",
+                "params": {
+                    "namespace": [],
+                    "data": {"type": "context_compaction", "status": "started"},
+                },
             }
 
         return events()
@@ -142,5 +150,15 @@ async def test_base_agent_hides_internal_summary_messages_from_state_stream():
                 {"content": "visible answer"},
                 {"node": "model", "namespace": [], "stream_event": {"method": "messages", "namespace": []}},
             ),
-        )
+        ),
+        (
+            "stream_event",
+            {
+                "method": "custom",
+                "namespace": [],
+                "data": {"type": "context_compaction", "status": "started"},
+            },
+        ),
     ]
+    graph = await agent.get_graph()
+    assert graph.transformers[0].__name__ == "CustomTransformer"

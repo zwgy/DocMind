@@ -704,30 +704,37 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                 revision=next_revision,
             )
             archive_prefix = _archive_summary_prefix(archive_path)
+            # 只发布生命周期状态，摘要正文继续由统一流出口隔离，避免为进度提示扩大隐私边界。
+            request.runtime.stream_writer({"type": "context_compaction", "status": "started"})
             try:
-                generated_summary, generated_degraded = self._create_summary(summary, compacted, target_tokens, budget)
-                summary, summary_quality = self._fit_summary_to_budget(
-                    request,
-                    survivors=survivors,
-                    prefix=archive_prefix,
-                    generated=generated_summary,
-                    budget=budget,
-                )
-            except ContextBudgetConfigurationError:
-                raise
-            except Exception:
-                # 归档已成功且前缀本身通过预算计算；摘要模型不可用时保留旧摘要的可容纳部分，
-                # 使主模型仍可借助归档索引继续，而不是把一次压缩失败扩大成整轮对话失败。
-                logger.exception("摘要模型失败，改用归档回执继续本次对话")
-                summary, _ = self._fit_summary_to_budget(
-                    request,
-                    survivors=survivors,
-                    prefix=archive_prefix,
-                    generated=summary,
-                    budget=budget,
-                )
-                generated_degraded = True
-                summary_quality = "degraded"
+                try:
+                    generated_summary, generated_degraded = self._create_summary(
+                        summary, compacted, target_tokens, budget
+                    )
+                    summary, summary_quality = self._fit_summary_to_budget(
+                        request,
+                        survivors=survivors,
+                        prefix=archive_prefix,
+                        generated=generated_summary,
+                        budget=budget,
+                    )
+                except ContextBudgetConfigurationError:
+                    raise
+                except Exception:
+                    # 归档已成功且前缀本身通过预算计算；摘要模型不可用时保留旧摘要的可容纳部分，
+                    # 使主模型仍可借助归档索引继续，而不是把一次压缩失败扩大成整轮对话失败。
+                    logger.exception("摘要模型失败，改用归档回执继续本次对话")
+                    summary, _ = self._fit_summary_to_budget(
+                        request,
+                        survivors=survivors,
+                        prefix=archive_prefix,
+                        generated=summary,
+                        budget=budget,
+                    )
+                    generated_degraded = True
+                    summary_quality = "degraded"
+            finally:
+                request.runtime.stream_writer({"type": "context_compaction", "status": "finished"})
             prepared = self._request_with_summary(request, messages=survivors, summary=summary)
             if self._request_tokens(prepared) <= budget.prompt_budget:
                 last_compacted = compacted[-1]
@@ -799,34 +806,39 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                 revision=next_revision,
             )
             archive_prefix = _archive_summary_prefix(archive_path)
+            # 异步路径保持与同步路径相同的公开状态契约，避免不同聊天入口显示不一致。
+            request.runtime.stream_writer({"type": "context_compaction", "status": "started"})
             try:
-                generated_summary, generated_degraded = await self._acreate_summary(
-                    summary,
-                    compacted,
-                    target_tokens,
-                    budget,
-                )
-                summary, summary_quality = self._fit_summary_to_budget(
-                    request,
-                    survivors=survivors,
-                    prefix=archive_prefix,
-                    generated=generated_summary,
-                    budget=budget,
-                )
-            except ContextBudgetConfigurationError:
-                raise
-            except Exception:
-                # 同步路径相同：只有归档与预算收敛已成立，才允许不依赖摘要模型继续。
-                logger.exception("摘要模型失败，改用归档回执继续本次对话")
-                summary, _ = self._fit_summary_to_budget(
-                    request,
-                    survivors=survivors,
-                    prefix=archive_prefix,
-                    generated=summary,
-                    budget=budget,
-                )
-                generated_degraded = True
-                summary_quality = "degraded"
+                try:
+                    generated_summary, generated_degraded = await self._acreate_summary(
+                        summary,
+                        compacted,
+                        target_tokens,
+                        budget,
+                    )
+                    summary, summary_quality = self._fit_summary_to_budget(
+                        request,
+                        survivors=survivors,
+                        prefix=archive_prefix,
+                        generated=generated_summary,
+                        budget=budget,
+                    )
+                except ContextBudgetConfigurationError:
+                    raise
+                except Exception:
+                    # 同步路径相同：只有归档与预算收敛已成立，才允许不依赖摘要模型继续。
+                    logger.exception("摘要模型失败，改用归档回执继续本次对话")
+                    summary, _ = self._fit_summary_to_budget(
+                        request,
+                        survivors=survivors,
+                        prefix=archive_prefix,
+                        generated=summary,
+                        budget=budget,
+                    )
+                    generated_degraded = True
+                    summary_quality = "degraded"
+            finally:
+                request.runtime.stream_writer({"type": "context_compaction", "status": "finished"})
             prepared = self._request_with_summary(request, messages=survivors, summary=summary)
             if self._request_tokens(prepared) <= budget.prompt_budget:
                 last_compacted = compacted[-1]

@@ -151,12 +151,20 @@ async function refreshExtraction(
       response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
       cacheExtractionResults(queryFiles, response.items || [])
     }
-    if (queryFiles.some((candidate) => candidate.source_file_id === selectedFile.value?.source_file_id))
+    if (
+      queryFiles.some(
+        (candidate) => candidate.source_file_id === selectedFile.value?.source_file_id
+      )
+    )
       refreshContextSummaries()
     return true
   } catch (err) {
     error.value = err instanceof Error ? err.message : '查询失败'
-    if (queryFiles.some((candidate) => candidate.source_file_id === selectedFile.value?.source_file_id))
+    if (
+      queryFiles.some(
+        (candidate) => candidate.source_file_id === selectedFile.value?.source_file_id
+      )
+    )
       refreshContextSummaries({ error: error.value })
     return false
   } finally {
@@ -444,6 +452,7 @@ onUnmounted(() => {
           :messages="chat.displayMessages"
           :loading="chat.isLoading"
           :streaming="chat.isStreaming"
+          :compacting="chat.isCompacting"
           :agent-state="chat.agentState"
           :thread-id="chat.currentThreadId"
           :token="context.config.token"

@@ -118,7 +118,9 @@
                   <div></div>
                   <div></div>
                 </div>
-                <span class="generating-text">正在生成回复...</span>
+                <span class="generating-text">{{
+                  isContextCompacting ? '正在压缩历史对话...' : '正在生成回复...'
+                }}</span>
               </div>
             </div>
           </div>
@@ -250,10 +252,17 @@
                   <div class="token-usage-content">
                     <div class="token-usage-stack">
                       <div class="token-usage-stack-head">
-                        <span>上次模型输入 · {{ tokenUsageView?.sourceLabel }}</span>
+                        <span>
+                          本轮上下文用量
+                          <small>{{ tokenUsageView?.sourceLabel }}</small>
+                        </span>
                         <strong>{{ tokenUsageStackHeadLabel }}</strong>
                       </div>
-                      <div class="token-usage-stack-track" aria-label="本地估算 Token 构成">
+                      <p v-if="tokenUsageView?.hasSummary" class="token-usage-summary-note">
+                        已自动压缩较早的对话，关键信息保存在“历史摘要”中。
+                      </p>
+                      <p class="token-usage-caption">以下分类为估算值，仅用于了解上下文构成。</p>
+                      <div class="token-usage-stack-track" aria-label="估算的上下文构成">
                         <div
                           v-for="segment in tokenUsageBarSegments"
                           :key="segment.key"
@@ -1028,40 +1037,35 @@ const tokenUsageMetaRows = computed(() => {
   const view = tokenUsageView.value
   if (!view) return []
   const rows = []
-  rows.push({
-    key: 'source',
-    label: '计数来源',
-    value: view.sourceLabel
-  })
   if (view.contextWindow) {
     rows.push({
       key: 'context-window',
-      label: '模型上下文',
-      value: formatTokenCount(view.contextWindow)
+      label: '模型上下文上限',
+      value: `${formatTokenCount(view.contextWindow)} Token`
     })
   }
   if (view.promptBudget) {
     rows.push({
       key: 'input-budget',
-      label: '安全输入预算',
-      value: formatTokenCount(view.promptBudget)
+      label: '本轮安全输入上限',
+      value: `${formatTokenCount(view.promptBudget)} Token`
     })
   }
   if (view.budgetDelta !== null) {
     rows.push({
       key: 'input-budget-delta',
-      label: '距安全预算',
+      label: view.budgetDelta >= 0 ? '当前可用余量' : '已超出安全上限',
       value:
         view.budgetDelta >= 0
-          ? `剩余 ${formatTokenCount(view.budgetDelta)}`
-          : `超出 ${formatTokenCount(Math.abs(view.budgetDelta))}`
+          ? `${formatTokenCount(view.budgetDelta)} Token`
+          : `${formatTokenCount(Math.abs(view.budgetDelta))} Token`
     })
   }
   if (view.correction !== null) {
     rows.push({
       key: 'protocol-correction',
-      label: '模型协议/模板校正',
-      value: signedTokenCount(view.correction)
+      label: '模型格式等额外开销',
+      value: `${signedTokenCount(view.correction)} Token`
     })
   }
   return rows
@@ -1539,6 +1543,7 @@ const isReplyLoading = computed(() => {
   const threadState = currentThreadState.value
   return Boolean(threadState?.replyLoadingVisible)
 })
+const isContextCompacting = computed(() => Boolean(currentThreadState.value?.isCompacting))
 const isSendButtonDisabled = computed(() => {
   return (
     sendCooldownActive.value ||
@@ -3536,10 +3541,41 @@ watch(currentChatId, (threadId, oldThreadId) => {
   color: var(--gray-500);
 }
 
+.token-usage-stack-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.token-usage-stack-head small {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--main-900);
+  background: var(--main-30);
+}
+
 .token-usage-stack-head strong {
   color: var(--gray-900);
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+}
+
+.token-usage-caption,
+.token-usage-summary-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.token-usage-caption {
+  color: var(--gray-500);
+}
+
+.token-usage-summary-note {
+  padding: 7px 8px;
+  border-radius: 7px;
+  color: var(--main-700);
+  background: var(--main-30);
 }
 
 .token-usage-stack-track {
@@ -3569,9 +3605,7 @@ watch(currentChatId, (threadId, oldThreadId) => {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
 }
 
 .token-usage-stack-legend-item i {
@@ -3635,9 +3669,7 @@ watch(currentChatId, (threadId, oldThreadId) => {
 
 .token-usage-breakdown-row span,
 .token-usage-breakdown-row strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
 }
 
 .token-usage-breakdown-row strong {

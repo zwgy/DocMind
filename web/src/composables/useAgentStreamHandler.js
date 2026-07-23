@@ -125,6 +125,7 @@ export function useAgentStreamHandler({
         }
         // 只有在服务端确认 init 后，才展示“正在回复”的加载动画。
         threadState.replyLoadingVisible = true
+        threadState.isCompacting = false
         return false
 
       case 'loading':
@@ -145,6 +146,11 @@ export function useAgentStreamHandler({
 
       case 'stream_event':
         {
+          const activity = chunk?.event?.method === 'custom' ? chunk.event.data : null
+          if (activity?.type === 'context_compaction') {
+            // 压缩状态只改变等待提示，不进入消息列表，避免用户把内部处理误认为模型回复。
+            threadState.isCompacting = activity.status === 'started'
+          }
           // 工具结果需立即落地（不经平滑层），写入 msgChunks 后由 convertToolResultToMessages
           // 按 tool_call_id 关联到对应 AI 消息的 tool_call，驱动其完成态。
           const toolMessage = toolFinishedMessage(chunk)
@@ -164,6 +170,7 @@ export function useAgentStreamHandler({
         if (threadState) {
           threadState.isStreaming = false
           threadState.replyLoadingVisible = false
+          threadState.isCompacting = false
           threadState.pendingRequestId = null
           threadState.pendingInterrupt = null
         }
@@ -173,6 +180,7 @@ export function useAgentStreamHandler({
       case 'human_approval_required':
         streamSmoother?.flushThread(threadId)
         threadState.replyLoadingVisible = false
+        threadState.isCompacting = false
         console.log(`${debugPrefix}[approval_required]`, {
           threadId,
           currentAgentId: unref(currentAgentId)
@@ -215,6 +223,7 @@ export function useAgentStreamHandler({
         if (threadState) {
           threadState.isStreaming = false
           threadState.replyLoadingVisible = false
+          threadState.isCompacting = false
           threadState.pendingRequestId = null
           threadState.pendingInterrupt = null
           console.log(`${debugPrefix}[finished]`, {
@@ -247,6 +256,7 @@ export function useAgentStreamHandler({
         if (threadState) {
           threadState.isStreaming = false
           threadState.replyLoadingVisible = false
+          threadState.isCompacting = false
           threadState.pendingRequestId = null
           const pendingInterrupt = extractPendingInterrupt(chunk, threadId)
           if (pendingInterrupt) {

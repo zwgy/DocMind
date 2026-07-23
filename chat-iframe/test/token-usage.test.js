@@ -24,14 +24,18 @@ test('uses the same measured total and estimated breakdown contract as the host 
 
   assert.equal(view?.used, 32601)
   assert.equal(view?.percent, 99)
-  assert.equal(view?.sourceLabel, '模型服务实测')
+  assert.equal(view?.sourceLabel, '实际用量')
+  assert.equal(view?.hasSummary, true)
   assert.equal(view?.budgetDelta, -4953)
   assert.equal(view?.correction, 12317)
   assert.deepEqual(
     view?.segments.map((segment) => segment.value),
     [3000, 1000, 2000, 14284]
   )
-  assert.ok(view?.segments.every((segment) => segment.label.includes('估算')))
+  assert.deepEqual(
+    view?.segments.map((segment) => segment.label),
+    ['对话消息', '历史摘要', '系统说明', '可用工具（51 个）']
+  )
 })
 
 test('does not claim provider measurement when only calibrated estimate exists', () => {
@@ -42,6 +46,6 @@ test('does not claim provider measurement when only calibrated estimate exists',
     protocol_correction_tokens: null
   })
 
-  assert.equal(view?.sourceLabel, 'usage 校准估算')
+  assert.equal(view?.sourceLabel, '校准后的估算')
   assert.equal(view?.correction, null)
 })

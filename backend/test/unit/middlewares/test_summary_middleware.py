@@ -58,12 +58,18 @@ def archive_backend(monkeypatch: pytest.MonkeyPatch) -> _ArchiveBackend:
 
 def _request(messages):
     model = _SummaryModel()
+    stream_events = []
     return model, ModelRequest(
         model=model,
         messages=messages,
         system_message=SystemMessage(content="system instructions"),
         tools=[{"name": "query_kb", "description": "x"}],
-        runtime=SimpleNamespace(context={}, config={}),
+        runtime=SimpleNamespace(
+            context={},
+            config={},
+            stream_events=stream_events,
+            stream_writer=stream_events.append,
+        ),
         state={"messages": messages, "context_revision": 3},
     )
 
@@ -113,6 +119,10 @@ def test_compaction_counts_final_request_and_commits_private_summary_after_succe
     assert isinstance(update["messages"], Overwrite)
     assert len(archive_backend.writes) == 1
     assert '"message_id":"user-old"' in archive_backend.writes[0][1]
+    assert request.runtime.stream_events == [
+        {"type": "context_compaction", "status": "started"},
+        {"type": "context_compaction", "status": "finished"},
+    ]
 
 
 @pytest.mark.unit
@@ -175,7 +185,7 @@ def test_oversized_summary_is_bounded_and_marked_degraded() -> None:
         messages=messages,
         system_message=SystemMessage(content="system instructions"),
         tools=[{"name": "query_kb", "description": "x"}],
-        runtime=SimpleNamespace(context={}, config={}),
+        runtime=SimpleNamespace(context={}, config={}, stream_writer=lambda _event: None),
         state={"messages": messages, "context_revision": 0},
     )
     middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")

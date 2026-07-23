@@ -2375,8 +2375,8 @@
   z-index: 32;
   display: grid;
   gap: 7px;
-  width: 218px;
-  padding: 10px;
+  width: min(320px, calc(100vw - 24px));
+  padding: 12px;
   border: 1px solid var(--gray-200);
   border-radius: 10px;
   color: var(--gray-700);
@@ -2391,6 +2391,38 @@
 
 .context-usage-popover small {
   color: var(--gray-500);
+}
+
+.context-usage-heading,
+.context-usage-legend > span,
+.context-usage-meta > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.context-usage-heading small {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--main-900);
+  background: var(--main-50);
+}
+
+.context-usage-total {
+  color: var(--gray-900);
+  font-size: 16px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-usage-summary-note {
+  padding: 7px 8px;
+  border-radius: 7px;
+  color: var(--main-700) !important;
+  background: var(--main-50);
+  line-height: 1.5;
 }
 
 .context-usage-bar {
@@ -2435,20 +2467,26 @@
 
 .context-usage-legend {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
   color: var(--gray-500);
   font-size: 11px;
 }
 
-.context-usage-legend span {
+.context-usage-legend > span {
   min-width: 0;
+}
+
+.context-usage-legend > span > span {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.context-usage-legend strong,
+.context-usage-meta strong {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .context-usage-legend i {
@@ -2457,6 +2495,13 @@
   flex-shrink: 0;
   border-radius: 2px;
   background: var(--gray-300);
+}
+
+.context-usage-meta {
+  display: grid;
+  gap: 6px;
+  padding-top: 7px;
+  border-top: 1px solid var(--gray-100);
 }
 
 .model-trigger {

@@ -22,7 +22,16 @@ import { appendRunChunkSegment, normalizeChatArtifacts } from '@/utils/chat-mess
 import { buildContextSummaryMessage, groupIncomingDocumentFiles } from '@/utils/context-summary'
 import { splitStreamingText } from '@/utils/streaming-text'
 import { attachmentValidationError } from '@/utils/attachment-limits'
-import type { ChatArtifact, ChatMessage, ChatThread, ExtractionResult, IncomingPageFile, ModelOption, PageContent, RunStreamChunk } from '@/types'
+import type {
+  ChatArtifact,
+  ChatMessage,
+  ChatThread,
+  ExtractionResult,
+  IncomingPageFile,
+  ModelOption,
+  PageContent,
+  RunStreamChunk
+} from '@/types'
 
 type SendOptions = {
   text: string
@@ -50,6 +59,7 @@ type ThreadRuntime = {
   messages: ChatMessage[]
   isSending: boolean
   isStreaming: boolean
+  isCompacting: boolean
   activeRunId: string
   lastEventSeq: string
   abortController: AbortController | null
@@ -86,6 +96,7 @@ function createThreadRuntime(): ThreadRuntime {
     messages: [],
     isSending: false,
     isStreaming: false,
+    isCompacting: false,
     activeRunId: '',
     lastEventSeq: '0-0',
     abortController: null,
@@ -117,7 +128,10 @@ function titleFromQuery(query: string) {
 
 function assistantTextLength(messages: ChatMessage[]) {
   return messages.reduce(
-    (length, message) => (message.role === 'assistant' ? length + message.content.length + (message.reasoningContent || '').length : length),
+    (length, message) =>
+      message.role === 'assistant'
+        ? length + message.content.length + (message.reasoningContent || '').length
+        : length,
     0
   )
 }
@@ -134,9 +148,14 @@ function refreshRunArtifacts(runtime: ThreadRuntime) {
 
 function attachRunArtifacts(runtime: ThreadRuntime) {
   if (!runtime.runArtifacts.length) return
-  const finalAnswer = [...runtime.messages].reverse().find((message) => message.role === 'assistant' && message.content.trim())
+  const finalAnswer = [...runtime.messages]
+    .reverse()
+    .find((message) => message.role === 'assistant' && message.content.trim())
   if (!finalAnswer) return
-  finalAnswer.artifacts = normalizeChatArtifacts([...(finalAnswer.artifacts || []).map((artifact) => artifact.path), ...runtime.runArtifacts.map((artifact) => artifact.path)])
+  finalAnswer.artifacts = normalizeChatArtifacts([
+    ...(finalAnswer.artifacts || []).map((artifact) => artifact.path),
+    ...runtime.runArtifacts.map((artifact) => artifact.path)
+  ])
 }
 
 function modelSpecFromHistory(messages: ChatMessage[]) {
@@ -185,14 +204,20 @@ export const useChatStore = defineStore('chat', {
     isStreaming(state) {
       return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.isStreaming || false
     },
+    isCompacting(state) {
+      return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.isCompacting || false
+    },
     pendingInterrupt(state) {
-      return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.pendingInterrupt || null
+      return (
+        state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.pendingInterrupt || null
+      )
     },
     agentState(state) {
       return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.agentState || null
     },
     displayMessages(state) {
-      const messages = state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.messages || []
+      const messages =
+        state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.messages || []
       return [...state.contextSummaryMessages, ...messages]
     }
   },
@@ -216,6 +241,21 @@ export const useChatStore = defineStore('chat', {
     },
     consumeRunStatus(runtime: ThreadRuntime, chunk: Record<string, unknown>) {
       const status = String(chunk.status || '')
+      if (status === 'stream_event') {
+        const event =
+          chunk.event && typeof chunk.event === 'object'
+            ? (chunk.event as Record<string, unknown>)
+            : null
+        const data =
+          event?.method === 'custom' && event.data && typeof event.data === 'object'
+            ? (event.data as Record<string, unknown>)
+            : null
+        if (data?.type === 'context_compaction') {
+          // 该状态只控制等待文案，不写入消息，避免把内部压缩过程伪装成聊天内容。
+          runtime.isCompacting = data.status === 'started'
+        }
+        return
+      }
       if (status === 'agent_state' && chunk.agent_state && typeof chunk.agent_state === 'object') {
         runtime.agentState = chunk.agent_state as Record<string, unknown>
         refreshRunArtifacts(runtime)
@@ -232,16 +272,31 @@ export const useChatStore = defineStore('chat', {
       if (!questions.length) return
       runtime.pendingInterrupt = {
         status,
-        questions: questions.filter((question): question is Record<string, unknown> => Boolean(question && typeof question === 'object')),
+        questions: questions.filter((question): question is Record<string, unknown> =>
+          Boolean(question && typeof question === 'object')
+        ),
         parentRunId: String(chunk.run_id || chunk.parent_run_id || runtime.activeRunId)
       }
       runtime.isSending = false
       runtime.isStreaming = false
+      runtime.isCompacting = false
     },
-    setContextSummary(input: { file: IncomingPageFile | null; result: ExtractionResult | null; loading?: boolean; error?: string }) {
+    setContextSummary(input: {
+      file: IncomingPageFile | null
+      result: ExtractionResult | null
+      loading?: boolean
+      error?: string
+    }) {
       this.setContextSummaries([input])
     },
-    setContextSummaries(inputs: Array<{ file: IncomingPageFile | null; result: ExtractionResult | null; loading?: boolean; error?: string }>) {
+    setContextSummaries(
+      inputs: Array<{
+        file: IncomingPageFile | null
+        result: ExtractionResult | null
+        loading?: boolean
+        error?: string
+      }>
+    ) {
       this.contextSummaryMessages = groupIncomingDocumentFiles(inputs)
         .map((input) => buildContextSummaryMessage(input, `context-summary-${input.key}`))
         .filter((message): message is ChatMessage => Boolean(message))
@@ -270,11 +325,19 @@ export const useChatStore = defineStore('chat', {
       // 打开侧边栏只刷新列表，避免把当前会话悄悄切到第一条。
       this.isLoading = true
       try {
-        const threads = await listConversations(token, agentId, conversationScopeKey, 0, THREAD_PAGE_SIZE)
+        const threads = await listConversations(
+          token,
+          agentId,
+          conversationScopeKey,
+          0,
+          THREAD_PAGE_SIZE
+        )
         this.threads = threads.map((thread) => {
           const current = this.threads.find((item) => item.id === thread.id)
           // 标题异步写入时，侧栏早发出的旧列表不能把已确认的本地标题覆盖回默认值。
-          return current?.title && current.title !== DEFAULT_THREAD_TITLE && thread.title === DEFAULT_THREAD_TITLE
+          return current?.title &&
+            current.title !== DEFAULT_THREAD_TITLE &&
+            thread.title === DEFAULT_THREAD_TITLE
             ? { ...thread, title: current.title }
             : thread
         })
@@ -290,7 +353,13 @@ export const useChatStore = defineStore('chat', {
       if (!this.hasMoreThreads || this.isLoadingMoreThreads) return
       this.isLoadingMoreThreads = true
       try {
-        const page = await listConversations(token, agentId, conversationScopeKey, this.threadOffset, THREAD_PAGE_SIZE)
+        const page = await listConversations(
+          token,
+          agentId,
+          conversationScopeKey,
+          this.threadOffset,
+          THREAD_PAGE_SIZE
+        )
         const seen = new Set(this.threads.map((thread) => thread.id))
         this.threads = [...this.threads, ...page.filter((thread) => !seen.has(thread.id))]
         const loaded = nonPinnedThreadCount(page)
@@ -331,9 +400,16 @@ export const useChatStore = defineStore('chat', {
     async renameConversation(threadId: string, title: string, token?: string) {
       this.manuallyRenamedThreads[threadId] = true
       const thread = await updateConversation(threadId, { title }, token)
-      this.threads = this.threads.map((item) => (item.id === threadId ? { ...item, ...thread } : item))
+      this.threads = this.threads.map((item) =>
+        item.id === threadId ? { ...item, ...thread } : item
+      )
     },
-    async togglePinConversation(threadId: string, token?: string, agentId?: string, conversationScopeKey?: string) {
+    async togglePinConversation(
+      threadId: string,
+      token?: string,
+      agentId?: string,
+      conversationScopeKey?: string
+    ) {
       const thread = this.threads.find((item) => item.id === threadId)
       if (!thread) return
       const nextPinned = !thread.is_pinned
@@ -372,7 +448,8 @@ export const useChatStore = defineStore('chat', {
       const fallbackTitle = titleFromQuery(query)
       try {
         const currentThread = this.threads.find((item) => item.id === threadId)
-        if (this.manuallyRenamedThreads[threadId] || currentThread?.title !== DEFAULT_THREAD_TITLE) return
+        if (this.manuallyRenamedThreads[threadId] || currentThread?.title !== DEFAULT_THREAD_TITLE)
+          return
         let title = fallbackTitle
         try {
           title = titleFromQuery(await generateConversationTitle(query, token)) || fallbackTitle
@@ -380,9 +457,16 @@ export const useChatStore = defineStore('chat', {
           // 快速模型故障不影响问答，但首条消息必须仍能脱离默认标题，方便用户辨识会话。
         }
         const thread = this.threads.find((item) => item.id === threadId)
-        if (!title || this.manuallyRenamedThreads[threadId] || thread?.title !== DEFAULT_THREAD_TITLE) return
+        if (
+          !title ||
+          this.manuallyRenamedThreads[threadId] ||
+          thread?.title !== DEFAULT_THREAD_TITLE
+        )
+          return
         const updated = await updateConversation(threadId, { title }, token)
-        this.threads = this.threads.map((item) => (item.id === threadId ? { ...item, ...updated, title } : item))
+        this.threads = this.threads.map((item) =>
+          item.id === threadId ? { ...item, ...updated, title } : item
+        )
       } catch {
         // 标题仅是辅助体验，快速模型不可用时不能影响正式问答结果。
       }
@@ -396,16 +480,28 @@ export const useChatStore = defineStore('chat', {
       }
 
       const persistedTurn = history.filter((message) => requestIdFromMessage(message) === requestId)
-      const start = runtime.messages.findIndex((message) => requestIdFromMessage(message) === requestId)
+      const start = runtime.messages.findIndex(
+        (message) => requestIdFromMessage(message) === requestId
+      )
       if (!persistedTurn.length || start < 0) return []
 
-      const nextUser = runtime.messages.findIndex((message, index) => index > start && message.role === 'user')
-      const localTurn = runtime.messages.slice(start, nextUser < 0 ? runtime.messages.length : nextUser)
+      const nextUser = runtime.messages.findIndex(
+        (message, index) => index > start && message.role === 'user'
+      )
+      const localTurn = runtime.messages.slice(
+        start,
+        nextUser < 0 ? runtime.messages.length : nextUser
+      )
       // run 刚结束时历史写库可能尚未完成；不能用较短的持久化片段覆盖已经展示的完整回答。
       if (assistantTextLength(persistedTurn) < assistantTextLength(localTurn)) return []
-      const localModelName = [...localTurn].reverse().find((message) => message.role === 'assistant')?.modelName
-      const persistedAnswer = [...persistedTurn].reverse().find((message) => message.role === 'assistant')
-      if (localModelName && persistedAnswer && !persistedAnswer.modelName) persistedAnswer.modelName = localModelName
+      const localModelName = [...localTurn]
+        .reverse()
+        .find((message) => message.role === 'assistant')?.modelName
+      const persistedAnswer = [...persistedTurn]
+        .reverse()
+        .find((message) => message.role === 'assistant')
+      if (localModelName && persistedAnswer && !persistedAnswer.modelName)
+        persistedAnswer.modelName = localModelName
       runtime.messages = [
         ...runtime.messages.slice(0, start),
         ...persistedTurn,
@@ -419,7 +515,13 @@ export const useChatStore = defineStore('chat', {
       if (!pending?.parentRunId) return null
       runtime.pendingInterrupt = null
       try {
-        const result = await createResumeRun({ threadId, agentId, parentRunId: pending.parentRunId, answer, token })
+        const result = await createResumeRun({
+          threadId,
+          agentId,
+          parentRunId: pending.parentRunId,
+          answer,
+          token
+        })
         await this.resumeActiveRun(threadId, token)
         return result
       } catch (error) {
@@ -443,10 +545,13 @@ export const useChatStore = defineStore('chat', {
       runtime.activeRunId = run.id
       runtime.isSending = true
       runtime.isStreaming = true
+      runtime.isCompacting = false
       const controller = new AbortController()
       runtime.abortController = controller
       let reachedTerminalEvent = false
-      let assistantMessage = [...runtime.messages].reverse().find((message) => message.role === 'assistant' && message.status === 'streaming')
+      let assistantMessage = [...runtime.messages]
+        .reverse()
+        .find((message) => message.role === 'assistant' && message.status === 'streaming')
       if (!assistantMessage) {
         assistantMessage = {
           id: messageId('assistant'),
@@ -490,7 +595,12 @@ export const useChatStore = defineStore('chat', {
             assistantMessage!.errorMessage = chunk.message
             if (!assistantMessage!.content) assistantMessage!.content = chunk.message
           } else {
-            assistantMessage = appendRunChunkSegment(runtime.messages, assistantMessage!, chunk, createAssistantSegment)
+            assistantMessage = appendRunChunkSegment(
+              runtime.messages,
+              assistantMessage!,
+              chunk,
+              createAssistantSegment
+            )
           }
           runtime.messages = [...runtime.messages]
         },
@@ -514,8 +624,15 @@ export const useChatStore = defineStore('chat', {
         while (!reachedTerminalEvent && !controller.signal.aborted) {
           const status = (await getRun(run.id, token)).run?.status
           if (status === 'completed') break
-          if (status === 'failed' || status === 'cancelled') throw new Error(`运行已${status === 'failed' ? '失败' : '取消'}`)
-          const resumed = await streamRunEvents(run.id, token, runtime.lastEventSeq, streamHandlers, controller.signal)
+          if (status === 'failed' || status === 'cancelled')
+            throw new Error(`运行已${status === 'failed' ? '失败' : '取消'}`)
+          const resumed = await streamRunEvents(
+            run.id,
+            token,
+            runtime.lastEventSeq,
+            streamHandlers,
+            controller.signal
+          )
           reachedTerminalEvent = reachedTerminalEvent || resumed.reachedTerminalEvent
           if (!reachedTerminalEvent) await waitForStreamReconnect()
         }
@@ -531,6 +648,7 @@ export const useChatStore = defineStore('chat', {
         if (runtime.abortController === controller) {
           runtime.isSending = false
           runtime.isStreaming = false
+          runtime.isCompacting = false
           runtime.activeRunId = ''
           runtime.abortController = null
         }
@@ -573,7 +691,10 @@ export const useChatStore = defineStore('chat', {
       runtime.abortController = null
       runtime.messages = [...runtime.messages]
     },
-    async feedback(payload: { messageId: string; rating: 'like' | 'dislike'; reason: string | null }, token?: string) {
+    async feedback(
+      payload: { messageId: string; rating: 'like' | 'dislike'; reason: string | null },
+      token?: string
+    ) {
       const runtime = this.ensureRuntime()
       const message = runtime.messages.find((item) => item.id === payload.messageId)
       if (!message || message.feedback || message.feedbackSubmitting) return
@@ -589,16 +710,25 @@ export const useChatStore = defineStore('chat', {
         runtime.messages = [...runtime.messages]
       }
     },
-    async send(options: SendOptions, token?: string, agentId?: string, conversationScopeKey?: string): Promise<SendResult> {
+    async send(
+      options: SendOptions,
+      token?: string,
+      agentId?: string,
+      conversationScopeKey?: string
+    ): Promise<SendResult> {
       const text = options.text.trim()
       const runtime = this.ensureRuntime()
       if (!text || runtime.isSending) return null
       const isFirstTurn = !runtime.messages.some((message) => message.role === 'user')
-      const selectedModelSpec = this.modelSpecsByThread[this.currentThreadId || DRAFT_THREAD_KEY] || this.selectedModelSpec
-      const selectedModelName = this.modelOptions.find((model) => model.value === selectedModelSpec)?.label || selectedModelSpec
+      const selectedModelSpec =
+        this.modelSpecsByThread[this.currentThreadId || DRAFT_THREAD_KEY] || this.selectedModelSpec
+      const selectedModelName =
+        this.modelOptions.find((model) => model.value === selectedModelSpec)?.label ||
+        selectedModelSpec
       this.error = ''
       runtime.isSending = true
       runtime.isStreaming = true
+      runtime.isCompacting = false
       runtime.agentState = null
       runtime.artifactBaseline = artifactPaths(runtime.messages)
       runtime.runArtifacts = []
@@ -651,7 +781,12 @@ export const useChatStore = defineStore('chat', {
         textTimer = null
       }
       const appendVisibleChunk = (chunk: RunStreamChunk) => {
-        assistantMessage = appendRunChunkSegment(runtime.messages, assistantMessage, chunk, createAssistantSegment)
+        assistantMessage = appendRunChunkSegment(
+          runtime.messages,
+          assistantMessage,
+          chunk,
+          createAssistantSegment
+        )
         runtime.messages = [...runtime.messages]
       }
       const drainTextQueue = () => {
@@ -669,7 +804,9 @@ export const useChatStore = defineStore('chat', {
           return
         }
         // 主站有完整 smoother；iframe 只做正文小步输出，避免维护另一套复杂状态机。
-        textQueue.push(...splitStreamingText(chunk.content, 5).map((content) => ({ ...chunk, content })))
+        textQueue.push(
+          ...splitStreamingText(chunk.content, 5).map((content) => ({ ...chunk, content }))
+        )
         if (!textTimer) textTimer = setInterval(drainTextQueue, 28)
       }
       runtime.messages = [...runtime.messages, userMessage, assistantMessage]
@@ -728,10 +865,15 @@ export const useChatStore = defineStore('chat', {
         const uploadedAttachments = await this.attachFiles(threadId, options.files || [], token)
         pendingFileUpload = false
         if (userMessage.attachments?.length) {
-          userMessage.attachments = uploadedAttachments.map((item) => ({ ...item, status: 'uploaded' }))
+          userMessage.attachments = uploadedAttachments.map((item) => ({
+            ...item,
+            status: 'uploaded'
+          }))
           runtime.messages = [...runtime.messages]
         }
-        const imageContent = options.imageFile ? (await uploadImage(options.imageFile, token)).image_content || null : null
+        const imageContent = options.imageFile
+          ? (await uploadImage(options.imageFile, token)).image_content || null
+          : null
         pendingImageUpload = false
         let runId = ''
         let requestId = ''
@@ -750,7 +892,9 @@ export const useChatStore = defineStore('chat', {
               extractionResult: options.extractionResult,
               selectedPageFiles: options.selectedPageFiles,
               extractionResults: options.extractionResults,
-              attachmentNames: uploadedAttachments.map((item) => String(item.file_name || '')).filter(Boolean),
+              attachmentNames: uploadedAttachments
+                .map((item) => String(item.file_name || ''))
+                .filter(Boolean),
               attachments: uploadedAttachments,
               imageContent,
               signal: controller.signal
@@ -767,9 +911,16 @@ export const useChatStore = defineStore('chat', {
         while (!reachedTerminalEvent && !controller.signal.aborted) {
           const status = (await getRun(runId, token)).run?.status
           if (status === 'completed') break
-          if (status === 'failed' || status === 'cancelled') throw new Error(`运行已${status === 'failed' ? '失败' : '取消'}`)
+          if (status === 'failed' || status === 'cancelled')
+            throw new Error(`运行已${status === 'failed' ? '失败' : '取消'}`)
           try {
-            const resumed = await streamRunEvents(runId, token, runtime.lastEventSeq, streamHandlers, controller.signal)
+            const resumed = await streamRunEvents(
+              runId,
+              token,
+              runtime.lastEventSeq,
+              streamHandlers,
+              controller.signal
+            )
             reachedTerminalEvent = reachedTerminalEvent || resumed.reachedTerminalEvent
           } catch {
             // SSE 连接可能在 worker 仍运行时瞬断；保留 cursor 后短暂等待再检查 run，不能直接把回答判成失败。
@@ -783,12 +934,17 @@ export const useChatStore = defineStore('chat', {
         attachRunArtifacts(runtime)
         const state = await getThreadState(threadId, token).catch(() => null)
         if (state?.agent_state) runtime.agentState = state.agent_state
-        if (!assistantMessages.some((message) => message.content) && assistantMessage.status !== 'error') {
+        if (
+          !assistantMessages.some((message) => message.content) &&
+          assistantMessage.status !== 'error'
+        ) {
           assistantMessage.content = '已完成。'
         }
         assistantMessage.status = assistantMessage.status === 'error' ? 'error' : 'done'
         runtime.messages = [...runtime.messages]
-        const persistedTurn = await this.syncThreadHistory(threadId, token, requestId).catch(() => [])
+        const persistedTurn = await this.syncThreadHistory(threadId, token, requestId).catch(
+          () => []
+        )
         attachRunArtifacts(runtime)
         runtime.messages = [...runtime.messages]
         const persistedUserMessage = persistedTurn.find((message) => message.role === 'user')
@@ -826,6 +982,7 @@ export const useChatStore = defineStore('chat', {
       } finally {
         runtime.isSending = false
         runtime.isStreaming = false
+        runtime.isCompacting = false
         runtime.activeRunId = ''
         runtime.abortController = null
       }

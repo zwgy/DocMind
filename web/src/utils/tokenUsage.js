@@ -40,16 +40,16 @@ export const buildTokenUsageView = (usage) => {
       ? usage.breakdown_estimate
       : {}
   const rawSegments = [
-    { key: 'messages', label: '消息（估算）', value: nonNegativeNumber(breakdown.messages) || 0 },
+    { key: 'messages', label: '对话消息', value: nonNegativeNumber(breakdown.messages) || 0 },
     {
       key: 'summary',
-      label: '摘要（估算）',
+      label: '历史摘要',
       value: nonNegativeNumber(breakdown.private_summary) || 0
     },
-    { key: 'system', label: '系统（估算）', value: nonNegativeNumber(breakdown.system) || 0 },
+    { key: 'system', label: '系统说明', value: nonNegativeNumber(breakdown.system) || 0 },
     {
       key: 'tools',
-      label: `工具（估算，${nonNegativeNumber(usage.tool_count) || 0}）`,
+      label: `可用工具（${nonNegativeNumber(usage.tool_count) || 0} 个）`,
       value: nonNegativeNumber(breakdown.tools) || 0
     }
   ].filter((segment) => segment.value > 0)
@@ -58,9 +58,9 @@ export const buildTokenUsageView = (usage) => {
     1
   )
   const sourceLabels = {
-    provider_usage: '模型服务实测',
-    calibrated_estimate: 'usage 校准估算',
-    fallback_estimate: '首次保守估算'
+    provider_usage: '实际用量',
+    calibrated_estimate: '校准后的估算',
+    fallback_estimate: '首次预估'
   }
 
   // 总量采用模型实测/校准值，分项只解释本地估算构成，不能把差额摊回某一项冒充精确值。
@@ -70,15 +70,16 @@ export const buildTokenUsageView = (usage) => {
     promptBudget,
     budgetDelta,
     correction,
+    hasSummary: rawSegments.some((segment) => segment.key === 'summary'),
     percent:
       contextWindow && contextWindow > 0
         ? Math.max(0, Math.min(Math.round((used / contextWindow) * 100), 100))
         : null,
-    sourceLabel: sourceLabels[usage.input_source] || '本地估算',
+    sourceLabel: sourceLabels[usage.input_source] || '本地预估',
     segments: rawSegments.map((segment) => ({
       ...segment,
       percent: `${((segment.value / compositionTotal) * 100).toFixed(2)}%`,
-      valueLabel: formatTokenCount(segment.value),
+      valueLabel: `${formatTokenCount(segment.value)} Token`,
       tone: `is-${segment.key}`
     }))
   }
