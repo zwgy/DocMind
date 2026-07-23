@@ -43,7 +43,7 @@ export function buildTokenUsageView(usage: Record<string, unknown> | null | unde
     { key: 'messages', label: '消息（估算）', value: nonNegativeNumber(breakdown.messages) || 0 },
     {
       key: 'summary',
-      label: '私有摘要（估算）',
+      label: '摘要（估算）',
       value: nonNegativeNumber(breakdown.private_summary) || 0
     },
     { key: 'system', label: '系统（估算）', value: nonNegativeNumber(breakdown.system) || 0 },
