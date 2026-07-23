@@ -38,6 +38,11 @@ IFRAME_CONTEXT_TEMPLATE = """### iframe 页面与附件上下文
 {% if documents %}
 
 【当前来文】
+核验来文原文时，必须先调用 `read_incoming_document`，使用下方真实的 `incoming_id` 和
+`source_file_id`，并设置 `include_full_text=true`；得到工具返回的 `markdown_path` 后，
+才能使用 `read_file` 读取。不得猜测文件路径，也不得使用 `execute`、`glob`、`ls`
+在文件系统中搜索来文附件。摘要和结构化结果不是逐字原文；原文读取失败时应明确说明，
+不得将摘要改写成原文或据此补充责任主体等事实。
 {% for document in documents %}
 #### 来文：{{ document.name }}{{ "（incoming_id=" ~ document.incoming_id ~ "）" if document.incoming_id else "" }}
 {% if document.classification %}
@@ -263,9 +268,7 @@ def _build_document_contexts(files: list[Any]) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
         document_name = (
-            _clean_text(item.get("documentTitle") or item.get("title"))
-            or _clean_text(item.get("name"))
-            or "未命名来文"
+            _clean_text(item.get("documentTitle") or item.get("title")) or _clean_text(item.get("name")) or "未命名来文"
         )
         incoming_id = _clean_text(item.get("incomingId"))
         classification = _clean_text(item.get("classificationLabel") or item.get("classification"))

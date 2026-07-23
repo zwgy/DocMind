@@ -183,7 +183,7 @@ async def test_render_iframe_context_keeps_source_file_id_without_injecting_evid
                                     "file_name": "资质附件.xlsx",
                                     "source_location": "分块 2",
                                     "quote": "需复核 Global Finance 的资质。",
-                                }
+                                },
                             ],
                         }
                     ],
@@ -207,6 +207,10 @@ async def test_render_iframe_context_keeps_source_file_id_without_injecting_evid
     assert "SKILL.md" not in prompt
     assert "incoming_id=inc_1" in prompt
     assert "##### 附件：client-review.pdf（source_file_id=main）" in prompt
+    assert "必须先调用 `read_incoming_document`" in prompt
+    assert "`include_full_text=true`" in prompt
+    assert "不得猜测文件路径" in prompt
+    assert "不得将摘要改写成原文" in prompt
     assert "Phase 1" not in prompt
 
 
