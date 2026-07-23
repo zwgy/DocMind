@@ -109,8 +109,12 @@ def test_compaction_counts_final_request_and_commits_private_summary_after_succe
 
     assert isinstance(result, ExtendedModelResponse)
     assert model.prompts
+    assert "Replace and merge previous_summary" in model.prompts[0]
+    assert "keep verified exact facts" in model.prompts[0]
     assert captured["request"].messages == [messages[-1]]
     assert "private_conversation_context" in captured["request"].system_message.text
+    assert "/outputs/conversation_history/" in captured["request"].system_message.text
+    assert "never guess" in captured["request"].system_message.text
     update = result.command.update
     assert update["token_usage"] == {"prompt_tokens": 123}
     assert "已归档旧对话：用户要完成项目文档。" in update["context_summary"]

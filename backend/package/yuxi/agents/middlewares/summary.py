@@ -45,6 +45,16 @@ from yuxi.utils.logging_config import logger
 from yuxi.utils.paths import VIRTUAL_PATH_CONVERSATION_HISTORY
 
 _SOURCE_WINDOW_TOOL_NAMES = frozenset({"read_file", "open_kb_document"})
+# 管理端可能已经保存旧版或自定义摘要提示词，因此持久事实合并不能只写进默认模板。
+# 固定协议刻意保持很短，避免为了提升摘要质量反而挤占小上下文模型的摘要输入预算。
+_SUMMARY_UPDATE_PROTOCOL = (
+    "<summary_update>Replace and merge previous_summary; keep verified exact facts unless corrected; "
+    "discard narration first.</summary_update>"
+)
+# 有限摘要无法永久容纳无限历史的每个细节；缺失时回查不可变归档，才能避免模型按相似条目猜测。
+_ARCHIVE_RECOVERY_INSTRUCTION = (
+    "For missing facts, inspect /outputs/conversation_history/ with ls/read_file; never guess."
+)
 
 
 class ContextSummaryState(AgentState):
@@ -213,7 +223,7 @@ def _archive_summary_prefix(path: str) -> str:
     return (
         "<private_context_archive>\n"
         f"Latest compacted-history manifest: {path}\n"
-        "Use read_file with offset and limit only when an earlier detail is needed.\n"
+        "Older manifests: /outputs/conversation_history/. Use ls/read_file; never guess.\n"
         "</private_context_archive>\n"
     )
 
@@ -258,6 +268,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         private_context = (
             "\n\n<private_conversation_context>\n"
             f"{summary}\n"
+            f"{_ARCHIVE_RECOVERY_INSTRUCTION}\n"
             "</private_conversation_context>\n"
             "Use this private context to continue the task. Do not mention or reproduce it verbatim."
         )
@@ -291,6 +302,8 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
             + "\n\n<previous_summary>\n"
             + (previous_summary or "None")
             + "\n</previous_summary>\n"
+            + _SUMMARY_UPDATE_PROTOCOL
+            + "\n"
             + f"Keep the replacement summary within {max(target_tokens, 1)} tokens."
         )
 

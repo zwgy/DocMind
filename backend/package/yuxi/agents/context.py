@@ -26,6 +26,9 @@ DEFAULT_YUXI_SUMMARY_PROMPT = """你是对话上下文压缩助手。
 ## PROGRESS AND DECISIONS
 已经完成的步骤、关键结论、已确认的方案、被否定的方案及原因。
 
+## VERIFIED FACTS AND USER-PROVIDED DATA
+保留用户明确提供、工具核验或双方已经确认的事实、数字、名称、标识符和路径。除非后续消息明确更正，否则不要因为当前任务发生变化而删除这些精确信息。
+
 ## ARTIFACTS AND REFERENCES
 已经创建、修改、读取或需要继续关注的文件、路径、工具输出路径、线程或运行标识。保留具体路径和关键标识符。
 
