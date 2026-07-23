@@ -9,7 +9,7 @@ WORKDIR /app
 ENV TZ=Asia/Shanghai
 
 # 安装 pnpm
-RUN npm install -g pnpm@latest
+RUN npm install -g pnpm@10.11.0 --registry=https://registry.npmmirror.com
 
 # 复制 package.json 和 pnpm-lock.yaml
 COPY ./web/package*.json ./
@@ -37,7 +37,7 @@ ENV VITE_MINIO_CONSOLE_URL=${VITE_MINIO_CONSOLE_URL}
 ENV VITE_MILVUS_WEBUI_URL=${VITE_MILVUS_WEBUI_URL}
 
 # 安装 pnpm
-RUN npm install -g pnpm@latest
+RUN npm install -g pnpm@10.11.0 --registry=https://registry.npmmirror.com
 
 # 复制依赖文件
 COPY ./web/package*.json ./
