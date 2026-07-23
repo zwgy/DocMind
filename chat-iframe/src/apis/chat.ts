@@ -108,7 +108,12 @@ export function buildChatQuery(input: ChatContextInput) {
 }
 
 export function buildIframeContext(input: ChatContextInput): IframeContextPayload {
-  const context: IframeContextPayload = { files: [] }
+  const context: IframeContextPayload = {
+    files: [],
+    // “问文件”是用户对本轮文件范围的明确授权。后端先准备线程隔离的只读 Markdown，
+    // 让本地模型直接拿到真实路径，避免它为寻找附件反复猜路径或调用无关工具。
+    prepare_file_paths: input.includeFile
+  }
   if (input.includePage && input.pageContent) context.page = input.pageContent
   if (!input.includeFile) return context
 
@@ -121,7 +126,10 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
     const summary = summarizeExtraction(result)
     const isMainFile = Boolean(
       file.is_main_file ||
-        result?.files?.some((documentFile) => documentFile.isMainFile && documentFile.sourceFileId === file.source_file_id)
+      result?.files?.some(
+        (documentFile) =>
+          documentFile.isMainFile && documentFile.sourceFileId === file.source_file_id
+      )
     )
     return {
       ...file,
@@ -144,21 +152,25 @@ export function buildIframeContext(input: ChatContextInput): IframeContextPayloa
       incoming_date: result?.incoming_date || file.incoming_date,
       // 所有事项都保留，以便模型按 item 的 source_file_id 精确读取原文；后端渲染提示词时会移除原文片段。
       items: result?.items || [],
-      display: result?.display,
+      display: result?.display
     }
   }
   const selectedFiles = files.map((file) => ({
     file,
     result:
       input.extractionResults?.[file.source_file_id] ||
-      (file.source_file_id === input.selectedFile?.source_file_id ? input.extractionResult || null : null)
+      (file.source_file_id === input.selectedFile?.source_file_id
+        ? input.extractionResult || null
+        : null)
   }))
-  context.files = groupIncomingDocumentFiles(selectedFiles).map(({ file, result, attachments }) => ({
-    ...toContextFile(file!, result),
-    selectedFiles: attachments.map(({ file: attachment, result: attachmentResult }) =>
-      toContextFile(attachment!, attachmentResult)
-    )
-  }))
+  context.files = groupIncomingDocumentFiles(selectedFiles).map(
+    ({ file, result, attachments }) => ({
+      ...toContextFile(file!, result),
+      selectedFiles: attachments.map(({ file: attachment, result: attachmentResult }) =>
+        toContextFile(attachment!, attachmentResult)
+      )
+    })
+  )
   return context
 }
 

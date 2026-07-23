@@ -141,6 +141,7 @@ export type IframeContextFile = IncomingPageFile & {
 export type IframeContextPayload = {
   page?: PageContent
   files: IframeContextFile[]
+  prepare_file_paths?: boolean
 }
 
 export type ContextSummaryPayload = {

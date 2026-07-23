@@ -47,8 +47,11 @@ async def test_materialize_writes_only_selected_markdown_to_owned_thread(tmp_pat
             ownership_checks.append((thread_id, "user-1"))
             return SimpleNamespace(uid="user-1", status="active")
 
+    download_calls = []
+
     async def fake_download_text(url):
         assert url == "minio://parsed/attachment.md"
+        download_calls.append(url)
         return "# 附件内容"
 
     monkeypatch.setattr(service_module.pg_manager, "get_async_session_context", fake_session_context)
@@ -76,6 +79,16 @@ async def test_materialize_writes_only_selected_markdown_to_owned_thread(tmp_pat
     assert host_path.read_text(encoding="utf-8") == "# 附件内容"
     assert "minio" not in str(result)
     assert str(tmp_path) not in str(result)
+
+    repeated = await IncomingDocumentMarkdownService(FakeIncomingRepository()).materialize(
+        incoming_id="inc-1",
+        source_file_ids=["attachment"],
+        uid="user-1",
+        thread_id="thread-1",
+    )
+
+    assert repeated == result
+    assert download_calls == ["minio://parsed/attachment.md"]
 
 
 @pytest.mark.asyncio

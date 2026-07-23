@@ -207,14 +207,79 @@ async def test_render_iframe_context_keeps_source_file_id_without_injecting_evid
     assert "SKILL.md" not in prompt
     assert "incoming_id=inc_1" in prompt
     assert "##### 附件：client-review.pdf（source_file_id=main）" in prompt
-    assert "必须先调用 `read_incoming_document`" in prompt
-    assert "`include_full_text=true`" in prompt
+    assert "`read_incoming_document(include_full_text=true)`" in prompt
+    assert "include_full_text=true" in prompt
     assert "不得猜测文件路径" in prompt
     assert "不得将摘要改写成原文" in prompt
     assert "工具返回内容必须同时包含对应条款号和原文" in prompt
     assert "条款层级和数字必须照抄工具结果" in prompt
     assert "不得自行解释序号" in prompt
     assert "Phase 1" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_render_iframe_context_prepares_selected_incoming_markdown_paths(monkeypatch):
+    calls = []
+
+    class FakeMarkdownService:
+        async def materialize(self, **kwargs):
+            calls.append(kwargs)
+            return [
+                {
+                    "source_file_id": "main",
+                    "filename": "main.docx",
+                    "markdown_path": "/home/gem/user-data/outputs/incoming-documents/inc-1/file-main.md",
+                },
+                {
+                    "source_file_id": "attachment",
+                    "filename": "attachment.pdf",
+                    "markdown_path": "/home/gem/user-data/outputs/incoming-documents/inc-1/file-attachment.md",
+                },
+            ]
+
+    monkeypatch.setattr(svc, "IncomingDocumentMarkdownService", FakeMarkdownService)
+
+    prompt = await svc.render_iframe_context_prompt(
+        thread_id="thread-1",
+        uid="user-1",
+        iframe_context={
+            "prepare_file_paths": True,
+            "files": [
+                {
+                    "name": "main.docx",
+                    "incomingId": "inc-1",
+                    "source_file_id": "main",
+                    "hasParsedMarkdown": True,
+                    "selectedFiles": [
+                        {
+                            "name": "main.docx",
+                            "incomingId": "inc-1",
+                            "source_file_id": "main",
+                            "hasParsedMarkdown": True,
+                        },
+                        {
+                            "name": "attachment.pdf",
+                            "incomingId": "inc-1",
+                            "source_file_id": "attachment",
+                            "hasParsedMarkdown": True,
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert calls == [
+        {
+            "incoming_id": "inc-1",
+            "source_file_ids": ["main", "attachment"],
+            "uid": "user-1",
+            "thread_id": "thread-1",
+        }
+    ]
+    assert "原文路径：/home/gem/user-data/outputs/incoming-documents/inc-1/file-main.md" in prompt
+    assert "原文路径：/home/gem/user-data/outputs/incoming-documents/inc-1/file-attachment.md" in prompt
+    assert "直接使用 `read_file` 读取该真实路径" in prompt
 
 
 @pytest.mark.asyncio

@@ -70,11 +70,14 @@ class IncomingDocumentMarkdownService:
             if not file.markdown_file_url:
                 raise ValueError(f"附件 Markdown 尚未生成: {file.filename}")
             host_path = target_dir / f"{file.incoming_file_id}.md"
-            try:
-                host_path.write_text(await self.download_text(file.markdown_file_url), encoding="utf-8")
-            except OSError as exc:
-                logger.warning(f"来文 Markdown 写入会话目录失败: {exc}")
-                raise IncomingDocumentMarkdownError("附件 Markdown 写入会话目录失败") from exc
+            # 来文 ready 后 Markdown 对象保持不变；同一线程续聊复用已落盘文件，
+            # 避免每轮“问文件”都在模型首个可见事件前重复访问对象存储。
+            if not host_path.is_file():
+                try:
+                    host_path.write_text(await self.download_text(file.markdown_file_url), encoding="utf-8")
+                except OSError as exc:
+                    logger.warning(f"来文 Markdown 写入会话目录失败: {exc}")
+                    raise IncomingDocumentMarkdownError("附件 Markdown 写入会话目录失败") from exc
             result.append(
                 {
                     "source_file_id": file.source_file_id,

@@ -8,6 +8,7 @@ from jinja2 import Environment, StrictUndefined
 
 from yuxi.agents.backends.sandbox import ensure_thread_dirs, sandbox_uploads_dir, virtual_path_for_thread_file
 from yuxi.knowledge.parser import Parser
+from yuxi.services.incoming_document_markdown_service import IncomingDocumentMarkdownService
 
 IFRAME_PAGE_INLINE_CHARS = 8000
 IFRAME_PAGE_PREVIEW_CHARS = 2000
@@ -38,10 +39,11 @@ IFRAME_CONTEXT_TEMPLATE = """### iframe 页面与附件上下文
 {% if documents %}
 
 【当前来文】
-核验来文原文时，必须先调用 `read_incoming_document`，使用下方真实的 `incoming_id` 和
-`source_file_id`，并设置 `include_full_text=true`；得到工具返回的 `markdown_path` 后，
-才能使用 `read_file` 读取。不得猜测文件路径，也不得使用 `execute`、`glob`、`ls`
-在文件系统中搜索来文附件。摘要和结构化结果不是逐字原文；原文读取失败时应明确说明，
+附件下方已经提供“原文路径”时，直接使用 `read_file` 读取该真实路径，不要再加载 Skill、
+调用 `read_incoming_document` 或搜索文件。仅在没有原文路径且确需原文时，才使用下方真实的
+`incoming_id` 和 `source_file_id` 调用 `read_incoming_document(include_full_text=true)`。
+不得猜测文件路径，也不得使用 `execute`、`glob`、`ls` 在文件系统中搜索来文附件。
+摘要和结构化结果不是逐字原文；原文读取失败时应明确说明，
 不得将摘要改写成原文或据此补充责任主体、条款号等事实。用户要求条款号或逐字引用时，
 工具返回内容必须同时包含对应条款号和原文，否则应继续读取相关范围或明确说明尚未核验。
 最终答案只保留用户要求的内容；条款层级和数字必须照抄工具结果，不得自行解释序号或
@@ -73,6 +75,9 @@ IFRAME_CONTEXT_TEMPLATE = """### iframe 页面与附件上下文
 {% endif %}
 {% if attachment.kb_id and attachment.file_id %}
   知识库文档定位参数：kb_id="{{ attachment.kb_id }}"，file_id="{{ attachment.file_id }}"。
+{% endif %}
+{% if attachment.markdown_path %}
+  原文路径：{{ attachment.markdown_path }}
 {% endif %}
 {% endfor %}
 {% if document.structured_sections %}
@@ -227,7 +232,7 @@ def _business_item_sections(file_info: dict[str, Any]) -> list[tuple[str, str]]:
     return [(headings[item_type], "\n".join(lines)) for item_type, lines in section_lines.items()]
 
 
-def _build_file_context(file_info: dict[str, Any]) -> dict[str, str]:
+def _build_file_context(file_info: dict[str, Any]) -> dict[str, Any]:
     name = _clean_text(file_info.get("name")) or "未命名附件"
     match_status = _clean_text(file_info.get("matchStatus"))
     extraction_status = _clean_text(file_info.get("extractionStatus"))
@@ -262,6 +267,8 @@ def _build_file_context(file_info: dict[str, Any]) -> dict[str, str]:
         "status": status,
         "kb_id": kb_id if has_kb_locator else "",
         "file_id": file_id if has_kb_locator else "",
+        "can_materialize": bool(incoming_id and selected_source_file_id and has_parsed),
+        "markdown_path": "",
     }
 
 
@@ -314,6 +321,27 @@ async def render_iframe_context_prompt(thread_id: str, uid: str, iframe_context:
     files = iframe_context.get("files")
     if isinstance(files, list):
         document_contexts = _build_document_contexts(files)
+        if iframe_context.get("prepare_file_paths"):
+            # “问文件”已明确限定本轮文件范围；在进入模型前准备真实路径，避免本地模型为找文件
+            # 额外消耗多轮工具调用。这里只注入路径而不内联全文，不能扩大模型输入上下文。
+            markdown_service = IncomingDocumentMarkdownService()
+            for document in document_contexts:
+                source_file_ids = [
+                    attachment["source_file_id"]
+                    for attachment in document["attachments"]
+                    if attachment["can_materialize"]
+                ]
+                if not source_file_ids:
+                    continue
+                markdown_files = await markdown_service.materialize(
+                    incoming_id=document["incoming_id"],
+                    source_file_ids=source_file_ids,
+                    uid=uid,
+                    thread_id=thread_id,
+                )
+                markdown_paths = {item["source_file_id"]: item["markdown_path"] for item in markdown_files}
+                for attachment in document["attachments"]:
+                    attachment["markdown_path"] = markdown_paths.get(attachment["source_file_id"], "")
 
     if not page_context and not document_contexts:
         return ""

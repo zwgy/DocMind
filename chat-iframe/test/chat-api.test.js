@@ -192,6 +192,7 @@ test('buildIframeContext carries enabled page and all selected files', () => {
   })
 
   assert.equal(context.page.title, 'Detail page')
+  assert.equal(context.prepare_file_paths, true)
   assert.equal(context.files.length, 2)
   assert.equal(context.files[0].kbId, 'kb1')
   assert.equal(context.files[0].documentFiles, undefined)
@@ -246,6 +247,7 @@ test('buildIframeContext omits disabled page and files', () => {
   })
 
   assert.equal(context.page, undefined)
+  assert.equal(context.prepare_file_paths, false)
   assert.deepEqual(context.files, [])
 })
 
@@ -352,7 +354,7 @@ test('readRunEventStream preserves compaction status from the queued run envelop
       'event: custom',
       'data: {"payload":{"name":"yuxi.stream_event","chunk":{"status":"stream_event","event":{"method":"custom","data":{"type":"context_compaction","status":"started"}}}}}',
       '',
-      '',
+      ''
     ].join('\n')
   )
   const statuses = []
