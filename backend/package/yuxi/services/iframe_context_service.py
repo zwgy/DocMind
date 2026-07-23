@@ -44,6 +44,8 @@ IFRAME_CONTEXT_TEMPLATE = """### iframe 页面与附件上下文
 在文件系统中搜索来文附件。摘要和结构化结果不是逐字原文；原文读取失败时应明确说明，
 不得将摘要改写成原文或据此补充责任主体、条款号等事实。用户要求条款号或逐字引用时，
 工具返回内容必须同时包含对应条款号和原文，否则应继续读取相关范围或明确说明尚未核验。
+最终答案只保留用户要求的内容；条款层级和数字必须照抄工具结果，不得自行解释序号或
+附加未经核验的字数统计、责任归纳。
 {% for document in documents %}
 #### 来文：{{ document.name }}{{ "（incoming_id=" ~ document.incoming_id ~ "）" if document.incoming_id else "" }}
 {% if document.classification %}

@@ -212,6 +212,8 @@ async def test_render_iframe_context_keeps_source_file_id_without_injecting_evid
     assert "不得猜测文件路径" in prompt
     assert "不得将摘要改写成原文" in prompt
     assert "工具返回内容必须同时包含对应条款号和原文" in prompt
+    assert "条款层级和数字必须照抄工具结果" in prompt
+    assert "不得自行解释序号" in prompt
     assert "Phase 1" not in prompt
 
 
