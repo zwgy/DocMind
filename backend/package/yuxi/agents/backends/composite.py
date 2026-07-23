@@ -46,7 +46,11 @@ def _tool_result_path(tool_call_id: str, content: str) -> str:
 
 def _path_matches_content_hash(path: str, content: str) -> bool:
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
-    return path.endswith(f"-{digest}.txt")
+    # 内部持久化文件不只包含 .txt，也包含上下文归档 .jsonl；幂等性应由文件名中的内容哈希保证，
+    # 不能把扩展名当成协议的一部分，否则同一轮失败重试会把已成功写入的归档误判为写入失败。
+    filename = path.rsplit("/", maxsplit=1)[-1]
+    stem = filename.rsplit(".", maxsplit=1)[0]
+    return stem.endswith(f"-{digest}")
 
 
 def write_text_idempotently(backend, path: str, content: str) -> bool:

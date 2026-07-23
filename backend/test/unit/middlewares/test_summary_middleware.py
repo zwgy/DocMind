@@ -12,6 +12,7 @@ from langgraph.types import Command, Overwrite
 from yuxi.agents.middlewares import summary as summary_module
 from yuxi.agents.middlewares.summary import YuxiSummarizationMiddleware, create_summary_middleware
 from yuxi.agents.middlewares.token_usage import (
+    ContextBudgetConfigurationError,
     ContextWindowExceededError,
     estimate_model_request,
     resolve_context_budget,
@@ -165,6 +166,51 @@ def test_failed_main_call_does_not_commit_compaction_state(archive_backend: _Arc
 
     # 原始历史可先幂等归档，但异常没有返回 Command，因此 checkpoint 不会提交裁剪或私有摘要状态。
     assert len(archive_backend.writes) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_archive_failure_is_reported_as_compaction_lifecycle(
+    asynchronous: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingArchiveBackend:
+        def write(self, _path: str, _content: str):
+            return SimpleNamespace(error="storage unavailable")
+
+        async def awrite(self, path: str, content: str):
+            return self.write(path, content)
+
+    monkeypatch.setattr(
+        summary_module,
+        "create_agent_composite_backend",
+        lambda _runtime: _FailingArchiveBackend(),
+    )
+    messages = [
+        HumanMessage(content="old user " + "x" * 2400, id="user-old"),
+        AIMessage(content="old assistant", id="assistant-old"),
+        HumanMessage(content="current user", id="user-current"),
+    ]
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    with pytest.raises(ContextBudgetConfigurationError, match="历史上下文无法安全归档到线程文件"):
+        if asynchronous:
+            await middleware.awrap_model_call(
+                request,
+                lambda _prepared: pytest.fail("archive failure must precede the main model call"),
+            )
+        else:
+            middleware.wrap_model_call(
+                request,
+                lambda _prepared: pytest.fail("archive failure must precede the main model call"),
+            )
+
+    assert request.runtime.stream_events == [
+        {"type": "context_compaction", "status": "started"},
+        {"type": "context_compaction", "status": "finished"},
+    ]
 
 
 @pytest.mark.unit

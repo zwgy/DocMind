@@ -134,6 +134,18 @@ def test_idempotent_write_accepts_existing_deterministic_hash_path() -> None:
     assert write_text_idempotently(_Backend(), path, "different") is False
 
 
+def test_idempotent_write_accepts_existing_jsonl_archive() -> None:
+    class _Backend:
+        def write(self, _path: str, _content: str):
+            return SimpleNamespace(error="Error: File already exists")
+
+    content = '{"message_id":"old-user"}'
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+    path = f"/outputs/conversation_history/archive-r3-{digest}.jsonl"
+
+    assert write_text_idempotently(_Backend(), path, content) is True
+
+
 def test_filesystem_middleware_evicts_large_non_read_file_tool_result() -> None:
     class _Backend:
         artifacts_root = "/"

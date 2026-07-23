@@ -698,15 +698,16 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
             target_tokens = self._summary_target_tokens(request, budget, survivors, archive_prefix)
             if target_tokens <= 0:
                 continue
-            archive_path = self._archive_compacted_messages(
-                request,
-                messages=compacted,
-                revision=next_revision,
-            )
-            archive_prefix = _archive_summary_prefix(archive_path)
-            # 只发布生命周期状态，摘要正文继续由统一流出口隔离，避免为进度提示扩大隐私边界。
+            # 归档也是压缩过程的一部分。状态必须先于归档发布，否则归档较慢或失败时，
+            # 用户只会一直看到“正在生成回复”，无法理解当前实际阶段。
             request.runtime.stream_writer({"type": "context_compaction", "status": "started"})
             try:
+                archive_path = self._archive_compacted_messages(
+                    request,
+                    messages=compacted,
+                    revision=next_revision,
+                )
+                archive_prefix = _archive_summary_prefix(archive_path)
                 try:
                     generated_summary, generated_degraded = self._create_summary(
                         summary, compacted, target_tokens, budget
@@ -800,15 +801,15 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
             target_tokens = self._summary_target_tokens(request, budget, survivors, archive_prefix)
             if target_tokens <= 0:
                 continue
-            archive_path = await self._aarchive_compacted_messages(
-                request,
-                messages=compacted,
-                revision=next_revision,
-            )
-            archive_prefix = _archive_summary_prefix(archive_path)
-            # 异步路径保持与同步路径相同的公开状态契约，避免不同聊天入口显示不一致。
+            # 异步路径保持与同步路径相同的公开状态契约，并覆盖归档与摘要两个阶段。
             request.runtime.stream_writer({"type": "context_compaction", "status": "started"})
             try:
+                archive_path = await self._aarchive_compacted_messages(
+                    request,
+                    messages=compacted,
+                    revision=next_revision,
+                )
+                archive_prefix = _archive_summary_prefix(archive_path)
                 try:
                     generated_summary, generated_degraded = await self._acreate_summary(
                         summary,
