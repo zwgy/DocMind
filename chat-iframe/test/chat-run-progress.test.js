@@ -12,17 +12,28 @@ const tokenUsageSource = readFileSync(
   new URL('../src/utils/token-usage.ts', import.meta.url),
   'utf8'
 )
+const chatStoreSource = readFileSync(new URL('../src/stores/chat.ts', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/assets/css/app.css', import.meta.url), 'utf8')
 
 test('active runs render Todo progress in the message list instead of a separate panel', () => {
   assert.match(appSource, /:agent-state="chat\.agentState"/)
+  assert.match(appSource, /:show-run-progress="chat\.showRunTodos"/)
   assert.match(
     source,
-    /const showRunProgress = computed\(\(\) => props\.streaming && runTodos\.value\.length > 0\)/
+    /const showRunProgress = computed\(\(\) => props\.streaming && props\.showRunProgress && runTodos\.value\.length > 0\)/
   )
   assert.match(source, /<section v-if="showRunProgress" class="run-progress-card"/)
   assert.match(source, /已完成 \{\{ completedTodoCount \}\}\/\{\{ runTodos\.length \}\}/)
   assert.match(styles, /\.run-progress-card \{/)
+})
+
+test('iframe polls agent state during streaming and hides unchanged persisted todos', () => {
+  assert.match(chatStoreSource, /runtime\.showRunTodos = false/)
+  assert.match(chatStoreSource, /const initialTodoSignature = todoSignature\(runtime\.agentState\)/)
+  assert.match(chatStoreSource, /stateRefreshTimer = globalThis\.setInterval\(/)
+  assert.match(chatStoreSource, /void getThreadState\(threadId, token\)/)
+  assert.match(chatStoreSource, /todoSignature\(state\.agent_state\) !== initialTodoSignature/)
+  assert.match(chatStoreSource, /globalThis\.clearInterval\(stateRefreshTimer\)/)
 })
 
 test('context usage is an optional input control next to model selection', () => {
@@ -34,9 +45,11 @@ test('context usage is an optional input control next to model selection', () =>
   assert.match(inputSource, /buildTokenUsageView\(props\.tokenUsage\)/)
   assert.match(inputSource, /本轮上下文用量/)
   assert.match(inputSource, /本轮安全输入上限/)
-  assert.match(inputSource, /模型格式等额外开销/)
+  assert.doesNotMatch(inputSource, /模型格式等额外开销/)
   assert.match(inputSource, /已自动压缩较早的对话/)
+  assert.match(inputSource, /当前对话已收纳/)
   assert.match(tokenUsageSource, /usage\.input_tokens/)
+  assert.match(tokenUsageSource, /usage\.tool_results_externalized/)
   assert.match(tokenUsageSource, /usage\.input_source/)
   assert.match(tokenUsageSource, /usage\.breakdown_estimate/)
   assert.match(tokenUsageSource, /usage\.context_window/)

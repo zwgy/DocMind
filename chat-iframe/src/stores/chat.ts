@@ -65,6 +65,7 @@ type ThreadRuntime = {
   abortController: AbortController | null
   pendingInterrupt: PendingInterrupt | null
   agentState: Record<string, unknown> | null
+  showRunTodos: boolean
   artifactBaseline: string[]
   runArtifacts: ChatArtifact[]
 }
@@ -102,6 +103,7 @@ function createThreadRuntime(): ThreadRuntime {
     abortController: null,
     pendingInterrupt: null,
     agentState: null,
+    showRunTodos: false,
     artifactBaseline: [],
     runArtifacts: []
   }
@@ -138,6 +140,11 @@ function assistantTextLength(messages: ChatMessage[]) {
 
 function artifactPaths(messages: ChatMessage[]) {
   return messages.flatMap((message) => message.artifacts?.map((artifact) => artifact.path) || [])
+}
+
+function todoSignature(agentState: Record<string, unknown> | null) {
+  const todos = agentState?.todos
+  return JSON.stringify(Array.isArray(todos) ? todos : [])
 }
 
 function refreshRunArtifacts(runtime: ThreadRuntime) {
@@ -214,6 +221,9 @@ export const useChatStore = defineStore('chat', {
     },
     agentState(state) {
       return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.agentState || null
+    },
+    showRunTodos(state) {
+      return state.threadRuntimes[state.currentThreadId || DRAFT_THREAD_KEY]?.showRunTodos || false
     },
     displayMessages(state) {
       const messages =
@@ -729,6 +739,8 @@ export const useChatStore = defineStore('chat', {
       runtime.isSending = true
       runtime.isStreaming = true
       runtime.isCompacting = false
+      runtime.showRunTodos = false
+      const initialTodoSignature = todoSignature(runtime.agentState)
       runtime.agentState = null
       runtime.artifactBaseline = artifactPaths(runtime.messages)
       runtime.runArtifacts = []
@@ -811,6 +823,7 @@ export const useChatStore = defineStore('chat', {
       }
       runtime.messages = [...runtime.messages, userMessage, assistantMessage]
       let reachedTerminalEvent = false
+      let stateRefreshTimer: ReturnType<typeof globalThis.setInterval> | null = null
       const streamHandlers = {
         onRunStart: (runId: string) => {
           runtime.activeRunId = runId
@@ -821,6 +834,9 @@ export const useChatStore = defineStore('chat', {
         },
         onStatus: (chunk: Record<string, unknown>) => {
           this.consumeRunStatus(runtime, chunk)
+          if (chunk.status === 'agent_state' && chunk.agent_state && typeof chunk.agent_state === 'object') {
+            runtime.showRunTodos ||= todoSignature(chunk.agent_state as Record<string, unknown>) !== initialTodoSignature
+          }
         },
         onChunk: (chunk: RunStreamChunk) => {
           if (chunk.type === 'done') {
@@ -861,6 +877,18 @@ export const useChatStore = defineStore('chat', {
       }
       try {
         const threadId = await this.ensureThread(token, agentId, conversationScopeKey)
+        // 与主站一致地补拉状态，避免 SSE 短暂中断时遗漏 write_todos 的状态变更。
+        stateRefreshTimer = globalThis.setInterval(() => {
+          if (!runtime.isStreaming) return
+          void getThreadState(threadId, token)
+            .then((state) => {
+              if (!state?.agent_state) return
+              runtime.agentState = state.agent_state
+              runtime.showRunTodos ||= todoSignature(state.agent_state) !== initialTodoSignature
+              refreshRunArtifacts(runtime)
+            })
+            .catch(() => null)
+        }, 5000)
         if (selectedModelSpec) this.modelSpecsByThread[threadId] = selectedModelSpec
         const uploadedAttachments = await this.attachFiles(threadId, options.files || [], token)
         pendingFileUpload = false
@@ -980,6 +1008,7 @@ export const useChatStore = defineStore('chat', {
         }
         return null
       } finally {
+        if (stateRefreshTimer !== null) globalThis.clearInterval(stateRefreshTimer)
         runtime.isSending = false
         runtime.isStreaming = false
         runtime.isCompacting = false

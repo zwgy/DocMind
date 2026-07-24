@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from langchain.agents.middleware.types import ExtendedModelResponse, ModelResponse
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from yuxi.agents.middlewares.token_usage import (
     ContextWindowExceededError,
@@ -12,6 +12,7 @@ from yuxi.agents.middlewares.token_usage import (
     estimate_model_request,
     resolve_context_budget,
 )
+from yuxi.agents.backends.composite import _TOOL_RESULT_SAVED_MARKER
 
 
 def _model(max_input_tokens: int = 2_000) -> SimpleNamespace:
@@ -166,6 +167,28 @@ async def test_private_summary_is_reported_as_an_estimated_component() -> None:
     assert token_usage["summary_active"] is True
     assert token_usage["breakdown_estimate"]["private_summary"] > 0
     assert token_usage["input_source"] == "fallback_estimate"
+
+
+@pytest.mark.asyncio
+async def test_externalized_tool_results_are_reported_separately_from_summary() -> None:
+    middleware = TokenUsageMiddleware()
+    request = _request()
+    request.messages.append(
+        ToolMessage(
+            content="工具结果已收纳到线程文件",
+            tool_call_id="tool-1",
+            additional_kwargs={_TOOL_RESULT_SAVED_MARKER: True},
+        )
+    )
+
+    async def handler(_request):
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    result = await middleware.awrap_model_call(request, handler)
+    token_usage = result.command.update["token_usage"]
+
+    assert token_usage["tool_results_externalized"] == 1
+    assert token_usage["summary_active"] is False
 
 
 @pytest.mark.asyncio

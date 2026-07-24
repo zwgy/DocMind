@@ -435,6 +435,9 @@ watch(text, resizeTextarea)
               <small v-if="contextUsage.hasSummary" class="context-usage-summary-note">
                 已自动压缩较早的对话，关键信息保存在“历史摘要”中。
               </small>
+              <small v-if="contextUsage.toolResultsExternalized" class="context-usage-summary-note">
+                当前对话已收纳 {{ contextUsage.toolResultsExternalized }} 个过长工具结果，可按需读取完整内容；这不是历史摘要。
+              </small>
               <small>以下分类为估算值，仅用于了解上下文构成。</small>
               <div class="context-usage-bar" aria-label="估算的上下文构成">
                 <i
@@ -460,10 +463,6 @@ watch(text, resizeTextarea)
                     contextUsage.budgetDelta >= 0 ? '当前可用余量' : '已超出安全上限'
                   }}</small>
                   <strong>{{ formatTokenCount(Math.abs(contextUsage.budgetDelta)) }} Token</strong>
-                </span>
-                <span v-if="contextUsage.correction !== null">
-                  <small>模型格式等额外开销</small>
-                  <strong>{{ formatTokenCount(contextUsage.correction) }} Token</strong>
                 </span>
               </div>
             </section>

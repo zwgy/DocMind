@@ -26,6 +26,7 @@ from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_business import Agent, User
 from yuxi.utils.guard import content_guard
 from yuxi.utils.logging_config import logger
+from yuxi.utils.paths import CONVERSATION_HISTORY_DIR_NAME, LARGE_TOOL_RESULTS_DIR_NAME, VIRTUAL_PATH_OUTPUTS
 from yuxi.utils.question_utils import (
     normalize_questions as _normalize_interrupt_questions,
 )
@@ -501,6 +502,27 @@ def _present_artifact_tool_call_ids(msg_dict: dict) -> set[str]:
     }
 
 
+def _write_file_delivery_candidates(pending_messages: list[tuple[str, dict]]) -> list[str]:
+    """只返回当前未持久化轮次中明确成功写入的最终文件。"""
+    excluded_prefixes = (
+        f"{VIRTUAL_PATH_OUTPUTS}/tmp/",
+        f"{VIRTUAL_PATH_OUTPUTS}/{CONVERSATION_HISTORY_DIR_NAME}/",
+        f"{VIRTUAL_PATH_OUTPUTS}/{LARGE_TOOL_RESULTS_DIR_NAME}/",
+    )
+    candidates: list[str] = []
+    for msg_type, msg_dict in pending_messages:
+        if msg_type != "tool" or msg_dict.get("name") != "write_file" or msg_dict.get("status") == "error":
+            continue
+        content = msg_dict.get("content")
+        if not isinstance(content, str) or not content.startswith("Updated file "):
+            continue
+        path = content.removeprefix("Updated file ").strip()
+        if not path.startswith(f"{VIRTUAL_PATH_OUTPUTS}/") or path.startswith(excluded_prefixes):
+            continue
+        candidates.append(path)
+    return list(dict.fromkeys(candidates))
+
+
 async def save_partial_message(
     conv_repo: ConversationRepository,
     thread_id: str,
@@ -558,6 +580,8 @@ async def save_messages_from_langgraph_state(
     existing_ids = await _get_existing_message_ids(conv_repo, thread_id)
 
     pending_messages: list[tuple[str, dict]] = []
+    current_turn_pending_messages: list[tuple[str, dict]] = []
+    current_turn_started = False
     for msg in messages:
         if hasattr(msg, "model_dump"):
             msg_dict = msg.model_dump()
@@ -576,24 +600,36 @@ async def save_messages_from_langgraph_state(
             elif role == "tool":
                 msg_type = "tool"
 
+        if msg_type == "human":
+            # 交付物只能归属最后一个用户提问之后的工具回执。运行中断时可能留下
+            # 尚未入库的旧消息，若把它们与当前轮混合，会错误地重新发布旧文件。
+            current_turn_started = True
+            current_turn_pending_messages = []
+
         msg_id = getattr(msg, "id", None) or msg_dict.get("id")
         if msg_type == "human" or msg_id in existing_ids:
             continue
 
         pending_messages.append((msg_type, msg_dict))
+        if current_turn_started:
+            current_turn_pending_messages.append((msg_type, msg_dict))
 
     present_artifact_call_ids = {
         tool_call_id
-        for msg_type, msg_dict in pending_messages
+        for msg_type, msg_dict in current_turn_pending_messages
         if msg_type == "ai"
         for tool_call_id in _present_artifact_tool_call_ids(msg_dict)
     }
     presented_artifacts = [
         path
-        for msg_type, msg_dict in pending_messages
+        for msg_type, msg_dict in current_turn_pending_messages
         if msg_type == "tool" and msg_dict.get("tool_call_id") in present_artifact_call_ids
         for path in _presented_artifacts_from_tool_message(msg_dict)
     ]
+    if not presented_artifacts:
+        # 只信任本轮 write_file 的成功回执：它既证明文件真实写入，也避免扫描 outputs
+        # 把附件物化、工具缓存或历史文件误认为用户交付物。
+        presented_artifacts = _write_file_delivery_candidates(current_turn_pending_messages)
     if presented_artifacts:
         for msg_type, msg_dict in reversed(pending_messages):
             if msg_type == "ai":

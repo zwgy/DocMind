@@ -18,12 +18,13 @@ from langchain.agents.middleware.types import (
     ModelResponse,
 )
 from langchain_core.exceptions import ContextOverflowError
-from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, convert_to_openai_messages
+from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage, convert_to_openai_messages
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.types import Command
 
 from yuxi.config import config as system_config
+from yuxi.agents.backends.composite import _TOOL_RESULT_SAVED_MARKER
 
 _REQUEST_PROTOCOL_VERSION = "langchain-openai-messages-v1"
 ACTIVE_CONTEXT_SUMMARY_STATE_KEY = "_active_context_summary"
@@ -88,6 +89,7 @@ class TokenUsagePayload(TypedDict, total=False):
     input_budget_delta: int
     context_remaining_after_input: int
     tool_count: int
+    tool_results_externalized: int
     summary_active: bool
     near_context_limit: bool
     measured_at: str
@@ -259,6 +261,14 @@ def _breakdown(
     }
 
 
+def _externalized_tool_result_count(messages: Iterable[AnyMessage]) -> int:
+    """只统计已持久化并以回执替代正文的工具结果，避免把正常工具调用误报为收纳。"""
+    return sum(
+        isinstance(message, ToolMessage) and bool(message.additional_kwargs.get(_TOOL_RESULT_SAVED_MARKER))
+        for message in messages
+    )
+
+
 def estimate_model_request(
     request: ModelRequest,
     *,
@@ -403,6 +413,7 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
             "input_budget_delta": budget.prompt_budget - input_tokens,
             "context_remaining_after_input": budget.context_window - input_tokens,
             "tool_count": len(request.tools or []),
+            "tool_results_externalized": _externalized_tool_result_count(request.messages or []),
             "summary_active": bool(request.state.get(ACTIVE_CONTEXT_SUMMARY_STATE_KEY)),
             "near_context_limit": near_context_limit,
             "measured_at": datetime.now(UTC).isoformat(),

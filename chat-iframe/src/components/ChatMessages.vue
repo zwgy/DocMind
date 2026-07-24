@@ -33,6 +33,7 @@ const props = withDefaults(
     loading?: boolean
     streaming?: boolean
     compacting?: boolean
+    showRunProgress?: boolean
     agentState?: Record<string, unknown> | null
     threadId?: string
     token?: string
@@ -42,6 +43,7 @@ const props = withDefaults(
     loading: false,
     streaming: false,
     compacting: false,
+    showRunProgress: false,
     agentState: null,
     threadId: '',
     token: ''
@@ -91,7 +93,7 @@ const runTodos = computed(() => {
 const completedTodoCount = computed(
   () => runTodos.value.filter((todo) => todo.status === 'done').length
 )
-const showRunProgress = computed(() => props.streaming && runTodos.value.length > 0)
+const showRunProgress = computed(() => props.streaming && props.showRunProgress && runTodos.value.length > 0)
 const lastAssistantMessageId = computed(() => {
   for (let index = props.messages.length - 1; index >= 0; index -= 1) {
     const message = props.messages[index]

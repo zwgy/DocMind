@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "format": "prettier --write src/ public/ test/",
     "test": "node --experimental-strip-types --import ./test/register-alias.mjs --test test/*.test.js",
-    "test:p0": "node --experimental-strip-types --import ./test/register-alias.mjs --test test/chat-thread-runtime.test.js test/chat-stream-resume.test.js test/chat-active-run.test.js test/chat-history-sync.test.js test/chat-interrupt.test.js test/chat-run-status.test.js test/chat-feedback.test.js test/iframe-message.test.js test/parent-script.test.js",
+    "test:p0": "node --experimental-strip-types --import ./test/register-alias.mjs --test test/chat-thread-runtime.test.js test/chat-stream-resume.test.js test/chat-active-run.test.js test/chat-history-sync.test.js test/chat-interrupt.test.js test/chat-run-status.test.js test/chat-run-progress.test.js test/chat-feedback.test.js test/iframe-message.test.js test/parent-script.test.js",
     "test:reliability": "pnpm test:p0 && pnpm typecheck && pnpm lint",
     "test:p1": "pnpm test && pnpm typecheck && pnpm lint && pnpm build"
   },

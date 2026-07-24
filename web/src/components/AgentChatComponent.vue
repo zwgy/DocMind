@@ -261,6 +261,9 @@
                       <p v-if="tokenUsageView?.hasSummary" class="token-usage-summary-note">
                         已自动压缩较早的对话，关键信息保存在“历史摘要”中。
                       </p>
+                      <p v-if="tokenUsageView?.toolResultsExternalized" class="token-usage-summary-note">
+                        当前对话已收纳 {{ tokenUsageView.toolResultsExternalized }} 个过长工具结果，可按需读取完整内容；这不是历史摘要。
+                      </p>
                       <p class="token-usage-caption">以下分类为估算值，仅用于了解上下文构成。</p>
                       <div class="token-usage-stack-track" aria-label="估算的上下文构成">
                         <div
@@ -1028,11 +1031,6 @@ const tokenUsageStackHeadLabel = computed(() => {
   return `${formatTokenCount(tokenUsageStackTotal.value)} Token`
 })
 const tokenUsageBarSegments = computed(() => tokenUsageSegments.value)
-const signedTokenCount = (value) => {
-  const numeric = Number(value)
-  if (!Number.isFinite(numeric)) return '-'
-  return `${numeric > 0 ? '+' : ''}${formatTokenCount(numeric)}`
-}
 const tokenUsageMetaRows = computed(() => {
   const view = tokenUsageView.value
   if (!view) return []
@@ -1059,13 +1057,6 @@ const tokenUsageMetaRows = computed(() => {
         view.budgetDelta >= 0
           ? `${formatTokenCount(view.budgetDelta)} Token`
           : `${formatTokenCount(Math.abs(view.budgetDelta))} Token`
-    })
-  }
-  if (view.correction !== null) {
-    rows.push({
-      key: 'protocol-correction',
-      label: '模型格式等额外开销',
-      value: `${signedTokenCount(view.correction)} Token`
     })
   }
   return rows

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -234,48 +233,125 @@ async def test_save_messages_persists_successfully_registered_artifacts_on_final
 
 
 @pytest.mark.asyncio
-async def test_save_messages_does_not_backfill_new_outputs_when_model_omits_presentation(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
-    materialized_markdown = tmp_path / "incoming-documents" / "inc-1" / "attachment.md"
-    materialized_markdown.parent.mkdir(parents=True)
-    materialized_markdown.write_text("来文原文", encoding="utf-8")
-    monkeypatch.setattr(svc, "sandbox_outputs_dir", lambda _thread_id: tmp_path, raising=False)
-
-    class FakeRunRepo:
-        def __init__(self, _db):
-            pass
-
-        async def get_run(self, _run_id):
-            return SimpleNamespace(started_at=datetime.now(UTC) - timedelta(seconds=1))
-
-        async def set_output_message(self, _run_id, _message_id):
-            return None
-
-    class FakeDB:
-        async def commit(self):
-            return None
-
+async def test_save_messages_registers_current_run_write_file_when_presentation_is_omitted() -> None:
     class FakeGraph:
         async def aget_state(self, _config):
-            return SimpleNamespace(values={"messages": [{"id": "ai-final", "type": "ai", "content": "已完成"}]})
+            return SimpleNamespace(
+                values={
+                    "messages": [
+                        {"id": "human-current", "type": "human", "content": "请生成通知文件"},
+                        {
+                            "id": "ai-write",
+                            "type": "ai",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "write-1",
+                                    "name": "write_file",
+                                    "args": {"file_path": "/home/gem/user-data/outputs/通知.txt"},
+                                }
+                            ],
+                        },
+                        {
+                            "id": "tool-write",
+                            "type": "tool",
+                            "name": "write_file",
+                            "tool_call_id": "write-1",
+                            "content": "Updated file /home/gem/user-data/outputs/通知.txt",
+                            "status": "success",
+                        },
+                        {"id": "ai-final", "type": "ai", "content": "通知已生成"},
+                    ]
+                }
+            )
 
     class FakeAgent:
         async def get_graph(self):
             return FakeGraph()
 
-    monkeypatch.setattr(svc, "AgentRunRepository", FakeRunRepo)
-    conv_repo = _FakeConvRepo(FakeDB())
+    conv_repo = _FakeConvRepo(None)
     await svc.save_messages_from_langgraph_state(
         agent_instance=FakeAgent(),
         thread_id="thread-1",
         conv_repo=conv_repo,
         config_dict={"configurable": {"thread_id": "thread-1", "uid": "user-1"}},
         trace_info=None,
-        run_id="run-1",
     )
 
-    assert "presented_artifacts" not in conv_repo.saved_messages[0]["extra_metadata"]
+    assert conv_repo.saved_messages[-1]["extra_metadata"]["presented_artifacts"] == [
+        "/home/gem/user-data/outputs/通知.txt"
+    ]
+
+
+def test_write_file_delivery_candidates_excludes_temporary_and_edit_results() -> None:
+    candidates = svc._write_file_delivery_candidates(
+        [
+            (
+                "tool",
+                {
+                    "name": "write_file",
+                    "status": "success",
+                    "content": "Updated file /home/gem/user-data/outputs/最终报告.docx",
+                },
+            ),
+            (
+                "tool",
+                {
+                    "name": "write_file",
+                    "status": "success",
+                    "content": "Updated file /home/gem/user-data/outputs/tmp/草稿.md",
+                },
+            ),
+            (
+                "tool",
+                {
+                    "name": "edit_file",
+                    "status": "success",
+                    "content": "Updated file /home/gem/user-data/outputs/既有文件.docx",
+                },
+            ),
+        ]
+    )
+
+    assert candidates == ["/home/gem/user-data/outputs/最终报告.docx"]
+
+
+@pytest.mark.asyncio
+async def test_save_messages_does_not_register_write_file_from_previous_unsaved_turn() -> None:
+    class FakeGraph:
+        async def aget_state(self, _config):
+            return SimpleNamespace(
+                values={
+                    "messages": [
+                        {"id": "ai-previous", "type": "ai", "content": ""},
+                        {
+                            "id": "tool-previous",
+                            "type": "tool",
+                            "name": "write_file",
+                            "tool_call_id": "write-previous",
+                            "content": "Updated file /home/gem/user-data/outputs/旧文件.docx",
+                            "status": "success",
+                        },
+                        {"id": "human-current", "type": "human", "content": "给我一个下载链接"},
+                        {"id": "ai-current", "type": "ai", "content": "当前轮没有生成文件"},
+                    ]
+                }
+            )
+
+    class FakeAgent:
+        async def get_graph(self):
+            return FakeGraph()
+
+    conv_repo = _FakeConvRepo(None)
+    await svc.save_messages_from_langgraph_state(
+        agent_instance=FakeAgent(),
+        thread_id="thread-1",
+        conv_repo=conv_repo,
+        config_dict={"configurable": {"thread_id": "thread-1", "uid": "user-1"}},
+        trace_info=None,
+    )
+
+    assert "presented_artifacts" not in conv_repo.saved_messages[-1]["extra_metadata"]
 
 
 @pytest.mark.asyncio
@@ -285,6 +361,7 @@ async def test_save_messages_ignores_failed_present_artifacts_call() -> None:
             return SimpleNamespace(
                 values={
                     "messages": [
+                        {"id": "human-current", "type": "human", "content": "请生成报告"},
                         {
                             "id": "ai-artifacts",
                             "type": "ai",
@@ -332,6 +409,7 @@ async def test_save_messages_does_not_reassign_previous_turn_artifacts() -> None
             return SimpleNamespace(
                 values={
                     "messages": [
+                        {"id": "human-current", "type": "human", "content": "请生成报告"},
                         {
                             "id": "ai-previous",
                             "type": "ai",
@@ -345,6 +423,7 @@ async def test_save_messages_does_not_reassign_previous_turn_artifacts() -> None
                             "content": "已将交付物展示给用户",
                             "additional_kwargs": {"presented_artifacts": ["/user-data/outputs/previous.pdf"]},
                         },
+                        {"id": "human-current", "type": "human", "content": "给我一个下载链接"},
                         {"id": "ai-current", "type": "ai", "content": "本轮没有交付物"},
                     ]
                 }
@@ -378,6 +457,7 @@ async def test_save_messages_accepts_openai_function_style_presented_artifacts()
             return SimpleNamespace(
                 values={
                     "messages": [
+                        {"id": "human-current", "type": "human", "content": "请生成文件"},
                         {
                             "id": "ai-artifacts",
                             "type": "ai",

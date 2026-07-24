@@ -453,6 +453,7 @@ onUnmounted(() => {
           :loading="chat.isLoading"
           :streaming="chat.isStreaming"
           :compacting="chat.isCompacting"
+          :show-run-progress="chat.showRunTodos"
           :agent-state="chat.agentState"
           :thread-id="chat.currentThreadId"
           :token="context.config.token"

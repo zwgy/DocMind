@@ -33,6 +33,7 @@ export function buildTokenUsageView(usage: Record<string, unknown> | null | unde
   const promptBudget = nonNegativeNumber(usage.prompt_budget)
   const budgetDelta = finiteNumber(usage.input_budget_delta)
   const correction = finiteNumber(usage.protocol_correction_tokens)
+  const toolResultsExternalized = nonNegativeNumber(usage.tool_results_externalized) || 0
   const breakdown =
     usage.breakdown_estimate &&
     typeof usage.breakdown_estimate === 'object' &&
@@ -88,6 +89,7 @@ export function buildTokenUsageView(usage: Record<string, unknown> | null | unde
     promptBudget,
     budgetDelta,
     correction,
+    toolResultsExternalized,
     hasSummary: rawSegments.some((segment) => segment.key === 'summary'),
     percent:
       contextWindow && contextWindow > 0
