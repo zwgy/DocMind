@@ -145,7 +145,14 @@ def present_artifacts(
     return Command(
         update={
             "artifacts": normalized_paths,
-            "messages": [ToolMessage(content="已将交付物展示给用户", tool_call_id=tool_call_id)],
+            # 历史持久化只信任已成功执行的工具结果，避免模型仅生成调用参数就被误认为完成交付。
+            "messages": [
+                ToolMessage(
+                    content="已将交付物展示给用户",
+                    tool_call_id=tool_call_id,
+                    additional_kwargs={"presented_artifacts": normalized_paths},
+                )
+            ],
         }
     )
 

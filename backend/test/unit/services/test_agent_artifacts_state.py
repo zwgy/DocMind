@@ -6,7 +6,7 @@ from yuxi.agents.backends.sandbox import (
 )
 from yuxi.agents.buildin.chatbot.state import merge_subagent_runs
 from yuxi.agents.state import merge_artifacts
-from yuxi.agents.toolkits.buildin.tools import _normalize_presented_artifact_path
+from yuxi.agents.toolkits.buildin.tools import _normalize_presented_artifact_path, present_artifacts
 from yuxi.services.chat_service import extract_agent_state
 from yuxi.utils.paths import CONVERSATION_HISTORY_DIR_NAME, LARGE_TOOL_RESULTS_DIR_NAME
 
@@ -93,6 +93,22 @@ def test_normalize_presented_artifact_path_rejects_internal_output_files():
             assert "工具调用阶段文件" in str(exc)
         else:
             raise AssertionError(f"expected ValueError for internal output file under {dir_name}")
+
+
+def test_present_artifacts_records_paths_on_successful_tool_message():
+    thread_id = "artifacts-present"
+    ensure_thread_dirs(thread_id, "user-1")
+    output_file = sandbox_outputs_dir(thread_id) / "report.md"
+    output_file.write_text("# demo", encoding="utf-8")
+
+    command = present_artifacts.func(
+        [f"{VIRTUAL_PATH_PREFIX}/outputs/report.md"],
+        _runtime_with_thread(thread_id),
+        "call-present",
+    )
+    tool_message = command.update["messages"][0]
+
+    assert tool_message.additional_kwargs["presented_artifacts"] == [f"{VIRTUAL_PATH_PREFIX}/outputs/report.md"]
 
 
 def test_extract_agent_state_includes_artifacts():

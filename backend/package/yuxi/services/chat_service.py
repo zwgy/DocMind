@@ -8,7 +8,6 @@ from typing import Any
 from langchain.messages import AIMessage, AIMessageChunk, HumanMessage
 from langgraph.types import Command
 from yuxi import config as conf
-from yuxi.agents.backends.sandbox import sandbox_outputs_dir
 from yuxi.agents.buildin import agent_manager
 from yuxi.agents.context import build_agent_input_context, normalize_agent_context_config
 from yuxi.agents.state import AgentStatePayload
@@ -29,12 +28,6 @@ from yuxi.utils.guard import content_guard
 from yuxi.utils.logging_config import logger
 from yuxi.utils.question_utils import (
     normalize_questions as _normalize_interrupt_questions,
-)
-from yuxi.utils.paths import CONVERSATION_HISTORY_DIR_NAME, LARGE_TOOL_RESULTS_DIR_NAME, VIRTUAL_PATH_OUTPUTS
-
-
-_AUTO_ARTIFACT_EXCLUDED_DIR_NAMES = frozenset(
-    {"tmp", CONVERSATION_HISTORY_DIR_NAME, LARGE_TOOL_RESULTS_DIR_NAME, "large_tool_history"}
 )
 
 
@@ -247,8 +240,21 @@ def _message_chunk_yuxi_events(
     thread_id: str | None,
     namespace: list[str],
 ) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
     route = {"thread_id": thread_id, "namespace": namespace}
+    if msg_dict.get("type") == "tool" and msg_dict.get("tool_call_id"):
+        # 框架校验和补偿路径会直接生成 ToolMessage，不经过 tools 的 tool-finished 事件；
+        # 统一发出终态，避免前端将这类失败调用永久显示为“进行中”。
+        return [
+            {
+                "type": "tool_result",
+                "tool_call_id": msg_dict["tool_call_id"],
+                "content": msg_dict.get("content", ""),
+                "status": "error" if msg_dict.get("status") == "error" else "done",
+                **route,
+            }
+        ]
+
+    events: list[dict[str, Any]] = []
     content = msg_dict.get("content")
     additional_kwargs = msg_dict.get("additional_kwargs") if isinstance(msg_dict.get("additional_kwargs"), dict) else {}
     reasoning_content = msg_dict.get("reasoning_content")
@@ -460,8 +466,19 @@ async def _save_tool_message(conv_repo: ConversationRepository, msg_dict: dict) 
     )
 
 
-def _presented_artifacts_from_message(msg_dict: dict) -> list[str]:
-    """提取本轮明确交付给用户的产物，避免把线程工作目录当作回答附件。"""
+def _presented_artifacts_from_tool_message(msg_dict: dict) -> list[str]:
+    """只接受成功的 present_artifacts 工具结果，不能根据 outputs 文件推测交付意图。"""
+    if msg_dict.get("type") != "tool" or msg_dict.get("status") == "error":
+        return []
+    additional_kwargs = msg_dict.get("additional_kwargs")
+    paths = additional_kwargs.get("presented_artifacts") if isinstance(additional_kwargs, dict) else None
+    if not isinstance(paths, list):
+        return []
+    return list(dict.fromkeys(path.strip() for path in paths if isinstance(path, str) and path.strip()))
+
+
+def _present_artifact_tool_call_ids(msg_dict: dict) -> set[str]:
+    """仅关联本次新增 AI 消息中的登记调用，避免历史 ToolMessage 重复归属到新回答。"""
     tool_calls = msg_dict.get("tool_calls")
     if not isinstance(tool_calls, list) and isinstance(msg_dict.get("additional_kwargs"), dict):
         tool_calls = msg_dict["additional_kwargs"].get("tool_calls")
@@ -470,69 +487,18 @@ def _presented_artifacts_from_message(msg_dict: dict) -> list[str]:
             item for item in msg_dict["content"] if isinstance(item, dict) and item.get("type") == "tool_call"
         ]
     if not isinstance(tool_calls, list):
-        return []
+        return set()
 
-    paths: list[str] = []
-    for tool_call in tool_calls:
-        if not isinstance(tool_call, dict):
-            continue
-        function = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
-        if tool_call.get("name") != "present_artifacts" and function.get("name") != "present_artifacts":
-            continue
-        args = tool_call.get("args") or function.get("arguments") or {}
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except json.JSONDecodeError:
-                continue
-        if not isinstance(args, dict):
-            continue
-        paths.extend(path.strip() for path in args.get("filepaths", []) if isinstance(path, str) and path.strip())
-    return list(dict.fromkeys(paths))
-
-
-def _output_artifacts_created_since(thread_id: str, started_at: datetime) -> list[str]:
-    """返回本次运行新增的可交付 outputs 文件。"""
-    if started_at.tzinfo is None:
-        started_at = started_at.replace(tzinfo=UTC)
-    threshold = started_at.timestamp() - 1
-    outputs_dir = sandbox_outputs_dir(thread_id)
-    if not outputs_dir.is_dir():
-        return []
-
-    paths: list[str] = []
-    try:
-        for path in outputs_dir.rglob("*"):
-            if not path.is_file() or any(
-                part in _AUTO_ARTIFACT_EXCLUDED_DIR_NAMES for part in path.relative_to(outputs_dir).parts
-            ):
-                continue
-            if path.stat().st_mtime >= threshold:
-                paths.append(f"{VIRTUAL_PATH_OUTPUTS}/{path.relative_to(outputs_dir).as_posix()}")
-    except OSError as exc:
-        logger.warning(f"Failed to discover run output artifacts for {thread_id}: {exc}")
-        return []
-    return sorted(paths)
-
-
-async def _fallback_presented_artifacts(
-    conv_repo: ConversationRepository,
-    thread_id: str,
-    run_id: str | None,
-) -> list[str]:
-    """模型漏调登记工具时，从本轮新增 outputs 回填交付物。"""
-    if not run_id:
-        return []
-    try:
-        run = await AgentRunRepository(conv_repo.db).get_run(run_id)
-    except Exception as exc:  # noqa: BLE001
-        # 这是展示增强，查询失败不能阻断正式回答和历史写入。
-        logger.warning(f"Failed to load run {run_id} for artifact fallback: {exc}")
-        return []
-    if not run:
-        return []
-    started_at = getattr(run, "started_at", None) or getattr(run, "created_at", None)
-    return _output_artifacts_created_since(thread_id, started_at) if isinstance(started_at, datetime) else []
+    return {
+        str(tool_call["id"])
+        for tool_call in tool_calls
+        if isinstance(tool_call, dict)
+        and tool_call.get("id")
+        and (
+            tool_call.get("name") == "present_artifacts"
+            or isinstance(tool_call.get("function"), dict) and tool_call["function"].get("name") == "present_artifacts"
+        )
+    }
 
 
 async def save_partial_message(
@@ -616,13 +582,18 @@ async def save_messages_from_langgraph_state(
 
         pending_messages.append((msg_type, msg_dict))
 
-    presented_artifacts: list[str] = []
-    for msg_type, msg_dict in pending_messages:
-        if msg_type == "ai":
-            presented_artifacts.extend(_presented_artifacts_from_message(msg_dict))
-    if not presented_artifacts:
-        # present_artifacts 是首选；仅在模型遗漏时回填本次新文件，避免旧交付物重复归属到新回答。
-        presented_artifacts = await _fallback_presented_artifacts(conv_repo, thread_id, run_id)
+    present_artifact_call_ids = {
+        tool_call_id
+        for msg_type, msg_dict in pending_messages
+        if msg_type == "ai"
+        for tool_call_id in _present_artifact_tool_call_ids(msg_dict)
+    }
+    presented_artifacts = [
+        path
+        for msg_type, msg_dict in pending_messages
+        if msg_type == "tool" and msg_dict.get("tool_call_id") in present_artifact_call_ids
+        for path in _presented_artifacts_from_tool_message(msg_dict)
+    ]
     if presented_artifacts:
         for msg_type, msg_dict in reversed(pending_messages):
             if msg_type == "ai":

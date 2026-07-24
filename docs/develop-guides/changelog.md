@@ -17,6 +17,7 @@
 - 优化本地模型首个可见事件配置：模型缓存继续合并供应商与单模型的 `extra.parameters`，运行时统一透传当前模型服务支持的请求参数；Chat 模型配置改为“模型请求参数 JSON”，不再把 `reasoning_effort` 伪装成通用思考开关。不同服务应按各自协议配置（例如 OpenAI 兼容服务可使用 `reasoning_effort`，其他服务可能使用不同字段或嵌套结构），并以真实对话的首个可见事件和答案质量验收。
 
 ### 开发记录
+- 修复小助手交付物与工具状态同步：只有 `present_artifacts` 实际成功登记的路径才会持久化到最终回答，删除按本轮修改时间扫描整个 `outputs` 的推测回填，来文 Markdown 缓存和其他工具文件不再被误显示为“本轮交付物”；补齐 PatchToolCallsMiddleware 合成工具错误的终态流事件，chat-iframe 无需切换会话即可将其显示为失败。提示词同时要求优先使用当前上下文，避免在摘要、结构化结果已足够时重复读取原文。
 - 修复聊天上下文用量展示：进度条统一以模型真实窗口为上限，自动摘要阈值改为独立的“估算”提示；chat-iframe 的用户消息和助手消息复制统一在 Clipboard API 被 HTTP 嵌入页拒绝时降级到原生复制，且仅在实际成功后显示完成状态。
 - 修复 Web 与 chat-iframe 在开发联调时因 Vite HMR WebSocket 短暂失联而整页刷新、丢失内存状态的问题：连接诊断日志确认触发链路后，默认开发 Compose 改为与正式环境共用 Vite 静态构建加 Nginx 托管；chat-iframe 仅在开发 Compose 中只读挂载示例和测试附件，生产镜像继续清理调试资源。前端改动需重建对应服务，后端热重载保持不变。
 - 修复工具元数据加载会错误读取原始 `args_schema` 的问题：展示参数改为使用 LangChain 已排除框架注入参数的 `tool_call_schema`，兼容 Pydantic v1/v2 模型及原生 JSON Schema，避免来文读取工具的 `ToolRuntime` 中 `Callable` 字段中断智能助手对话。

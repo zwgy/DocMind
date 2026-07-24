@@ -221,6 +221,15 @@ function streamEventChunk(streamEvent: Record<string, unknown>): RunStreamChunk 
       args: streamEvent.args || streamEvent.args_delta
     }
   }
+  if (eventType === 'tool_result') {
+    return {
+      type: 'tool_result',
+      toolCallId:
+        typeof streamEvent.tool_call_id === 'string' ? streamEvent.tool_call_id : undefined,
+      content: streamEvent.content,
+      status: streamEvent.status === 'error' ? 'error' : 'done'
+    }
+  }
   return null
 }
 

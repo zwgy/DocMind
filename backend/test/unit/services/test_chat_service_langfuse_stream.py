@@ -13,6 +13,33 @@ async def _fake_normalize_agent_context_config(context, **_kwargs):
     return dict(context or {})
 
 
+def test_message_payload_maps_tool_message_to_terminal_tool_result() -> None:
+    events = svc._message_payload_yuxi_events(
+        {
+            "id": "tool-list",
+            "type": "tool",
+            "tool_call_id": "call-list",
+            "content": "list is not a valid tool",
+            "status": "error",
+        },
+        metadata={"run_id": "run-1"},
+        namespace=[],
+        thread_id="thread-1",
+        protocol_message_ids={},
+    )
+
+    assert events == [
+        {
+            "type": "tool_result",
+            "tool_call_id": "call-list",
+            "content": "list is not a valid tool",
+            "status": "error",
+            "thread_id": "thread-1",
+            "namespace": [],
+        }
+    ]
+
+
 class _FakeConvRepo:
     def __init__(self, _db):
         self.saved_messages: list[dict] = []

@@ -90,6 +90,9 @@ class _FakeConvRepo:
         )
         return SimpleNamespace(id=len(self.tool_calls))
 
+    async def update_tool_call_output(self, **_kwargs):
+        return None
+
     async def create_conversation(self, *, uid: str, agent_id: str, thread_id: str, metadata: dict | None = None):
         conversation = SimpleNamespace(
             id=1,
@@ -181,7 +184,7 @@ async def test_save_messages_from_langgraph_state_handles_dict_tool_call_blocks(
 
 
 @pytest.mark.asyncio
-async def test_save_messages_persists_presented_artifacts_on_final_answer() -> None:
+async def test_save_messages_persists_successfully_registered_artifacts_on_final_answer() -> None:
     class FakeGraph:
         async def aget_state(self, _config):
             return SimpleNamespace(
@@ -200,6 +203,13 @@ async def test_save_messages_persists_presented_artifacts_on_final_answer() -> N
                                     },
                                 }
                             ],
+                        },
+                        {
+                            "id": "tool-artifacts",
+                            "type": "tool",
+                            "tool_call_id": "present-1",
+                            "content": "已将交付物展示给用户",
+                            "additional_kwargs": {"presented_artifacts": ["/user-data/outputs/report.pdf"]},
                         },
                         {"id": "ai-final", "type": "ai", "content": "报告已生成"},
                     ]
@@ -224,17 +234,13 @@ async def test_save_messages_persists_presented_artifacts_on_final_answer() -> N
 
 
 @pytest.mark.asyncio
-async def test_save_messages_backfills_new_outputs_when_model_omits_presentation(
+async def test_save_messages_does_not_backfill_new_outputs_when_model_omits_presentation(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    (tmp_path / "report.docx").write_bytes(b"docx")
-    (tmp_path / "tmp").mkdir()
-    (tmp_path / "tmp" / "draft.md").write_text("draft", encoding="utf-8")
-    monkeypatch.setattr(svc, "sandbox_outputs_dir", lambda _thread_id: tmp_path)
-
-    class FakeDB:
-        async def commit(self):
-            return None
+    materialized_markdown = tmp_path / "incoming-documents" / "inc-1" / "attachment.md"
+    materialized_markdown.parent.mkdir(parents=True)
+    materialized_markdown.write_text("来文原文", encoding="utf-8")
+    monkeypatch.setattr(svc, "sandbox_outputs_dir", lambda _thread_id: tmp_path, raising=False)
 
     class FakeRunRepo:
         def __init__(self, _db):
@@ -255,7 +261,7 @@ async def test_save_messages_backfills_new_outputs_when_model_omits_presentation
             return FakeGraph()
 
     monkeypatch.setattr(svc, "AgentRunRepository", FakeRunRepo)
-    conv_repo = _FakeConvRepo(FakeDB())
+    conv_repo = _FakeConvRepo(object())
     await svc.save_messages_from_langgraph_state(
         agent_instance=FakeAgent(),
         thread_id="thread-1",
@@ -265,9 +271,100 @@ async def test_save_messages_backfills_new_outputs_when_model_omits_presentation
         run_id="run-1",
     )
 
-    assert conv_repo.saved_messages[0]["extra_metadata"]["presented_artifacts"] == [
-        "/home/gem/user-data/outputs/report.docx"
-    ]
+    assert "presented_artifacts" not in conv_repo.saved_messages[0]["extra_metadata"]
+
+
+@pytest.mark.asyncio
+async def test_save_messages_ignores_failed_present_artifacts_call() -> None:
+    class FakeGraph:
+        async def aget_state(self, _config):
+            return SimpleNamespace(
+                values={
+                    "messages": [
+                        {
+                            "id": "ai-artifacts",
+                            "type": "ai",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "present-1",
+                                    "name": "present_artifacts",
+                                    "args": {"filepaths": ["/user-data/outputs/report.pdf"]},
+                                }
+                            ],
+                        },
+                        {
+                            "id": "tool-artifacts",
+                            "type": "tool",
+                            "tool_call_id": "present-1",
+                            "content": "Error: 文件不存在",
+                            "status": "error",
+                        },
+                        {"id": "ai-final", "type": "ai", "content": "报告未生成"},
+                    ]
+                }
+            )
+
+    class FakeAgent:
+        async def get_graph(self):
+            return FakeGraph()
+
+    conv_repo = _FakeConvRepo(None)
+    await svc.save_messages_from_langgraph_state(
+        agent_instance=FakeAgent(),
+        thread_id="thread-1",
+        conv_repo=conv_repo,
+        config_dict={"configurable": {"thread_id": "thread-1", "uid": "user-1"}},
+        trace_info=None,
+    )
+
+    assert "presented_artifacts" not in conv_repo.saved_messages[-1]["extra_metadata"]
+
+
+@pytest.mark.asyncio
+async def test_save_messages_does_not_reassign_previous_turn_artifacts() -> None:
+    class FakeGraph:
+        async def aget_state(self, _config):
+            return SimpleNamespace(
+                values={
+                    "messages": [
+                        {
+                            "id": "ai-previous",
+                            "type": "ai",
+                            "content": "",
+                            "tool_calls": [{"id": "present-previous", "name": "present_artifacts", "args": {}}],
+                        },
+                        {
+                            "id": "tool-previous",
+                            "type": "tool",
+                            "tool_call_id": "present-previous",
+                            "content": "已将交付物展示给用户",
+                            "additional_kwargs": {"presented_artifacts": ["/user-data/outputs/previous.pdf"]},
+                        },
+                        {"id": "ai-current", "type": "ai", "content": "本轮没有交付物"},
+                    ]
+                }
+            )
+
+    class FakeAgent:
+        async def get_graph(self):
+            return FakeGraph()
+
+    conv_repo = _FakeConvRepo(None)
+
+    async def existing_messages(_thread_id):
+        return [SimpleNamespace(extra_metadata={"id": "ai-previous"})]
+
+    conv_repo.get_messages_by_thread_id = existing_messages
+    await svc.save_messages_from_langgraph_state(
+        agent_instance=FakeAgent(),
+        thread_id="thread-1",
+        conv_repo=conv_repo,
+        config_dict={"configurable": {"thread_id": "thread-1", "uid": "user-1"}},
+        trace_info=None,
+    )
+
+    assert "presented_artifacts" not in conv_repo.saved_messages[0]["extra_metadata"]
 
 
 @pytest.mark.asyncio
@@ -292,6 +389,13 @@ async def test_save_messages_accepts_openai_function_style_presented_artifacts()
                                     }
                                 ]
                             },
+                        },
+                        {
+                            "id": "tool-artifacts",
+                            "type": "tool",
+                            "tool_call_id": "present-1",
+                            "content": "已将交付物展示给用户",
+                            "additional_kwargs": {"presented_artifacts": ["/user-data/outputs/report.md"]},
                         },
                         {"id": "ai-final", "type": "ai", "content": "已生成文件"},
                     ]
