@@ -69,13 +69,7 @@ const editingModel = ref({
   supported_parameters: [],
   extra: {}
 })
-
-const reasoningEffortOptions = [
-  { value: 'none', label: '关闭（优先响应速度）' },
-  { value: 'low', label: '低' },
-  { value: 'medium', label: '中' },
-  { value: 'high', label: '高' }
-]
+const modelParametersText = ref('{}')
 
 // Models modal state (per provider)
 const showModelsModal = ref(false)
@@ -481,6 +475,22 @@ const normalizeModel = (model = {}) => ({
   }
 })
 
+const stringifyModelParameters = (parameters) => JSON.stringify(parameters || {}, null, 2)
+
+const parseModelParameters = () => {
+  try {
+    const parameters = JSON.parse(modelParametersText.value || '{}')
+    if (!parameters || Array.isArray(parameters) || typeof parameters !== 'object') {
+      message.error('模型请求参数必须是 JSON 对象')
+      return null
+    }
+    return parameters
+  } catch {
+    message.error('模型请求参数不是有效的 JSON')
+    return null
+  }
+}
+
 const testModelConnection = async (providerId, model) => {
   const spec = buildModelSpec(providerId, model.id)
   if (modelTestLoadingBySpec.value[spec]) return
@@ -540,7 +550,9 @@ const addModelFromRemote = async (providerId, remoteModel) => {
 }
 
 const openModelConfigModal = (model) => {
-  Object.assign(editingModel.value, normalizeModel(model))
+  const normalized = normalizeModel(model)
+  Object.assign(editingModel.value, normalized)
+  modelParametersText.value = stringifyModelParameters(normalized.extra.parameters)
   isCreating.value = false
   showModelModal.value = true
 }
@@ -565,6 +577,7 @@ const openCreateModal = (provider) => {
     supported_parameters: [],
     extra: { parameters: {} }
   })
+  modelParametersText.value = '{}'
   isCreating.value = true
   showModelModal.value = true
 }
@@ -578,9 +591,16 @@ const saveModelConfig = async () => {
     )
     if (!provider) return
 
+    const modelToSave = normalizeModel(editingModel.value)
+    if (modelToSave.type === 'chat') {
+      const parameters = parseModelParameters()
+      if (parameters === null) return
+      modelToSave.extra.parameters = parameters
+    }
+
     let enabledModels
     if (isCreating.value) {
-      const newId = (editingModel.value.id || '').trim()
+      const newId = (modelToSave.id || '').trim()
       if (!newId) {
         message.error('请填写模型 ID')
         return
@@ -589,11 +609,11 @@ const saveModelConfig = async () => {
         message.error('模型 ID 已存在')
         return
       }
-      const newModel = { ...editingModel.value, id: newId, source: 'manual', enabled: true }
+      const newModel = { ...modelToSave, id: newId, source: 'manual', enabled: true }
       enabledModels = [...(provider.enabled_models || []), newModel]
     } else {
       enabledModels = (provider.enabled_models || []).map((m) =>
-        m.id === editingModel.value.id ? { ...editingModel.value } : m
+        m.id === modelToSave.id ? modelToSave : m
       )
     }
 
@@ -1135,15 +1155,10 @@ defineExpose({
         </div>
         <div class="form-row" v-if="editingModel.type === 'chat'">
           <label class="form-label full-width">
-            <span>生成前思考</span>
-            <a-select
-              v-model:value="editingModel.extra.parameters.reasoning_effort"
-              :options="reasoningEffortOptions"
-              placeholder="跟随模型服务"
-              allow-clear
-            />
+            <span>模型请求参数 JSON</span>
+            <a-textarea v-model:value="modelParametersText" :rows="5" placeholder="{}" />
             <small class="context-length-help">
-              仅在模型服务支持 reasoning_effort 时配置；关闭可缩短首字符和工具调用等待时间。
+              按当前模型服务的协议填写并原样发送；不同供应商的思考模式参数并不通用。留空即跟随模型服务默认值。
             </small>
           </label>
         </div>

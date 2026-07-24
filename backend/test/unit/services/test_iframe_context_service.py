@@ -207,13 +207,12 @@ async def test_render_iframe_context_keeps_source_file_id_without_injecting_evid
     assert "SKILL.md" not in prompt
     assert "incoming_id=inc_1" in prompt
     assert "##### 附件：client-review.pdf（source_file_id=main）" in prompt
-    assert "`read_incoming_document(include_full_text=true)`" in prompt
-    assert "include_full_text=true" in prompt
-    assert "不得猜测文件路径" in prompt
-    assert "不得将摘要改写成原文" in prompt
-    assert "工具返回内容必须同时包含对应条款号和原文" in prompt
-    assert "条款层级和数字必须照抄工具结果" in prompt
-    assert "不得自行解释序号" in prompt
+    assert "摘要和结构化提取结果不是逐字原文" in prompt
+    assert "read_incoming_document" not in prompt
+    assert "read_file" not in prompt
+    assert "加载 Skill" not in prompt
+    assert "不得猜测文件路径" not in prompt
+    assert "条款层级和数字必须照抄工具结果" not in prompt
     assert "Phase 1" not in prompt
 
 
@@ -279,7 +278,9 @@ async def test_render_iframe_context_prepares_selected_incoming_markdown_paths(m
     ]
     assert "原文路径：/home/gem/user-data/outputs/incoming-documents/inc-1/file-main.md" in prompt
     assert "原文路径：/home/gem/user-data/outputs/incoming-documents/inc-1/file-attachment.md" in prompt
-    assert "直接使用 `read_file` 读取该真实路径" in prompt
+    assert "原文路径是当前会话已准备的已解析原文" in prompt
+    assert "read_file" not in prompt
+    assert "read_incoming_document" not in prompt
 
 
 @pytest.mark.asyncio

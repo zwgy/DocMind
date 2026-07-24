@@ -39,15 +39,8 @@ IFRAME_CONTEXT_TEMPLATE = """### iframe 页面与附件上下文
 {% if documents %}
 
 【当前来文】
-附件下方已经提供“原文路径”时，直接使用 `read_file` 读取该真实路径，不要再加载 Skill、
-调用 `read_incoming_document` 或搜索文件。仅在没有原文路径且确需原文时，才使用下方真实的
-`incoming_id` 和 `source_file_id` 调用 `read_incoming_document(include_full_text=true)`。
-不得猜测文件路径，也不得使用 `execute`、`glob`、`ls` 在文件系统中搜索来文附件。
-摘要和结构化结果不是逐字原文；原文读取失败时应明确说明，
-不得将摘要改写成原文或据此补充责任主体、条款号等事实。用户要求条款号或逐字引用时，
-工具返回内容必须同时包含对应条款号和原文，否则应继续读取相关范围或明确说明尚未核验。
-最终答案只保留用户要求的内容；条款层级和数字必须照抄工具结果，不得自行解释序号或
-附加未经核验的字数统计、责任归纳。
+以下资料用于理解当前来文范围；摘要和结构化提取结果不是逐字原文。
+附件下方的原文路径是当前会话已准备的已解析原文。
 {% for document in documents %}
 #### 来文：{{ document.name }}{{ "（incoming_id=" ~ document.incoming_id ~ "）" if document.incoming_id else "" }}
 {% if document.classification %}
