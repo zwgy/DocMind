@@ -217,24 +217,11 @@ async def test_render_iframe_context_keeps_source_file_id_without_injecting_evid
 
 
 @pytest.mark.asyncio
-async def test_render_iframe_context_prepares_selected_incoming_markdown_paths(monkeypatch):
-    calls = []
+async def test_render_iframe_context_does_not_prepare_incoming_markdown_paths(monkeypatch):
 
     class FakeMarkdownService:
         async def materialize(self, **kwargs):
-            calls.append(kwargs)
-            return [
-                {
-                    "source_file_id": "main",
-                    "filename": "main.docx",
-                    "markdown_path": "/home/gem/user-data/outputs/incoming-documents/inc-1/file-main.md",
-                },
-                {
-                    "source_file_id": "attachment",
-                    "filename": "attachment.pdf",
-                    "markdown_path": "/home/gem/user-data/outputs/incoming-documents/inc-1/file-attachment.md",
-                },
-            ]
+            raise AssertionError("iframe 上下文不应预先物化附件原文")
 
     monkeypatch.setattr(svc, "IncomingDocumentMarkdownService", FakeMarkdownService)
 
@@ -268,17 +255,7 @@ async def test_render_iframe_context_prepares_selected_incoming_markdown_paths(m
         },
     )
 
-    assert calls == [
-        {
-            "incoming_id": "inc-1",
-            "source_file_ids": ["main", "attachment"],
-            "uid": "user-1",
-            "thread_id": "thread-1",
-        }
-    ]
-    assert "原文路径：/home/gem/user-data/outputs/incoming-documents/inc-1/file-main.md" in prompt
-    assert "原文路径：/home/gem/user-data/outputs/incoming-documents/inc-1/file-attachment.md" in prompt
-    assert "原文路径是当前会话已准备的已解析原文" in prompt
+    assert "原文路径" not in prompt
     assert "read_file" not in prompt
     assert "read_incoming_document" not in prompt
 

@@ -57,6 +57,24 @@ export const buildTokenUsageView = (usage) => {
     rawSegments.reduce((total, segment) => total + segment.value, 0),
     1
   )
+  // 分项只是本地估算，模型实测总量可能因协议模板和校准而更高或更低；先压缩超出的估算，
+  // 再用灰色段补齐不足，才能让彩色段和已用总量共同落在同一条上下文窗口刻度上。
+  const visualScale = compositionTotal > used ? used / compositionTotal : 1
+  const barSegments = rawSegments.map((segment) => ({
+    ...segment,
+    visualValue: segment.value * visualScale
+  }))
+  const estimatedVisualTotal = barSegments.reduce((total, segment) => total + segment.visualValue, 0)
+  const overhead = Math.max(used - estimatedVisualTotal, 0)
+  if (overhead > 0) {
+    barSegments.push({
+      key: 'overhead',
+      label: '模型协议/模板校正',
+      value: overhead,
+      visualValue: overhead
+    })
+  }
+  const barCapacity = Math.max(contextWindow || used, 1)
   const sourceLabels = {
     provider_usage: '实际用量',
     calibrated_estimate: '校准后的估算',
@@ -76,9 +94,9 @@ export const buildTokenUsageView = (usage) => {
         ? Math.max(0, Math.min(Math.round((used / contextWindow) * 100), 100))
         : null,
     sourceLabel: sourceLabels[usage.input_source] || '本地预估',
-    segments: rawSegments.map((segment) => ({
+    segments: barSegments.map(({ visualValue, ...segment }) => ({
       ...segment,
-      percent: `${((segment.value / compositionTotal) * 100).toFixed(2)}%`,
+      percent: `${((visualValue / barCapacity) * 100).toFixed(2)}%`,
       valueLabel: `${formatTokenCount(segment.value)} Token`,
       tone: `is-${segment.key}`
     }))

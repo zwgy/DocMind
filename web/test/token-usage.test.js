@@ -24,14 +24,22 @@ test('shows provider total separately from estimated component breakdown', () =>
 
   assert.equal(view.used, 32601)
   assert.equal(view.percent, 99)
-  assert.equal(view.sourceLabel, '模型服务实测')
+  assert.equal(view.sourceLabel, '实际用量')
   assert.equal(view.budgetDelta, -4953)
   assert.equal(view.correction, 12317)
   assert.deepEqual(
     view.segments.map((segment) => segment.value),
-    [3000, 1000, 2000, 14284]
+    [3000, 1000, 2000, 14284, 12317]
   )
-  assert.ok(view.segments.every((segment) => segment.label.includes('估算')))
+  assert.deepEqual(
+    view.segments.map((segment) => segment.key),
+    ['messages', 'summary', 'system', 'tools', 'overhead']
+  )
+  assert.equal(view.segments.at(-1).label, '模型协议/模板校正')
+  assert.equal(
+    Number(view.segments.reduce((total, segment) => total + Number.parseFloat(segment.percent), 0).toFixed(2)),
+    99.49
+  )
 })
 
 test('labels a request without provider usage as calibrated estimate', () => {
@@ -42,6 +50,6 @@ test('labels a request without provider usage as calibrated estimate', () => {
     protocol_correction_tokens: null
   })
 
-  assert.equal(view.sourceLabel, 'usage 校准估算')
+  assert.equal(view.sourceLabel, '校准后的估算')
   assert.equal(view.correction, null)
 })

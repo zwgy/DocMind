@@ -14,6 +14,7 @@ IFRAME_PAGE_INLINE_CHARS = 8000
 IFRAME_PAGE_PREVIEW_CHARS = 2000
 IFRAME_FILE_SUMMARY_CHARS = 1200
 IFRAME_CONTEXT_TOTAL_CHARS = 8000
+IFRAME_PREPARED_FILE_PATHS_ENABLED = False
 TRUNCATED_NOTICE = "[已截断，更多内容请使用给定工具读取]"
 # 完整提示词骨架集中在一个模板中；代码只准备数据，不再拼接业务展示结构或 Agent 能力说明。
 IFRAME_CONTEXT_TEMPLATE = """### iframe 页面与附件上下文
@@ -40,7 +41,6 @@ IFRAME_CONTEXT_TEMPLATE = """### iframe 页面与附件上下文
 
 【当前来文】
 以下资料用于理解当前来文范围；摘要和结构化提取结果不是逐字原文。
-附件下方的原文路径是当前会话已准备的已解析原文。
 {% for document in documents %}
 #### 来文：{{ document.name }}{{ "（incoming_id=" ~ document.incoming_id ~ "）" if document.incoming_id else "" }}
 {% if document.classification %}
@@ -314,7 +314,9 @@ async def render_iframe_context_prompt(thread_id: str, uid: str, iframe_context:
     files = iframe_context.get("files")
     if isinstance(files, list):
         document_contexts = _build_document_contexts(files)
-        if iframe_context.get("prepare_file_paths"):
+        # 默认不预先物化原文，避免基础 read_file 因已知路径绕过 incoming-document Skill。
+        # 保留现有实现和字段，供后续经验证的受控调用链显式恢复；请求本身不能开启该能力。
+        if IFRAME_PREPARED_FILE_PATHS_ENABLED and iframe_context.get("prepare_file_paths"):
             # “问文件”已明确限定本轮文件范围；在进入模型前准备真实路径，避免本地模型为找文件
             # 额外消耗多轮工具调用。这里只注入路径而不内联全文，不能扩大模型输入上下文。
             markdown_service = IncomingDocumentMarkdownService()

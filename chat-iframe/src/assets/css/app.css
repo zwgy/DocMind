@@ -2462,7 +2462,9 @@
 }
 
 .context-usage-bar i.is-other,
-.context-usage-legend i.is-other {
+.context-usage-legend i.is-other,
+.context-usage-bar i.is-overhead,
+.context-usage-legend i.is-overhead {
   background: var(--gray-300);
 }
 

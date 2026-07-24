@@ -30,11 +30,15 @@ test('uses the same measured total and estimated breakdown contract as the host 
   assert.equal(view?.correction, 12317)
   assert.deepEqual(
     view?.segments.map((segment) => segment.value),
-    [3000, 1000, 2000, 14284]
+    [3000, 1000, 2000, 14284, 12317]
   )
   assert.deepEqual(
     view?.segments.map((segment) => segment.label),
-    ['对话消息', '历史摘要', '系统说明', '可用工具（51 个）']
+    ['对话消息', '历史摘要', '系统说明', '可用工具（51 个）', '模型协议/模板校正']
+  )
+  assert.equal(
+    Number(view?.segments.reduce((total, segment) => total + Number.parseFloat(segment.percent), 0).toFixed(2)),
+    99.49
   )
 })
 

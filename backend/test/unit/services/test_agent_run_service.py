@@ -16,6 +16,24 @@ def _sse_data(chunk: str) -> dict:
     raise AssertionError(f"SSE chunk has no data line: {chunk}")
 
 
+def test_compact_stream_chunk_keeps_context_compaction_state():
+    compact = agent_run_service._compact_stream_chunk(
+        {
+            "status": "stream_event",
+            "event": {
+                "method": "custom",
+                "namespace": [],
+                "data": {"type": "context_compaction", "status": "started"},
+            },
+        }
+    )
+
+    assert compact["event"] == {
+        "method": "custom",
+        "data": {"type": "context_compaction", "status": "started"},
+    }
+
+
 class _FakeContext:
     def __init__(self):
         self.model = "agent-default-model"
