@@ -252,6 +252,10 @@ async def test_save_messages_does_not_backfill_new_outputs_when_model_omits_pres
         async def set_output_message(self, _run_id, _message_id):
             return None
 
+    class FakeDB:
+        async def commit(self):
+            return None
+
     class FakeGraph:
         async def aget_state(self, _config):
             return SimpleNamespace(values={"messages": [{"id": "ai-final", "type": "ai", "content": "已完成"}]})
@@ -261,7 +265,7 @@ async def test_save_messages_does_not_backfill_new_outputs_when_model_omits_pres
             return FakeGraph()
 
     monkeypatch.setattr(svc, "AgentRunRepository", FakeRunRepo)
-    conv_repo = _FakeConvRepo(object())
+    conv_repo = _FakeConvRepo(FakeDB())
     await svc.save_messages_from_langgraph_state(
         agent_instance=FakeAgent(),
         thread_id="thread-1",
