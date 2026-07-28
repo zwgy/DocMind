@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -39,3 +41,35 @@ def test_reserve_output_never_overwrites_existing_artifact(tmp_path: Path) -> No
     assert reserved.name == "report-2.svg"
     assert reserved.read_bytes() == b""
     assert virtual_path.endswith("/report-2.svg")
+
+
+def test_flowchart_renderer_removes_graphviz_doctype(tmp_path: Path) -> None:
+    source = tmp_path / "flow.flow.json"
+    output = tmp_path / "flow.svg"
+    source.write_text(
+        '{"nodes":[{"id":"start","kind":"start","label":"开始"},{"id":"end","kind":"end","label":"结束"}],'
+        '"edges":[{"source":"start","target":"end"}]}',
+        encoding="utf-8",
+    )
+    script = (
+        Path(__file__).parents[3]
+        / "package"
+        / "yuxi"
+        / "agents"
+        / "skills"
+        / "buildin"
+        / "visualization"
+        / "scripts"
+        / "render_flowchart.py"
+    )
+
+    subprocess.run(
+        [sys.executable, str(script)],
+        input=f'{{"source_path": "{source.as_posix()}", "output": "{output.as_posix()}"}}',
+        text=True,
+        check=True,
+        capture_output=True,
+    )
+
+    assert "<!doctype" not in output.read_text(encoding="utf-8").lower()
+    _validate_svg(output)
