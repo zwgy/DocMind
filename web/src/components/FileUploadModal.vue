@@ -438,7 +438,7 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-vue-next'
-import { buildChunkParamsPayload } from '@/utils/chunk_presets'
+import { buildChunkParamsPayload } from '@/utils/chunkUtils'
 import ChunkParamsConfig from '@/components/ChunkParamsConfig.vue'
 import FileTypeIcon from '@/components/common/FileTypeIcon.vue'
 
