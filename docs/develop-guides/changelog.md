@@ -32,6 +32,7 @@
 
 ### 开发记录
 - 同步上游知识库文件搜索修复：`search_file` 改为在 PostgreSQL 侧按文件名筛选、排序和计数，单知识库直接使用数据库分页，跨知识库仅归并当前页候选项；不再先扫描受仓储上限约束的文件列表，避免大知识库中较晚的匹配项被静默遗漏，`total` 与 `has_more` 也以完整匹配集为准。
+- 同步上游超大知识库查询修复：按 `file_id` 批量读取元数据时统一按 10,000 个 ID 分批执行，避免思维导图等大规模流程超过 asyncpg 单条 SQL 参数上限而失败；返回顺序仍与调用方输入一致。
 - 加固动态 Agent sandbox 网络边界：每个 Docker sandbox 独占 bridge 网络，仅允许 sandbox-provisioner 接入；API/worker 不再直连随机宿主机端口，而是通过携带独立 `SANDBOX_PROVISIONER_TOKEN` 的认证代理访问。旧共享网络 sandbox 会在下次发现时自动重建。初始化与生产管理脚本会生成并校验该 token，sandbox 相关配置不再进入运行时可修改的系统配置。基础设施端口新增 `INFRA_BIND_HOST`，默认仅监听 `127.0.0.1`，确需外部直连时可显式配置。
 - 收敛公开 MinIO 图片访问：新上传的公开图片返回同源 `/minio/public/...` URL，主站、chat-iframe 与本地 Vite 均只代理该只读路径，其他 bucket 路径直接拒绝；public bucket 策略移除对象列表权限，历史 `:9000/public/...` 头像在登录、模拟登录和反馈列表返回时自动规范化，并保留查询参数与片段。
 - 修复 API 镜像无法执行容器内 Lint：镜像继续安装完整测试依赖，并保留包含 Ruff 的开发依赖组，使远程 Compose 验收可以在与服务一致的 Python 依赖快照中完成“测试 + Lint”。
