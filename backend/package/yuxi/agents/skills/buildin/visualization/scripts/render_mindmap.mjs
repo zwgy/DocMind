@@ -9,5 +9,8 @@ const width = Math.min(4000, Math.max(1200, 500 + maxDepth * 230 + maxLabelLengt
 const height = Math.min(4000, Math.max(720, count * 42));
 const chart = echarts.init(null, null, { renderer: "svg", ssr: true, width, height });
 chart.setOption({ animation: false, series: [{ type: "tree", data: [root], layout: request.layout === "radial" ? "radial" : "orthogonal", orient: request.layout === "radial" ? undefined : "LR", expandAndCollapse: false, label: { position: "left" } }] });
-fs.writeFileSync(request.output, chart.renderToSVGString());
+const svg = chart.renderToSVGString();
+// SSR 进程必须释放图表实例，否则 Node 会保持事件循环而无法作为 CLI 返回。
+chart.dispose();
+fs.writeFileSync(request.output, svg);
 console.log(JSON.stringify({ summary: `已生成思维导图，共 ${count} 个节点` }));

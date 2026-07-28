@@ -68,5 +68,8 @@ if (["bar", "line", "area"].includes(request.chart_type)) {
 if (rows.length > 2000) fail("数据点超过 2000 个限制");
 const chart = echarts.init(null, null, { renderer: "svg", ssr: true, width: 1200, height: 720 });
 chart.setOption(option);
-fs.writeFileSync(request.output, chart.renderToSVGString());
+const svg = chart.renderToSVGString();
+// ECharts SSR 会保留内部资源；显式释放实例才能让 CLI 在输出 SVG 后正常退出。
+chart.dispose();
+fs.writeFileSync(request.output, svg);
 console.log(JSON.stringify({ summary: `已生成${request.title}，共 ${rows.length} 个数据点` }));
