@@ -252,12 +252,16 @@ async def test_stream_agent_resume_routes_subagent_chunks(monkeypatch):
     monkeypatch.setattr(svc, "ConversationRepository", lambda _db: object())
     monkeypatch.setattr(svc, "flush_langfuse", lambda: None)
 
+    class FakeDb:
+        async def commit(self):
+            return None
+
     stream = stream_agent_resume(
         thread_id="parent-thread",
         resume_input={"ok": True},
         meta={"request_id": "req-1"},
         current_user=SimpleNamespace(uid="user-1"),
-        db=object(),
+        db=FakeDb(),
     )
 
     chunks = []

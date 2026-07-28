@@ -88,3 +88,10 @@ def get_shared_neo4j_connection() -> Neo4jConnectionManager:
             if _shared_neo4j_connection is None or not _shared_neo4j_connection.driver:
                 _shared_neo4j_connection = Neo4jConnectionManager()
     return _shared_neo4j_connection
+
+
+def close_shared_neo4j_connection() -> None:
+    """在应用退出前关闭共享 driver，避免连接池随进程残留。"""
+    with _shared_neo4j_connection_lock:
+        if _shared_neo4j_connection is not None:
+            _shared_neo4j_connection.close()

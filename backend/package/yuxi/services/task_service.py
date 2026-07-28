@@ -105,6 +105,8 @@ class Tasker:
         self._queue: asyncio.Queue[tuple[str, TaskCoroutine]] = asyncio.Queue()
         self._tasks: dict[str, Task] = {}
         self._lock = asyncio.Lock()
+        # 生命周期操作不能持有任务状态锁等待 worker 退出，否则 worker 在收尾落库时会相互等待。
+        self._lifecycle_lock = asyncio.Lock()
         self._workers: list[asyncio.Task[Any]] = []
         self._started = False
         self._repo = TaskRepository()
@@ -112,26 +114,30 @@ class Tasker:
         self._last_persisted_progress: dict[str, float] = {}
 
     async def start(self) -> list[Task]:
-        async with self._lock:
-            if self._started:
-                return []
-            interrupted_tasks = await self._load_state()
-            for _ in range(self.worker_count):
-                worker = asyncio.create_task(self._worker_loop(), name="tasker-worker")
-                self._workers.append(worker)
-            self._started = True
-            logger.info("Tasker started with {} workers", self.worker_count)
-            return interrupted_tasks
+        async with self._lifecycle_lock:
+            async with self._lock:
+                if self._started:
+                    return []
+                interrupted_tasks = await self._load_state()
+                for _ in range(self.worker_count):
+                    worker = asyncio.create_task(self._worker_loop(), name="tasker-worker")
+                    self._workers.append(worker)
+                self._started = True
+                logger.info("Tasker started with {} workers", self.worker_count)
+                return interrupted_tasks
 
     async def shutdown(self) -> None:
-        async with self._lock:
-            if not self._started:
-                return
-            for worker in self._workers:
-                worker.cancel()
-            await asyncio.gather(*self._workers, return_exceptions=True)
-            self._workers.clear()
-            self._started = False
+        async with self._lifecycle_lock:
+            async with self._lock:
+                if not self._started:
+                    return
+                workers = self._workers.copy()
+                self._workers.clear()
+                self._started = False
+                for worker in workers:
+                    worker.cancel()
+
+            await asyncio.gather(*workers, return_exceptions=True)
             logger.info("Tasker shutdown complete")
 
     async def enqueue(
@@ -283,7 +289,11 @@ class Tasker:
                             completed_at=utc_isoformat(),
                         )
                     except asyncio.CancelledError:
+                        worker = asyncio.current_task()
+                        should_stop_worker = worker is not None and worker.cancelling() > 0
                         await self._mark_cancelled(task_id, "任务被取消")
+                        if should_stop_worker:
+                            raise
                     except Exception as exc:  # noqa: BLE001
                         logger.exception("Task {} failed: {}", task_id, exc)
                         await self._update_task(
@@ -301,6 +311,9 @@ class Tasker:
                 break
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Tasker worker error: {}", exc)
+                worker = asyncio.current_task()
+                if worker is not None and worker.cancelling() > 0:
+                    break
 
     async def _get_task_instance(self, task_id: str) -> Task | None:
         async with self._lock:
