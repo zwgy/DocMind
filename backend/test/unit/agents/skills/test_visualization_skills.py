@@ -52,3 +52,12 @@ def test_visualization_skills_require_ascii_output_names() -> None:
         assert "`output_name`" in content
         assert "ASCII" in content
         assert "不含扩展名" in content
+
+
+def test_mindmap_skill_requires_the_written_outline_path() -> None:
+    specs = {spec.slug: spec for spec in BUILTIN_SKILLS}
+    content = specs["mindmap"].source_dir.joinpath("SKILL.md").read_text(encoding="utf-8")
+
+    assert "`outline_path`" in content
+    assert "`write_file` 成功返回的完整路径" in content
+    assert "`.mindmap.md` 扩展名" in content
