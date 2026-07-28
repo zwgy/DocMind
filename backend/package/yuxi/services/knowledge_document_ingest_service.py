@@ -11,7 +11,7 @@ from yuxi.services.task_service import TaskContext, tasker
 from yuxi.utils import logger
 
 TaskCallback = Callable[[dict[str, Any]], Awaitable[Any] | Any]
-TaskFailureCallback = Callable[[Exception], Awaitable[Any] | Any]
+TaskFailureCallback = Callable[[BaseException], Awaitable[Any] | Any]
 
 
 class KnowledgeDocumentIngestService:
@@ -64,7 +64,7 @@ class KnowledgeDocumentIngestService:
                 if on_success is not None:
                     await _maybe_await(on_success(result))
                 return result
-            except Exception as exc:
+            except (Exception, asyncio.CancelledError) as exc:
                 if on_failure is not None:
                     await _maybe_await(on_failure(exc))
                 raise
@@ -189,7 +189,11 @@ class KnowledgeDocumentIngestService:
                             "error_type": "index_failed",
                         }
         except asyncio.CancelledError:
-            await context.set_progress(100.0, "任务已取消")
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling():
+                current_task.uncancel()
+            message = "任务已取消" if context.is_cancel_requested() else "任务执行超时"
+            await context.set_progress(100.0, message)
             raise
         except Exception as task_error:
             logger.exception(f"Task processing failed: {task_error}")

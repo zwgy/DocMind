@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from asyncio import gather
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -37,6 +38,21 @@ ClassifyDocumentFn = Callable[..., Awaitable[dict[str, Any]]]
 SummarizeAttachmentFn = Callable[..., Awaitable[str]]
 INCOMING_DOCUMENT_PROCESS_TASK_TYPE = "incoming_document_process"
 MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.8
+
+
+def _interruption_error(context: TaskContext | None) -> str:
+    if context is not None and context.is_cancel_requested():
+        return "任务已取消"
+    if context is not None and context.cancellation_reason == "timeout":
+        return "任务执行超时"
+    return "服务停止，任务执行中断"
+
+
+def _clear_cancellation_for_state_update() -> None:
+    """取消处理前先释放当前取消标记，确保来文状态可落为可重试失败。"""
+    current_task = asyncio.current_task()
+    if current_task is not None and current_task.cancelling():
+        current_task.uncancel()
 
 
 class IncomingKnowledgeImportConflict(ValueError):
@@ -288,9 +304,13 @@ class IncomingDocumentIngestService:
                         {"status": "parsed", "markdown_file_url": markdown_url, "processing_error": None},
                     )
                     return {"file": file, "markdown": markdown, "markdown_url": markdown_url}
-                except Exception as exc:
+                except (Exception, asyncio.CancelledError) as exc:
+                    error = str(exc)
+                    if isinstance(exc, asyncio.CancelledError):
+                        _clear_cancellation_for_state_update()
+                        error = _interruption_error(context)
                     await self.incoming_repo.update_file(
-                        file.incoming_file_id, {"status": "failed", "processing_error": str(exc)}
+                        file.incoming_file_id, {"status": "failed", "processing_error": error}
                     )
                     raise
 
@@ -328,9 +348,13 @@ class IncomingDocumentIngestService:
             )
             await _set_progress(context, 100, "来文处理完成")
             return {"incoming_id": incoming_id, "status": "ready"}
-        except Exception as exc:
+        except (Exception, asyncio.CancelledError) as exc:
+            error = str(exc)
+            if isinstance(exc, asyncio.CancelledError):
+                _clear_cancellation_for_state_update()
+                error = _interruption_error(context)
             await self.incoming_repo.update_document(
-                incoming_id, {"status": "failed", "processing_error": str(exc), "updated_by": operator_id}
+                incoming_id, {"status": "failed", "processing_error": error, "updated_by": operator_id}
             )
             raise
 

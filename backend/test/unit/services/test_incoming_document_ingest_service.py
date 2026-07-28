@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 from types import SimpleNamespace
 
@@ -97,6 +98,13 @@ class FakeBusinessExtractionService:
 class FakeContext:
     async def set_progress(self, *_args):
         return None
+
+
+class CancellationContext(FakeContext):
+    cancellation_reason = "timeout"
+
+    def is_cancel_requested(self) -> bool:
+        return False
 
 
 class FakeKnowledgeIngest:
@@ -257,6 +265,48 @@ async def test_process_rejects_empty_parsed_markdown():
 
     assert repo.document.status == "failed"
     assert repo.files[0].status == "failed"
+
+
+async def test_process_cancellation_marks_document_and_file_failed():
+    parsing = asyncio.Event()
+
+    async def blocked_parse(_source, _params):
+        parsing.set()
+        await asyncio.Event().wait()
+
+    repo = FakeIncomingRepo()
+    repo.document = SimpleNamespace(
+        incoming_id="inc_1",
+        source_document_id="DOC-1",
+        document_metadata={},
+        status="uploaded",
+    )
+    repo.files = [
+        SimpleNamespace(
+            incoming_id="inc_1",
+            incoming_file_id="incf_main",
+            source_file_id="main",
+            filename="main.pdf",
+            original_file_url="minio://main",
+            status="uploaded",
+        )
+    ]
+    service = IncomingDocumentIngestService(
+        incoming_repo=repo,
+        tasker=FakeTasker(),
+        parse_document=blocked_parse,
+    )
+
+    task = asyncio.create_task(service.process_incoming_document("inc_1", context=CancellationContext()))
+    await asyncio.wait_for(parsing.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert repo.document.status == "failed"
+    assert repo.document.processing_error == "任务执行超时"
+    assert repo.files[0].status == "failed"
+    assert repo.files[0].processing_error == "任务执行超时"
 
 
 @pytest.mark.parametrize(
