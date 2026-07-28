@@ -908,7 +908,7 @@ async def test_get_agent_state_view_restores_interrupted_question_payload(monkey
             {
                 "question_id": "q-1",
                 "question": "请确认是否继续",
-                "options": ["继续", "取消"],
+                "options": [{"label": "继续", "value": "继续"}, {"label": "取消", "value": "取消"}],
                 "multi_select": False,
                 "allow_other": True,
             }
