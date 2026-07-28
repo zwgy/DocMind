@@ -71,6 +71,7 @@ async def test_render_iframe_context_inlines_short_page_and_kb_pointer(tmp_path,
     assert "Detail page" in prompt
     assert "Page body" in prompt
     assert "Risk summary" in prompt
+    assert "直接回答，不要调用工具或子智能体重复核验" in prompt
     assert '知识库文档定位参数：kb_id="kb1"，file_id="file1"。' in prompt
     assert "open_kb_document" not in prompt
 
