@@ -712,6 +712,90 @@ async def test_recover_pending_agent_requests_requeues_runs_and_ready_queue_head
 
 
 @pytest.mark.asyncio
+async def test_get_agent_request_view_returns_only_current_users_request(monkeypatch: pytest.MonkeyPatch):
+    request = SimpleNamespace(
+        request_id="request-1",
+        thread_id="thread-1",
+        agent_id="default",
+        status="queued",
+        dispatched_run_id=None,
+    )
+
+    class RequestRepo:
+        def __init__(self, db):
+            del db
+
+        async def get_for_user(self, **kwargs):
+            assert kwargs == {"request_id": "request-1", "uid": "user-1"}
+            return request
+
+    monkeypatch.setattr(agent_run_service, "AgentRunRequestRepository", RequestRepo)
+
+    assert await agent_run_service.get_agent_request_view(
+        request_id="request-1",
+        current_uid="user-1",
+        db=object(),
+    ) == {
+        "request": {
+            "request_id": "request-1",
+            "thread_id": "thread-1",
+            "agent_id": "default",
+            "status": "queued",
+            "queued": True,
+            "run_id": None,
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_cancel_agent_request_view_cancels_only_queued_request(monkeypatch: pytest.MonkeyPatch):
+    request = SimpleNamespace(
+        request_id="request-1",
+        thread_id="thread-1",
+        agent_id="default",
+        status="queued",
+        dispatched_run_id=None,
+    )
+    cancelled: list[object] = []
+
+    class FakeDB:
+        committed = False
+
+        async def commit(self):
+            self.committed = True
+
+    class RequestRepo:
+        def __init__(self, db):
+            del db
+
+        async def get_for_user_for_update(self, **kwargs):
+            assert kwargs == {"request_id": "request-1", "uid": "user-1"}
+            return request
+
+        async def cancel_queued(self, item):
+            cancelled.append(item)
+            item.status = "cancelled"
+
+    db = FakeDB()
+    monkeypatch.setattr(agent_run_service, "AgentRunRequestRepository", RequestRepo)
+
+    assert await agent_run_service.cancel_agent_request_view(
+        request_id="request-1",
+        current_uid="user-1",
+        db=db,
+    ) == {
+        "request_id": "request-1",
+        "thread_id": "thread-1",
+        "agent_id": "default",
+        "status": "cancelled",
+        "queued": False,
+        "run_id": None,
+    }
+    assert cancelled == [request]
+    assert db.committed is True
+
+
+@pytest.mark.asyncio
 async def test_create_resume_run_marks_input_message_source(monkeypatch: pytest.MonkeyPatch):
     class FakeResult:
         def scalar_one_or_none(self):

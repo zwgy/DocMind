@@ -17,6 +17,26 @@ class AgentRunRequestRepository:
         result = await self.db.execute(select(AgentRunRequest).where(AgentRunRequest.request_id == request_id))
         return result.scalar_one_or_none()
 
+    async def get_for_user(self, *, request_id: str, uid: str) -> AgentRunRequest | None:
+        result = await self.db.execute(
+            select(AgentRunRequest).where(
+                AgentRunRequest.request_id == request_id,
+                AgentRunRequest.uid == str(uid),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_for_user_for_update(self, *, request_id: str, uid: str) -> AgentRunRequest | None:
+        result = await self.db.execute(
+            select(AgentRunRequest)
+            .where(
+                AgentRunRequest.request_id == request_id,
+                AgentRunRequest.uid == str(uid),
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
     async def has_queued_request(self, *, thread_id: str, uid: str) -> bool:
         result = await self.db.execute(
             select(AgentRunRequest.id)

@@ -563,6 +563,26 @@ async def recover_pending_agent_requests() -> tuple[int, int]:
     return recovered_runs, dispatched_requests
 
 
+async def get_agent_request_view(*, request_id: str, current_uid: str, db: AsyncSession) -> dict:
+    request = await AgentRunRequestRepository(db).get_for_user(request_id=request_id, uid=current_uid)
+    if not request:
+        raise HTTPException(status_code=404, detail="排队请求不存在")
+    return {"request": _build_agent_request_response(request)}
+
+
+async def cancel_agent_request_view(*, request_id: str, current_uid: str, db: AsyncSession) -> dict:
+    request_repo = AgentRunRequestRepository(db)
+    request = await request_repo.get_for_user_for_update(request_id=request_id, uid=current_uid)
+    if not request:
+        raise HTTPException(status_code=404, detail="排队请求不存在")
+    if request.status == "queued":
+        await request_repo.cancel_queued(request)
+        await db.commit()
+    elif request.status == "dispatched":
+        raise HTTPException(status_code=409, detail="请求已开始执行，请取消对应运行任务")
+    return _build_agent_request_response(request)
+
+
 async def create_agent_run_view(
     *,
     query: str | None,

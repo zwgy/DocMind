@@ -18,10 +18,12 @@ from yuxi.repositories.agent_repository import (
 )
 from yuxi.services.agent_run_service import (
     cancel_agent_run_view,
+    cancel_agent_request_view,
     create_agent_run_view,
     get_active_run_by_thread,
     get_agent_run_result_view,
     get_agent_run_view,
+    get_agent_request_view,
     stream_agent_run_events,
 )
 from yuxi.services.agent_eval_run_service import run_agent_eval
@@ -310,6 +312,20 @@ async def get_agent_run(
     run_id: str, current_user: User = Depends(get_required_user), db: AsyncSession = Depends(get_db)
 ):
     return await get_agent_run_view(run_id=run_id, current_uid=str(current_user.uid), db=db)
+
+
+@agent_router.get("/requests/{request_id}")
+async def get_agent_request(
+    request_id: str, current_user: User = Depends(get_required_user), db: AsyncSession = Depends(get_db)
+):
+    return await get_agent_request_view(request_id=request_id, current_uid=str(current_user.uid), db=db)
+
+
+@agent_router.post("/requests/{request_id}/cancel")
+async def cancel_agent_request(
+    request_id: str, current_user: User = Depends(get_required_user), db: AsyncSession = Depends(get_db)
+):
+    return await cancel_agent_request_view(request_id=request_id, current_uid=str(current_user.uid), db=db)
 
 
 @agent_router.get("/runs/{run_id}/result")
