@@ -1,7 +1,7 @@
 ---
 name: 数据图表
 slug: data-chart
-description: 当用户需要依据 CSV、查询结果或小型表格生成柱状图、折线图、面积图、饼图或散点图时使用。
+description: 用户明确要求数据图表、柱状图、折线图、面积图、饼图或散点图时必须先读取此 Skill；只用 render_data_chart 生成 SVG，禁止改用文档生成工具或手写 SVG。
 ---
 
 # 数据图表

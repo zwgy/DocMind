@@ -1,7 +1,7 @@
 ---
 name: 思维导图
 slug: mindmap
-description: 当用户需要把主题、方案、会议要点或文档摘要整理为层级化静态思维导图时使用。
+description: 用户明确要求思维导图、脑图或 mind map 时必须先读取此 Skill；只用 render_mindmap 生成 SVG，禁止改用文档生成工具或手写 SVG。
 ---
 
 # 思维导图

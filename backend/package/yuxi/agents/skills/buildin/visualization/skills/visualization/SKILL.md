@@ -1,7 +1,7 @@
 ---
 name: 可视化路由
 slug: visualization
-description: 当用户只说“做个图”或“可视化一下”但未说明图形类型时，判断应生成数据图表、流程图还是思维导图。
+description: 仅当用户未明确可视化类型时读取此 Skill，并选择数据图表、流程图或思维导图子 Skill；类型明确时直接读取对应子 Skill。
 ---
 
 # 可视化路由

@@ -1,7 +1,7 @@
 ---
 name: 流程图
 slug: flowchart
-description: 当用户需要把业务步骤、审批、判断分支或流程流转制作成静态流程图时使用。
+description: 用户明确要求流程图、审批流程或业务流程图时必须先读取此 Skill；只用 render_flowchart 生成 SVG，禁止改用文档生成工具或手写 SVG。
 ---
 
 # 流程图

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from yuxi.agents.skills.buildin import BUILTIN_SKILLS
 
 
@@ -61,3 +63,26 @@ def test_mindmap_skill_requires_the_written_outline_path() -> None:
     assert "`outline_path`" in content
     assert "`write_file` 成功返回的完整路径" in content
     assert "`.mindmap.md` 扩展名" in content
+
+
+def test_visualization_skill_metadata_routes_explicit_requests_to_child_skills() -> None:
+    specs = {spec.slug: spec for spec in BUILTIN_SKILLS}
+    expected = {
+        "data-chart": ("数据图表", "render_data_chart"),
+        "flowchart": ("流程图", "render_flowchart"),
+        "mindmap": ("思维导图", "render_mindmap"),
+    }
+
+    # description 是小模型选择 Skill 前唯一可见的信息，必须直接给出触发词和排他性的执行入口。
+    assert "仅当用户未明确可视化类型时" in specs["visualization"].description
+    for slug, (trigger, renderer) in expected.items():
+        description = specs[slug].description
+        assert trigger in description
+        assert "必须先读取此 Skill" in description
+        assert renderer in description
+        assert "禁止改用文档生成工具或手写 SVG" in description
+
+        content = specs[slug].source_dir.joinpath("SKILL.md").read_text(encoding="utf-8")
+        frontmatter_description = re.search(r"^description:\s*(.+)$", content, re.MULTILINE)
+        assert frontmatter_description is not None
+        assert frontmatter_description.group(1) == description
