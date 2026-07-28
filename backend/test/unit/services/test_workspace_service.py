@@ -120,7 +120,7 @@ async def test_read_workspace_file_content_returns_pdf_preview_for_office_file(
 
 
 @pytest.mark.asyncio
-async def test_read_workspace_file_content_rejects_xlsx_preview(
+async def test_read_workspace_file_content_converts_xlsx_preview(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -130,11 +130,21 @@ async def test_read_workspace_file_content_rejects_xlsx_preview(
     target = root / "sheet.xlsx"
     target.write_bytes(b"PK\x03\x04excel")
 
-    result = await svc.read_workspace_file_content(path="/sheet.xlsx", current_user=user)
+    async def fake_convert(filename: str, content: bytes) -> bytes:
+        assert filename == "sheet.xlsx"
+        assert content == b"PK\x03\x04excel"
+        return b"%PDF-1.4\npreview"
 
-    assert result["content"] is None
-    assert result["preview_type"] == "unsupported"
-    assert result["supported"] is False
+    monkeypatch.setattr(svc, "convert_office_to_pdf", fake_convert)
+
+    result = await svc.read_workspace_file_content(path="/sheet.xlsx", current_user=user)
+    body = b""
+    async for chunk in result.body_iterator:
+        body += chunk
+
+    assert result.media_type == "application/pdf"
+    assert result.headers["x-yuxi-preview-type"] == "pdf"
+    assert body == b"%PDF-1.4\npreview"
 
 
 @pytest.mark.asyncio
