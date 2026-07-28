@@ -604,6 +604,114 @@ async def test_create_agent_run_view_keeps_busy_thread_rejection_by_default(monk
 
 
 @pytest.mark.asyncio
+async def test_dispatch_next_agent_request_creates_run_then_marks_request_dispatched(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    queued_request = SimpleNamespace(
+        request_id="request-queued",
+        thread_id="thread-1",
+        agent_id="default",
+        uid="user-1",
+        input_payload={
+            "query": "later question",
+            "meta": {"request_id": "request-queued"},
+            "image_content": None,
+            "model_spec": None,
+            "resume": None,
+            "parent_run_id": None,
+            "resume_request_id": None,
+        },
+    )
+    marks: list[tuple[object, str]] = []
+    enqueued_runs: list[str] = []
+
+    @asynccontextmanager
+    async def fake_session_ctx():
+        yield object()
+
+    class RequestRepo:
+        def __init__(self, db):
+            del db
+
+        async def get_next_queued_for_thread_for_update(self, **kwargs):
+            assert kwargs == {"thread_id": "thread-1", "uid": "user-1"}
+            return queued_request
+
+        async def mark_dispatched(self, request, *, run_id: str):
+            marks.append((request, run_id))
+
+    class RunRepo:
+        def __init__(self, db):
+            del db
+
+        async def get_active_run_by_checkpoint_thread(self, thread_id: str):
+            assert thread_id == "thread-1"
+            return None
+
+    async def fake_create_agent_run(**kwargs):
+        assert kwargs["allow_queued_request_id"] == "request-queued"
+        assert kwargs["commit"] is False
+        assert kwargs["query"] == "later question"
+        return SimpleNamespace(id="run-2"), True
+
+    async def fake_enqueue_agent_run(run_id: str):
+        enqueued_runs.append(run_id)
+
+    monkeypatch.setattr(agent_run_service.pg_manager, "get_async_session_context", fake_session_ctx)
+    monkeypatch.setattr(agent_run_service, "AgentRunRequestRepository", RequestRepo)
+    monkeypatch.setattr(agent_run_service, "AgentRunRepository", RunRepo)
+    monkeypatch.setattr(agent_run_service, "create_agent_run", fake_create_agent_run)
+    monkeypatch.setattr(agent_run_service, "enqueue_agent_run", fake_enqueue_agent_run)
+
+    run_id = await agent_run_service.dispatch_next_agent_request(thread_id="thread-1", current_uid="user-1")
+
+    assert run_id == "run-2"
+    assert marks == [(queued_request, "run-2")]
+    assert enqueued_runs == ["run-2"]
+
+
+@pytest.mark.asyncio
+async def test_recover_pending_agent_requests_requeues_runs_and_ready_queue_heads(monkeypatch: pytest.MonkeyPatch):
+    recovered_run_ids: list[str] = []
+    dispatched_thread_keys: list[tuple[str, str]] = []
+
+    class PendingResult:
+        def scalars(self):
+            return SimpleNamespace(all=lambda: ["run-1", "run-2"])
+
+    class FakeDB:
+        async def execute(self, _statement):
+            return PendingResult()
+
+    @asynccontextmanager
+    async def fake_session_ctx():
+        yield FakeDB()
+
+    class RequestRepo:
+        def __init__(self, db):
+            del db
+
+        async def list_queued_thread_keys(self):
+            return [("thread-1", "user-1"), ("thread-2", "user-2")]
+
+    async def fake_enqueue_agent_run(run_id: str):
+        recovered_run_ids.append(run_id)
+
+    async def fake_dispatch_next_agent_request(*, thread_id: str, current_uid: str):
+        dispatched_thread_keys.append((thread_id, current_uid))
+        return "run-3" if thread_id == "thread-1" else None
+
+    monkeypatch.setattr(agent_run_service.pg_manager, "get_async_session_context", fake_session_ctx)
+    monkeypatch.setattr(agent_run_service, "AgentRunRequestRepository", RequestRepo)
+    monkeypatch.setattr(agent_run_service, "enqueue_agent_run", fake_enqueue_agent_run)
+    monkeypatch.setattr(agent_run_service, "dispatch_next_agent_request", fake_dispatch_next_agent_request)
+
+    assert await agent_run_service.recover_pending_agent_requests() == (2, 1)
+    assert recovered_run_ids == ["run-1", "run-2"]
+    assert dispatched_thread_keys == [("thread-1", "user-1"), ("thread-2", "user-2")]
+
+
+@pytest.mark.asyncio
 async def test_create_resume_run_marks_input_message_source(monkeypatch: pytest.MonkeyPatch):
     class FakeResult:
         def scalar_one_or_none(self):

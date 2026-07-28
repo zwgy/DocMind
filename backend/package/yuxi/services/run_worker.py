@@ -15,7 +15,7 @@ from yuxi.agents.mcp.service import ensure_builtin_mcp_servers_in_db
 from yuxi.agents.skills.service import init_builtin_skills
 from yuxi.config import config as sys_config
 from yuxi.repositories.agent_run_repository import TERMINAL_RUN_STATUSES, AgentRunRepository
-from yuxi.services.agent_run_service import dispatch_next_agent_request
+from yuxi.services.agent_run_service import dispatch_next_agent_request, recover_pending_agent_requests
 from yuxi.services.chat_service import stream_agent_chat, stream_agent_resume
 from yuxi.services.run_queue_service import (
     append_run_stream_event,
@@ -480,7 +480,12 @@ async def process_agent_run(ctx, run_id: str):
             dispatch_next = True
 
         if dispatch_next:
-            await dispatch_next_agent_request(thread_id=thread_id, current_uid=str(uid))
+            try:
+                await dispatch_next_agent_request(thread_id=thread_id, current_uid=str(uid))
+            except Exception:
+                # 前一任务已经成功结束；接力失败不能反向改写其终态。请求记录仍在
+                # 数据库中，worker 重启恢复会再次投递对应的 pending run。
+                logger.exception("Failed to dispatch queued request after run completion: %s", run_id)
 
     except asyncio.CancelledError:
         await writer.flush()
@@ -560,6 +565,13 @@ async def _worker_startup(ctx):
     pg_manager.initialize()
     await pg_manager.create_business_tables()
     await pg_manager.ensure_business_schema()
+    recovered_runs, dispatched_requests = await recover_pending_agent_requests()
+    if recovered_runs or dispatched_requests:
+        logger.info(
+            "Recovered queued agent work: pending_runs=%s, queued_requests=%s",
+            recovered_runs,
+            dispatched_requests,
+        )
     await ensure_builtin_mcp_servers_in_db()
     async with pg_manager.get_async_session_context() as session:
         await init_builtin_skills(session)

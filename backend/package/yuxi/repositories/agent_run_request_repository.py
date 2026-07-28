@@ -43,6 +43,14 @@ class AgentRunRequestRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_queued_thread_keys(self) -> list[tuple[str, str]]:
+        result = await self.db.execute(
+            select(AgentRunRequest.thread_id, AgentRunRequest.uid)
+            .where(AgentRunRequest.status == "queued")
+            .distinct()
+        )
+        return [(str(thread_id), str(uid)) for thread_id, uid in result.all()]
+
     async def create_request(
         self,
         *,

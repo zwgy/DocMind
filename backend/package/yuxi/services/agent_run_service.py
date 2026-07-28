@@ -29,7 +29,7 @@ from yuxi.services.run_queue_service import (
     publish_cancel_signal,
 )
 from yuxi.storage.postgres.manager import pg_manager
-from yuxi.storage.postgres.models_business import Message, User
+from yuxi.storage.postgres.models_business import AgentRun, Message, User
 from yuxi.utils.datetime_utils import utc_now_naive
 from yuxi.utils.logging_config import logger
 
@@ -542,6 +542,25 @@ async def dispatch_next_agent_request(*, thread_id: str, current_uid: str) -> st
     if run_id:
         await enqueue_agent_run(run_id)
     return run_id
+
+
+async def recover_pending_agent_requests() -> tuple[int, int]:
+    """Recover unsubmitted ARQ jobs and queued heads after a worker restart."""
+    async with pg_manager.get_async_session_context() as db:
+        pending_result = await db.execute(select(AgentRun.id).where(AgentRun.status == "pending"))
+        pending_run_ids = [str(run_id) for run_id in pending_result.scalars().all()]
+        queued_thread_keys = await AgentRunRequestRepository(db).list_queued_thread_keys()
+
+    recovered_runs = 0
+    for run_id in pending_run_ids:
+        await enqueue_agent_run(run_id)
+        recovered_runs += 1
+
+    dispatched_requests = 0
+    for thread_id, uid in queued_thread_keys:
+        if await dispatch_next_agent_request(thread_id=thread_id, current_uid=uid):
+            dispatched_requests += 1
+    return recovered_runs, dispatched_requests
 
 
 async def create_agent_run_view(
