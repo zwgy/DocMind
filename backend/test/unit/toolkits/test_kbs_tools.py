@@ -95,6 +95,16 @@ async def _fake_visible_kbs(runtime):
     return [{"kb_id": "db-1", "name": "FAQ"}]
 
 
+def _fake_search_files(records):
+    async def _search_files(self, *, kb_id, filename_query=None, offset=0, limit=100, files_only=True):
+        del self, kb_id, files_only
+        normalized_query = (filename_query or "").lower()
+        matched = [record for record in records if normalized_query in record.filename.lower()]
+        return matched[offset : offset + limit], len(matched)
+
+    return _search_files
+
+
 @pytest.mark.asyncio
 async def test_query_kb_returns_search_schema_without_sandbox_paths(monkeypatch) -> None:
     async def _fake_retriever(query_text: str, **kwargs):
@@ -484,12 +494,9 @@ async def test_search_file_returns_files_by_query(monkeypatch) -> None:
         ),
     ]
 
-    async def _fake_list_by_kb_id_after(self, kb_id, *, after_file_id=None, limit=500, files_only=False):
-        return fake_files
-
     from yuxi.repositories.knowledge_file_repository import KnowledgeFileRepository
 
-    monkeypatch.setattr(KnowledgeFileRepository, "list_by_kb_id_after", _fake_list_by_kb_id_after)
+    monkeypatch.setattr(KnowledgeFileRepository, "search_files", _fake_search_files(fake_files))
 
     runtime = SimpleNamespace(context=SimpleNamespace())
     result = await _run_search_file(query="test", runtime=runtime)
@@ -527,12 +534,9 @@ async def test_search_file_returns_all_files_when_query_empty(monkeypatch) -> No
         ),
     ]
 
-    async def _fake_list_by_kb_id_after(self, kb_id, *, after_file_id=None, limit=500, files_only=False):
-        return fake_files
-
     from yuxi.repositories.knowledge_file_repository import KnowledgeFileRepository
 
-    monkeypatch.setattr(KnowledgeFileRepository, "list_by_kb_id_after", _fake_list_by_kb_id_after)
+    monkeypatch.setattr(KnowledgeFileRepository, "search_files", _fake_search_files(fake_files))
 
     runtime = SimpleNamespace(context=SimpleNamespace())
     result = await _run_search_file(kb_name="FAQ", runtime=runtime)
@@ -560,12 +564,9 @@ async def test_search_file_pagination(monkeypatch) -> None:
         for i in range(10)
     ]
 
-    async def _fake_list_by_kb_id_after(self, kb_id, *, after_file_id=None, limit=500, files_only=False):
-        return fake_files
-
     from yuxi.repositories.knowledge_file_repository import KnowledgeFileRepository
 
-    monkeypatch.setattr(KnowledgeFileRepository, "list_by_kb_id_after", _fake_list_by_kb_id_after)
+    monkeypatch.setattr(KnowledgeFileRepository, "search_files", _fake_search_files(fake_files))
 
     runtime = SimpleNamespace(context=SimpleNamespace())
     result = await _run_search_file(kb_name="FAQ", offset=2, limit=3, runtime=runtime)
@@ -611,13 +612,9 @@ async def test_search_file_total_reflects_full_set_not_page(monkeypatch) -> None
         for i in range(50)
     ]
 
-    async def _fake_list_by_kb_id_after(self, kb_id, *, after_file_id=None, limit=500, files_only=False):
-        # 真实仓储会按 limit 截断；此 mock 同样遵守 limit，以暴露按 limit+offset 取数导致的 total 失真。
-        return fake_files[:limit]
-
     from yuxi.repositories.knowledge_file_repository import KnowledgeFileRepository
 
-    monkeypatch.setattr(KnowledgeFileRepository, "list_by_kb_id_after", _fake_list_by_kb_id_after)
+    monkeypatch.setattr(KnowledgeFileRepository, "search_files", _fake_search_files(fake_files))
 
     runtime = SimpleNamespace(context=SimpleNamespace())
     result = await _run_search_file(kb_name="FAQ", offset=0, limit=10, runtime=runtime)

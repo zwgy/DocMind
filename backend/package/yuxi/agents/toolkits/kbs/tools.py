@@ -439,11 +439,6 @@ async def find_kb_document(
         return f"知识库文档内检索失败: {str(e)}"
 
 
-# 单个知识库一次最多扫描的文件数（与仓储层 list_by_kb_id_after 的硬上限保持一致），
-# 用于在内存中做文件名过滤与准确计数，避免按 limit+offset 截断导致 total/has_more 失真。
-_KB_FILE_SCAN_LIMIT = 5000
-
-
 class SearchFileInput(BaseModel):
     """搜索文件输入模型"""
 
@@ -494,21 +489,27 @@ async def search_file(
 
     repo = KnowledgeFileRepository()
 
+    normalized_offset = max(int(offset or 0), 0)
+    normalized_limit = min(max(int(limit or 300), 1), 5000)
+    use_sql_pagination = len(target_kbs) == 1
+    candidate_limit = normalized_limit if use_sql_pagination else normalized_offset + normalized_limit
+    query_offset = normalized_offset if use_sql_pagination else 0
+
     all_files = []
+    total = 0
     for kb in target_kbs:
         kb_id = kb.get("kb_id")
         if not kb_id:
             continue
 
-        files = await repo.list_by_kb_id_after(
+        files, kb_total = await repo.search_files(
             kb_id=kb_id,
-            limit=_KB_FILE_SCAN_LIMIT,
+            filename_query=query,
+            offset=query_offset,
+            limit=candidate_limit,
             files_only=True,
         )
-
-        if query:
-            query_lower = query.lower()
-            files = [f for f in files if query_lower in f.filename.lower()]
+        total += kb_total
 
         for f in files:
             all_files.append(
@@ -525,17 +526,19 @@ async def search_file(
                 }
             )
 
-    all_files.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
-
-    total = len(all_files)
-    paginated_files = all_files[offset : offset + limit]
+    if not use_sql_pagination:
+        # 跨知识库时才需要在内存中按更新时间归并；单库结果已由数据库完成排序与分页。
+        all_files.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+    paginated_files = (
+        all_files if use_sql_pagination else all_files[normalized_offset : normalized_offset + normalized_limit]
+    )
 
     return {
         "files": paginated_files,
         "total": total,
-        "offset": offset,
-        "limit": limit,
-        "has_more": offset + limit < total,
+        "offset": normalized_offset,
+        "limit": normalized_limit,
+        "has_more": normalized_offset + normalized_limit < total,
     }
 
 
