@@ -494,18 +494,21 @@ class MilvusGraphService:
         def query(tx):
             tx.run(
                 f"""
-                MATCH (:Chunk:MilvusKB:`{label}`)-[m:MENTIONS {{kb_id: $kb_id, file_id: $file_id}}]->
+                MATCH (:Entity:MilvusKB:`{label}`)-[r:RELATION {{kb_id: $kb_id, file_id: $file_id}}]->
                     (:Entity:MilvusKB:`{label}`)
-                DELETE m
+                DELETE r
                 """,
                 kb_id=kb_id,
                 file_id=file_id,
             )
             tx.run(
                 f"""
-                MATCH (:Entity:MilvusKB:`{label}`)-[r:RELATION {{kb_id: $kb_id, file_id: $file_id}}]->
-                    (:Entity:MilvusKB:`{label}`)
-                DELETE r
+                MATCH (:Chunk:MilvusKB:`{label}` {{kb_id: $kb_id, file_id: $file_id}})-[m:MENTIONS]->
+                    (e:Entity:MilvusKB:`{label}`)
+                DELETE m
+                WITH DISTINCT e
+                WHERE NOT ()-[:MENTIONS]->(e)
+                DETACH DELETE e
                 """,
                 kb_id=kb_id,
                 file_id=file_id,
@@ -517,14 +520,6 @@ class MilvusGraphService:
                 """,
                 kb_id=kb_id,
                 file_id=file_id,
-            )
-            tx.run(
-                f"""
-                MATCH (e:Entity:MilvusKB:`{label}` {{kb_id: $kb_id}})
-                WHERE NOT ()-[:MENTIONS]->(e)
-                DETACH DELETE e
-                """,
-                kb_id=kb_id,
             )
 
         neo4j_write(self.driver, query)
@@ -568,13 +563,24 @@ class MilvusGraphService:
         exclude_chunk: bool,
     ) -> dict[str, Any]:
         with self.driver.session() as session:
+            query_params: dict[str, Any] = {
+                "keyword": keyword,
+                "limit": limit,
+            }
+            if max_depth > 0:
+                # 可变长度路径深度直接进入 Cypher 文本，限制为产品支持的三跳，避免异常输入放大图遍历成本。
+                max_depth = min(max_depth, 3)
+                query_params["path_limit"] = max(limit, 1) * 10
             result = session.run(
                 self._build_query(label, keyword, limit, max_depth, exclude_chunk),
-                keyword=keyword,
-                limit=limit,
-                edge_limit=limit * 10,
+                **query_params,
             )
-            return self._process_query_result(result, limit, kb_id, exclude_chunk)
+            if max_depth <= 0:
+                return self._process_query_result(result, limit, kb_id, exclude_chunk)
+            record = result.single()
+            if not record:
+                return {"nodes": [], "edges": []}
+            return self._process_subgraph_record(record, limit, kb_id)
 
     async def query_seed_subgraph(
         self,
@@ -802,7 +808,6 @@ class MilvusGraphService:
 
     def _build_query(self, label: str, keyword: str, limit: int, max_depth: int, exclude_chunk: bool = False) -> str:
         where = self._build_where(exclude_chunk, keyword)
-        m_exclude = " WHERE NOT m:Chunk" if exclude_chunk else ""
 
         if max_depth <= 0:
             return f"""
@@ -812,13 +817,24 @@ class MilvusGraphService:
             LIMIT $limit
             """
 
+        path_node_filter = f"path_node:MilvusKB AND path_node:`{label}`"
+        if exclude_chunk:
+            # 过滤条件必须覆盖整条路径，否则查询仍可能借道 Chunk 扩展到不应出现的实体。
+            path_node_filter += " AND NOT path_node:Chunk"
+
         return f"""
         MATCH (n:MilvusKB:`{label}`)
         {where}
         WITH n LIMIT $limit
-        OPTIONAL MATCH (n)-[r]-(m:MilvusKB:`{label}`){m_exclude}
-        RETURN n AS h, r AS r, m AS t
-        LIMIT $edge_limit
+        WITH collect(n) AS seeds
+        UNWIND seeds AS seed
+        OPTIONAL MATCH p = (seed)-[*1..{max_depth}]-(m:MilvusKB:`{label}`)
+        WHERE all(path_node IN nodes(p) WHERE {path_node_filter})
+        WITH seeds, p
+        LIMIT $path_limit
+        WITH seeds, collect(p) AS paths
+        RETURN reduce(path_nodes = [], path IN paths | path_nodes + nodes(path)) + seeds AS nodes,
+               reduce(path_edges = [], path IN paths | path_edges + relationships(path)) AS edges
         """
 
     def _process_query_result(self, result, limit: int, kb_id: str, exclude_chunk: bool = False) -> dict[str, Any]:
@@ -848,7 +864,7 @@ class MilvusGraphService:
             if len(nodes) >= limit:
                 break
 
-        return {"nodes": nodes[:limit], "edges": edges[: limit * 2]}
+        return self._finalize_subgraph_result(nodes, edges, limit)
 
     def _process_subgraph_record(self, record: Any, limit: int, kb_id: str) -> dict[str, Any]:
         nodes = []
@@ -874,7 +890,22 @@ class MilvusGraphService:
             edges.append(edge)
             edge_ids.add(edge["id"])
 
-        return {"nodes": nodes, "edges": edges}
+        return self._finalize_subgraph_result(nodes, edges, limit)
+
+    @staticmethod
+    def _finalize_subgraph_result(
+        nodes: list[dict[str, Any]], edges: list[dict[str, Any]], limit: int
+    ) -> dict[str, Any]:
+        limit = max(0, limit)
+        final_nodes = nodes[:limit]
+        node_ids = {node["id"] for node in final_nodes}
+        # 节点截断或 Chunk 过滤后必须再次约束边，避免前端收到端点不存在的悬空关系。
+        final_edges = [
+            edge
+            for edge in edges
+            if edge.get("source_id") in node_ids and edge.get("target_id") in node_ids
+        ]
+        return {"nodes": final_nodes, "edges": final_edges[: limit * 2]}
 
     def _normalize_node(self, raw_node: Any, kb_id: str | None = None) -> dict[str, Any]:
         if hasattr(raw_node, "element_id"):
