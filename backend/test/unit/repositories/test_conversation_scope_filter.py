@@ -96,6 +96,23 @@ async def test_list_conversations_without_scope_keeps_existing_behavior(session)
     assert {item.thread_id for item in all_threads} == {"scope-a-pinned", "scope-a-normal", "scope-b", "no-scope"}
 
 
+async def test_update_conversation_persists_merged_json_metadata(session):
+    repo = ConversationRepository(session)
+
+    conversation = await repo.update_conversation(
+        "scope-a-normal",
+        metadata={"tool_approval_mode": "always_trust"},
+    )
+
+    assert conversation is not None
+    session.expire(conversation)
+    await session.refresh(conversation)
+    assert conversation.extra_metadata == {
+        "conversation_scope_key": "oa:contract:001",
+        "tool_approval_mode": "always_trust",
+    }
+
+
 async def test_list_conversations_keeps_pinned_threads_outside_non_pinned_page_limit(session):
     now = utc_now_naive()
     session.add_all(

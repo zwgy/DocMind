@@ -297,7 +297,8 @@ class ConversationRepository:
             conversation.is_pinned = is_pinned
 
         if metadata is not None:
-            current_metadata = conversation.extra_metadata or {}
+            # JSON 字段的原地修改可能不会被 SQLAlchemy 追踪；复制后重新赋值才能确保增量元数据落库。
+            current_metadata = dict(conversation.extra_metadata or {})
             current_metadata.update(metadata)
             conversation.extra_metadata = current_metadata
 
