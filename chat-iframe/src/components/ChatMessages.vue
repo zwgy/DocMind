@@ -382,8 +382,7 @@ async function scrollToBottom() {
 }
 
 watch([displayItems, showGeneratingStatus, showRunProgress, () => props.compacting], scrollToBottom, {
-  flush: 'post',
-  deep: true
+  flush: 'post'
 })
 watch(() => props.threadId, clearInlineSvgUrls, { immediate: true })
 // 交付物会在运行结束后补挂到最终消息；直接跟踪实际驱动卡片渲染的显示项，避免原始消息数组的更新时机错过预加载。

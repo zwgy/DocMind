@@ -26,3 +26,10 @@ test('SVG artifacts use the existing image preview path', () => {
   assert.match(component, /\(\) => props\.token/)
   assert.match(component, /\[displayItems, \(\) => props\.threadId, \(\) => props\.token\]/)
 })
+
+test('streaming auto-scroll observes display item replacement without deep traversal', () => {
+  assert.match(
+    component,
+    /watch\(\[displayItems, showGeneratingStatus, showRunProgress, \(\) => props\.compacting\], scrollToBottom, \{\s*flush: 'post'\s*\}\)/
+  )
+})
