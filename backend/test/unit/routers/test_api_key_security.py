@@ -92,20 +92,15 @@ async def test_api_key_rejects_deleted_bound_user_without_department_or_superadm
     assert verified_key is None
 
 
-async def test_department_only_api_key_does_not_fallback_to_superadmin(session):
+async def test_department_only_api_key_does_not_fallback_to_department_admin(session):
     db = session["db"]
-    empty_dept = Department(name="No Admin Dept")
-    db.add(empty_dept)
-    await db.commit()
-    await db.refresh(empty_dept)
-
     secret, key_hash, key_prefix = AuthUtils.generate_api_key()
     db.add(
         APIKey(
             key_hash=key_hash,
             key_prefix=key_prefix,
             name="department key",
-            department_id=empty_dept.id,
+            department_id=session["dept_b"].id,
             created_by=str(session["superadmin"].id),
         )
     )
