@@ -21,28 +21,40 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
     BuiltinSkillSpec(
         slug="visualization",
         source_dir=_SKILLS_ROOT / "visualization" / "skills" / "visualization",
-        description="仅当用户未明确可视化类型时读取此 Skill，并选择数据图表、流程图或思维导图子 Skill；类型明确时直接读取对应子 Skill。",
+        description=(
+            "仅当用户未明确可视化类型时读取此 Skill，并选择数据图表、流程图或思维导图子 Skill；"
+            "类型明确时直接读取对应子 Skill。"
+        ),
         version="2026.07.28",
         skill_dependencies=("data-chart", "flowchart", "mindmap"),
     ),
     BuiltinSkillSpec(
         slug="data-chart",
         source_dir=_SKILLS_ROOT / "visualization" / "skills" / "data-chart",
-        description="用户明确要求数据图表、柱状图、折线图、面积图、饼图或散点图时必须先读取此 Skill；只用 render_data_chart 生成 SVG，禁止改用文档生成工具或手写 SVG。",
+        description=(
+            "用户明确要求数据图表、柱状图、折线图、面积图、饼图或散点图时必须先读取此 Skill；"
+            "只用 render_data_chart 生成 SVG，禁止改用文档生成工具或手写 SVG。"
+        ),
         version="2026.07.28",
         tool_dependencies=("render_data_chart", "present_artifacts"),
     ),
     BuiltinSkillSpec(
         slug="flowchart",
         source_dir=_SKILLS_ROOT / "visualization" / "skills" / "flowchart",
-        description="用户明确要求流程图、审批流程或业务流程图时必须先读取此 Skill；只用 render_flowchart 生成 SVG，禁止改用文档生成工具或手写 SVG。",
+        description=(
+            "用户明确要求流程图、审批流程或业务流程图时必须先读取此 Skill；"
+            "只用 render_flowchart 生成 SVG，禁止改用文档生成工具或手写 SVG。"
+        ),
         version="2026.07.28",
         tool_dependencies=("render_flowchart", "present_artifacts"),
     ),
     BuiltinSkillSpec(
         slug="mindmap",
         source_dir=_SKILLS_ROOT / "visualization" / "skills" / "mindmap",
-        description="用户明确要求思维导图、脑图或 mind map 时必须先读取此 Skill；只用 render_mindmap 生成 SVG，禁止改用文档生成工具或手写 SVG。",
+        description=(
+            "用户明确要求思维导图、脑图或 mind map 时必须先读取此 Skill；"
+            "只用 render_mindmap 生成 SVG，禁止改用文档生成工具或手写 SVG。"
+        ),
         version="2026.07.28",
         tool_dependencies=("render_mindmap", "present_artifacts"),
     ),
