@@ -162,14 +162,19 @@ def chunk_markdown(
     while i < len(tokens):
         token = tokens[i]
         if token.type == "heading_open":
+            inline_token = tokens[i + 1] if i + 1 < len(tokens) else None
+            full_title = inline_token.content.strip() if inline_token and inline_token.type == "inline" else ""
+            if not full_title:
+                # 空标题没有新的层级语义，若继续刷新标题栈会让后续正文丢失原有父子标题上下文；
+                # 同时兼容异常截断的 token 流，避免直接读取 i + 1 造成越界。
+                i += 3
+                continue
+
             _flush_content(result, current_content, title_stack, max_length, embed_fn)
             level = int(token.tag[1:]) if token.tag and len(token.tag) > 1 else 1
-            inline_token = tokens[i + 1]
-            if inline_token.type == "inline":
-                full_title = inline_token.content.strip()
-                title_stack[level - 1] = full_title
-                for j in range(level, 6):
-                    title_stack[j] = ""
+            title_stack[level - 1] = full_title
+            for j in range(level, 6):
+                title_stack[j] = ""
             i += 3
             continue
         elif token.type == "table_open":
