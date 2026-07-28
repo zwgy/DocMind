@@ -24,5 +24,5 @@ test('SVG artifacts use the existing image preview path', () => {
   assert.match(component, /preloadRecentInlineSvgs/)
   assert.match(component, /class="artifact-inline-svg"/)
   assert.match(component, /\(\) => props\.token/)
-  assert.match(component, /\.filter\(isInlineSvgArtifact\)/)
+  assert.match(component, /\[displayItems, \(\) => props\.threadId, \(\) => props\.token\]/)
 })

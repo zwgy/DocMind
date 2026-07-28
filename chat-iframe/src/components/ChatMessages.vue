@@ -385,20 +385,11 @@ watch([displayItems, showGeneratingStatus, showRunProgress, () => props.compacti
   deep: true
 })
 watch(() => props.threadId, clearInlineSvgUrls, { immediate: true })
-// 交付物会在运行结束后补挂到最终消息；显式跟踪线程、令牌和 SVG 路径，避免仅依赖深层消息对象变更而错过预加载时机。
+// 交付物会在运行结束后补挂到最终消息；直接跟踪实际驱动卡片渲染的显示项，避免原始消息数组的更新时机错过预加载。
 watch(
-  [
-    () => props.threadId,
-    () => props.token,
-    () =>
-      props.messages
-        .flatMap((message) => message.artifacts || [])
-        .filter(isInlineSvgArtifact)
-        .map((artifact) => artifact.path)
-        .join('\u0000')
-  ],
+  [displayItems, () => props.threadId, () => props.token],
   () => void preloadRecentInlineSvgs(),
-  { immediate: true }
+  { deep: true, immediate: true }
 )
 onUnmounted(() => {
   closeImagePreview()
