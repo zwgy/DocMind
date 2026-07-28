@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,6 +63,7 @@ class MarkdownParseResult:
 
 
 _docling_converter: DocumentConverter | None = None
+_docling_converter_lock = threading.Lock()
 
 
 def _get_docling_converter() -> DocumentConverter:
@@ -131,8 +133,10 @@ def _convert_with_docling(file_path: Path, params: dict | None = None) -> str:
     params = params or {}
     image_bucket, image_prefix = _resolve_image_storage_params(params)
 
-    converter = _get_docling_converter()
-    result = converter.convert(file_path)
+    # Docling 转换器是进程级单例，多个解析线程并发调用会共享内部状态，因此只串行化转换本身。
+    with _docling_converter_lock:
+        converter = _get_docling_converter()
+        result = converter.convert(file_path)
 
     if result.status.name != "SUCCESS":
         raise RuntimeError(f"Docling 转换失败: {result.status}")
@@ -223,6 +227,19 @@ def _convert_docx_with_python_docx(file_path: Path) -> str:
         blocks.append("")
 
     return "\n\n".join(blocks).strip()
+
+
+def _convert_csv_to_markdown(file_path: Path) -> str:
+    """逐行转换 CSV，并保留每一列原始 dtype。"""
+    import pandas as pd
+
+    dataframe = pd.read_csv(file_path)
+    tables: list[str] = []
+    for row_index in range(len(dataframe)):
+        # 使用二维 iloc 保持 DataFrame 列 dtype；iterrows 会把整行统一提升类型并损坏大整数。
+        row_dataframe = dataframe.iloc[[row_index]]
+        tables.append(row_dataframe.to_markdown(index=False))
+    return "\n\n".join(tables)
 
 
 def pdfreader(file_path, params=None):
@@ -351,48 +368,38 @@ async def _process_file_to_markdown_core(
             result = f"{text}"
 
         elif file_ext in [".txt", ".md"]:
-            with open(file_path_obj, encoding="utf-8") as f:
-                content = f.read()
+            async with aiofiles.open(file_path_obj, encoding="utf-8") as f:
+                content = await f.read()
             result = f"{content}"
 
         elif file_ext == ".docx":
             try:
-                result = _convert_with_docling(file_path_obj, params=params)
+                result = await asyncio.to_thread(_convert_with_docling, file_path_obj, params=params)
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"Docling 解析 DOCX 失败，回退到 python-docx: {file_path_obj.name}, {e}")
-                result = _convert_docx_with_python_docx(file_path_obj)
+                result = await asyncio.to_thread(_convert_docx_with_python_docx, file_path_obj)
 
         elif file_ext == ".pptx":
-            result = _convert_with_docling(file_path_obj, params=params)
+            result = await asyncio.to_thread(_convert_with_docling, file_path_obj, params=params)
 
         elif file_ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"]:
             text = await parse_image_async(str(file_path_obj), params=params)
             result = f"{text}"
 
         elif file_ext in [".html", ".htm"]:
-            with open(file_path_obj, encoding="utf-8") as f:
-                content = f.read()
-            text = md_convert(content, heading_style="ATX")
+            async with aiofiles.open(file_path_obj, encoding="utf-8") as f:
+                content = await f.read()
+            text = await asyncio.to_thread(md_convert, content, heading_style="ATX")
             result = f"{text}"
 
         elif file_ext == ".csv":
-            import pandas as pd
-
-            df = pd.read_csv(file_path_obj)
-            markdown_content = ""
-
-            for _, row in df.iterrows():
-                row_df = pd.DataFrame([row], columns=df.columns)
-                markdown_table = row_df.to_markdown(index=False)
-                markdown_content += f"{markdown_table}\n\n"
-
-            result = markdown_content.strip()
+            result = await asyncio.to_thread(_convert_csv_to_markdown, file_path_obj)
 
         elif file_ext in [".doc", ".xls"]:
-            result = _convert_legacy_office_with_docling(file_path_obj, params=params)
+            result = await asyncio.to_thread(_convert_legacy_office_with_docling, file_path_obj, params=params)
 
         elif file_ext == ".xlsx":
-            result = _convert_with_docling(file_path_obj, params=params)
+            result = await asyncio.to_thread(_convert_with_docling, file_path_obj, params=params)
 
         elif file_ext == ".json":
             import json
