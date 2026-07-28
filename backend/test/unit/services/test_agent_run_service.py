@@ -472,6 +472,13 @@ async def test_create_agent_run_persists_input_before_enqueue(monkeypatch: pytes
             del user
             return SimpleNamespace(slug=slug, backend_id="ChatbotAgent")
 
+    class RequestRepo:
+        def __init__(self, db_session):
+            del db_session
+
+        async def has_queued_request(self, **_kwargs):
+            return False
+
     class Queue:
         async def enqueue_job(self, job_name: str, run_id: str, _job_id: str):
             assert job_name == "process_agent_run"
@@ -487,6 +494,7 @@ async def test_create_agent_run_persists_input_before_enqueue(monkeypatch: pytes
     monkeypatch.setattr(agent_run_service, "AgentRepository", AgentRepo)
     monkeypatch.setattr(agent_run_service, "ConversationRepository", ConvRepo)
     monkeypatch.setattr(agent_run_service, "AgentRunRepository", RunRepo)
+    monkeypatch.setattr(agent_run_service, "AgentRunRequestRepository", RequestRepo)
     monkeypatch.setattr(agent_run_service, "get_arq_pool", fake_get_arq_pool)
 
     result = await agent_run_service.create_agent_run_view(
@@ -695,6 +703,13 @@ async def test_create_resume_run_marks_input_message_source(monkeypatch: pytest.
 
     async def fake_get_arq_pool():
         return Queue()
+
+    class RequestRepo:
+        def __init__(self, db_session):
+            del db_session
+
+        async def has_queued_request(self, **_kwargs):
+            return False
 
     monkeypatch.setattr(agent_run_service.agent_manager, "get_agent", lambda backend_id: _FakeBackend())
     monkeypatch.setattr(agent_run_service, "AgentRepository", AgentRepo)
@@ -1024,6 +1039,13 @@ def _patch_common_run_repos(
     async def fake_get_arq_pool():
         return Queue()
 
+    class RequestRepo:
+        def __init__(self, db_session):
+            del db_session
+
+        async def has_queued_request(self, **_kwargs):
+            return False
+
     monkeypatch.setattr(agent_run_service.agent_manager, "get_agent", lambda backend_id: _FakeBackend())
     monkeypatch.setattr(agent_run_service, "AgentRepository", AgentRepo)
     monkeypatch.setattr(agent_run_service, "ConversationRepository", ConvRepo)
@@ -1039,6 +1061,7 @@ def _patch_common_run_repos(
         run_repo_factory = RunRepoWithActiveCheckpointCheck
 
     monkeypatch.setattr(agent_run_service, "AgentRunRepository", run_repo_factory)
+    monkeypatch.setattr(agent_run_service, "AgentRunRequestRepository", RequestRepo)
     monkeypatch.setattr(agent_run_service, "get_arq_pool", fake_get_arq_pool)
     return FakeDB()
 
