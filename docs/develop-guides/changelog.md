@@ -9,6 +9,7 @@
 ### 离线可视化
 
 - 新增离线可视化能力包：通过按需激活的中文 Skill 生成 CSV 数据图表、流程图和思维导图，渲染结果统一为 SVG 并复用现有 artifact 预览、下载与保存链路。渲染工具不进入 Agent 默认工具集，新用户请求会清空上一请求激活的专用 Skill；中间 CSV 和结构文件不会被自动交付。默认 Charts MCP 已退役，API/worker 镜像在构建阶段安装 ECharts、csv-parse 与 Graphviz；项目沙盒运行时镜像固定安装 PyMySQL，MySQL 数据准备在禁网环境不再触发依赖下载。
+- 修复可视化渲染工具的运行时注入与自定义 Schema 冲突，避免框架内部 `runtime` 参数触发校验失败。
 
 ### 上下文管理
 

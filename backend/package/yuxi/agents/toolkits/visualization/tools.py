@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from langchain_core.tools import ToolException
 from langgraph.prebuilt.tool_node import ToolRuntime
@@ -29,28 +29,6 @@ class ChartEncoding(BaseModel):
     size: str | None = Field(default=None, description="散点大小列")
 
 
-class RenderDataChartInput(BaseModel):
-    model_config = {"extra": "forbid"}
-    source_path: str = Field(description="当前会话中的 CSV 虚拟路径")
-    chart_type: Literal["bar", "line", "area", "pie", "scatter"] = Field(description="图表类型")
-    title: str = Field(min_length=1, max_length=200, description="中文图表标题")
-    encoding: ChartEncoding = Field(description="字段角色映射")
-    output_name: str = Field(description="ASCII 文件名主体，不含扩展名")
-
-
-class RenderFlowchartInput(BaseModel):
-    model_config = {"extra": "forbid"}
-    definition_path: str = Field(description="当前会话中的 .flow.json 虚拟路径")
-    output_name: str = Field(description="ASCII 文件名主体，不含扩展名")
-
-
-class RenderMindmapInput(BaseModel):
-    model_config = {"extra": "forbid"}
-    outline_path: str = Field(description="当前会话中的 .mindmap.md 虚拟路径")
-    layout: Literal["horizontal", "radial"] = Field(default="horizontal", description="思维导图布局")
-    output_name: str = Field(description="ASCII 文件名主体，不含扩展名")
-
-
 def _scope(runtime: ToolRuntime) -> tuple[str, str]:
     context = runtime.context
     uid = str(getattr(context, "uid", "") or "").strip()
@@ -60,14 +38,14 @@ def _scope(runtime: ToolRuntime) -> tuple[str, str]:
     return uid, thread_id
 
 
-@tool(category="visualization", tags=["可视化"], display_name="生成数据图表", args_schema=RenderDataChartInput)
+@tool(category="visualization", tags=["可视化"], display_name="生成数据图表")
 async def render_data_chart(
-    source_path: str,
-    chart_type: str,
-    title: str,
-    encoding: dict,
-    output_name: str,
-    runtime: ToolRuntime,
+    source_path: Annotated[str, Field(description="当前会话中的 CSV 虚拟路径")],
+    chart_type: Annotated[Literal["bar", "line", "area", "pie", "scatter"], Field(description="图表类型")],
+    title: Annotated[str, Field(min_length=1, max_length=200, description="中文图表标题")],
+    encoding: Annotated[ChartEncoding, Field(description="字段角色映射")],
+    output_name: Annotated[str, Field(description="ASCII 文件名主体，不含扩展名")],
+    runtime: ToolRuntime = None,
 ) -> dict:
     """根据当前会话 CSV 和受限字段映射生成静态 SVG 数据图表。"""
     uid, thread_id = _scope(runtime)
@@ -91,8 +69,12 @@ async def render_data_chart(
         raise ToolException(str(exc)) from exc
 
 
-@tool(category="visualization", tags=["可视化"], display_name="生成流程图", args_schema=RenderFlowchartInput)
-async def render_flowchart(definition_path: str, output_name: str, runtime: ToolRuntime) -> dict:
+@tool(category="visualization", tags=["可视化"], display_name="生成流程图")
+async def render_flowchart(
+    definition_path: Annotated[str, Field(description="当前会话中的 .flow.json 虚拟路径")],
+    output_name: Annotated[str, Field(description="ASCII 文件名主体，不含扩展名")],
+    runtime: ToolRuntime = None,
+) -> dict:
     """根据受限流程 JSON 生成静态 SVG 流程图。"""
     uid, thread_id = _scope(runtime)
     try:
@@ -108,8 +90,13 @@ async def render_flowchart(definition_path: str, output_name: str, runtime: Tool
         raise ToolException(str(exc)) from exc
 
 
-@tool(category="visualization", tags=["可视化"], display_name="生成思维导图", args_schema=RenderMindmapInput)
-async def render_mindmap(outline_path: str, layout: str, output_name: str, runtime: ToolRuntime) -> dict:
+@tool(category="visualization", tags=["可视化"], display_name="生成思维导图")
+async def render_mindmap(
+    outline_path: Annotated[str, Field(description="当前会话中的 .mindmap.md 虚拟路径")],
+    output_name: Annotated[str, Field(description="ASCII 文件名主体，不含扩展名")],
+    layout: Annotated[Literal["horizontal", "radial"], Field(description="思维导图布局")] = "horizontal",
+    runtime: ToolRuntime = None,
+) -> dict:
     """根据受限 Markdown 大纲生成静态 SVG 思维导图。"""
     uid, thread_id = _scope(runtime)
     try:
