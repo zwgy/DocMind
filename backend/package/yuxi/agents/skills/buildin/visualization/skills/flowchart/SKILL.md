@@ -29,4 +29,5 @@ description: 当用户需要把业务步骤、审批、判断分支或流程流�
 }
 ```
 
-5. 调用 `render_flowchart`，成功后调用 `present_artifacts`。不生成 DOT、HTML 或 Graphviz 属性。
+5. `output_name` 只能使用 1 至 80 个 ASCII 字母、数字、下划线或短横线，不含扩展名；中文标题也要转换为英文文件名，如 `application-approval-process`。
+6. 调用 `render_flowchart`，成功后调用 `present_artifacts`。不生成 DOT、HTML 或 Graphviz 属性。

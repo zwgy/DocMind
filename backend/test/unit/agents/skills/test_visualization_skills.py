@@ -41,3 +41,14 @@ def test_flowchart_skill_provides_the_renderer_json_contract() -> None:
     # 小模型必须能在首次调用前得到渲染器要求的真实字段名，避免靠错误信息反复猜测。
     for field_name in ('"kind"', '"source"', '"target"', '"label"'):
         assert field_name in content
+
+
+def test_visualization_skills_require_ascii_output_names() -> None:
+    specs = {spec.slug: spec for spec in BUILTIN_SKILLS}
+
+    # 工具 Schema 的简短字段说明不足以稳定约束本地小模型，必须在激活后的 Skill 主流程中重复这一硬契约。
+    for slug in ("data-chart", "flowchart", "mindmap"):
+        content = specs[slug].source_dir.joinpath("SKILL.md").read_text(encoding="utf-8")
+        assert "`output_name`" in content
+        assert "ASCII" in content
+        assert "不含扩展名" in content
