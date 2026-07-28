@@ -53,7 +53,7 @@ chat-iframe 默认直接使用父页面传入的外部用户身份自助换票�
 CHAT_IFRAME_ALLOWED_ORIGINS=https://oa.example.com
 ```
 
-生产 Compose 中存在 `${...}` 插值，因此启动时必须显式传入 `--env-file .env.prod`；仅配置服务级 `env_file` 不能替代 Compose 插值文件。
+生产 Compose 中存在 `${...}` 插值，因此启动时必须显式传入 `--env-file .env.prod`；仅配置服务级 `env_file` 不能替代 Compose 插值文件。即使绕过管理脚本直接执行 Compose，上述六项安全变量为空时也会拒绝解析配置，不会回退到公开默认密码。
 
 ### 2. 启动服务
 

@@ -65,6 +65,27 @@ def test_management_scripts_share_the_same_safe_compose_contract():
     assert (ROOT / "scripts" / "manage.ps1").read_bytes().startswith(b"\xef\xbb\xbf")
 
 
+def test_production_compose_requires_security_credentials_without_public_defaults():
+    """直接调用生产 Compose 时也必须执行密钥门禁，不能依赖管理脚本才安全。"""
+
+    template = (ROOT / ".env.template").read_text(encoding="utf-8")
+    production = (ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
+
+    for key in (
+        "JWT_SECRET_KEY",
+        "YUXI_INSTANCE_ID",
+        "POSTGRES_PASSWORD",
+        "NEO4J_PASSWORD",
+        "MINIO_ACCESS_KEY",
+        "MINIO_SECRET_KEY",
+    ):
+        assert f"{key}=" in template
+        assert f"${{{key}:?" in production
+
+    for public_default in ("POSTGRES_PASSWORD:-postgres", "NEO4J_PASSWORD:-0123456789", "MINIO_ACCESS_KEY:-minioadmin"):
+        assert public_default not in production
+
+
 def test_node_images_share_version_24_and_keep_required_os_variants():
     """API 需要 Debian/glibc 的 slim，前端构建可复用更小的 Alpine。"""
     api = (ROOT / "docker" / "api.Dockerfile").read_text(encoding="utf-8")
