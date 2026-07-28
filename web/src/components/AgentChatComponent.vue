@@ -2702,7 +2702,7 @@ watch(
       scrollController.scrollToBottom()
     }
   },
-  { deep: true, flush: 'post' }
+  { flush: 'post' }
 )
 
 watch(
