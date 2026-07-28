@@ -341,14 +341,15 @@ def test_mysql_reporter_builtin_skill_spec_replaces_reporter_and_deep_reporter()
     assert "deep-reporter" not in specs
     assert "mysql-reporter" in specs
     mysql_reporter = specs["mysql-reporter"]
-    assert mysql_reporter["name"] == "mysql reporter"
+    assert mysql_reporter["name"] == "MySQL 报表"
     assert mysql_reporter["tool_dependencies"] == []
-    assert mysql_reporter["mcp_dependencies"] == ["mcp-server-chart"]
+    assert mysql_reporter["mcp_dependencies"] == []
+    assert mysql_reporter["skill_dependencies"] == ["data-chart"]
     assert (mysql_reporter["source_dir"] / "SKILL.md").exists()
     for script_name in ("list_tables.py", "describe_table.py", "query.py"):
         script_path = mysql_reporter["source_dir"] / "scripts" / script_name
         assert script_path.exists()
-        assert script_path.read_text(encoding="utf-8").startswith("# /// script")
+        assert not script_path.read_text(encoding="utf-8").startswith("# /// script")
 
 
 def test_is_valid_skill_slug():
