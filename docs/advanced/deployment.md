@@ -32,6 +32,7 @@ bash scripts/manage.sh prod init
 
 - `JWT_SECRET_KEY`：随机生成至少 32 字节的密钥
 - `YUXI_INSTANCE_ID`：为当前部署设置稳定且唯一的实例 ID
+- `SANDBOX_PROVISIONER_TOKEN`：仅供 API、worker 与 provisioner 使用的独立随机凭据
 - `POSTGRES_PASSWORD`：修改默认密码
 - `NEO4J_PASSWORD`：修改默认密码
 - `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY`：修改默认密钥
@@ -53,7 +54,7 @@ chat-iframe 默认直接使用父页面传入的外部用户身份自助换票�
 CHAT_IFRAME_ALLOWED_ORIGINS=https://oa.example.com
 ```
 
-生产 Compose 中存在 `${...}` 插值，因此启动时必须显式传入 `--env-file .env.prod`；仅配置服务级 `env_file` 不能替代 Compose 插值文件。即使绕过管理脚本直接执行 Compose，上述六项安全变量为空时也会拒绝解析配置，不会回退到公开默认密码。
+生产 Compose 中存在 `${...}` 插值，因此启动时必须显式传入 `--env-file .env.prod`；仅配置服务级 `env_file` 不能替代 Compose 插值文件。即使绕过管理脚本直接执行 Compose，上述七项安全变量为空时也会拒绝解析配置，不会回退到公开默认密码。
 
 ### 2. 启动服务
 
@@ -92,6 +93,8 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml --profile all up 
 - Chat Iframe：http://localhost/chat-iframe/
 - Chat Iframe 父页面脚本：http://localhost/chat-iframe/docmind-chat-iframe-parent.js
 - API 健康检查：`curl http://localhost/api/system/health`
+
+PostgreSQL、Redis、MinIO、Milvus、Neo4j、MinerU、PaddleX 和 sandbox-provisioner 默认只绑定宿主机回环地址。若确有其他机器直连基础设施的运维需求，可在 `.env.prod` 设置 `INFRA_BIND_HOST=0.0.0.0`；这会扩大攻击面，应配合网络访问控制。动态 Agent sandbox 不发布宿主机端口，并通过 provisioner 的 Bearer token 认证代理访问。
 
 ## 维护与更新
 

@@ -55,7 +55,7 @@ normalize_env_file() {
 # 保留所有 KEY=真值 行（包括基础设施默认值和用户实际填的值）
 cleanup_empty_placeholders() {
     # 自动生成项必须留在模板原位置，后续 ensure_env_var 才能原地写入真实值。
-    sed -i.bak -E '/^(JWT_SECRET_KEY|YUXI_INSTANCE_ID)=/!{/^[A-Z_][A-Z0-9_]*=[[:space:]]*(#.*)?$/d;}' .env
+    sed -i.bak -E '/^(JWT_SECRET_KEY|YUXI_INSTANCE_ID|SANDBOX_PROVISIONER_TOKEN)=/!{/^[A-Z_][A-Z0-9_]*=[[:space:]]*(#.*)?$/d;}' .env
     rm -f .env.bak
 }
 
@@ -122,6 +122,8 @@ cleanup_empty_placeholders
 # 第 2 步：补齐缺失的密钥（脚本可生成项先生成，避免后续交互中断留下空值）
 ensure_env_var JWT_SECRET_KEY "$(generate_hex 32)"
 ensure_env_var YUXI_INSTANCE_ID "instance-$(generate_hex 8)"
+# 该 token 仅由 api、worker 与 provisioner 持有，不能传入 sandbox.env。
+ensure_env_var SANDBOX_PROVISIONER_TOKEN "$(generate_hex 32)"
 
 # 第 3 步：补齐缺失项
 echo ""

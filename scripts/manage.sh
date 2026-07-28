@@ -135,6 +135,7 @@ initialize_production_env() {
     write_prod_env_value YUXI_ENV production
     write_prod_env_value JWT_SECRET_KEY "$(generate_hex 32)"
     write_prod_env_value YUXI_INSTANCE_ID "instance-$(generate_hex 8)"
+    write_prod_env_value SANDBOX_PROVISIONER_TOKEN "$(generate_hex 32)"
     write_prod_env_value POSTGRES_PASSWORD "$(generate_hex 32)"
     write_prod_env_value NEO4J_PASSWORD "$(generate_hex 32)"
     write_prod_env_value MINIO_ACCESS_KEY "minio-$(generate_hex 12)"
@@ -215,7 +216,7 @@ read_env_value() {
 validate_prod_env() {
     local failed=0
     local key value
-    local required=(JWT_SECRET_KEY YUXI_INSTANCE_ID POSTGRES_PASSWORD NEO4J_PASSWORD MINIO_ACCESS_KEY MINIO_SECRET_KEY)
+    local required=(JWT_SECRET_KEY YUXI_INSTANCE_ID SANDBOX_PROVISIONER_TOKEN POSTGRES_PASSWORD NEO4J_PASSWORD MINIO_ACCESS_KEY MINIO_SECRET_KEY)
 
     for key in "${required[@]}"; do
         value="$(read_env_value "$key")"
@@ -224,6 +225,12 @@ validate_prod_env() {
             failed=1
         fi
     done
+
+    value="$(read_env_value SANDBOX_PROVISIONER_TOKEN)"
+    if [ "${#value}" -lt 32 ]; then
+        echo "Error: SANDBOX_PROVISIONER_TOKEN must contain at least 32 characters." >&2
+        failed=1
+    fi
 
     [ "$(read_env_value JWT_SECRET_KEY)" = "yuxi_know_secure_key" ] && echo "Error: JWT_SECRET_KEY uses the public default." >&2 && failed=1
     [ "$(read_env_value POSTGRES_PASSWORD)" = "postgres" ] && echo "Error: POSTGRES_PASSWORD uses the public default." >&2 && failed=1

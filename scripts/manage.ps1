@@ -109,6 +109,7 @@ function Initialize-ProductionEnv([string]$EnvFile) {
     Set-ProductionEnvValue $EnvFile "YUXI_ENV" "production"
     Set-ProductionEnvValue $EnvFile "JWT_SECRET_KEY" (New-RandomHex 32)
     Set-ProductionEnvValue $EnvFile "YUXI_INSTANCE_ID" ("instance-" + (New-RandomHex 8))
+    Set-ProductionEnvValue $EnvFile "SANDBOX_PROVISIONER_TOKEN" (New-RandomHex 32)
     Set-ProductionEnvValue $EnvFile "POSTGRES_PASSWORD" (New-RandomHex 32)
     Set-ProductionEnvValue $EnvFile "NEO4J_PASSWORD" (New-RandomHex 32)
     Set-ProductionEnvValue $EnvFile "MINIO_ACCESS_KEY" ("minio-" + (New-RandomHex 12))
@@ -214,13 +215,18 @@ try {
     function Assert-ProductionEnv {
         # 发布前拒绝模板空值、占位符和公开默认密码；自助换票开启时强制要求白名单。
         $failed = $false
-        $required = @("JWT_SECRET_KEY", "YUXI_INSTANCE_ID", "POSTGRES_PASSWORD", "NEO4J_PASSWORD", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY")
+        $required = @("JWT_SECRET_KEY", "YUXI_INSTANCE_ID", "SANDBOX_PROVISIONER_TOKEN", "POSTGRES_PASSWORD", "NEO4J_PASSWORD", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY")
         foreach ($name in $required) {
             $value = Get-DotEnvValue $name
             if ([string]::IsNullOrWhiteSpace($value) -or $value.StartsWith("#") -or $value.StartsWith("__REPLACE_ME__")) {
                 Write-Host "Error: $name must be configured in .env.prod." -ForegroundColor Red
                 $failed = $true
             }
+        }
+
+        if ((Get-DotEnvValue "SANDBOX_PROVISIONER_TOKEN").Length -lt 32) {
+            Write-Host "Error: SANDBOX_PROVISIONER_TOKEN must contain at least 32 characters." -ForegroundColor Red
+            $failed = $true
         }
 
         $weakValues = @{

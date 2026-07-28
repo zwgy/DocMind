@@ -11,15 +11,17 @@ def test_init_scripts_keep_auto_generated_env_placeholders():
     ps1 = ps1_path.read_text(encoding="utf-8")
 
     assert "\nnormalize_env_file\n\n# 删除模板占位" in bash
-    assert "JWT_SECRET_KEY|YUXI_INSTANCE_ID" in bash
+    assert "JWT_SECRET_KEY|YUXI_INSTANCE_ID|SANDBOX_PROVISIONER_TOKEN" in bash
     assert 'ensure_env_var JWT_SECRET_KEY "$(generate_hex 32)"' in bash
     assert 'ensure_env_var YUXI_INSTANCE_ID "instance-$(generate_hex 8)"' in bash
+    assert 'ensure_env_var SANDBOX_PROVISIONER_TOKEN "$(generate_hex 32)"' in bash
     assert bash.index('ensure_env_var JWT_SECRET_KEY "$(generate_hex 32)"') < bash.index(
         "ask_or_skip SILICONFLOW_API_KEY"
     )
-    assert '@("JWT_SECRET_KEY", "YUXI_INSTANCE_ID")' in ps1
+    assert '@("JWT_SECRET_KEY", "YUXI_INSTANCE_ID", "SANDBOX_PROVISIONER_TOKEN")' in ps1
     assert 'Update-EnvVar "JWT_SECRET_KEY" (New-RandomHex 32)' in ps1
     assert 'Update-EnvVar "YUXI_INSTANCE_ID" ("instance-" + (New-RandomHex 8))' in ps1
+    assert 'Update-EnvVar "SANDBOX_PROVISIONER_TOKEN" (New-RandomHex 32)' in ps1
     assert ps1.index('Update-EnvVar "JWT_SECRET_KEY" (New-RandomHex 32)') < ps1.index(
         'Read-UserInput "SILICONFLOW_API_KEY"'
     )
@@ -59,6 +61,7 @@ def test_management_scripts_share_the_same_safe_compose_contract():
         "POSTGRES_PASSWORD",
         "MINIO_ACCESS_KEY",
         "MINIO_SECRET_KEY",
+        "SANDBOX_PROVISIONER_TOKEN",
     ):
         assert key in bash
         assert key in powershell
@@ -84,6 +87,23 @@ def test_production_compose_requires_security_credentials_without_public_default
 
     for public_default in ("POSTGRES_PASSWORD:-postgres", "NEO4J_PASSWORD:-0123456789", "MINIO_ACCESS_KEY:-minioadmin"):
         assert public_default not in production
+
+
+def test_sandbox_compose_keeps_private_networks_and_loopback_infrastructure_defaults():
+    """沙箱不能加入 app-network，基础设施默认也不应向局域网暴露。"""
+
+    template = (ROOT / ".env.template").read_text(encoding="utf-8")
+    development = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    production = (ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
+
+    assert "INFRA_BIND_HOST=127.0.0.1" in template
+    assert "SANDBOX_DOCKER_NETWORK_PREFIX=yuxi-know-sandbox" in template
+    assert "DOCKER_NETWORK_PREFIX=${SANDBOX_DOCKER_NETWORK_PREFIX:-yuxi-know-sandbox}" in development
+    assert "DOCKER_NETWORK_PREFIX=${SANDBOX_DOCKER_NETWORK_PREFIX:-yuxi-know-sandbox}" in production
+    assert "APP_DOCKER_NETWORK:-yuxi-know_app-network" in development
+    assert "APP_DOCKER_NETWORK:-yuxi-know_app-network" in production
+    assert '"${INFRA_BIND_HOST:-127.0.0.1}:${REDIS_HOST_PORT:-6379}:6379"' in development
+    assert '"${INFRA_BIND_HOST:-127.0.0.1}:8002:8002"' in development
 
 
 def test_node_images_share_version_24_and_keep_required_os_variants():

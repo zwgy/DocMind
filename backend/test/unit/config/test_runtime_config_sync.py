@@ -61,7 +61,7 @@ def test_save_writes_runtime_snapshot_after_base_toml(tmp_path, monkeypatch: pyt
     assert payload["default_model"] == "test-provider:new-chat"
     assert payload["enable_content_guard"] is True
     assert "save_dir" not in payload
-    assert payload["sandbox_provider"] == "provisioner"
+    assert "sandbox_provider" not in payload
     assert "enable_reranker" not in payload
     assert "default_agent_id" not in payload
     # 快照只含公开配置字段，不夹带元数据
@@ -95,8 +95,9 @@ def test_save_dir_from_base_toml_is_ignored(tmp_path, monkeypatch: pytest.Monkey
     _patch_runtime_redis(monkeypatch, _FakeRedis())
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True)
+    ignored_save_dir = (tmp_path / "from-file").as_posix()
     (config_dir / "base.toml").write_text(
-        f'save_dir = "{tmp_path / "from-file"}"\ndefault_model = "test-provider:file-chat"\n',
+        f'save_dir = "{ignored_save_dir}"\ndefault_model = "test-provider:file-chat"\n',
         encoding="utf-8",
     )
 
@@ -128,7 +129,7 @@ def test_refresh_loads_public_config_from_redis(tmp_path, monkeypatch: pytest.Mo
 
     assert cfg.default_model == "test-provider:worker-chat"
     assert cfg.save_dir == str(tmp_path)
-    assert cfg.sandbox_virtual_path_prefix == "/redis/user-data"
+    assert not hasattr(cfg, "sandbox_virtual_path_prefix")
     assert str(cfg._config_file) == str(tmp_path / "config" / "base.toml")
     # 快照里的非运行时字段和未知键不会被写回
     assert not hasattr(cfg, "enable_reranker")
