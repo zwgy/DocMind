@@ -654,6 +654,10 @@ async def test_dispatch_next_agent_request_creates_run_then_marks_request_dispat
             assert thread_id == "thread-1"
             return None
 
+        async def get_latest_run_by_thread_for_user(self, thread_id: str, uid: str):
+            assert (thread_id, uid) == ("thread-1", "user-1")
+            return None
+
     async def fake_create_agent_run(**kwargs):
         assert kwargs["allow_queued_request_id"] == "request-queued"
         assert kwargs["commit"] is False
