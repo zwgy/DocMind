@@ -109,6 +109,18 @@ def test_api_image_keeps_container_lint_tooling():
     assert "uv sync --group test --no-dev" not in api
 
 
+def test_public_minio_proxy_is_read_only_on_both_frontend_origins():
+    """主站与 iframe 都会收到同源图片路径，两侧代理必须保持相同的只读边界。"""
+
+    for relative_path in ("docker/nginx/default.conf", "chat-iframe/nginx.conf"):
+        config = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "location /minio/public/" in config
+        assert "limit_except GET HEAD" in config
+        assert "proxy_pass http://docmind_minio_upstream/public/" in config
+        assert "location /minio/" in config
+        assert "return 404;" in config
+
+
 def test_frontend_compose_uses_static_runtime_without_hmr():
     """业务联调页面必须走静态服务，避免 HMR 断线后自动整页刷新。"""
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")

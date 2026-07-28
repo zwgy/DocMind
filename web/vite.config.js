@@ -37,6 +37,11 @@ export default defineConfig(({ mode }) => {
         '^/api': {
           target: env.VITE_API_URL || 'http://api:5050',
           changeOrigin: true
+        },
+        '^/minio/public/': {
+          target: env.VITE_MINIO_URL || 'http://minio:9000',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/minio/, '')
         }
       },
       watch: {
