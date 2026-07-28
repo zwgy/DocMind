@@ -158,7 +158,7 @@ function closeImagePreviewOnEscape(event: KeyboardEvent) {
 
 function artifactKind(path: string): 'image' | 'pdf' | 'text' | null {
   const extension = path.split('.').pop()?.toLowerCase() || ''
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extension)) return 'image'
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(extension)) return 'image'
   if (extension === 'pdf') return 'pdf'
   if (['txt', 'md', 'json', 'csv', 'yaml', 'yml', 'xml', 'html', 'log'].includes(extension))
     return 'text'

@@ -17,3 +17,8 @@ test('context summary renders supplementary attachments without duplicating thei
   assert.match(component, /if \(!summary\?\.file\.is_main_file\) return \[\]/)
   assert.doesNotMatch(component, /contextSummaryAttachments/)
 })
+
+test('SVG artifacts use the existing image preview path', () => {
+  assert.match(component, /\['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'\]/)
+  assert.match(component, /artifactPreview\.kind === 'image'/)
+})
