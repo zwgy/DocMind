@@ -114,6 +114,11 @@ export const documentApi = {
     return apiAdminGet(`/api/knowledge/databases/${kbId}/documents${query ? `?${query}` : ''}`)
   },
 
+  searchDocuments: async (kbId, params = {}) => {
+    const query = buildQuery(params)
+    return apiAdminGet(`/api/knowledge/databases/${kbId}/documents/search${query ? `?${query}` : ''}`)
+  },
+
   /**
    * 检查知识库中是否存在指定文件名或相对路径
    * @param {string} kbId - 知识库ID

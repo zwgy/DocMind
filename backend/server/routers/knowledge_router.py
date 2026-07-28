@@ -637,6 +637,26 @@ async def list_documents(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@knowledge.get("/databases/{kb_id}/documents/search")
+async def search_documents(
+    kb_id: str,
+    query: str = Query("", description="文件名关键词，仅匹配文件名不匹配内容"),
+    offset: int = Query(0, ge=0, description="偏移量，从 0 开始"),
+    limit: int = Query(100, ge=1, le=500, description="每页数量"),
+    current_user: User = Depends(get_admin_user),
+):
+    """按文件名搜索知识库文件（仅匹配文件名，不搜索文件内容）。"""
+    del current_user
+    await _ensure_database_supports_documents(kb_id, "文档搜索")
+    return await knowledge_base.search_document_files(
+        kb_id,
+        query=query,
+        offset=offset,
+        limit=limit,
+        include_parent_id=True,
+    )
+
+
 @knowledge.get("/databases/{kb_id}/documents/exists")
 async def document_file_exists(
     kb_id: str,

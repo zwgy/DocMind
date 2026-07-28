@@ -11,6 +11,7 @@ from yuxi.utils.share_config import SHARE_ACCESS_LEVELS, normalize_share_config
 
 DEFAULT_SHARE_CONFIG = {"access_level": "global", "department_ids": [], "user_uids": []}
 ACCESS_LEVELS = SHARE_ACCESS_LEVELS
+DOCUMENT_SEARCH_LIMIT = 500
 
 
 class KnowledgeBaseManager:
@@ -614,6 +615,59 @@ class KnowledgeBaseManager:
         if stats is not None:
             result["stats"] = stats
         return result
+
+    async def search_document_files(
+        self,
+        kb_id: str,
+        *,
+        query: str,
+        offset: int = 0,
+        limit: int = 100,
+        include_parent_id: bool = False,
+    ) -> dict:
+        """按文件名搜索单个知识库，保持查询、排序和总数在数据库侧完成。"""
+        from yuxi.repositories.knowledge_file_repository import KnowledgeFileRepository
+
+        normalized_query = (query or "").strip()
+        normalized_offset = max(int(offset or 0), 0)
+        normalized_limit = min(max(int(limit or 100), 1), DOCUMENT_SEARCH_LIMIT)
+        if not normalized_query:
+            return {
+                "files": [],
+                "total": 0,
+                "offset": normalized_offset,
+                "limit": normalized_limit,
+                "has_more": False,
+            }
+
+        files, total = await KnowledgeFileRepository().search_files(
+            kb_id=kb_id,
+            filename_query=normalized_query,
+            offset=normalized_offset,
+            limit=normalized_limit,
+            files_only=True,
+        )
+        items = []
+        for file in files:
+            item = {
+                "file_id": file.file_id,
+                "filename": file.filename,
+                "file_type": file.file_type,
+                "status": file.status,
+                "created_at": str(file.created_at) if file.created_at else None,
+                "updated_at": str(file.updated_at) if file.updated_at else None,
+                "file_size": file.file_size,
+            }
+            if include_parent_id:
+                item["parent_id"] = file.parent_id
+            items.append(item)
+        return {
+            "files": items,
+            "total": total,
+            "offset": normalized_offset,
+            "limit": normalized_limit,
+            "has_more": normalized_offset + normalized_limit < total,
+        }
 
     async def document_file_exists(self, kb_id: str, filename: str) -> bool:
         """检查指定知识库中是否存在给定展示文件名或相对路径的文件。"""

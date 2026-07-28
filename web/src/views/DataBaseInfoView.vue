@@ -16,6 +16,8 @@
       @success="onFileUploadSuccess"
     />
 
+    <FileSearchModal v-model:open="fileSearchModalVisible" :kb-id="kbId" @select="onFileSearchSelect" />
+
     <div class="detail-top-bar">
       <button class="detail-back-btn" type="button" @click="backToDatabase">
         <ArrowLeft :size="16" />
@@ -91,6 +93,14 @@
                 >
                   <FolderPlus :size="14" />
                   <span>新建文件夹</span>
+                </button>
+                <button
+                  type="button"
+                  class="lucide-icon-btn extension-panel-action extension-panel-action-secondary"
+                  @click="fileSearchModalVisible = true"
+                >
+                  <Search :size="14" />
+                  <span>搜索文件</span>
                 </button>
               </div>
             </div>
@@ -383,6 +393,7 @@ import { message, Modal } from 'ant-design-vue'
 import FileTable from '@/components/FileTable.vue'
 import FileDetailModal from '@/components/FileDetailModal.vue'
 import FileUploadModal from '@/components/FileUploadModal.vue'
+import FileSearchModal from '@/components/modals/FileSearchModal.vue'
 import KnowledgeGraphSection from '@/components/KnowledgeGraphSection.vue'
 import QuerySection from '@/components/QuerySection.vue'
 import MindMapSection from '@/components/MindMapSection.vue'
@@ -574,6 +585,12 @@ const handleInlineSearchConfigSave = async () => {
 }
 
 const addFilesModalVisible = ref(false)
+const fileSearchModalVisible = ref(false)
+
+const onFileSearchSelect = (file) => {
+  if (file?.file_id) store.openFileDetail(file.file_id)
+}
+
 const currentFolderId = ref(null)
 const isFolderUploadMode = ref(false)
 const addFilesMode = ref('file')
