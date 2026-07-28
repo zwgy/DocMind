@@ -152,6 +152,7 @@
 - 对话消息图片支持点击全屏预览：对话中用户上传的图片支持点击放大查看，复用文件预览的全屏蒙层交互（Teleport 蒙层，点击图片/空白处或按 Esc 关闭），不引入额外依赖。
 - 新增 Agent token usage 状态快照，在状态面板中作为普通可折叠分组展示完整 `messages`、当前传给 LLM 的 `messages`、system/tools 构成、输入构成堆叠条和上下文窗口占用估算。
 - 重构 Agent 上下文预算：删除 70% 摘要触发线和 15% 保留比例，模型配置显式保存完整上下文、最低输出预留和可选安全缓冲；调用前按最终系统提示词、工具定义与消息计算可用输入预算。项目自有摘要中间件仅在超预算时压缩完整历史交互段，并将摘要保存为私有状态，不再依赖 DeepAgents 的私有摘要实现。
+- 评估数据集自动生成支持断点续跑：生成过程中按 `YUXI_DATASET_PERSIST_BATCH_SIZE`（默认 1）批量持久化已生成的题目，任务失败或中断后可从已持久化进度继续生成；新增 `POST /api/evaluation/databases/{kb_id}/datasets/{dataset_id}/resume` 接口与前端"继续生成"按钮。修复生成器先收集后产出导致批量持久化在生成中途不生效的问题：改为 worker 产出即流式回报、消费端按 attempt_no 重排输出，异常或取消时已产出未落库的题目（含队列中未消费与 buffer 残余）一并保存；恢复接口改用原子化入队，消除并发恢复创建重复任务引发的唯一约束冲突。失败数据集支持查看已持久化题目：数据集详情接口状态限制放宽为 completed/failed 白名单，前端放开失败数据集的点击查看，下载与发起评估仍仅限生成完成。
 - 收敛普通聊天模型加载链路：`select_model` 保留旧 `.call()` 调用契约，内部改为通过 LangChain chat model adapter 复用 Agent 侧模型加载器，统一 OpenAI-compatible、Anthropic 与 Gemini 等 provider 的运行时适配；移除旧 `OpenAIBase` wrapper，默认重试策略迁移为 LangChain provider 参数。
 - 统一 Redis 客户端管理：新增 `yuxi.storage.redis` 作为 Redis 配置、短生命周期同步客户端、共享异步客户端与 ARQ RedisSettings 的唯一基础设施入口；运行队列、系统配置快照同步、模型缓存和 worker 不再各自散落读取 `REDIS_URL` 或直接创建 Redis 客户端，Redis 连接失败日志统一使用脱敏 URL。
 - 新增系统配置 Redis 快照同步：管理员保存配置时仍以 `saves/config/base.toml` 作为唯一持久化来源，成功写入后将可运行时同步的公开配置字段写入 `yuxi:runtime_config`；API 与 worker 进程在启动时各拉起一个后台同步线程，按 5 秒间隔从快照刷新内存值，读取端按普通属性访问、无需感知，Redis 不可用时继续使用当前内存值。`save_dir` 是启动期内部路径配置，不在管理员配置中展示、不从 `base.toml` 读取、不写入 Redis 快照且不支持通过管理员配置接口修改；sandbox 相关配置仍属于启动期敏感配置，运行中的已初始化组件不承诺完整热更新，修改后仍需重启保证生效；移除已无运行时调用点的 `enable_reranker` 与 `default_agent_id` 配置字段。
