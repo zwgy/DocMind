@@ -395,7 +395,10 @@ export async function getThreadState(threadId: string, token?: string) {
   const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/state`), {
     headers: authHeaders(token, false)
   })
-  return parseResponse<{ agent_state?: Record<string, unknown> }>(response, '获取会话运行状态失败')
+  return parseResponse<{
+    agent_state?: Record<string, unknown>
+    interrupt?: Record<string, unknown>
+  }>(response, '获取会话运行状态失败')
 }
 
 export async function fetchThreadArtifact(

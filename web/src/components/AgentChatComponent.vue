@@ -609,7 +609,7 @@ import { storeToRefs } from 'pinia'
 import { MessageProcessor } from '@/utils/messageProcessor'
 import { agentApi, threadApi } from '@/apis'
 import HumanApprovalModal from '@/components/HumanApprovalModal.vue'
-import { useApproval } from '@/composables/useApproval'
+import { extractPendingInterrupt, useApproval } from '@/composables/useApproval'
 import { useAgentThreadState } from '@/composables/useAgentThreadState'
 import { useAgentRunStream } from '@/composables/useAgentRunStream'
 import { useAgentStreamHandler } from '@/composables/useAgentStreamHandler'
@@ -1957,14 +1957,33 @@ const handleArtifactSaved = async () => {
 }
 
 const fetchAgentState = async (agentId, threadId) => {
-  if (!threadId) return
+  if (!threadId) return false
+  const targetState = getThreadState(threadId)
+  if (!targetState) return false
+  const requestVersion = (targetState.agentStateRequestVersion || 0) + 1
+  targetState.agentStateRequestVersion = requestVersion
+
   try {
     const res = await agentApi.getAgentState(threadId)
-    const targetState = getThreadState(threadId)
-    if (!targetState) return
-    targetState.agentState = res.agent_state || null
+    const latestState = getThreadState(threadId)
+    if (!latestState || latestState.agentStateRequestVersion !== requestVersion) return false
+
+    latestState.agentState = res.agent_state || null
+    const pendingInterrupt = extractPendingInterrupt(res.interrupt, threadId)
+    const interruptIsCurrent =
+      pendingInterrupt &&
+      !latestState.isStreaming &&
+      (!pendingInterrupt.parentRunId ||
+        !latestState.activeRunId ||
+        pendingInterrupt.parentRunId === latestState.activeRunId)
+    if (interruptIsCurrent) {
+      latestState.pendingInterrupt = pendingInterrupt
+      if (currentChatId.value === threadId) restorePendingInterruptForThread(threadId)
+    }
+    return true
   } catch {
     // agent state is optional UI state
+    return false
   }
 }
 

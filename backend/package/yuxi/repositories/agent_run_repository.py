@@ -49,6 +49,20 @@ class AgentRunRepository:
         result = await self.db.execute(select(AgentRun).where(and_(AgentRun.id == run_id, AgentRun.uid == str(uid))))
         return result.scalar_one_or_none()
 
+    async def get_latest_run_by_thread_for_user(self, thread_id: str, uid: str) -> AgentRun | None:
+        """返回主会话最后一次运行，用于恢复 checkpoint 中断状态。"""
+        result = await self.db.execute(
+            select(AgentRun)
+            .where(
+                AgentRun.thread_id == thread_id,
+                AgentRun.uid == str(uid),
+                AgentRun.run_type.in_(["chat", "resume"]),
+            )
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def get_latest_subagent_run_by_thread_for_user(self, thread_id: str, uid: str) -> AgentRun | None:
         result = await self.db.execute(
             select(AgentRun)

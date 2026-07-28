@@ -32,6 +32,7 @@ export function useAgentThreadState({
         isCompacting: false,
         pendingRequestId: null,
         pendingInterrupt: null,
+        agentStateRequestVersion: 0,
         onGoingConv: createOnGoingConvState(),
         agentState: null
       }

@@ -67,3 +67,32 @@ test('context compaction stream event only changes the waiting status', () => {
   assert.equal(runtime.isCompacting, false)
   assert.equal(runtime.messages.length, 0)
 })
+
+test('interrupted run restores checkpoint questions instead of replaying its finished stream', async () => {
+  setActivePinia(createPinia())
+  const calls = []
+  globalThis.fetch = async (url) => {
+    calls.push(url)
+    if (url === '/api/agent/thread/thread-1/active_run') {
+      return Response.json({ run: { id: 'parent-run', status: 'interrupted' } })
+    }
+    if (url === '/api/chat/thread/thread-1/state') {
+      return Response.json({
+        interrupt: {
+          status: 'ask_user_question_required',
+          run_id: 'parent-run',
+          questions: [{ question_id: 'q-1', question: 'Continue?', options: ['yes', 'no'] }]
+        }
+      })
+    }
+    throw new Error(`unexpected request: ${url}`)
+  }
+
+  const chat = useChatStore()
+  await chat.resumeActiveRun('thread-1', 'token-1')
+
+  const runtime = chat.threadRuntimes['thread-1']
+  assert.equal(runtime.pendingInterrupt?.parentRunId, 'parent-run')
+  assert.equal(runtime.isStreaming, false)
+  assert.equal(calls.some((url) => url.includes('/events')), false)
+})

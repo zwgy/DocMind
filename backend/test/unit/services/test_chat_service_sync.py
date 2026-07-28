@@ -843,6 +843,83 @@ async def test_get_agent_state_view_allows_recorded_child_thread(monkeypatch: py
 
 
 @pytest.mark.asyncio
+async def test_get_agent_state_view_restores_interrupted_question_payload(monkeypatch: pytest.MonkeyPatch):
+    class ConvRepo:
+        def __init__(self, _db):
+            pass
+
+        async def get_conversation_by_thread_id(self, thread_id: str):
+            assert thread_id == "thread-1"
+            return SimpleNamespace(uid="user-1", agent_id="main-agent", status="active")
+
+    class AgentRepo:
+        def __init__(self, _db):
+            pass
+
+        async def get_by_slug(self, slug: str):
+            assert slug == "main-agent"
+            return SimpleNamespace(backend_id="ChatbotAgent")
+
+    class RunRepo:
+        def __init__(self, _db):
+            pass
+
+        async def get_latest_run_by_thread_for_user(self, thread_id: str, uid: str):
+            assert (thread_id, uid) == ("thread-1", "user-1")
+            return SimpleNamespace(id="run-interrupted", status="interrupted")
+
+    class Graph:
+        async def aget_state(self, _config):
+            return SimpleNamespace(
+                values={},
+                tasks=[
+                    SimpleNamespace(
+                        interrupts=[
+                            SimpleNamespace(
+                                value={
+                                    "questions": [
+                                        {
+                                            "question_id": "q-1",
+                                            "question": "请确认是否继续",
+                                            "options": ["继续", "取消"],
+                                        }
+                                    ]
+                                }
+                            )
+                        ]
+                    )
+                ],
+            )
+
+    class Agent:
+        async def get_graph(self):
+            return Graph()
+
+    monkeypatch.setattr(svc, "ConversationRepository", ConvRepo)
+    monkeypatch.setattr(svc, "AgentRepository", AgentRepo)
+    monkeypatch.setattr(svc, "AgentRunRepository", RunRepo)
+    monkeypatch.setattr(svc.agent_manager, "get_agent", lambda _backend_id: Agent())
+
+    result = await svc.get_agent_state_view(thread_id="thread-1", current_uid="user-1", db=object())
+
+    assert result["interrupt"] == {
+        "status": "ask_user_question_required",
+        "questions": [
+            {
+                "question_id": "q-1",
+                "question": "请确认是否继续",
+                "options": ["继续", "取消"],
+                "multi_select": False,
+                "allow_other": True,
+            }
+        ],
+        "source": "interrupt",
+        "thread_id": "thread-1",
+        "run_id": "run-interrupted",
+    }
+
+
+@pytest.mark.asyncio
 async def test_build_agent_input_context_keeps_prompt_when_workspace_agents_prompt_empty(
     monkeypatch: pytest.MonkeyPatch,
 ):

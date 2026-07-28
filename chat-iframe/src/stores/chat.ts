@@ -138,6 +138,19 @@ function assistantTextLength(messages: ChatMessage[]) {
   )
 }
 
+function pendingInterruptFromState(state: { interrupt?: Record<string, unknown> } | null) {
+  const interrupt = state?.interrupt
+  const status = String(interrupt?.status || '')
+  const questions = Array.isArray(interrupt?.questions)
+    ? interrupt.questions.filter((question): question is Record<string, unknown> =>
+        Boolean(question && typeof question === 'object')
+      )
+    : []
+  const parentRunId = String(interrupt?.run_id || interrupt?.parent_run_id || '')
+  if (!questions.length || !parentRunId) return null
+  return { status, questions, parentRunId }
+}
+
 function artifactPaths(messages: ChatMessage[]) {
   return messages.flatMap((message) => message.artifacts?.map((artifact) => artifact.path) || [])
 }
@@ -450,6 +463,14 @@ export const useChatStore = defineStore('chat', {
         runtime.agentState = state.agent_state
         refreshRunArtifacts(runtime)
       }
+      const pendingInterrupt = pendingInterruptFromState(state)
+      if (pendingInterrupt) {
+        runtime.pendingInterrupt = pendingInterrupt
+        runtime.activeRunId = pendingInterrupt.parentRunId
+        runtime.isSending = false
+        runtime.isStreaming = false
+        runtime.isCompacting = false
+      }
       this.restoreThreadModelSpec(threadId, runtime.messages)
       this.selectedModelSpec = this.modelSpecsByThread[threadId] || this.selectedModelSpec
       void this.resumeActiveRun(threadId, token)
@@ -551,6 +572,15 @@ export const useChatStore = defineStore('chat', {
       const state = await getThreadState(threadId, token).catch(() => null)
       runtime.agentState = state?.agent_state || null
       refreshRunArtifacts(runtime)
+      const pendingInterrupt = pendingInterruptFromState(state)
+      if (run?.status === 'interrupted' && pendingInterrupt) {
+        runtime.pendingInterrupt = pendingInterrupt
+        runtime.activeRunId = pendingInterrupt.parentRunId
+        runtime.isSending = false
+        runtime.isStreaming = false
+        runtime.isCompacting = false
+        return
+      }
       if (runtime.activeRunId !== run.id) runtime.lastEventSeq = '0-0'
       runtime.activeRunId = run.id
       runtime.isSending = true
