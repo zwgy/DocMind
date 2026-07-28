@@ -19,7 +19,7 @@ test('context summary renders supplementary attachments without duplicating thei
 })
 
 test('SVG artifacts use the existing image preview path', () => {
-  assert.match(component, /\['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'\]/)
+  assert.match(component, /\(artifact\.name \|\| artifact\.path\)/)
   assert.match(component, /artifactPreview\.kind === 'image'/)
   assert.match(component, /preloadRecentInlineSvgs/)
   assert.match(component, /class="artifact-inline-svg"/)

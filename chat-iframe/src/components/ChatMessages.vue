@@ -157,8 +157,9 @@ function closeImagePreviewOnEscape(event: KeyboardEvent) {
   if (event.key === 'Escape') closeImagePreview()
 }
 
-function artifactKind(path: string): 'image' | 'pdf' | 'text' | null {
-  const extension = path.split('.').pop()?.toLowerCase() || ''
+function artifactKind(artifact: ChatArtifact): 'image' | 'pdf' | 'text' | null {
+  // 交付物 path 可能是虚拟目录或工具回传值；界面类型必须以用户可见文件名为准，读取仍使用 path。
+  const extension = (artifact.name || artifact.path).split('.').pop()?.toLowerCase() || ''
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(extension)) return 'image'
   if (extension === 'pdf') return 'pdf'
   if (['txt', 'md', 'json', 'csv', 'yaml', 'yml', 'xml', 'html', 'log'].includes(extension))
@@ -167,7 +168,7 @@ function artifactKind(path: string): 'image' | 'pdf' | 'text' | null {
 }
 
 function isInlineSvgArtifact(artifact: ChatArtifact) {
-  return artifact.path.toLowerCase().endsWith('.svg')
+  return artifactKind(artifact) === 'image' && artifact.name.toLowerCase().endsWith('.svg')
 }
 
 function inlineSvgKey(artifact: ChatArtifact) {
@@ -214,7 +215,7 @@ function closeArtifactPreview() {
 }
 
 async function previewArtifact(artifact: ChatArtifact) {
-  const kind = artifactKind(artifact.path)
+  const kind = artifactKind(artifact)
   if (!kind || !props.threadId || artifactBusyPath.value) return
   artifactBusyPath.value = artifact.path
   artifactError.value = ''
@@ -605,7 +606,7 @@ onUnmounted(() => {
                   <FileText :size="16" />
                   <span :title="artifact.name">{{ artifact.name }}</span>
                   <button
-                    v-if="artifactKind(artifact.path)"
+                    v-if="artifactKind(artifact)"
                     type="button"
                     :disabled="Boolean(artifactBusyPath)"
                     title="预览交付物"
