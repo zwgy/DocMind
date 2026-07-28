@@ -415,6 +415,12 @@ test('local example starts minimized so users open the assistant explicitly', ()
   assert.match(example, /source_file_id:\s*'202010200206'/)
 })
 
+test('local example bypasses parent SDK responses cached before no-store', () => {
+  const example = readFileSync(join(import.meta.dirname, '../public/example.html'), 'utf8')
+
+  assert.match(example, /docmind-chat-iframe-parent\.js\?v=[\d.]+/)
+})
+
 test('iframe header drag messages move the parent window', () => {
   const { container, iframe, DocMindChatIframe, listeners } = parentHarness()
   const chat = new DocMindChatIframe({
