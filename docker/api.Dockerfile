@@ -74,9 +74,10 @@ RUN npm ci --omit=dev --no-audit --no-fund
 # 先复制 package 目录，因为 pyproject.toml 中 yuxi = { path = "package", editable = true }
 COPY ../backend/package /app/package
 
+# 镜像同时承担远程验收环境；保留 dev 组中的 Ruff，确保测试与 Lint 使用同一依赖快照。
 # 如果网络还是不好，可以在后面添加 --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --group test --no-dev --frozen
+    uv sync --group test --frozen
 
 # 激活虚拟环境并添加到PATH
 ENV PATH="/app/.venv/bin:$PATH"

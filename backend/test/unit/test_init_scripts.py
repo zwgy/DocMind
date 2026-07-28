@@ -100,6 +100,15 @@ def test_node_images_share_version_24_and_keep_required_os_variants():
     assert "corepack pnpm" not in iframe
 
 
+def test_api_image_keeps_container_lint_tooling():
+    """API 镜像是远程验收环境，不能在安装测试依赖时排除 Ruff 所在的 dev 组。"""
+
+    api = (ROOT / "docker" / "api.Dockerfile").read_text(encoding="utf-8")
+
+    assert "uv sync --group test --frozen" in api
+    assert "uv sync --group test --no-dev" not in api
+
+
 def test_frontend_compose_uses_static_runtime_without_hmr():
     """业务联调页面必须走静态服务，避免 HMR 断线后自动整页刷新。"""
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
