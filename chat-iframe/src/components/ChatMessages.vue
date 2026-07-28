@@ -385,7 +385,21 @@ watch([displayItems, showGeneratingStatus, showRunProgress, () => props.compacti
   deep: true
 })
 watch(() => props.threadId, clearInlineSvgUrls, { immediate: true })
-watch(() => props.messages, () => void preloadRecentInlineSvgs(), { deep: true, immediate: true })
+// 交付物会在运行结束后补挂到最终消息；显式跟踪线程、令牌和 SVG 路径，避免仅依赖深层消息对象变更而错过预加载时机。
+watch(
+  [
+    () => props.threadId,
+    () => props.token,
+    () =>
+      props.messages
+        .flatMap((message) => message.artifacts || [])
+        .filter(isInlineSvgArtifact)
+        .map((artifact) => artifact.path)
+        .join('\u0000')
+  ],
+  () => void preloadRecentInlineSvgs(),
+  { immediate: true }
+)
 onUnmounted(() => {
   closeImagePreview()
   closeArtifactPreview()
