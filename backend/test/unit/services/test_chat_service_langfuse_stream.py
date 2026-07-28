@@ -106,6 +106,14 @@ class _FakeConvRepo:
         return []
 
 
+class _FakeDatabase:
+    def __init__(self):
+        self.commit_count = 0
+
+    async def commit(self):
+        self.commit_count += 1
+
+
 @pytest.mark.asyncio
 async def test_stream_agent_chat_passes_langfuse_callbacks_and_persists_trace_info(monkeypatch: pytest.MonkeyPatch):
     calls: dict[str, object] = {}
@@ -178,6 +186,7 @@ async def test_stream_agent_chat_passes_langfuse_callbacks_and_persists_trace_in
     )
     monkeypatch.setattr(svc, "flush_langfuse", lambda: calls.setdefault("flushed", True))
 
+    db = _FakeDatabase()
     chunks = []
     async for chunk in svc.stream_agent_chat(
         query="hello",
@@ -186,7 +195,7 @@ async def test_stream_agent_chat_passes_langfuse_callbacks_and_persists_trace_in
         meta={"request_id": "req-1"},
         image_content=None,
         current_user=SimpleNamespace(id=1, uid="user-1", role="user", department_id="dept-1"),
-        db=object(),
+        db=db,
     ):
         chunks.append(json.loads(chunk.decode("utf-8")))
 
@@ -209,6 +218,7 @@ async def test_stream_agent_chat_passes_langfuse_callbacks_and_persists_trace_in
     assert chunks[-1]["status"] == "finished"
     assert calls["flushed"] is True
     assert isinstance(calls["stream_messages"][0], HumanMessage)
+    assert db.commit_count == 1
 
 
 @pytest.mark.asyncio
@@ -311,6 +321,7 @@ async def test_stream_agent_chat_maps_raw_protocol_events_to_yuxi_stream_events(
     monkeypatch.setattr(svc, "get_trace_info", lambda _run_context: {})
     monkeypatch.setattr(svc, "flush_langfuse", lambda: None)
 
+    db = _FakeDatabase()
     chunks = []
     async for chunk in svc.stream_agent_chat(
         query="hello",
@@ -319,7 +330,7 @@ async def test_stream_agent_chat_maps_raw_protocol_events_to_yuxi_stream_events(
         meta={"request_id": "req-1"},
         image_content=None,
         current_user=SimpleNamespace(id=1, uid="user-1", role="user", department_id="dept-1"),
-        db=object(),
+        db=db,
     ):
         chunks.append(json.loads(chunk.decode("utf-8")))
 
@@ -403,6 +414,7 @@ async def test_stream_agent_chat_emits_realtime_agent_state_from_values(monkeypa
     monkeypatch.setattr(svc, "get_trace_info", lambda _run_context: {})
     monkeypatch.setattr(svc, "flush_langfuse", lambda: None)
 
+    db = _FakeDatabase()
     chunks = []
     async for chunk in svc.stream_agent_chat(
         query="hello",
@@ -411,7 +423,7 @@ async def test_stream_agent_chat_emits_realtime_agent_state_from_values(monkeypa
         meta={"request_id": "req-1"},
         image_content=None,
         current_user=SimpleNamespace(id=1, uid="user-1", role="user", department_id="dept-1"),
-        db=object(),
+        db=db,
     ):
         chunks.append(json.loads(chunk.decode("utf-8")))
 
