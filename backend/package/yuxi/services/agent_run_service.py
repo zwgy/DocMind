@@ -336,8 +336,7 @@ async def create_agent_run(
             detail={"message": "该会话已有运行中的任务", "run_id": active_run.id},
         )
     if resolved_run_type == "chat":
-        get_latest_run = getattr(run_repo, "get_latest_run_by_thread_for_user", None)
-        latest_run = await get_latest_run(thread_id, str(current_uid)) if callable(get_latest_run) else None
+        latest_run = await run_repo.get_latest_run_by_thread_for_user(thread_id, str(current_uid))
         if latest_run and latest_run.status == "interrupted":
             # interrupted 虽是数据库终态，但其 LangGraph checkpoint 仍等待用户输入；
             # 不能让新 chat 或恢复扫描绕过该交互并写入同一线程的后续上下文。
@@ -540,8 +539,7 @@ async def dispatch_next_agent_request(*, thread_id: str, current_uid: str) -> st
         if active_run:
             return None
 
-        get_latest_run = getattr(run_repo, "get_latest_run_by_thread_for_user", None)
-        latest_run = await get_latest_run(thread_id, str(current_uid)) if callable(get_latest_run) else None
+        latest_run = await run_repo.get_latest_run_by_thread_for_user(thread_id, str(current_uid))
         if latest_run and latest_run.status == "interrupted":
             return None
 

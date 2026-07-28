@@ -444,6 +444,10 @@ async def test_create_agent_run_persists_input_before_enqueue(monkeypatch: pytes
             assert checkpoint_thread_id == "thread-1"
             return None
 
+        async def get_latest_run_by_thread_for_user(self, thread_id: str, uid: str):
+            assert (thread_id, uid) == ("thread-1", "user-1")
+            return None
+
         async def create_run(self, **kwargs):
             assert kwargs["request_id"] == "req-1"
             assert kwargs["conversation_id"] == 1
@@ -1359,16 +1363,20 @@ def _patch_common_run_repos(
     monkeypatch.setattr(agent_run_service.agent_manager, "get_agent", lambda backend_id: _FakeBackend())
     monkeypatch.setattr(agent_run_service, "AgentRepository", AgentRepo)
     monkeypatch.setattr(agent_run_service, "ConversationRepository", ConvRepo)
-    if hasattr(run_repo_cls, "get_active_run_by_checkpoint_thread"):
-        run_repo_factory = run_repo_cls
-    else:
+    class RunRepoWithCheckpointGuards(run_repo_cls):
+        async def get_active_run_by_checkpoint_thread(self, checkpoint_thread_id: str):
+            method = getattr(super(), "get_active_run_by_checkpoint_thread", None)
+            if callable(method):
+                return await method(checkpoint_thread_id)
+            return None
 
-        class RunRepoWithActiveCheckpointCheck(run_repo_cls):
-            async def get_active_run_by_checkpoint_thread(self, checkpoint_thread_id: str):
-                del checkpoint_thread_id
-                return None
+        async def get_latest_run_by_thread_for_user(self, thread_id: str, uid: str):
+            method = getattr(super(), "get_latest_run_by_thread_for_user", None)
+            if callable(method):
+                return await method(thread_id, uid)
+            return None
 
-        run_repo_factory = RunRepoWithActiveCheckpointCheck
+    run_repo_factory = RunRepoWithCheckpointGuards
 
     monkeypatch.setattr(agent_run_service, "AgentRunRepository", run_repo_factory)
     monkeypatch.setattr(agent_run_service, "AgentRunRequestRepository", RequestRepo)
