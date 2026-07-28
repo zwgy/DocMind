@@ -632,7 +632,7 @@ import ChunkParamsConfig from '@/components/ChunkParamsConfig.vue'
 import FileDetailModal from '@/components/FileDetailModal.vue'
 import { incomingDocumentApi } from '@/apis/incoming_document_api'
 import { databaseApi, documentApi } from '@/apis/knowledge_api'
-import { buildChunkParamsPayload } from '@/utils/chunk_presets'
+import { buildChunkParamsPayload } from '@/utils/chunkUtils'
 import { getPreviewTypeByPath, normalizePreviewResponse } from '@/utils/file_preview'
 
 const documents = ref([])
