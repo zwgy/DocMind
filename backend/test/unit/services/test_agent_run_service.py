@@ -537,6 +537,7 @@ async def test_create_agent_run_view_enqueues_busy_thread_without_creating_messa
                 agent_id="default",
                 status="queued",
                 dispatched_run_id=None,
+                input_payload={"query": "later question"},
             ),
             True,
         )
@@ -562,6 +563,7 @@ async def test_create_agent_run_view_enqueues_busy_thread_without_creating_messa
         "status": "queued",
         "queued": True,
         "run_id": None,
+        "content": "later question",
     }
     assert len(created_requests) == 1
     assert created_requests[0] | {"db": None} == {
@@ -719,6 +721,7 @@ async def test_get_agent_request_view_returns_only_current_users_request(monkeyp
         agent_id="default",
         status="queued",
         dispatched_run_id=None,
+        input_payload={"query": "later question"},
     )
 
     class RequestRepo:
@@ -743,6 +746,7 @@ async def test_get_agent_request_view_returns_only_current_users_request(monkeyp
             "status": "queued",
             "queued": True,
             "run_id": None,
+            "content": "later question",
         }
     }
 
@@ -755,6 +759,7 @@ async def test_cancel_agent_request_view_cancels_only_queued_request(monkeypatch
         agent_id="default",
         status="queued",
         dispatched_run_id=None,
+        input_payload={"query": "later question"},
     )
     cancelled: list[object] = []
 
@@ -790,6 +795,7 @@ async def test_cancel_agent_request_view_cancels_only_queued_request(monkeypatch
         "status": "cancelled",
         "queued": False,
         "run_id": None,
+        "content": "later question",
     }
     assert cancelled == [request]
     assert db.committed is True

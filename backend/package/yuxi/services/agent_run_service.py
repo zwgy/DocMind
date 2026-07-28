@@ -74,7 +74,8 @@ def _build_run_response(run) -> dict:
 
 
 def _build_agent_request_response(request) -> dict:
-    input_payload = request.input_payload if isinstance(request.input_payload, dict) else {}
+    input_payload = getattr(request, "input_payload", None)
+    input_payload = input_payload if isinstance(input_payload, dict) else {}
     return {
         "request_id": request.request_id,
         "thread_id": request.thread_id,
