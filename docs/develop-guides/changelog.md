@@ -33,6 +33,7 @@
 - 修复小助手交付物与工具状态同步：只有 `present_artifacts` 实际成功登记的路径才会持久化到最终回答，删除按本轮修改时间扫描整个 `outputs` 的推测回填，来文 Markdown 缓存和其他工具文件不再被误显示为“本轮交付物”；补齐 PatchToolCallsMiddleware 合成工具错误的终态流事件，chat-iframe 无需切换会话即可将其显示为失败。提示词同时要求优先使用当前上下文，避免在摘要、结构化结果已足够时重复读取原文。
 - 修复聊天上下文用量展示：进度条统一以模型真实窗口为上限，分项估算不足模型实测用量时以灰色“模型协议/模板校正”补齐，未使用部分保持留白；自动摘要阈值改为独立的“估算”提示；chat-iframe 的用户消息和助手消息复制统一在 Clipboard API 被 HTTP 嵌入页拒绝时降级到原生复制，且仅在实际成功后显示完成状态。
 - 修复 Web 与 chat-iframe 在开发联调时因 Vite HMR WebSocket 短暂失联而整页刷新、丢失内存状态的问题：连接诊断日志确认触发链路后，默认开发 Compose 改为与正式环境共用 Vite 静态构建加 Nginx 托管；chat-iframe 仅在开发 Compose 中只读挂载示例和测试附件，生产镜像继续清理调试资源。前端改动需重建对应服务，后端热重载保持不变。
+- 修复 Web 与 chat-iframe 的 Nginx 在 API 或 iframe 容器重建后继续访问旧容器 IP、导致接口返回 502 的问题：上游改为通过 Docker 内置 DNS 动态解析 Compose 服务名，并使用共享状态区让所有 Nginx worker 同步最新地址。
 - 修复工具元数据加载会错误读取原始 `args_schema` 的问题：展示参数改为使用 LangChain 已排除框架注入参数的 `tool_call_schema`，兼容 Pydantic v1/v2 模型及原生 JSON Schema，避免来文读取工具的 `ToolRuntime` 中 `Callable` 字段中断智能助手对话。
 - 修复本地模型在多次工具调用后空白结束的问题：模型缓存的完整窗口、最低输出预留和安全缓冲会写入 LangChain profile，主 Agent 与子 Agent 在最终请求超出可用输入预算时再压缩，而不是按窗口百分比提前触发；最低输出预留只决定压缩时机，不会截断复杂任务的实际生成，调用方显式设置真实输出上限时会相应扩大预留；OpenAI 兼容服务返回空正文且 `finish_reason=length` 时转为标准上下文溢出并进入恢复流程。来文原文模式不再重复返回整套结构化结果，已知来文与附件 ID 时直接将 Markdown 写入当前线程 outputs，并由 `present_artifacts` 交付，不再为单纯文件交付把全文读入模型上下文。
 - 模型配置弹窗新增仅适用于 Chat 模型的上下文长度（Token）输入与后端取值说明；服务端统一校验为正整数并移除 Embedding、Rerank 的无效上下文配置。远端模型没有返回上下文时，管理员可按 Ollama、GPUStack 等当前推理实例的实际部署上限手动配置。
