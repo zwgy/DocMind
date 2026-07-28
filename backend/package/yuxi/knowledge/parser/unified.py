@@ -19,6 +19,7 @@ from docling.document_converter import DocumentConverter
 from langchain_community.document_loaders import PyPDFLoader
 from markdownify import markdownify as md_convert
 
+from yuxi.knowledge.parser.pdf_preflight import validate_pdf_page_tree_loadable
 from yuxi.knowledge.parser.zip_utils import process_zip_file as _process_zip_file
 from yuxi.storage.minio import get_minio_client
 from yuxi.utils import logger
@@ -344,6 +345,8 @@ async def _process_file_to_markdown_core(
         file_ext = file_path_obj.suffix.lower()
 
         if file_ext == ".pdf":
+            # 页树遍历属于同步文件解析，必须与后续 PDF 解析一样下沉线程，避免大文件阻塞 API 事件循环。
+            await asyncio.to_thread(validate_pdf_page_tree_loadable, file_path_obj)
             text = await parse_pdf_async(str(file_path_obj), params=params)
             result = f"{text}"
 
