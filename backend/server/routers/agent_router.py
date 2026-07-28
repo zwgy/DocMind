@@ -24,6 +24,7 @@ from yuxi.services.agent_run_service import (
     get_agent_run_result_view,
     get_agent_run_view,
     get_agent_request_view,
+    list_queued_agent_requests_view,
     stream_agent_run_events,
 )
 from yuxi.services.agent_eval_run_service import run_agent_eval
@@ -326,6 +327,21 @@ async def cancel_agent_request(
     request_id: str, current_user: User = Depends(get_required_user), db: AsyncSession = Depends(get_db)
 ):
     return await cancel_agent_request_view(request_id=request_id, current_uid=str(current_user.uid), db=db)
+
+
+@agent_router.get("/thread/{thread_id}/requests")
+async def list_queued_agent_requests(
+    thread_id: str,
+    agent_id: str,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await list_queued_agent_requests_view(
+        thread_id=thread_id,
+        agent_id=agent_id,
+        current_uid=str(current_user.uid),
+        db=db,
+    )
 
 
 @agent_router.get("/runs/{run_id}/result")

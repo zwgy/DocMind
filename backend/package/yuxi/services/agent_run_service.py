@@ -570,6 +570,31 @@ async def get_agent_request_view(*, request_id: str, current_uid: str, db: Async
     return {"request": _build_agent_request_response(request)}
 
 
+async def list_queued_agent_requests_view(
+    *, thread_id: str, agent_id: str, current_uid: str, db: AsyncSession
+) -> dict:
+    conversation = await ConversationRepository(db).get_conversation_by_thread_id(thread_id)
+    if not conversation or conversation.uid != str(current_uid) or conversation.status == "deleted":
+        raise HTTPException(status_code=404, detail="对话线程不存在")
+    if conversation.agent_id != agent_id:
+        raise HTTPException(status_code=409, detail="会话线程已绑定其他智能体")
+
+    requests = await AgentRunRequestRepository(db).list_queued_for_thread(
+        thread_id=thread_id,
+        agent_id=agent_id,
+        uid=current_uid,
+    )
+    return {
+        "requests": [
+            {
+                **_build_agent_request_response(request),
+                "queue_position": index,
+            }
+            for index, request in enumerate(requests, start=1)
+        ]
+    }
+
+
 async def cancel_agent_request_view(*, request_id: str, current_uid: str, db: AsyncSession) -> dict:
     request_repo = AgentRunRequestRepository(db)
     request = await request_repo.get_for_user_for_update(request_id=request_id, uid=current_uid)

@@ -796,6 +796,73 @@ async def test_cancel_agent_request_view_cancels_only_queued_request(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_list_queued_agent_requests_view_returns_fifo_positions(monkeypatch: pytest.MonkeyPatch):
+    requests = [
+        SimpleNamespace(
+            request_id="request-1",
+            thread_id="thread-1",
+            agent_id="default",
+            status="queued",
+            dispatched_run_id=None,
+        ),
+        SimpleNamespace(
+            request_id="request-2",
+            thread_id="thread-1",
+            agent_id="default",
+            status="queued",
+            dispatched_run_id=None,
+        ),
+    ]
+
+    class ConvRepo:
+        def __init__(self, db):
+            del db
+
+        async def get_conversation_by_thread_id(self, thread_id: str):
+            assert thread_id == "thread-1"
+            return SimpleNamespace(uid="user-1", status="active", agent_id="default")
+
+    class RequestRepo:
+        def __init__(self, db):
+            del db
+
+        async def list_queued_for_thread(self, **kwargs):
+            assert kwargs == {"thread_id": "thread-1", "agent_id": "default", "uid": "user-1"}
+            return requests
+
+    monkeypatch.setattr(agent_run_service, "ConversationRepository", ConvRepo)
+    monkeypatch.setattr(agent_run_service, "AgentRunRequestRepository", RequestRepo)
+
+    assert await agent_run_service.list_queued_agent_requests_view(
+        thread_id="thread-1",
+        agent_id="default",
+        current_uid="user-1",
+        db=object(),
+    ) == {
+        "requests": [
+            {
+                "request_id": "request-1",
+                "thread_id": "thread-1",
+                "agent_id": "default",
+                "status": "queued",
+                "queued": True,
+                "run_id": None,
+                "queue_position": 1,
+            },
+            {
+                "request_id": "request-2",
+                "thread_id": "thread-1",
+                "agent_id": "default",
+                "status": "queued",
+                "queued": True,
+                "run_id": None,
+                "queue_position": 2,
+            },
+        ]
+    }
+
+
+@pytest.mark.asyncio
 async def test_create_resume_run_marks_input_message_source(monkeypatch: pytest.MonkeyPatch):
     class FakeResult:
         def scalar_one_or_none(self):
