@@ -18,6 +18,7 @@ from yuxi.agents.models import resolve_chat_model_spec
 from yuxi.models.providers.cache import model_cache
 from yuxi.repositories.agent_repository import AgentRepository
 from yuxi.repositories.agent_run_repository import TERMINAL_RUN_STATUSES, AgentRunRepository
+from yuxi.repositories.agent_run_request_repository import AgentRunRequestRepository
 from yuxi.repositories.conversation_repository import ConversationRepository
 from yuxi.services.run_queue_service import (
     build_run_event_envelope,
@@ -69,6 +70,17 @@ def _build_run_response(run) -> dict:
         "status": run.status,
         "request_id": run.request_id,
         "stream_url": f"/api/agent/runs/{run.id}/events",
+    }
+
+
+def _build_agent_request_response(request) -> dict:
+    return {
+        "request_id": request.request_id,
+        "thread_id": request.thread_id,
+        "agent_id": request.agent_id,
+        "status": request.status,
+        "queued": request.status == "queued",
+        "run_id": request.dispatched_run_id,
     }
 
 
@@ -257,6 +269,8 @@ async def create_agent_run(
     parent_agent_run_id: str | None = None,
     checkpoint_thread_id: str | None = None,
     persist_input_message: bool = True,
+    commit: bool = True,
+    allow_queued_request_id: str | None = None,
 ) -> tuple[Any, bool]:
     if not query and resume is None:
         raise HTTPException(status_code=422, detail="query 或 resume 不能为空")
@@ -317,6 +331,16 @@ async def create_agent_run(
             status_code=409,
             detail={"message": "该会话已有运行中的任务", "run_id": active_run.id},
         )
+    if resolved_run_type == "chat" and not allow_queued_request_id:
+        has_queued_request = await AgentRunRequestRepository(db).has_queued_request(
+            thread_id=thread_id,
+            uid=str(current_uid),
+        )
+        if has_queued_request:
+            raise HTTPException(
+                status_code=409,
+                detail={"message": "该会话存在等待执行的请求", "queue_blocked": True},
+            )
 
     run_id = str(uuid.uuid4())
     input_payload = {
@@ -395,8 +419,11 @@ async def create_agent_run(
             db.add(input_message)
             await db.flush()
             await run_repo.set_input_message(run_id, input_message.id)
-        await db.commit()
+        if commit:
+            await db.commit()
     except IntegrityError:
+        if not commit:
+            raise
         await db.rollback()
         existing = await run_repo.get_run_by_request_id(request_id)
         if existing and existing.uid == str(current_uid):
@@ -409,6 +436,112 @@ async def create_agent_run(
 async def enqueue_agent_run(run_id: str) -> None:
     queue = await get_arq_pool()
     await queue.enqueue_job("process_agent_run", run_id, _job_id=f"run:{run_id}")
+
+
+def _is_queueable_run_conflict(exc: HTTPException) -> bool:
+    """Only convert normal single-thread conflicts into an explicit queued request."""
+    if exc.status_code != 409:
+        return False
+    detail = exc.detail
+    return isinstance(detail, dict) and (bool(detail.get("run_id")) or bool(detail.get("queue_blocked")))
+
+
+async def enqueue_agent_request(
+    *,
+    query: str | None,
+    agent_id: str,
+    thread_id: str,
+    meta: dict,
+    image_content: str | None,
+    current_uid: str,
+    db: AsyncSession,
+    model_spec: str | None = None,
+    resume: object | None = None,
+    parent_run_id: str | None = None,
+    resume_request_id: str | None = None,
+) -> tuple[Any, bool]:
+    """Persist a future input without writing a conversation message yet."""
+    request_id = str(resume_request_id or (meta or {}).get("request_id") or uuid.uuid4())
+    request_repo = AgentRunRequestRepository(db)
+    existing = await request_repo.get_by_request_id(request_id)
+    if existing:
+        if existing.uid != str(current_uid):
+            raise HTTPException(status_code=409, detail="request_id 冲突")
+        return existing, False
+
+    # The immediate creation path has already checked agent visibility. Locking the
+    # conversation here keeps the queue write in the same ordering domain as runs.
+    conversation = await ConversationRepository(db).get_conversation_by_thread_id_for_update(thread_id)
+    if not conversation or conversation.uid != str(current_uid) or conversation.status == "deleted":
+        raise HTTPException(status_code=404, detail="对话线程不存在")
+    if conversation.agent_id != agent_id:
+        raise HTTPException(status_code=409, detail="会话线程已绑定其他智能体")
+
+    payload = {
+        "query": query,
+        "agent_id": agent_id,
+        "thread_id": thread_id,
+        "meta": dict(meta or {}),
+        "image_content": image_content,
+        "model_spec": model_spec,
+        "resume": resume,
+        "parent_run_id": parent_run_id,
+        "resume_request_id": resume_request_id,
+    }
+    try:
+        request = await request_repo.create_request(
+            request_id=request_id,
+            thread_id=thread_id,
+            agent_id=agent_id,
+            uid=str(current_uid),
+            input_payload=payload,
+        )
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existing = await request_repo.get_by_request_id(request_id)
+        if existing and existing.uid == str(current_uid):
+            return existing, False
+        raise HTTPException(status_code=409, detail="request_id 冲突")
+    return request, True
+
+
+async def dispatch_next_agent_request(*, thread_id: str, current_uid: str) -> str | None:
+    """Dispatch the FIFO head only after the preceding run completed successfully."""
+    run_id: str | None = None
+    async with pg_manager.get_async_session_context() as db:
+        request_repo = AgentRunRequestRepository(db)
+        request = await request_repo.get_next_queued_for_thread_for_update(thread_id=thread_id, uid=current_uid)
+        if not request:
+            return None
+
+        run_repo = AgentRunRepository(db)
+        active_run = await run_repo.get_active_run_by_checkpoint_thread(thread_id)
+        if active_run:
+            return None
+
+        payload = request.input_payload or {}
+        run, _ = await create_agent_run(
+            query=payload.get("query"),
+            agent_id=request.agent_id,
+            thread_id=request.thread_id,
+            meta=dict(payload.get("meta") or {}),
+            image_content=payload.get("image_content"),
+            current_uid=current_uid,
+            db=db,
+            model_spec=payload.get("model_spec"),
+            resume=payload.get("resume"),
+            parent_run_id=payload.get("parent_run_id"),
+            resume_request_id=payload.get("resume_request_id"),
+            commit=False,
+            allow_queued_request_id=request.request_id,
+        )
+        await request_repo.mark_dispatched(request, run_id=run.id)
+        run_id = run.id
+
+    if run_id:
+        await enqueue_agent_run(run_id)
+    return run_id
 
 
 async def create_agent_run_view(
@@ -424,20 +557,41 @@ async def create_agent_run_view(
     resume: object | None = None,
     parent_run_id: str | None = None,
     resume_request_id: str | None = None,
+    queue_policy: str = "reject",
 ) -> dict:
-    run, created = await create_agent_run(
-        query=query,
-        agent_id=agent_id,
-        thread_id=thread_id,
-        meta=meta,
-        image_content=image_content,
-        current_uid=current_uid,
-        db=db,
-        model_spec=model_spec,
-        resume=resume,
-        parent_run_id=parent_run_id,
-        resume_request_id=resume_request_id,
-    )
+    if queue_policy not in {"enqueue", "reject"}:
+        raise HTTPException(status_code=422, detail="queue_policy 仅支持 enqueue 或 reject")
+    try:
+        run, created = await create_agent_run(
+            query=query,
+            agent_id=agent_id,
+            thread_id=thread_id,
+            meta=meta,
+            image_content=image_content,
+            current_uid=current_uid,
+            db=db,
+            model_spec=model_spec,
+            resume=resume,
+            parent_run_id=parent_run_id,
+            resume_request_id=resume_request_id,
+        )
+    except HTTPException as exc:
+        if queue_policy != "enqueue" or resume is not None or not _is_queueable_run_conflict(exc):
+            raise
+        request, _ = await enqueue_agent_request(
+            query=query,
+            agent_id=agent_id,
+            thread_id=thread_id,
+            meta=meta,
+            image_content=image_content,
+            current_uid=current_uid,
+            db=db,
+            model_spec=model_spec,
+            resume=resume,
+            parent_run_id=parent_run_id,
+            resume_request_id=resume_request_id,
+        )
+        return _build_agent_request_response(request)
     if created:
         await enqueue_agent_run(run.id)
 

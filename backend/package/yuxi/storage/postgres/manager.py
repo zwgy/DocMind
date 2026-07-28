@@ -744,6 +744,22 @@ class PostgresManager(metaclass=SingletonMeta):
             )
             """,
             "ALTER TABLE IF EXISTS agent_runs ADD COLUMN IF NOT EXISTS parent_agent_run_id VARCHAR(64)",
+            """
+            CREATE TABLE IF NOT EXISTS agent_run_requests (
+                id SERIAL PRIMARY KEY,
+                request_id VARCHAR(64) NOT NULL UNIQUE,
+                thread_id VARCHAR(64) NOT NULL,
+                agent_id VARCHAR(64) NOT NULL,
+                uid VARCHAR(64) NOT NULL,
+                queue_policy VARCHAR(16) NOT NULL DEFAULT 'enqueue',
+                status VARCHAR(32) NOT NULL DEFAULT 'queued',
+                input_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                dispatched_run_id VARCHAR(64),
+                error_message TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
             "CREATE INDEX IF NOT EXISTS idx_agent_runs_uid_created ON agent_runs(uid, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_agent_runs_thread_created ON agent_runs(thread_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_agent_runs_status_updated ON agent_runs(status, updated_at)",
@@ -755,6 +771,8 @@ class PostgresManager(metaclass=SingletonMeta):
             CREATE INDEX IF NOT EXISTS idx_agent_runs_subagent_lookup
             ON agent_runs(uid, thread_id, run_type, created_at DESC)
             """,
+            "CREATE INDEX IF NOT EXISTS idx_agent_run_requests_thread_queue ON agent_run_requests(thread_id, uid, status, id)",
+            "CREATE INDEX IF NOT EXISTS idx_agent_run_requests_dispatched_run ON agent_run_requests(dispatched_run_id)",
             "CREATE INDEX IF NOT EXISTS ix_conversations_is_pinned ON conversations(is_pinned)",
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_model_providers_provider_id ON model_providers(provider_id)",
             "CREATE INDEX IF NOT EXISTS ix_model_providers_is_enabled ON model_providers(is_enabled)",

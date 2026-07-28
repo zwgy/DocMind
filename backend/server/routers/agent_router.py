@@ -63,6 +63,7 @@ class AgentRunCreate(BaseModel):
     resume: Any | None = Field(None, description="可选，恢复 interrupted run 的输入")
     parent_run_id: str | None = Field(None, description="可选，被恢复的 run ID")
     resume_request_id: str | None = Field(None, description="可选，resume 幂等键")
+    queue_policy: str = Field("reject", description="会话忙碌时的策略：reject 或 enqueue")
 
 
 class AgentEvaluationContext(BaseModel):
@@ -282,6 +283,7 @@ async def create_agent_run(
         resume=payload.resume,
         parent_run_id=payload.parent_run_id,
         resume_request_id=payload.resume_request_id,
+        queue_policy=payload.queue_policy,
     )
 
 

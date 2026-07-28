@@ -15,6 +15,7 @@ from yuxi.agents.mcp.service import ensure_builtin_mcp_servers_in_db
 from yuxi.agents.skills.service import init_builtin_skills
 from yuxi.config import config as sys_config
 from yuxi.repositories.agent_run_repository import TERMINAL_RUN_STATUSES, AgentRunRepository
+from yuxi.services.agent_run_service import dispatch_next_agent_request
 from yuxi.services.chat_service import stream_agent_chat, stream_agent_resume
 from yuxi.services.run_queue_service import (
     append_run_stream_event,
@@ -378,6 +379,7 @@ async def process_agent_run(ctx, run_id: str):
         thread_id=thread_id,
     )
     terminal_set = False
+    dispatch_next = False
 
     try:
         async with pg_manager.get_async_session_context() as db:
@@ -425,6 +427,7 @@ async def process_agent_run(ctx, run_id: str):
                             await mark_run_terminal(run_id, "completed")
                             await _append_end_event(run_id, "completed", thread_id=thread_id, payload={"chunk": chunk})
                             terminal_set = True
+                            dispatch_next = True
                         elif status == "error":
                             await mark_run_terminal(
                                 run_id,
@@ -474,6 +477,10 @@ async def process_agent_run(ctx, run_id: str):
             finished_chunk = {"status": "finished", "request_id": request_id}
             await mark_run_terminal(run_id, "completed")
             await _append_end_event(run_id, "completed", thread_id=thread_id, payload={"chunk": finished_chunk})
+            dispatch_next = True
+
+        if dispatch_next:
+            await dispatch_next_agent_request(thread_id=thread_id, current_uid=str(uid))
 
     except asyncio.CancelledError:
         await writer.flush()

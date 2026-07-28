@@ -75,6 +75,7 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch, run_obj: SimpleNamespace):
     monkeypatch.setattr(run_worker, "_load_user", fake_load_user)
     monkeypatch.setattr(run_worker, "mark_run_running", fake_noop)
     monkeypatch.setattr(run_worker, "clear_cancel_signal", fake_noop)
+    monkeypatch.setattr(run_worker, "dispatch_next_agent_request", fake_noop)
     monkeypatch.setattr(run_worker, "stream_agent_chat", lambda **kwargs: object())
     monkeypatch.setattr(run_worker.RunContext, "start", fake_noop)
     monkeypatch.setattr(run_worker.RunContext, "close", fake_noop)
@@ -240,6 +241,36 @@ async def test_process_agent_run_passes_iframe_context_to_chat_stream(monkeypatc
     await run_worker.process_agent_run({"job_try": 1}, "run-1")
 
     assert captured["meta"]["iframe_context"] == {"page": {"title": "Detail"}, "files": []}
+
+
+@pytest.mark.asyncio
+async def test_process_agent_run_dispatches_next_request_only_after_completion(monkeypatch: pytest.MonkeyPatch):
+    run_obj = _build_run()
+    _patch_common(monkeypatch, run_obj)
+    dispatches: list[dict] = []
+
+    async def fake_append_event(*_args, **_kwargs):
+        return None
+
+    async def fake_mark_terminal(*_args, **_kwargs):
+        return None
+
+    async def fake_dispatch_next_agent_request(**kwargs):
+        dispatches.append(kwargs)
+        return "run-2"
+
+    monkeypatch.setattr(run_worker, "append_run_event", fake_append_event)
+    monkeypatch.setattr(run_worker, "mark_run_terminal", fake_mark_terminal)
+    monkeypatch.setattr(run_worker, "dispatch_next_agent_request", fake_dispatch_next_agent_request)
+    monkeypatch.setattr(
+        run_worker,
+        "_consume_stream_with_cancel",
+        lambda stream, run_ctx: _BytesAsyncIter([b'{"status":"finished","request_id":"req-1"}\n']),
+    )
+
+    await run_worker.process_agent_run({"job_try": 1}, "run-1")
+
+    assert dispatches == [{"thread_id": "thread-1", "current_uid": "user-1"}]
 
 
 @pytest.mark.asyncio

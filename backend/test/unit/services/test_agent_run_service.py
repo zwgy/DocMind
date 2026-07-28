@@ -511,6 +511,91 @@ async def test_create_agent_run_persists_input_before_enqueue(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
+async def test_create_agent_run_view_enqueues_busy_thread_without_creating_message(monkeypatch: pytest.MonkeyPatch):
+    created_requests: list[dict] = []
+
+    async def fake_create_agent_run(**_kwargs):
+        raise agent_run_service.HTTPException(
+            status_code=409,
+            detail={"message": "该会话已有运行中的任务", "run_id": "run-active"},
+        )
+
+    async def fake_enqueue_agent_request(**kwargs):
+        created_requests.append(kwargs)
+        return (
+            SimpleNamespace(
+                request_id="request-queued",
+                thread_id="thread-1",
+                agent_id="default",
+                status="queued",
+                dispatched_run_id=None,
+            ),
+            True,
+        )
+
+    monkeypatch.setattr(agent_run_service, "create_agent_run", fake_create_agent_run)
+    monkeypatch.setattr(agent_run_service, "enqueue_agent_request", fake_enqueue_agent_request)
+
+    result = await agent_run_service.create_agent_run_view(
+        query="later question",
+        agent_id="default",
+        thread_id="thread-1",
+        meta={"request_id": "request-queued"},
+        image_content=None,
+        current_uid="user-1",
+        db=object(),
+        queue_policy="enqueue",
+    )
+
+    assert result == {
+        "request_id": "request-queued",
+        "thread_id": "thread-1",
+        "agent_id": "default",
+        "status": "queued",
+        "queued": True,
+        "run_id": None,
+    }
+    assert len(created_requests) == 1
+    assert created_requests[0] | {"db": None} == {
+        "query": "later question",
+        "agent_id": "default",
+        "thread_id": "thread-1",
+        "meta": {"request_id": "request-queued"},
+        "image_content": None,
+        "current_uid": "user-1",
+        "db": None,
+        "model_spec": None,
+        "resume": None,
+        "parent_run_id": None,
+        "resume_request_id": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_agent_run_view_keeps_busy_thread_rejection_by_default(monkeypatch: pytest.MonkeyPatch):
+    async def fake_create_agent_run(**_kwargs):
+        raise agent_run_service.HTTPException(
+            status_code=409,
+            detail={"message": "该会话已有运行中的任务", "run_id": "run-active"},
+        )
+
+    monkeypatch.setattr(agent_run_service, "create_agent_run", fake_create_agent_run)
+
+    with pytest.raises(agent_run_service.HTTPException) as exc_info:
+        await agent_run_service.create_agent_run_view(
+            query="later question",
+            agent_id="default",
+            thread_id="thread-1",
+            meta={"request_id": "request-queued"},
+            image_content=None,
+            current_uid="user-1",
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_create_resume_run_marks_input_message_source(monkeypatch: pytest.MonkeyPatch):
     class FakeResult:
         def scalar_one_or_none(self):

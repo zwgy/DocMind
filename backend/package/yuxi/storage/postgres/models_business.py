@@ -806,3 +806,47 @@ class AgentRun(Base):
             "created_at": format_utc_datetime(self.created_at),
             "updated_at": format_utc_datetime(self.updated_at),
         }
+
+
+class AgentRunRequest(Base):
+    """排队中的 Agent 输入请求。
+
+    请求和运行任务分离：只有轮到该请求时才创建 ``AgentRun`` 与用户消息，
+    从而避免后续输入在前一轮尚未结束时进入同一线程的模型上下文。
+    """
+
+    __tablename__ = "agent_run_requests"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_id = Column(String(64), unique=True, index=True, nullable=False, comment="Idempotency request ID")
+    thread_id = Column(String(64), index=True, nullable=False, comment="Conversation thread ID")
+    agent_id = Column(String(64), index=True, nullable=False, comment="Agent ID")
+    uid = Column(String(64), index=True, nullable=False, comment="UID")
+    queue_policy = Column(String(16), nullable=False, default="enqueue", comment="Queue policy")
+    status = Column(
+        String(32),
+        index=True,
+        nullable=False,
+        default="queued",
+        comment="Request status: queued/dispatched/cancelled/failed",
+    )
+    input_payload = Column(JSON, nullable=False, default=dict, comment="Original input payload")
+    dispatched_run_id = Column(String(64), nullable=True, index=True, comment="Created AgentRun ID")
+    error_message = Column(Text, nullable=True, comment="Dispatch error message")
+    created_at = Column(DateTime, default=utc_now_naive, comment="Creation time")
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive, comment="Update time")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "request_id": self.request_id,
+            "thread_id": self.thread_id,
+            "agent_id": self.agent_id,
+            "uid": self.uid,
+            "queue_policy": self.queue_policy,
+            "status": self.status,
+            "dispatched_run_id": self.dispatched_run_id,
+            "error_message": self.error_message,
+            "created_at": format_utc_datetime(self.created_at),
+            "updated_at": format_utc_datetime(self.updated_at),
+        }
