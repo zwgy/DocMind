@@ -30,6 +30,10 @@ def test_business_items_groups_mixed_schemas_and_keeps_all_labeled_fields():
     ]
 
 
+def test_iframe_context_default_budget_is_bounded_for_small_models():
+    assert svc.IFRAME_CONTEXT_TOTAL_CHARS == 3000
+
+
 @pytest.mark.asyncio
 async def test_render_iframe_context_inlines_short_page_and_kb_pointer(tmp_path, monkeypatch):
     monkeypatch.setattr(sandbox_paths.conf, "save_dir", str(tmp_path))

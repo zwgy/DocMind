@@ -406,6 +406,52 @@ def test_final_request_evicts_large_ordinary_tool_result_before_model_call(monke
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_final_request_evicts_large_completed_tool_call_arguments(
+    asynchronous: bool,
+    archive_backend: _ArchiveBackend,
+) -> None:
+    raw_definition = "node definition\n" * 1_000
+    messages = [
+        HumanMessage(content="生成流程图", id="user-current"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-write",
+                    "name": "write_file",
+                    "args": {"file_path": "/outputs/spec.flow.json", "content": raw_definition},
+                }
+            ],
+            id="tool-call",
+        ),
+        ToolMessage(content="文件已写入", tool_call_id="call-write", name="write_file", id="tool-result"),
+    ]
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    captured = {}
+
+    def handler(prepared: ModelRequest):
+        captured["messages"] = prepared.messages
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    async def async_handler(prepared: ModelRequest):
+        return handler(prepared)
+
+    if asynchronous:
+        result = await middleware.awrap_model_call(request, async_handler)
+    else:
+        result = middleware.wrap_model_call(request, handler)
+
+    saved_args = captured["messages"][1].tool_calls[0]["args"]
+    assert "_yuxi_saved_arguments_path" in saved_args
+    assert raw_definition not in str(captured["messages"][1].tool_calls)
+    assert '"content":"node definition\\n' in archive_backend.writes[0][1]
+    assert "context_summary" not in result.command.update
+
+
+@pytest.mark.unit
 def test_final_request_replaces_large_source_window_without_second_offload(monkeypatch) -> None:
     monkeypatch.setattr(
         summary_module,

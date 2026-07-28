@@ -66,6 +66,7 @@ const artifactPreview = ref<{
 } | null>(null)
 const artifactBusyPath = ref('')
 const artifactError = ref('')
+const inlineSvgUrls = ref<Record<string, string>>({})
 const displayItems = computed(() => groupMessageDisplayItems(props.messages))
 const showGeneratingStatus = computed(
   () => props.streaming && props.messages.some((message) => message.role === 'user')
@@ -163,6 +164,48 @@ function artifactKind(path: string): 'image' | 'pdf' | 'text' | null {
   if (['txt', 'md', 'json', 'csv', 'yaml', 'yml', 'xml', 'html', 'log'].includes(extension))
     return 'text'
   return null
+}
+
+function isInlineSvgArtifact(artifact: ChatArtifact) {
+  return artifact.path.toLowerCase().endsWith('.svg')
+}
+
+function inlineSvgKey(artifact: ChatArtifact) {
+  return `${props.threadId}\u0000${artifact.path}`
+}
+
+function inlineSvgUrl(artifact: ChatArtifact) {
+  return inlineSvgUrls.value[inlineSvgKey(artifact)] || ''
+}
+
+function clearInlineSvgUrls() {
+  Object.values(inlineSvgUrls.value).forEach((url) => URL.revokeObjectURL(url))
+  inlineSvgUrls.value = {}
+}
+
+async function preloadRecentInlineSvgs() {
+  const threadId = props.threadId
+  if (!threadId || !props.token) return
+  const artifacts = props.messages
+    .flatMap((message) => message.artifacts || [])
+    .filter(isInlineSvgArtifact)
+    .slice(-3)
+
+  for (const artifact of artifacts) {
+    const key = `${threadId}\u0000${artifact.path}`
+    if (inlineSvgUrls.value[key]) continue
+    try {
+      const response = await fetchThreadArtifact(threadId, artifact.path, props.token)
+      const url = URL.createObjectURL(await response.blob())
+      if (props.threadId !== threadId) {
+        URL.revokeObjectURL(url)
+        return
+      }
+      inlineSvgUrls.value = { ...inlineSvgUrls.value, [key]: url }
+    } catch {
+      // 内联预览失败不应影响交付物下载或现有的弹层预览能力。
+    }
+  }
 }
 
 function closeArtifactPreview() {
@@ -341,9 +384,12 @@ watch([displayItems, showGeneratingStatus, showRunProgress, () => props.compacti
   flush: 'post',
   deep: true
 })
+watch(() => props.threadId, clearInlineSvgUrls, { immediate: true })
+watch(() => props.messages, () => void preloadRecentInlineSvgs(), { deep: true, immediate: true })
 onUnmounted(() => {
   closeImagePreview()
   closeArtifactPreview()
+  clearInlineSvgUrls()
 })
 </script>
 
@@ -550,25 +596,33 @@ onUnmounted(() => {
                 <strong>本轮交付物（{{ item.message.artifacts.length }}）</strong>
               </header>
               <article v-for="artifact in item.message.artifacts" :key="artifact.path">
-                <FileText :size="16" />
-                <span :title="artifact.name">{{ artifact.name }}</span>
-                <button
-                  v-if="artifactKind(artifact.path)"
-                  type="button"
-                  :disabled="Boolean(artifactBusyPath)"
-                  title="预览交付物"
-                  @click="previewArtifact(artifact)"
-                >
-                  <Eye :size="14" />
-                </button>
-                <button
-                  type="button"
-                  :disabled="Boolean(artifactBusyPath)"
-                  title="下载交付物"
-                  @click="downloadArtifact(artifact)"
-                >
-                  <Download :size="14" />
-                </button>
+                <div class="artifact-row">
+                  <FileText :size="16" />
+                  <span :title="artifact.name">{{ artifact.name }}</span>
+                  <button
+                    v-if="artifactKind(artifact.path)"
+                    type="button"
+                    :disabled="Boolean(artifactBusyPath)"
+                    title="预览交付物"
+                    @click="previewArtifact(artifact)"
+                  >
+                    <Eye :size="14" />
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="Boolean(artifactBusyPath)"
+                    title="下载交付物"
+                    @click="downloadArtifact(artifact)"
+                  >
+                    <Download :size="14" />
+                  </button>
+                </div>
+                <img
+                  v-if="inlineSvgUrl(artifact)"
+                  class="artifact-inline-svg"
+                  :src="inlineSvgUrl(artifact)"
+                  :alt="artifact.name"
+                />
               </article>
               <p v-if="artifactError" class="error-hint">{{ artifactError }}</p>
             </section>

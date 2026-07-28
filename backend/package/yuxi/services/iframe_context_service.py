@@ -13,7 +13,10 @@ from yuxi.services.incoming_document_markdown_service import IncomingDocumentMar
 IFRAME_PAGE_INLINE_CHARS = 8000
 IFRAME_PAGE_PREVIEW_CHARS = 2000
 IFRAME_FILE_SUMMARY_CHARS = 1200
-IFRAME_CONTEXT_TOTAL_CHARS = 8000
+# iframe 上下文对每次模型调用都会重复注入；按中文字符估算时，8000 字符已接近
+# 小模型一次可用输入预算的主要部分。保留摘要、附件定位和少量结构化事项即可，完整
+# 原文仍通过受控工具按需读取，避免图表等多工具任务在当前轮次耗尽上下文窗口。
+IFRAME_CONTEXT_TOTAL_CHARS = 3000
 IFRAME_PREPARED_FILE_PATHS_ENABLED = False
 TRUNCATED_NOTICE = "[已截断，更多内容请使用给定工具读取]"
 # 完整提示词骨架集中在一个模板中；代码只准备数据，不再拼接业务展示结构或 Agent 能力说明。

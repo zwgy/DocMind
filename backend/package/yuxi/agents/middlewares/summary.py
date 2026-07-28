@@ -17,7 +17,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain.chat_models import BaseChatModel
 from langchain_core.exceptions import ContextOverflowError
-from langchain_core.messages import AnyMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import get_buffer_string
 from langgraph.types import Command, Overwrite
 
@@ -45,6 +45,7 @@ from yuxi.utils.logging_config import logger
 from yuxi.utils.paths import VIRTUAL_PATH_CONVERSATION_HISTORY
 
 _SOURCE_WINDOW_TOOL_NAMES = frozenset({"read_file", "open_kb_document"})
+_TOOL_CALL_ARGUMENTS_SAVED_KEY = "_yuxi_saved_arguments_path"
 # 管理端可能已经保存旧版或自定义摘要提示词，因此持久事实合并不能只写进默认模板。
 # 固定协议刻意保持很短，避免为了提升摘要质量反而挤占小上下文模型的摘要输入预算。
 _SUMMARY_UPDATE_PROTOCOL = (
@@ -175,6 +176,22 @@ def _planned_tool_receipt(messages: list[AnyMessage], message: ToolMessage) -> T
         _tool_result_path(message.tool_call_id or "unknown", content),
         _tool_result_tokens(message),
     )
+
+
+def _tool_call_arguments_text(tool_call: dict[str, Any]) -> str:
+    """序列化已执行工具的参数，供最终预算收纳后按需追溯。"""
+    return json.dumps(tool_call.get("args") or {}, ensure_ascii=False, default=str, separators=(",", ":"))
+
+
+def _tool_call_arguments_receipt(tool_call: dict[str, Any], path: str) -> dict[str, Any]:
+    """保留工具协议所需的 ID 和名称，只收纳已执行调用的大参数。"""
+    return {
+        **tool_call,
+        "args": {
+            _TOOL_CALL_ARGUMENTS_SAVED_KEY: path,
+            "note": "该工具调用已完成；完整参数已因上下文预算收纳。",
+        },
+    }
 
 
 def _message_content_text(message: AnyMessage) -> str:
@@ -662,6 +679,138 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
             changed = True
         return messages, changed
 
+    def _shrink_completed_tool_call_arguments(
+        self,
+        request: ModelRequest,
+        *,
+        messages: list[AnyMessage],
+        summary: str,
+        budget: ResolvedContextBudget,
+    ) -> tuple[list[AnyMessage], bool]:
+        """收纳已完成调用的大参数，避免 write_file 等工具把当前轮撑满。
+
+        当前轮不能整体归档，否则会破坏 assistant tool_call 与 ToolMessage 的配对协议。
+        但只要相同 call ID 已有工具结果，历史参数已不再参与执行；保留 ID、工具名和
+        可读取的收纳路径即可让后续模型理解这次调用，同时释放写入大 JSON/CSV 的空间。
+        """
+        messages = list(messages)
+        changed = False
+        backend = None
+        failed: set[tuple[int, int]] = set()
+        completed_call_ids = {
+            str(message.tool_call_id)
+            for message in messages
+            if isinstance(message, ToolMessage) and message.tool_call_id
+        }
+
+        while True:
+            prepared = self._request_with_summary(request, messages=messages, summary=summary)
+            if self._request_tokens(prepared) <= budget.prompt_budget:
+                return messages, changed
+
+            candidates: list[tuple[int, int, int, AIMessage, str, str, AIMessage]] = []
+            for message_index, message in enumerate(messages):
+                if not isinstance(message, AIMessage):
+                    continue
+                tool_calls = list(message.tool_calls or [])
+                for call_index, tool_call in enumerate(tool_calls):
+                    if (message_index, call_index) in failed or not isinstance(tool_call, dict):
+                        continue
+                    call_id = str(tool_call.get("id") or "").strip()
+                    args = tool_call.get("args")
+                    if (
+                        not call_id
+                        or call_id not in completed_call_ids
+                        or not isinstance(args, dict)
+                        or _TOOL_CALL_ARGUMENTS_SAVED_KEY in args
+                    ):
+                        continue
+                    content = _tool_call_arguments_text(tool_call)
+                    path = _tool_result_path(f"{call_id}-arguments", content)
+                    replaced_calls = list(tool_calls)
+                    replaced_calls[call_index] = _tool_call_arguments_receipt(tool_call, path)
+                    replacement = message.model_copy(update={"tool_calls": replaced_calls})
+                    reduction = estimate_messages_tokens([message]) - estimate_messages_tokens([replacement])
+                    if reduction > 0:
+                        candidates.append(
+                            (reduction, message_index, call_index, message, content, path, replacement)
+                        )
+
+            if not candidates:
+                return messages, changed
+
+            _, message_index, call_index, _, content, path, replacement = max(candidates, key=lambda item: item[0])
+            if backend is None:
+                backend = create_agent_composite_backend(request.runtime)
+            if not write_text_idempotently(backend, path, content):
+                failed.add((message_index, call_index))
+                continue
+            messages[message_index] = replacement
+            changed = True
+
+    async def _ashrink_completed_tool_call_arguments(
+        self,
+        request: ModelRequest,
+        *,
+        messages: list[AnyMessage],
+        summary: str,
+        budget: ResolvedContextBudget,
+    ) -> tuple[list[AnyMessage], bool]:
+        messages = list(messages)
+        changed = False
+        backend = None
+        failed: set[tuple[int, int]] = set()
+        completed_call_ids = {
+            str(message.tool_call_id)
+            for message in messages
+            if isinstance(message, ToolMessage) and message.tool_call_id
+        }
+
+        while True:
+            prepared = self._request_with_summary(request, messages=messages, summary=summary)
+            if self._request_tokens(prepared) <= budget.prompt_budget:
+                return messages, changed
+
+            candidates: list[tuple[int, int, int, AIMessage, str, str, AIMessage]] = []
+            for message_index, message in enumerate(messages):
+                if not isinstance(message, AIMessage):
+                    continue
+                tool_calls = list(message.tool_calls or [])
+                for call_index, tool_call in enumerate(tool_calls):
+                    if (message_index, call_index) in failed or not isinstance(tool_call, dict):
+                        continue
+                    call_id = str(tool_call.get("id") or "").strip()
+                    args = tool_call.get("args")
+                    if (
+                        not call_id
+                        or call_id not in completed_call_ids
+                        or not isinstance(args, dict)
+                        or _TOOL_CALL_ARGUMENTS_SAVED_KEY in args
+                    ):
+                        continue
+                    content = _tool_call_arguments_text(tool_call)
+                    path = _tool_result_path(f"{call_id}-arguments", content)
+                    replaced_calls = list(tool_calls)
+                    replaced_calls[call_index] = _tool_call_arguments_receipt(tool_call, path)
+                    replacement = message.model_copy(update={"tool_calls": replaced_calls})
+                    reduction = estimate_messages_tokens([message]) - estimate_messages_tokens([replacement])
+                    if reduction > 0:
+                        candidates.append(
+                            (reduction, message_index, call_index, message, content, path, replacement)
+                        )
+
+            if not candidates:
+                return messages, changed
+
+            _, message_index, call_index, _, content, path, replacement = max(candidates, key=lambda item: item[0])
+            if backend is None:
+                backend = create_agent_composite_backend(request.runtime)
+            if not await awrite_text_idempotently(backend, path, content):
+                failed.add((message_index, call_index))
+                continue
+            messages[message_index] = replacement
+            changed = True
+
     def _build_plan(
         self,
         request: ModelRequest,
@@ -679,9 +828,15 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
             summary=summary,
             budget=budget,
         )
+        survivors, tool_arguments_shrunk = self._shrink_completed_tool_call_arguments(
+            request,
+            messages=survivors,
+            summary=summary,
+            budget=budget,
+        )
         prepared = self._request_with_summary(request, messages=survivors, summary=summary)
         if self._request_tokens(prepared) <= budget.prompt_budget and not force_compaction:
-            if not (input_externalized or tool_results_shrunk):
+            if not (input_externalized or tool_results_shrunk or tool_arguments_shrunk):
                 return None
             return {
                 "request": prepared,
@@ -784,9 +939,15 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
             summary=summary,
             budget=budget,
         )
+        survivors, tool_arguments_shrunk = await self._ashrink_completed_tool_call_arguments(
+            request,
+            messages=survivors,
+            summary=summary,
+            budget=budget,
+        )
         prepared = self._request_with_summary(request, messages=survivors, summary=summary)
         if self._request_tokens(prepared) <= budget.prompt_budget and not force_compaction:
-            if not (input_externalized or tool_results_shrunk):
+            if not (input_externalized or tool_results_shrunk or tool_arguments_shrunk):
                 return None
             return {
                 "request": prepared,
