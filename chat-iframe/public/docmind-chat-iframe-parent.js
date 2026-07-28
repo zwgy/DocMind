@@ -25,6 +25,14 @@
     return source ? source.replace(/\/[^/?#]+(?:[?#].*)?$/, '/') : '/chat-iframe/'
   }
 
+  function iframeEntryUrl(iframeSrc) {
+    var source = stripText(iframeSrc)
+    if (!source) return source
+    // 部分嵌入式浏览器会复用固定 URL 的旧子框架文档，即使入口响应声明 no-store；
+    // 只刷新入口 HTML，内部带内容哈希的静态资源仍可正常使用长期缓存。
+    return source + (source.indexOf('?') === -1 ? '?' : '&') + '_docmind_instance=' + Date.now()
+  }
+
   function resolveTargetOrigin(iframeSrc) {
     return originFromUrl(iframeSrc) || originFromUrl(global.location && global.location.href) || '*'
   }
@@ -137,7 +145,7 @@
     this.container.innerHTML = this._html()
     document.body.appendChild(this.container)
     this.iframe = this.container.querySelector('iframe')
-    this.iframe.src = this.options.iframeSrc
+    this.iframe.src = iframeEntryUrl(this.options.iframeSrc)
     this._bindEvents()
     this._setWindowState(this.windowState, false)
     return this

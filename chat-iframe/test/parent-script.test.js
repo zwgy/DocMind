@@ -146,7 +146,10 @@ test('derives the default iframe URL from the parent script URL', () => {
   })
   const chat = new DocMindChatIframe()
 
-  assert.equal(iframe.src, 'https://docmind.example.com/chat-iframe/')
+  assert.match(
+    iframe.src,
+    /^https:\/\/docmind\.example\.com\/chat-iframe\/\?_docmind_instance=\d+$/
+  )
   assert.equal(chat.apiBaseUrl, 'https://docmind.example.com')
   assert.equal(chat.targetOrigin, 'https://docmind.example.com')
   chat.destroy()
