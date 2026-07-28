@@ -673,6 +673,47 @@ async def test_dispatch_next_agent_request_creates_run_then_marks_request_dispat
 
 
 @pytest.mark.asyncio
+async def test_dispatch_next_agent_request_keeps_queue_paused_for_interrupted_run(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    queued_request = SimpleNamespace(request_id="request-queued", thread_id="thread-1", uid="user-1")
+
+    @asynccontextmanager
+    async def fake_session_ctx():
+        yield object()
+
+    class RequestRepo:
+        def __init__(self, db):
+            del db
+
+        async def get_next_queued_for_thread_for_update(self, **kwargs):
+            assert kwargs == {"thread_id": "thread-1", "uid": "user-1"}
+            return queued_request
+
+    class RunRepo:
+        def __init__(self, db):
+            del db
+
+        async def get_active_run_by_checkpoint_thread(self, thread_id: str):
+            assert thread_id == "thread-1"
+            return None
+
+        async def get_latest_run_by_thread_for_user(self, thread_id: str, uid: str):
+            assert (thread_id, uid) == ("thread-1", "user-1")
+            return SimpleNamespace(id="run-interrupted", status="interrupted")
+
+    async def fail_create_agent_run(**_kwargs):
+        raise AssertionError("interrupted thread must not dispatch queued input")
+
+    monkeypatch.setattr(agent_run_service.pg_manager, "get_async_session_context", fake_session_ctx)
+    monkeypatch.setattr(agent_run_service, "AgentRunRequestRepository", RequestRepo)
+    monkeypatch.setattr(agent_run_service, "AgentRunRepository", RunRepo)
+    monkeypatch.setattr(agent_run_service, "create_agent_run", fail_create_agent_run)
+
+    assert await agent_run_service.dispatch_next_agent_request(thread_id="thread-1", current_uid="user-1") is None
+
+
+@pytest.mark.asyncio
 async def test_recover_pending_agent_requests_requeues_runs_and_ready_queue_heads(monkeypatch: pytest.MonkeyPatch):
     recovered_run_ids: list[str] = []
     dispatched_thread_keys: list[tuple[str, str]] = []
@@ -1367,6 +1408,46 @@ async def test_create_agent_run_rejects_second_active_checkpoint_thread(monkeypa
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["run_id"] == "running-run"
+
+
+@pytest.mark.asyncio
+async def test_create_agent_run_rejects_new_chat_while_checkpoint_is_interrupted(monkeypatch: pytest.MonkeyPatch):
+    class RunRepo:
+        def __init__(self, db_session):
+            del db_session
+
+        async def get_run_by_request_id(self, request_id: str):
+            assert request_id == "new-request"
+            return None
+
+        async def get_active_run_by_checkpoint_thread(self, checkpoint_thread_id: str):
+            assert checkpoint_thread_id == "thread-1"
+            return None
+
+        async def get_latest_run_by_thread_for_user(self, thread_id: str, uid: str):
+            assert (thread_id, uid) == ("thread-1", "user-1")
+            return SimpleNamespace(id="interrupted-run", status="interrupted")
+
+        async def create_run(self, **_kwargs):
+            raise AssertionError("interrupted checkpoint must be resumed before creating a chat run")
+
+    db = _patch_common_run_repos(monkeypatch, RunRepo)
+
+    with pytest.raises(agent_run_service.HTTPException) as exc_info:
+        await agent_run_service.create_agent_run_view(
+            query="hello",
+            agent_id="default",
+            thread_id="thread-1",
+            meta={"request_id": "new-request"},
+            image_content=None,
+            current_uid="user-1",
+            db=db,
+            queue_policy="enqueue",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["run_interrupted"] is True
+    assert exc_info.value.detail["run_id"] == "interrupted-run"
 
 
 @pytest.mark.asyncio

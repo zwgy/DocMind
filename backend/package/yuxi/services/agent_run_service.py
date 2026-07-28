@@ -335,6 +335,20 @@ async def create_agent_run(
             status_code=409,
             detail={"message": "该会话已有运行中的任务", "run_id": active_run.id},
         )
+    if resolved_run_type == "chat":
+        get_latest_run = getattr(run_repo, "get_latest_run_by_thread_for_user", None)
+        latest_run = await get_latest_run(thread_id, str(current_uid)) if callable(get_latest_run) else None
+        if latest_run and latest_run.status == "interrupted":
+            # interrupted 虽是数据库终态，但其 LangGraph checkpoint 仍等待用户输入；
+            # 不能让新 chat 或恢复扫描绕过该交互并写入同一线程的后续上下文。
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "该会话正在等待用户回答或审批",
+                    "run_id": latest_run.id,
+                    "run_interrupted": True,
+                },
+            )
     if resolved_run_type == "chat" and not allow_queued_request_id:
         has_queued_request = await AgentRunRequestRepository(db).has_queued_request(
             thread_id=thread_id,
@@ -447,6 +461,8 @@ def _is_queueable_run_conflict(exc: HTTPException) -> bool:
     if exc.status_code != 409:
         return False
     detail = exc.detail
+    if isinstance(detail, dict) and detail.get("run_interrupted"):
+        return False
     return isinstance(detail, dict) and (bool(detail.get("run_id")) or bool(detail.get("queue_blocked")))
 
 
@@ -522,6 +538,11 @@ async def dispatch_next_agent_request(*, thread_id: str, current_uid: str) -> st
         run_repo = AgentRunRepository(db)
         active_run = await run_repo.get_active_run_by_checkpoint_thread(thread_id)
         if active_run:
+            return None
+
+        get_latest_run = getattr(run_repo, "get_latest_run_by_thread_for_user", None)
+        latest_run = await get_latest_run(thread_id, str(current_uid)) if callable(get_latest_run) else None
+        if latest_run and latest_run.status == "interrupted":
             return None
 
         payload = request.input_payload or {}
