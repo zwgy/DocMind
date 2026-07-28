@@ -248,37 +248,37 @@ uv run pytest backend/test/services/test_agent_run_service.py
 
 - 新增：`backend/package/yuxi/services/iframe_context_service.py`
 - 修改：`backend/package/yuxi/services/chat_service.py`
-- 测试：`backend/test/services/test_iframe_context_service.py`
+- 测试：`backend/test/unit/services/test_iframe_context_service.py`
 
 **实施：**
 
-- [ ] 新建 `render_iframe_context_prompt(thread_id, uid, iframe_context)`。
-- [ ] 页面处理规则：
+- [x] 新建 `render_iframe_context_prompt(thread_id, uid, iframe_context)`。
+- [x] 页面处理规则：
   - 优先用 `page.text`。
   - 没有 `text` 且有 `html` 时，把 HTML 写入临时 `.html`，调用 `Parser.aparse()` 转 markdown。
-  - markdown 长度不超过 `IFRAME_PAGE_INLINE_CHARS = 8000` 时直接内联。
-  - 超过时写入 `{save_dir}/threads/{thread_id}/user-data/uploads/iframe-context/page.md`。
+  - 页面区段能够完整放入实际剩余预算时直接内联。
+  - 无法完整放入时写入 `{save_dir}/threads/{thread_id}/user-data/uploads/iframe-context/page.md`。
   - 对模型暴露路径 `/home/gem/user-data/uploads/iframe-context/page.md`。
-- [ ] system prompt 预览限制：
+- [x] system prompt 使用单一总预算：
 
 ```python
-IFRAME_PAGE_PREVIEW_CHARS = 2000
-IFRAME_FILE_SUMMARY_CHARS = 1200
-IFRAME_CONTEXT_TOTAL_CHARS = 8000
+IFRAME_CONTEXT_TOTAL_CHARS = 4000
 ```
 
-- [ ] 所有截断文本后追加：
+- [x] 附件摘要、结构化结果和页面使用分区配额；先保留附件定位及结构化信息，页面预览自动使用剩余空间，不再对最终完整提示词做尾部截断。
+- [x] 区段内发生截断时追加：
 
 ```text
 [已截断，更多内容请使用给定工具读取]
 ```
 
-- [ ] `chat_service.stream_agent_chat()` 和 `agent_chat()` 在 `_apply_model_override()` 后调用 renderer，把返回文本追加到 `input_context["system_prompt"]`。
+- [x] `chat_service.stream_agent_chat()` 和 `agent_chat()` 在 `_apply_model_override()` 后调用 renderer，把返回文本追加到 `input_context["system_prompt"]`。
 
 **验收：**
 
-- 短网页进入 system prompt。
-- 长网页落盘，system prompt 只包含预览和 `read_file` 路径。
+- 能够放入页面区段预算的网页进入 system prompt。
+- 无法放入页面区段预算的网页落盘，system prompt 只包含预览和 `read_file` 路径。
+- 页面、附件摘要和结构化结果同时存在时，三类信息均保留且总长度不超过 4000 字符。
 - 没有 page/files 时不改变 system prompt。
 - renderer 不写普通聊天附件状态，不污染附件列表。
 
@@ -293,16 +293,16 @@ uv run pytest backend/test/services/test_iframe_context_service.py
 **文件：**
 
 - 修改：`backend/package/yuxi/services/iframe_context_service.py`
-- 测试：`backend/test/services/test_iframe_context_service.py`
+- 测试：`backend/test/unit/services/test_iframe_context_service.py`
 
 **实施：**
 
-- [ ] 对每个 `iframe_context.files` 渲染明确状态。
-- [ ] `summary_ready`：渲染摘要，并给 `open_kb_document(kb_id, file_id)`。
-- [ ] `matched + hasParsedMarkdown=true`：不要求摘要，直接给 `open_kb_document(kb_id, file_id)`。
-- [ ] `pending_sync/ingesting/parsing`：提示附件未就绪，不给读取工具，不允许模型猜。
-- [ ] `multiple`：提示匹配到多个候选，需要用户或系统明确文件。
-- [ ] 单文件摘要超过 1200 字截断；总上下文超过 8000 字整体截断。
+- [x] 对每个 `iframe_context.files` 渲染明确状态。
+- [x] `summary_ready`：渲染摘要和已验证的知识库定位参数。
+- [x] `matched + hasParsedMarkdown=true`：无摘要时显示已解析状态，并保留可用的定位参数。
+- [x] `pending_sync/ingesting/parsing`：提示附件未就绪，不给读取路径，不允许模型猜。
+- [x] `multiple`：提示匹配到多个候选，需要用户或系统明确文件。
+- [x] 所有附件摘要公平共享附件区段预算，结构化结果使用独立区段；最终上下文只受 `IFRAME_CONTEXT_TOTAL_CHARS` 单一总预算控制。
 
 **状态文案示例：**
 

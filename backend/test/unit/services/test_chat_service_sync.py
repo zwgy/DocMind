@@ -189,6 +189,7 @@ async def test_save_messages_persists_successfully_registered_artifacts_on_final
             return SimpleNamespace(
                 values={
                     "messages": [
+                        {"id": "human-current", "type": "human", "content": "请生成报告"},
                         {
                             "id": "ai-artifacts",
                             "type": "ai",

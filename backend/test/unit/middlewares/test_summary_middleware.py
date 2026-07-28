@@ -452,6 +452,46 @@ async def test_final_request_evicts_large_completed_tool_call_arguments(
 
 
 @pytest.mark.unit
+def test_completed_tool_call_argument_candidate_prefers_largest_reduction() -> None:
+    messages = [
+        HumanMessage(content="生成两个文件", id="user-current"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-large",
+                    "name": "write_file",
+                    "args": {"file_path": "/outputs/large.txt", "content": "large\n" * 2_000},
+                },
+                {
+                    "id": "call-small",
+                    "name": "write_file",
+                    "args": {"file_path": "/outputs/small.txt", "content": "small\n" * 500},
+                },
+            ],
+            id="tool-calls",
+        ),
+        ToolMessage(content="大文件已写入", tool_call_id="call-large", name="write_file"),
+        ToolMessage(content="小文件已写入", tool_call_id="call-small", name="write_file"),
+    ]
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    candidate = middleware._next_completed_tool_call_arguments_candidate(
+        request,
+        messages=messages,
+        summary="",
+        budget=resolve_context_budget(request),
+        failed=set(),
+    )
+
+    assert candidate is not None
+    assert candidate["call_index"] == 0
+    assert candidate["path"].endswith(".txt")
+    assert '"content":"large\\n' in candidate["content"]
+
+
+@pytest.mark.unit
 def test_final_request_replaces_large_source_window_without_second_offload(monkeypatch) -> None:
     monkeypatch.setattr(
         summary_module,

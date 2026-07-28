@@ -20,7 +20,7 @@
 - 准备 3 个真实附件：
   - `关于做好2026年度供电6C系统评定工作的通知.doc`：主文件，source_file_id 为 `202607080359`。
   - `附件1：2026年上海局供电6C评定实施方案.docx`：附件，source_file_id 为 `202607080360`。
-  - `incoming-web-page-long.html` 或一段超过 8000 字的网页正文，用于验证网页 `read_file`。
+  - `incoming-web-page-long.html` 或一段无法完整放入页面区段预算的网页正文，用于验证网页 `read_file`。
 
 ## 认证准备
 
@@ -315,13 +315,13 @@ https://你的域名/chat-iframe/example.html?source_system=oa&function_id=e2eIn
 
 ### 3.4 网页上下文 read_file
 
-准备一个超过 8000 字的页面正文。可在 `example.html` 的正文区域插入长文本，或通过父脚本调用：
+准备一个无法完整放入 iframe 提示词剩余预算的页面正文。可在 `example.html` 的正文区域插入长文本，或通过父脚本调用：
 
 ```js
 chat.setPageContent({
   title: '长网页测试',
   url: location.href,
-  text: '超过 8000 字的网页正文...'
+  text: '无法完整放入页面区段预算的网页正文...'
 })
 ```
 
@@ -337,8 +337,8 @@ chat.setPageContent({
 
 通过标准：
 
-- 对短网页，系统提示直接内联页面内容。
-- 对长网页，系统提示只给预览，并提示：
+- 对能够完整放入页面区段预算的短网页，系统提示直接内联页面内容。
+- 对无法完整放入页面区段预算的网页，系统提示只给预览，并提示：
 
 ```text
 完整网页内容请使用 read_file 读取：/.../uploads/iframe-context/page.md
@@ -437,8 +437,8 @@ curl "$DOCMIND_API/chat/threads?limit=50&offset=0&conversation_scope_key=oa:e2eI
 | E2E-06 | 解析中问答 | 任务未 ready 时提问 | 回答提示等待解析，不编造 |
 | E2E-07 | ready 摘要问答 | 附件 ready 后提问概述 | 回答使用摘要和结构化信息 |
 | E2E-08 | 附件细节追问 | 问摘要不足的细节 | 触发 `read_file` 或 `open_kb_document` |
-| E2E-09 | 网页短上下文 | 页面正文短于 8000 字 | 直接按网页内容回答 |
-| E2E-10 | 网页长上下文 | 页面正文长于 8000 字 | 追问细节触发 `read_file page.md` |
+| E2E-09 | 网页短上下文 | 页面正文能够完整放入页面区段预算 | 直接按网页内容回答 |
+| E2E-10 | 网页长上下文 | 页面正文无法完整放入附件和结构化信息之后的剩余预算 | 追问细节触发 `read_file page.md` |
 | E2E-11 | 会话隔离 | 切换不同 `business_id` | 会话列表不串 |
 | E2E-12 | 来文入知识库 | 管理页点击存入知识库 | 入库完成后回写 `linkedKbId/linkedFileId` |
 | E2E-13 | 知识库普通上传 | 直接在知识库上传文件 | 不触发业务结构化抽取 |
@@ -482,7 +482,7 @@ Tasker 可观察：
 | 状态 ready 但无摘要 | 模型配置是否可用，查看 `processing_error` |
 | 业务抽取无结果 | 文档是否命中分类；业务抽取失败不会阻断来文 ready，需看后端 warning |
 | 追问细节不读文件 | iframe 上下文是否包含 `全文读取` 行，模型是否启用了 `read_file` 工具 |
-| 网页长文本没生成 page.md | `page.text/html` 是否真正超过 `IFRAME_PAGE_INLINE_CHARS = 8000` |
+| 网页长文本没生成 page.md | 渲染后的页面区段是否确实超过附件与结构化信息之后的剩余预算 |
 | 会话列表串业务 | URL 参数 `source_system/function_id/business_id` 是否缺失或相同 |
 
 ## 上线前结论标准

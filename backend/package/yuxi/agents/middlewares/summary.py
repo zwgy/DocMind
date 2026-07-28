@@ -79,6 +79,15 @@ class _CompactionPlan(TypedDict):
     summary_quality: str
 
 
+class _ToolCallArgumentsArchiveCandidate(TypedDict):
+    reduction: int
+    message_index: int
+    call_index: int
+    content: str
+    path: str
+    replacement: AIMessage
+
+
 def _message_identifier(message: AnyMessage, fallback_index: int) -> str:
     identifier = getattr(message, "id", None)
     if isinstance(identifier, str) and identifier:
@@ -679,6 +688,65 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
             changed = True
         return messages, changed
 
+    def _next_completed_tool_call_arguments_candidate(
+        self,
+        request: ModelRequest,
+        *,
+        messages: list[AnyMessage],
+        summary: str,
+        budget: ResolvedContextBudget,
+        failed: set[tuple[int, int]],
+    ) -> _ToolCallArgumentsArchiveCandidate | None:
+        prepared = self._request_with_summary(request, messages=messages, summary=summary)
+        if self._request_tokens(prepared) <= budget.prompt_budget:
+            return None
+
+        completed_call_ids = {
+            str(message.tool_call_id)
+            for message in messages
+            if isinstance(message, ToolMessage) and message.tool_call_id
+        }
+        candidates: list[_ToolCallArgumentsArchiveCandidate] = []
+        for message_index, message in enumerate(messages):
+            if not isinstance(message, AIMessage):
+                continue
+            tool_calls = list(message.tool_calls or [])
+            for call_index, tool_call in enumerate(tool_calls):
+                if (message_index, call_index) in failed or not isinstance(tool_call, dict):
+                    continue
+                call_id = str(tool_call.get("id") or "").strip()
+                args = tool_call.get("args")
+                if (
+                    not call_id
+                    or call_id not in completed_call_ids
+                    or not isinstance(args, dict)
+                    or _TOOL_CALL_ARGUMENTS_SAVED_KEY in args
+                ):
+                    continue
+                content = _tool_call_arguments_text(tool_call)
+                path = _tool_result_path(f"{call_id}-arguments", content)
+                replaced_calls = list(tool_calls)
+                replaced_calls[call_index] = _tool_call_arguments_receipt(tool_call, path)
+                replacement = message.model_copy(update={"tool_calls": replaced_calls})
+                reduction = estimate_messages_tokens([message]) - estimate_messages_tokens([replacement])
+                if reduction > 0:
+                    candidates.append(
+                        {
+                            "reduction": reduction,
+                            "message_index": message_index,
+                            "call_index": call_index,
+                            "content": content,
+                            "path": path,
+                            "replacement": replacement,
+                        }
+                    )
+
+        if not candidates:
+            return None
+        # 同步和异步入口必须使用完全相同的收益排序，否则同一段历史可能因调用方式不同
+        # 生成不同的归档路径和活动上下文；这里只做确定性的候选选择，不执行任何 IO。
+        return max(candidates, key=lambda item: item["reduction"])
+
     def _shrink_completed_tool_call_arguments(
         self,
         request: ModelRequest,
@@ -697,55 +765,23 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         changed = False
         backend = None
         failed: set[tuple[int, int]] = set()
-        completed_call_ids = {
-            str(message.tool_call_id)
-            for message in messages
-            if isinstance(message, ToolMessage) and message.tool_call_id
-        }
 
         while True:
-            prepared = self._request_with_summary(request, messages=messages, summary=summary)
-            if self._request_tokens(prepared) <= budget.prompt_budget:
+            candidate = self._next_completed_tool_call_arguments_candidate(
+                request,
+                messages=messages,
+                summary=summary,
+                budget=budget,
+                failed=failed,
+            )
+            if candidate is None:
                 return messages, changed
-
-            candidates: list[tuple[int, int, int, AIMessage, str, str, AIMessage]] = []
-            for message_index, message in enumerate(messages):
-                if not isinstance(message, AIMessage):
-                    continue
-                tool_calls = list(message.tool_calls or [])
-                for call_index, tool_call in enumerate(tool_calls):
-                    if (message_index, call_index) in failed or not isinstance(tool_call, dict):
-                        continue
-                    call_id = str(tool_call.get("id") or "").strip()
-                    args = tool_call.get("args")
-                    if (
-                        not call_id
-                        or call_id not in completed_call_ids
-                        or not isinstance(args, dict)
-                        or _TOOL_CALL_ARGUMENTS_SAVED_KEY in args
-                    ):
-                        continue
-                    content = _tool_call_arguments_text(tool_call)
-                    path = _tool_result_path(f"{call_id}-arguments", content)
-                    replaced_calls = list(tool_calls)
-                    replaced_calls[call_index] = _tool_call_arguments_receipt(tool_call, path)
-                    replacement = message.model_copy(update={"tool_calls": replaced_calls})
-                    reduction = estimate_messages_tokens([message]) - estimate_messages_tokens([replacement])
-                    if reduction > 0:
-                        candidates.append(
-                            (reduction, message_index, call_index, message, content, path, replacement)
-                        )
-
-            if not candidates:
-                return messages, changed
-
-            _, message_index, call_index, _, content, path, replacement = max(candidates, key=lambda item: item[0])
             if backend is None:
                 backend = create_agent_composite_backend(request.runtime)
-            if not write_text_idempotently(backend, path, content):
-                failed.add((message_index, call_index))
+            if not write_text_idempotently(backend, candidate["path"], candidate["content"]):
+                failed.add((candidate["message_index"], candidate["call_index"]))
                 continue
-            messages[message_index] = replacement
+            messages[candidate["message_index"]] = candidate["replacement"]
             changed = True
 
     async def _ashrink_completed_tool_call_arguments(
@@ -760,55 +796,23 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         changed = False
         backend = None
         failed: set[tuple[int, int]] = set()
-        completed_call_ids = {
-            str(message.tool_call_id)
-            for message in messages
-            if isinstance(message, ToolMessage) and message.tool_call_id
-        }
 
         while True:
-            prepared = self._request_with_summary(request, messages=messages, summary=summary)
-            if self._request_tokens(prepared) <= budget.prompt_budget:
+            candidate = self._next_completed_tool_call_arguments_candidate(
+                request,
+                messages=messages,
+                summary=summary,
+                budget=budget,
+                failed=failed,
+            )
+            if candidate is None:
                 return messages, changed
-
-            candidates: list[tuple[int, int, int, AIMessage, str, str, AIMessage]] = []
-            for message_index, message in enumerate(messages):
-                if not isinstance(message, AIMessage):
-                    continue
-                tool_calls = list(message.tool_calls or [])
-                for call_index, tool_call in enumerate(tool_calls):
-                    if (message_index, call_index) in failed or not isinstance(tool_call, dict):
-                        continue
-                    call_id = str(tool_call.get("id") or "").strip()
-                    args = tool_call.get("args")
-                    if (
-                        not call_id
-                        or call_id not in completed_call_ids
-                        or not isinstance(args, dict)
-                        or _TOOL_CALL_ARGUMENTS_SAVED_KEY in args
-                    ):
-                        continue
-                    content = _tool_call_arguments_text(tool_call)
-                    path = _tool_result_path(f"{call_id}-arguments", content)
-                    replaced_calls = list(tool_calls)
-                    replaced_calls[call_index] = _tool_call_arguments_receipt(tool_call, path)
-                    replacement = message.model_copy(update={"tool_calls": replaced_calls})
-                    reduction = estimate_messages_tokens([message]) - estimate_messages_tokens([replacement])
-                    if reduction > 0:
-                        candidates.append(
-                            (reduction, message_index, call_index, message, content, path, replacement)
-                        )
-
-            if not candidates:
-                return messages, changed
-
-            _, message_index, call_index, _, content, path, replacement = max(candidates, key=lambda item: item[0])
             if backend is None:
                 backend = create_agent_composite_backend(request.runtime)
-            if not await awrite_text_idempotently(backend, path, content):
-                failed.add((message_index, call_index))
+            if not await awrite_text_idempotently(backend, candidate["path"], candidate["content"]):
+                failed.add((candidate["message_index"], candidate["call_index"]))
                 continue
-            messages[message_index] = replacement
+            messages[candidate["message_index"]] = candidate["replacement"]
             changed = True
 
     def _build_plan(

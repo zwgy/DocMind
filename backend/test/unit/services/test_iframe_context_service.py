@@ -31,7 +31,18 @@ def test_business_items_groups_mixed_schemas_and_keeps_all_labeled_fields():
 
 
 def test_iframe_context_default_budget_is_bounded_for_small_models():
-    assert svc.IFRAME_CONTEXT_TOTAL_CHARS == 3000
+    assert 500 <= svc.IFRAME_CONTEXT_TOTAL_CHARS <= 4000
+
+
+@pytest.mark.asyncio
+async def test_render_iframe_context_ignores_empty_page():
+    prompt = await svc.render_iframe_context_prompt(
+        thread_id="thread-1",
+        uid="user-1",
+        iframe_context={"page": {}, "files": []},
+    )
+
+    assert prompt == ""
 
 
 @pytest.mark.asyncio
@@ -67,19 +78,89 @@ async def test_render_iframe_context_inlines_short_page_and_kb_pointer(tmp_path,
 @pytest.mark.asyncio
 async def test_render_iframe_context_writes_long_page_to_thread_file(tmp_path, monkeypatch):
     monkeypatch.setattr(sandbox_paths.conf, "save_dir", str(tmp_path))
-    monkeypatch.setattr(svc, "IFRAME_PAGE_INLINE_CHARS", 20)
-    monkeypatch.setattr(svc, "IFRAME_PAGE_PREVIEW_CHARS", 10)
+    page_text = "abcdefghijklmnopqrstuvwxyz" * 200
 
     prompt = await svc.render_iframe_context_prompt(
         thread_id="thread-1",
         uid="user-1",
-        iframe_context={"page": {"title": "Long page", "text": "abcdefghijklmnopqrstuvwxyz"}},
+        iframe_context={"page": {"title": "Long page", "text": page_text}},
     )
 
     host_path = tmp_path / "threads" / "thread-1" / "user-data" / "uploads" / "iframe-context" / "page.md"
-    assert host_path.read_text(encoding="utf-8") == "abcdefghijklmnopqrstuvwxyz"
+    assert host_path.read_text(encoding="utf-8") == page_text
     assert "/home/gem/user-data/uploads/iframe-context/page.md" in prompt
     assert "已截断" in prompt
+
+
+@pytest.mark.asyncio
+async def test_render_iframe_context_materializes_page_that_cannot_fit_total_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr(sandbox_paths.conf, "save_dir", str(tmp_path))
+    page_text = "中等长度页面正文。" * 500
+
+    prompt = await svc.render_iframe_context_prompt(
+        thread_id="thread-1",
+        uid="user-1",
+        iframe_context={
+            "page": {"title": "Medium page", "text": page_text},
+            "files": [
+                {
+                    "name": "attachment.docx",
+                    "incomingId": "inc-1",
+                    "source_file_id": "source-1",
+                    "summary": "必须保留的附件摘要",
+                }
+            ],
+        },
+    )
+
+    host_path = tmp_path / "threads" / "thread-1" / "user-data" / "uploads" / "iframe-context" / "page.md"
+    assert host_path.read_text(encoding="utf-8") == page_text
+    assert "/home/gem/user-data/uploads/iframe-context/page.md" in prompt
+    assert "必须保留的附件摘要" in prompt
+    assert len(prompt) <= svc.IFRAME_CONTEXT_TOTAL_CHARS
+
+
+@pytest.mark.asyncio
+async def test_render_iframe_context_reserves_separate_page_attachment_and_structured_budgets(tmp_path, monkeypatch):
+    monkeypatch.setattr(sandbox_paths.conf, "save_dir", str(tmp_path))
+
+    prompt = await svc.render_iframe_context_prompt(
+        thread_id="thread-1",
+        uid="user-1",
+        iframe_context={
+            "page": {"title": "Long page", "text": "很长的网页正文。" * 1200},
+            "files": [
+                {
+                    "name": "requirements.docx",
+                    "incomingId": "inc-1",
+                    "source_file_id": "source-1",
+                    "selectedFiles": [
+                        {
+                            "name": "requirements.docx",
+                            "source_file_id": "source-1",
+                            "summary": "附件摘要必须可见。" + "摘要补充内容。" * 300,
+                            "display": {
+                                "schemaLabels": {"general_item": "通用事项"},
+                                "fieldLabels": {"general_item": {"content": "事项内容"}},
+                            },
+                            "items": [{"item_type": "general_item", "data": {"content": "结构化事项必须可见"}}],
+                        },
+                        {
+                            "name": "appendix.pdf",
+                            "source_file_id": "source-2",
+                            "summary": "第二个附件摘要也必须可见",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert "/home/gem/user-data/uploads/iframe-context/page.md" in prompt
+    assert "附件摘要必须可见" in prompt
+    assert "第二个附件摘要也必须可见" in prompt
+    assert "结构化事项必须可见" in prompt
+    assert len(prompt) <= svc.IFRAME_CONTEXT_TOTAL_CHARS
 
 
 @pytest.mark.asyncio
@@ -108,7 +189,6 @@ async def test_render_iframe_context_marks_unready_files_without_tool_path(tmp_p
 @pytest.mark.asyncio
 async def test_render_iframe_context_keeps_business_items_until_total_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(sandbox_paths.conf, "save_dir", str(tmp_path))
-    monkeypatch.setattr(svc, "IFRAME_CONTEXT_TOTAL_CHARS", 4000)
 
     prompt = await svc.render_iframe_context_prompt(
         thread_id="thread-1",
