@@ -32,3 +32,12 @@ def test_echarts_renderers_dispose_their_ssr_instance() -> None:
 
     for script_name in ("render_data_chart.mjs", "render_mindmap.mjs"):
         assert "chart.dispose()" in (scripts_dir / script_name).read_text(encoding="utf-8")
+
+
+def test_flowchart_skill_provides_the_renderer_json_contract() -> None:
+    specs = {spec.slug: spec for spec in BUILTIN_SKILLS}
+    content = specs["flowchart"].source_dir.joinpath("SKILL.md").read_text(encoding="utf-8")
+
+    # 小模型必须能在首次调用前得到渲染器要求的真实字段名，避免靠错误信息反复猜测。
+    for field_name in ('"kind"', '"source"', '"target"', '"label"'):
+        assert field_name in content
