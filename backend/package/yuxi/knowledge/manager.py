@@ -38,51 +38,42 @@ class KnowledgeBaseManager:
         self._metadata_lock = asyncio.Lock()
 
     async def initialize(self):
-        """异步初始化"""
-        # 初始化已存在的知识库实例
-        self._initialize_existing_kbs()
+        """异步初始化，等待已有知识库元数据可用后再结束启动。"""
+        # lifespan 已 await 本方法；若再创建后台任务，启动后的首个知识库请求可能看到空元数据。
+        await self._initialize_existing_kbs()
         logger.info("KnowledgeBaseManager initialized")
 
-    def _initialize_existing_kbs(self):
+    async def _initialize_existing_kbs(self):
         """初始化已存在的知识库实例"""
         from yuxi.repositories.knowledge_base_repository import KnowledgeBaseRepository
 
-        async def _async_init():
-            kb_repo = KnowledgeBaseRepository()
-            rows = await kb_repo.get_all()
+        kb_repo = KnowledgeBaseRepository()
+        rows = await kb_repo.get_all()
 
-            kb_types_in_use = set()
-            for row in rows:
-                kb_type = row.kb_type or "milvus"
-                if KnowledgeBaseFactory.is_type_supported(kb_type):
-                    kb_types_in_use.add(kb_type)
-                else:
-                    logger.warning(f"Skip unsupported knowledge base type during initialization: {kb_type}")
+        kb_types_in_use = set()
+        for row in rows:
+            kb_type = row.kb_type or "milvus"
+            if KnowledgeBaseFactory.is_type_supported(kb_type):
+                kb_types_in_use.add(kb_type)
+            else:
+                logger.warning(f"Skip unsupported knowledge base type during initialization: {kb_type}")
 
-            logger.info(f"[InitializeKB] 发现 {len(kb_types_in_use)} 种知识库类型: {kb_types_in_use}")
+        logger.info(f"[InitializeKB] 发现 {len(kb_types_in_use)} 种知识库类型: {kb_types_in_use}")
 
-            # 为每种使用中的知识库类型创建实例并加载元数据
-            for kb_type in kb_types_in_use:
-                if not KnowledgeBaseFactory.is_type_supported(kb_type):
-                    logger.warning(f"[InitializeKB] Skip initialization for unsupported knowledge base type: {kb_type}")
-                    continue
-                try:
-                    kb_instance = self._get_or_create_kb_instance(kb_type)
-                    # 让 KB 实例自行加载元数据
-                    await kb_instance._load_metadata()
-                    logger.info(f"[InitializeKB] {kb_type} 实例已初始化")
-                except Exception as e:
-                    logger.error(f"Failed to initialize {kb_type} knowledge base: {e}")
-                    import traceback
+        # 为每种使用中的知识库类型创建实例并加载元数据。
+        for kb_type in kb_types_in_use:
+            if not KnowledgeBaseFactory.is_type_supported(kb_type):
+                logger.warning(f"[InitializeKB] Skip initialization for unsupported knowledge base type: {kb_type}")
+                continue
+            try:
+                kb_instance = self._get_or_create_kb_instance(kb_type)
+                await kb_instance._load_metadata()
+                logger.info(f"[InitializeKB] {kb_type} 实例已初始化")
+            except Exception as e:
+                logger.error(f"Failed to initialize {kb_type} knowledge base: {e}")
+                import traceback
 
-                    logger.error(traceback.format_exc())
-
-        # 在事件循环中运行异步初始化
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(_async_init())
-        except RuntimeError:
-            asyncio.run(_async_init())
+                logger.error(traceback.format_exc())
 
     def _get_or_create_kb_instance(self, kb_type: str) -> KnowledgeBase:
         """
