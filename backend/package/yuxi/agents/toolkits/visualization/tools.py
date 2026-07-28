@@ -62,7 +62,7 @@ async def render_data_chart(
                 "source_path": str(source),
                 "chart_type": chart_type,
                 "title": title,
-                "encoding": encoding,
+                "encoding": encoding.model_dump(exclude_none=True),
             },
         )
     except VisualizationError as exc:

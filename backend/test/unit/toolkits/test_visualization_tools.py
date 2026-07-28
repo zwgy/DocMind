@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from langgraph.prebuilt.tool_node import ToolRuntime
 
+from yuxi.agents.toolkits.visualization import tools
 from yuxi.agents.toolkits.registry import get_extra_metadata
 from yuxi.agents.toolkits.visualization import render_data_chart, render_flowchart, render_mindmap
 
@@ -52,3 +54,35 @@ def test_visualization_tools_accept_injected_runtime_without_exposing_it_to_mode
 
     assert parsed["runtime"] is runtime
     assert "runtime" not in render_data_chart.tool_call_schema.model_fields
+
+
+@pytest.mark.asyncio
+async def test_data_chart_serializes_encoding_before_rendering(monkeypatch) -> None:
+    captured: dict = {}
+    runtime = ToolRuntime(
+        state={},
+        tool_call_id="call-1",
+        config={"configurable": {}},
+        context=SimpleNamespace(uid="user-1", thread_id="thread-1"),
+        store=None,
+        stream_writer=lambda _: None,
+    )
+
+    monkeypatch.setattr(tools, "chart_source_path", lambda *_: "/tmp/chart.csv")
+
+    async def fake_render_visualization(**kwargs):
+        captured.update(kwargs)
+        return {"artifact_path": "/home/gem/user-data/outputs/monthly-sales.svg"}
+
+    monkeypatch.setattr(tools, "render_visualization", fake_render_visualization)
+
+    await render_data_chart.coroutine(
+        source_path="/home/gem/user-data/outputs/.visualization-data/chart.csv",
+        chart_type="bar",
+        title="月度销售",
+        encoding=tools.ChartEncoding(category="month", values=["sales"]),
+        output_name="monthly-sales",
+        runtime=runtime,
+    )
+
+    assert captured["request"]["encoding"] == {"category": "month", "values": ["sales"]}
