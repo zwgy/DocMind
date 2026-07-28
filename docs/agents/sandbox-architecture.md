@@ -164,6 +164,8 @@ skills 的结合方式分成两层。第一层是提示词层，`prepare_agent_r
 
 如果只是正常开发、调试或单机部署，最简单也是当前默认的方式就是保留 `SANDBOX_PROVIDER=provisioner`，同时把 `SANDBOX_PROVISIONER_BACKEND` 设为 `docker`。这会让整个项目继续由 Docker Compose 管理，而沙盒实例由 provisioner 动态创建。通常不需要手工 `docker run` 沙盒镜像，也不需要在 Compose 文件里静态声明每一个沙盒容器。
 
+默认 `SANDBOX_IMAGE` 指向项目控制的 `yuxi-sandbox-runtime`。首次部署或升级该镜像时，先执行 `docker compose --profile sandbox-runtime build sandbox-runtime`，再启动或重启 `sandbox-provisioner`。该镜像仅在构建阶段安装固定版本的 PyMySQL，MySQL 报表脚本在禁网运行时不会调用 `uv`、`pip` 或包索引。
+
 最小必要配置通常就是下面这几项：
 
 ```env

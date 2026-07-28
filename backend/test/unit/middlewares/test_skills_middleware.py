@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from langchain_core.messages import SystemMessage, ToolMessage
-from langgraph.types import Command
+from langgraph.types import Command, Overwrite
 
 import yuxi.agents.middlewares.skills as skills_middleware
 from yuxi.agents.middlewares.skills import (
@@ -215,6 +215,14 @@ def test_resolve_skill_gated_tools_collects_readable_dependency_tools():
     tools = resolve_skill_gated_tools(context)
 
     assert {tool.name for tool in tools} == _KB_TOOL_NAMES
+
+
+def test_before_agent_overwrites_previous_activated_skills():
+    """新用户消息必须清空 reducer 已合并的激活状态，不能使用普通空列表。"""
+    update = SkillsMiddleware().before_agent({"activated_skills": ["old-skill"]}, SimpleNamespace())
+
+    assert isinstance(update["activated_skills"], Overwrite)
+    assert update["activated_skills"].value == []
 
 
 @pytest.mark.asyncio

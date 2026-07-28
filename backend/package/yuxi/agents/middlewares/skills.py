@@ -11,7 +11,7 @@ from deepagents.middleware.skills import SKILLS_SYSTEM_PROMPT
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
 from langchain.tools.tool_node import ToolCallRequest
-from langgraph.types import Command
+from langgraph.types import Command, Overwrite
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yuxi.agents.mcp.service import get_enabled_mcp_tools
@@ -196,6 +196,11 @@ class SkillsMiddleware(AgentMiddleware):
     """
 
     state_schema = SkillsState
+
+    def before_agent(self, state: SkillsState, runtime) -> dict:
+        """新用户请求从图入口进入，必须丢弃上一请求激活的专用工具。"""
+        del state, runtime
+        return {"activated_skills": Overwrite([])}
 
     def __init__(
         self,

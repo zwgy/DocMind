@@ -1,9 +1,3 @@
-# /// script
-# dependencies = [
-#   "pymysql>=1.1.0",
-# ]
-# ///
-
 from __future__ import annotations
 
 import argparse
@@ -12,6 +6,9 @@ import os
 import re
 import sys
 import time
+import csv
+import json
+from pathlib import Path
 from typing import Any
 
 import pymysql
@@ -237,7 +234,7 @@ def format_query_result(result: list[dict[str, Any]]) -> str:
     return "查询执行成功，但返回数据为空"
 
 
-def run_query(sql: str, timeout: int) -> str:
+def run_query(sql: str, timeout: int, output: str | None = None) -> str:
     if not MySQLSecurityChecker.validate_sql(sql):
         raise ValueError("SQL语句包含不安全的操作或可能的注入攻击，请检查SQL语句")
 
@@ -248,7 +245,22 @@ def run_query(sql: str, timeout: int) -> str:
     connection = create_connection(config)
     try:
         result = execute_query_with_timeout(connection, sql, timeout=timeout or 60)
-        return format_query_result(result)
+        if output is None:
+            return format_query_result(result)
+        target = Path(output).resolve()
+        allowed = Path("/home/gem/user-data/outputs/.visualization-data").resolve()
+        if not target.is_relative_to(allowed):
+            raise ValueError("--output 只能写入 outputs/.visualization-data 目录")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        columns = list(result[0]) if result else []
+        with target.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=columns)
+            writer.writeheader()
+            writer.writerows(result)
+        sample = result[:1]
+        return json.dumps(
+            {"path": output, "columns": columns, "row_count": len(result), "sample": sample}, ensure_ascii=False
+        )
     finally:
         if connection.open:
             connection.close()
@@ -279,13 +291,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="执行只读 MySQL SQL 查询")
     parser.add_argument("--sql", required=True, help="要执行的SQL查询语句")
     parser.add_argument("--timeout", type=int, default=60, help="查询超时时间（秒），默认60秒，最大600秒")
+    parser.add_argument("--output", help="图表 CSV 输出路径，仅允许 outputs/.visualization-data")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     try:
-        print(run_query(args.sql, args.timeout))
+        print(run_query(args.sql, args.timeout, args.output))
         return 0
     except ValueError as exc:
         print(str(exc), file=sys.stderr)

@@ -43,14 +43,6 @@ _BUILTIN_MCP_ARTIFACT_DIR = Path(tempfile.gettempdir()) / "yuxi-mcp-artifacts"
 
 # Default MCP Server configurations (Imported to DB on first run)
 _DEFAULT_MCP_SERVERS = {
-    "mcp-server-chart": {
-        "command": "npx",
-        "args": ["-y", "@antv/mcp-server-chart"],
-        "transport": "stdio",
-        "description": "图表生成工具，支持生成各类图表（柱状图、折线图、饼图等）",
-        "icon": "📊",
-        "tags": ["内置", "图表"],
-    },
     "document-exporter": {
         "name": "文档导出",
         "command": "python",
@@ -102,7 +94,8 @@ async def _stage_builtin_mcp_artifact(request, handler):
     )
 
 
-_RETIRED_BUILTIN_MCP_SERVER_SLUGS = ("sequentialthinking",)
+# 仅清理系统自动创建的历史 Charts MCP，用户手工创建的同名配置仍由用户自行管理。
+_RETIRED_BUILTIN_MCP_SERVER_SLUGS = ("sequentialthinking", "mcp-server-chart")
 
 _SYNCED_MCP_FIELDS = (
     "description",

@@ -19,6 +19,34 @@ _SKILLS_ROOT = Path(__file__).resolve().parent
 
 BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
     BuiltinSkillSpec(
+        slug="visualization",
+        source_dir=_SKILLS_ROOT / "visualization" / "skills" / "visualization",
+        description="离线生成数据图表、流程图或思维导图；请求类型不明确时负责选择一个可视化子技能。",
+        version="2026.07.28",
+        skill_dependencies=("data-chart", "flowchart", "mindmap"),
+    ),
+    BuiltinSkillSpec(
+        slug="data-chart",
+        source_dir=_SKILLS_ROOT / "visualization" / "skills" / "data-chart",
+        description="基于当前会话 CSV 离线生成柱状图、折线图、面积图、饼图或散点图。",
+        version="2026.07.28",
+        tool_dependencies=("render_data_chart", "present_artifacts"),
+    ),
+    BuiltinSkillSpec(
+        slug="flowchart",
+        source_dir=_SKILLS_ROOT / "visualization" / "skills" / "flowchart",
+        description="根据受限流程 JSON 离线生成包含开始、处理、判断和结束节点的流程图。",
+        version="2026.07.28",
+        tool_dependencies=("render_flowchart", "present_artifacts"),
+    ),
+    BuiltinSkillSpec(
+        slug="mindmap",
+        source_dir=_SKILLS_ROOT / "visualization" / "skills" / "mindmap",
+        description="根据 Markdown 无序列表大纲离线生成水平或径向思维导图。",
+        version="2026.07.28",
+        tool_dependencies=("render_mindmap", "present_artifacts"),
+    ),
+    BuiltinSkillSpec(
         slug="image-gen",
         source_dir=_SKILLS_ROOT / "image-gen",
         description="在 Agent 沙盒中生成图片并保存到 outputs，默认支持 Qwen-Image，也可接入其它图片生成接口。",
@@ -92,6 +120,6 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
         source_dir=_SKILLS_ROOT / "mysql-reporter",
         description="生成 MySQL 查询报表并生成可视化图表。",
         version="2026.06.05",
-        mcp_dependencies=("mcp-server-chart",),
+        skill_dependencies=("data-chart",),
     ),
 ]

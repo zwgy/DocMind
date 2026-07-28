@@ -508,6 +508,8 @@ def _write_file_delivery_candidates(pending_messages: list[tuple[str, dict]]) ->
         f"{VIRTUAL_PATH_OUTPUTS}/tmp/",
         f"{VIRTUAL_PATH_OUTPUTS}/{CONVERSATION_HISTORY_DIR_NAME}/",
         f"{VIRTUAL_PATH_OUTPUTS}/{LARGE_TOOL_RESULTS_DIR_NAME}/",
+        f"{VIRTUAL_PATH_OUTPUTS}/.visualization-data/",
+        f"{VIRTUAL_PATH_OUTPUTS}/.visualization-specs/",
     )
     candidates: list[str] = []
     for msg_type, msg_dict in pending_messages:

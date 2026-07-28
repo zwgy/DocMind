@@ -33,6 +33,7 @@ RUN set -ex; \
         apt-get update; \
         apt-get install -y --no-install-recommends --fix-missing \
             curl \
+            graphviz \
             ffmpeg \
             fonts-liberation \
             fonts-noto-cjk \
@@ -64,6 +65,11 @@ RUN set -ex; \
 COPY ../backend/pyproject.toml /app/pyproject.toml
 COPY ../backend/.python-version /app/.python-version
 COPY ../backend/uv.lock /app/uv.lock
+
+# 图表运行时依赖在构建阶段固定安装，开发环境挂载 package 不会覆盖 /app/node_modules。
+COPY ../backend/package/yuxi/agents/skills/buildin/visualization/scripts/package.json /app/package.json
+COPY ../backend/package/yuxi/agents/skills/buildin/visualization/scripts/package-lock.json /app/package-lock.json
+RUN npm ci --omit=dev --no-audit --no-fund
 
 # 先复制 package 目录，因为 pyproject.toml 中 yuxi = { path = "package", editable = true }
 COPY ../backend/package /app/package

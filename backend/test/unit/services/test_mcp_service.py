@@ -56,6 +56,19 @@ async def test_ensure_builtin_mcp_servers_removes_retired_system_server(monkeypa
         updated_by="system",
     )
     mcp_session.add(retired_server)
+    mcp_session.add(
+        MCPServer(
+            slug="mcp-server-chart",
+            name="历史图表 MCP",
+            description="old builtin chart server",
+            transport="stdio",
+            command="npx",
+            args=["-y", "@antv/mcp-server-chart"],
+            enabled=1,
+            created_by="system",
+            updated_by="system",
+        )
+    )
     await mcp_session.commit()
 
     monkeypatch.setattr(
@@ -70,7 +83,7 @@ async def test_ensure_builtin_mcp_servers_removes_retired_system_server(monkeypa
     chart = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "mcp-server-chart"))
     document_exporter = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "document-exporter"))
     assert retired is None
-    assert chart is not None
+    assert chart is None
     assert document_exporter is not None
     assert document_exporter.command == "python"
     assert document_exporter.enabled == 1

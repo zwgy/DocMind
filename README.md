@@ -60,6 +60,12 @@
 
 **前置要求**：已安装 [Docker](https://docs.docker.com/get-docker/) 与 Docker Compose，并准备至少一个兼容 OpenAI 接口的大模型 API。
 
+首次使用内置 MySQL 报表或离线可视化前，先构建项目控制的沙盒运行时镜像；该镜像预装固定版本的 PyMySQL，运行时无需联网安装依赖：
+
+```bash
+docker compose --profile sandbox-runtime build sandbox-runtime
+```
+
 **1. 克隆代码并初始化**
 
 ```bash

@@ -75,3 +75,12 @@ def test_mysql_reporter_describe_table_name_security_validates_known_cases():
 
     for table_name, expected in table_cases.items():
         assert describe_script.MySQLSecurityChecker.validate_table_name(table_name) is expected
+
+
+def test_mysql_reporter_scripts_do_not_trigger_pep_723_dependency_installation():
+    scripts_dir = _mysql_reporter_dir() / "scripts"
+
+    for script_name in ("list_tables.py", "describe_table.py", "query.py"):
+        content = (scripts_dir / script_name).read_text(encoding="utf-8")
+        assert "# /// script" not in content
+        assert "pymysql>=" not in content
