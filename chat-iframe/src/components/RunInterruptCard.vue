@@ -92,8 +92,8 @@ function submit() {
       <textarea v-else v-model.trim="answers[question.id]" rows="2" :disabled="disabled" placeholder="请输入回答" />
     </div>
     <div class="interrupt-actions">
-      <button type="button" :disabled="disabled" @click="emit('cancel')">拒绝</button>
-      <button type="button" :disabled="disabled || !ready" @click="submit">提交并继续</button>
+      <button type="button" class="interrupt-cancel" :disabled="disabled" @click="emit('cancel')">拒绝</button>
+      <button type="button" class="interrupt-submit" :disabled="disabled || !ready" @click="submit">提交并继续</button>
     </div>
   </section>
 </template>
@@ -106,7 +106,9 @@ function submit() {
 .interrupt-question label { display: block; margin: 6px 0; color: var(--gray-700); font-size: 13px; }
 .interrupt-question textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--gray-300); border-radius: 6px; padding: 7px; resize: vertical; }
 .interrupt-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-.interrupt-actions button { border: 0; border-radius: 6px; padding: 7px 10px; cursor: pointer; color: var(--gray-700); background: var(--gray-100); }
-.interrupt-actions button:last-child { color: var(--gray-0); background: var(--main-color); }
-.interrupt-actions button:disabled { cursor: not-allowed; opacity: .55; }
+.interrupt-actions button { min-height: 34px; border-radius: 6px; padding: 7px 12px; font-weight: 600; cursor: pointer; }
+.interrupt-cancel { border: 1px solid var(--gray-300); color: var(--gray-700); background: var(--gray-0); }
+.interrupt-submit { border: 1px solid var(--main-700); color: var(--gray-0); background: var(--main-700); }
+.interrupt-cancel:disabled { border-color: var(--gray-200); color: var(--gray-500); background: var(--gray-100); cursor: not-allowed; }
+.interrupt-submit:disabled { border-color: var(--main-200); color: var(--main-700); background: var(--main-50); cursor: not-allowed; }
 </style>
