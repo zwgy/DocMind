@@ -74,6 +74,7 @@ def _build_run_response(run) -> dict:
 
 
 def _build_agent_request_response(request) -> dict:
+    input_payload = request.input_payload if isinstance(request.input_payload, dict) else {}
     return {
         "request_id": request.request_id,
         "thread_id": request.thread_id,
@@ -81,6 +82,8 @@ def _build_agent_request_response(request) -> dict:
         "status": request.status,
         "queued": request.status == "queued",
         "run_id": request.dispatched_run_id,
+        # 队列中的用户消息尚未写入会话，前端需要这个摘要来说明等待执行的内容。
+        "content": str(input_payload.get("query") or ""),
     }
 
 

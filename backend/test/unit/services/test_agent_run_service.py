@@ -804,6 +804,7 @@ async def test_list_queued_agent_requests_view_returns_fifo_positions(monkeypatc
             agent_id="default",
             status="queued",
             dispatched_run_id=None,
+            input_payload={"query": "first question"},
         ),
         SimpleNamespace(
             request_id="request-2",
@@ -811,6 +812,7 @@ async def test_list_queued_agent_requests_view_returns_fifo_positions(monkeypatc
             agent_id="default",
             status="queued",
             dispatched_run_id=None,
+            input_payload={"query": "second question"},
         ),
     ]
 
@@ -847,6 +849,7 @@ async def test_list_queued_agent_requests_view_returns_fifo_positions(monkeypatc
                 "status": "queued",
                 "queued": True,
                 "run_id": None,
+                "content": "first question",
                 "queue_position": 1,
             },
             {
@@ -856,6 +859,7 @@ async def test_list_queued_agent_requests_view_returns_fifo_positions(monkeypatc
                 "status": "queued",
                 "queued": True,
                 "run_id": None,
+                "content": "second question",
                 "queue_position": 2,
             },
         ]

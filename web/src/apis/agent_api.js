@@ -108,8 +108,16 @@ export const agentApi = {
       model_spec: data.model_spec || null,
       resume: data.resume ?? null,
       parent_run_id: data.parent_run_id || null,
-      resume_request_id: data.resume_request_id || null
+      resume_request_id: data.resume_request_id || null,
+      queue_policy: data.queue_policy || 'reject'
     }),
+
+  getAgentRequest: (requestId) => apiGet(`/api/agent/requests/${requestId}`),
+
+  cancelAgentRequest: (requestId) => apiPost(`/api/agent/requests/${requestId}/cancel`, {}),
+
+  listThreadQueuedRequests: (threadId, agentId) =>
+    apiGet(`/api/agent/thread/${threadId}/requests?agent_id=${encodeURIComponent(agentId)}`),
 
   /**
    * 获取 Run 状态

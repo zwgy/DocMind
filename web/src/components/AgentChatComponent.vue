@@ -145,9 +145,35 @@
                 <h1>{{ randomGreeting }}</h1>
               </div>
 
+              <div v-if="currentQueuedRequests.length" class="queued-request-list">
+                <div class="queued-request-title">
+                  <ClockCircleOutlined />
+                  <span>等待执行的消息</span>
+                </div>
+                <div
+                  v-for="request in currentQueuedRequests"
+                  :key="request.request_id"
+                  class="queued-request-item"
+                >
+                  <span class="queued-request-content" :title="request.content || '图片消息'">
+                    {{ request.content || '图片消息' }}
+                  </span>
+                  <span class="queued-request-position">第 {{ request.queue_position }} 位</span>
+                  <button
+                    class="lucide-icon-btn queued-request-cancel"
+                    type="button"
+                    title="取消等待中的消息"
+                    aria-label="取消等待中的消息"
+                    @click="cancelQueuedRequest(request)"
+                  >
+                    <CloseCircleOutlined />
+                  </button>
+                </div>
+              </div>
+
               <AgentInputArea
                 v-model="userInput"
-                :is-loading="isProcessing"
+                :is-loading="shouldShowStopButton"
                 :disabled="!currentAgent"
                 :send-button-disabled="isSendButtonDisabled"
                 :mention="mentionConfig"
@@ -646,6 +672,7 @@ const { threads, currentThreadId, currentThread } = storeToRefs(chatThreadsStore
 
 // ==================== LOCAL CHAT & UI STATE ====================
 const userInput = ref('')
+let queuePollTimer = null
 const sendCooldownActive = ref(false)
 let sendCooldownTimer = null
 // 预设的打招呼文本
@@ -1539,6 +1566,15 @@ const shouldRefreshStateWhileStreaming = computed(
   () => Boolean(currentChatId.value) && isStreaming.value && statePanelOpen.value
 )
 const isProcessing = computed(() => isStreaming.value)
+const currentQueuedRequests = computed(() =>
+  (currentThreadState.value?.queuedRequests || []).filter((request) => request.status === 'queued')
+)
+const shouldShowStopButton = computed(
+  () =>
+    isProcessing.value &&
+    !userInput.value.trim() &&
+    currentPendingThreadAttachments.value.length === 0
+)
 const isReplyLoading = computed(() => {
   const threadState = currentThreadState.value
   return Boolean(threadState?.replyLoadingVisible)
@@ -1822,6 +1858,7 @@ const startChatMainResizeObserver = () => {
 }
 
 onMounted(() => {
+  startQueuePolling()
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', handlePageVisibilityChange)
   }
@@ -1837,17 +1874,20 @@ onMounted(() => {
 })
 
 onActivated(() => {
+  startQueuePolling()
   nextTick(() => {
     startChatMainResizeObserver()
   })
 })
 
 onDeactivated(() => {
+  stopQueuePolling()
   stopChatMainResizeObserver()
   stopStreamingStateRefresh()
 })
 
 onUnmounted(() => {
+  stopQueuePolling()
   if (typeof document !== 'undefined') {
     document.removeEventListener('visibilitychange', handlePageVisibilityChange)
   }
@@ -2101,8 +2141,90 @@ const { startRunStream, resumeActiveRunForThread, stopRunStreamSubscription } = 
     if (approvalState.threadId === threadId || touchedThreadIds.includes(approvalState.threadId)) {
       hideApprovalState()
     }
+    void pollQueuedRequests(threadId)
   }
 })
+
+const refreshQueuedRequests = async (threadId, agentId = currentAgentId.value) => {
+  if (!threadId || !agentId) return
+  const threadState = getThreadState(threadId)
+  if (!threadState) return
+
+  try {
+    const response = await agentApi.listThreadQueuedRequests(threadId, agentId)
+    const dispatchedRequests = threadState.queuedRequests.filter(
+      (request) => request.status === 'dispatched'
+    )
+    threadState.queuedRequests = [...(response?.requests || []), ...dispatchedRequests]
+  } catch (error) {
+    console.warn('Failed to load queued agent requests:', threadId, error)
+  }
+}
+
+const pollQueuedRequests = async (threadId = currentChatId.value) => {
+  if (!threadId) return
+  const threadState = getThreadState(threadId)
+  if (!threadState?.queuedRequests.length) return
+
+  const requests = [...threadState.queuedRequests]
+  for (const queuedRequest of requests) {
+    try {
+      const response = await agentApi.getAgentRequest(queuedRequest.request_id)
+      const request = response?.request
+      if (!request) continue
+
+      Object.assign(queuedRequest, request)
+      if (request.status === 'dispatched' && request.run_id && !threadState.activeRunId) {
+        threadState.queuedRequests = threadState.queuedRequests.filter(
+          (item) => item.request_id !== request.request_id
+        )
+        await startRunStream(threadId, request.run_id, '0-0')
+        return
+      }
+      if (request.status === 'cancelled' || request.status === 'failed') {
+        threadState.queuedRequests = threadState.queuedRequests.filter(
+          (item) => item.request_id !== request.request_id
+        )
+      }
+    } catch (error) {
+      console.warn('Failed to poll queued agent request:', queuedRequest.request_id, error)
+    }
+  }
+}
+
+const startQueuePolling = () => {
+  if (queuePollTimer || typeof window === 'undefined') return
+  queuePollTimer = window.setInterval(() => {
+    void pollQueuedRequests()
+  }, 1000)
+}
+
+const stopQueuePolling = () => {
+  if (!queuePollTimer) return
+  clearInterval(queuePollTimer)
+  queuePollTimer = null
+}
+
+const cancelQueuedRequest = async (request) => {
+  try {
+    await agentApi.cancelAgentRequest(request.request_id)
+    const threadState = getThreadState(request.thread_id)
+    if (threadState) {
+      threadState.queuedRequests = threadState.queuedRequests.filter(
+        (item) => item.request_id !== request.request_id
+      )
+    }
+    const attachments = threadAttachmentsMap.value[request.thread_id] || []
+    threadAttachmentsMap.value[request.thread_id] = attachments.map((attachment) =>
+      attachment.request_id === request.request_id
+        ? { ...attachment, request_id: undefined }
+        : attachment
+    )
+    message.info('已取消等待中的消息')
+  } catch (error) {
+    handleChatError(error, 'cancel')
+  }
+}
 
 const resumeCurrentRunForVisiblePage = async () => {
   if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
@@ -2190,6 +2312,7 @@ const selectChat = async (chatId) => {
   syncThreadConfigSnapshot(chatId, { overwrite: false })
   await resumeActiveRunForThread(chatId)
   restorePendingInterruptForThread(chatId)
+  await refreshQueuedRequests(chatId, targetAgentId)
 }
 
 const selectThreadFromRoute = async (threadId) => {
@@ -2231,7 +2354,6 @@ const handleSendMessage = async ({ image } = {}) => {
   if (
     (!text && !image) ||
     !currentAgent.value ||
-    isProcessing.value ||
     sendCooldownActive.value ||
     props.sendDisabled
   )
@@ -2266,9 +2388,12 @@ const handleSendMessage = async ({ image } = {}) => {
 
   const threadState = getThreadState(threadId)
   if (!threadState) return
-  threadState.pendingInterrupt = null
-  if (approvalState.threadId === threadId) {
-    hideApprovalState()
+  const isQueuedSubmission = Boolean(threadState.isStreaming && threadState.activeRunId)
+  if (!isQueuedSubmission) {
+    threadState.pendingInterrupt = null
+    if (approvalState.threadId === threadId) {
+      hideApprovalState()
+    }
   }
 
   const pendingAttachments = [...currentPendingThreadAttachments.value]
@@ -2276,7 +2401,7 @@ const handleSendMessage = async ({ image } = {}) => {
     .map((attachment) => attachment.file_id)
     .filter(Boolean)
 
-  if ((threadMessages.value[threadId] || []).length === 0) {
+  if (!isQueuedSubmission && (threadMessages.value[threadId] || []).length === 0) {
     const autoTitle = text.replace(/\s+/g, ' ').trim().slice(0, 2000)
     if (autoTitle) {
       void (async () => {
@@ -2299,19 +2424,21 @@ const handleSendMessage = async ({ image } = {}) => {
     }
   }
 
-  resetOnGoingConv(threadId)
   const requestId = createClientRequestId()
   const previousAttachments = markAttachmentsRequestId(threadId, pendingAttachments, requestId)
-  insertOptimisticHumanMessage(threadState, {
-    requestId,
-    text,
-    imageContent,
-    attachments: pendingAttachments.map((attachment) => ({
-      ...attachment,
-      request_id: requestId
-    }))
-  })
-  threadState.isStreaming = true
+  if (!isQueuedSubmission) {
+    resetOnGoingConv(threadId)
+    insertOptimisticHumanMessage(threadState, {
+      requestId,
+      text,
+      imageContent,
+      attachments: pendingAttachments.map((attachment) => ({
+        ...attachment,
+        request_id: requestId
+      }))
+    })
+    threadState.isStreaming = true
+  }
 
   try {
     const runResp = await agentApi.createAgentRun({
@@ -2323,19 +2450,39 @@ const handleSendMessage = async ({ image } = {}) => {
         attachment_file_ids: pendingAttachmentFileIds
       },
       image_content: imageContent,
-      model_spec: modelSpec
+      model_spec: modelSpec,
+      queue_policy: isQueuedSubmission ? 'enqueue' : 'reject'
     })
     const runId = runResp?.run_id
-    if (!runId) {
+    if (runId) {
+      await startRunStream(threadId, runId, 0)
+    } else if (runResp?.queued && runResp?.request_id) {
+      threadState.queuedRequests = [
+        ...threadState.queuedRequests,
+        {
+          request_id: runResp.request_id,
+          thread_id: threadId,
+          agent_id: currentAgentId.value,
+          status: 'queued',
+          queued: true,
+          run_id: null,
+          content: text,
+          queue_position: currentQueuedRequests.value.length + 1
+        }
+      ]
+      void refreshQueuedRequests(threadId)
+      message.info('消息已加入等待队列')
+    } else {
       throw new Error('创建 run 失败：缺少 run_id')
     }
-    await startRunStream(threadId, runId, 0)
   } catch (error) {
-    threadState.isStreaming = false
-    threadState.replyLoadingVisible = false
-    threadState.pendingRequestId = null
     rollbackAttachments(threadId, previousAttachments)
-    resetOnGoingConv(threadId)
+    if (!isQueuedSubmission) {
+      threadState.isStreaming = false
+      threadState.replyLoadingVisible = false
+      threadState.pendingRequestId = null
+      resetOnGoingConv(threadId)
+    }
     handleChatError(error, 'send')
   }
 }
@@ -2348,7 +2495,8 @@ const handleSendOrStop = async (payload) => {
 
   const threadId = currentChatId.value
   const threadState = getThreadState(threadId)
-  if (isProcessing.value && threadState?.activeRunId) {
+  const hasNewInput = Boolean(userInput.value.trim() || payload?.image?.imageContent)
+  if (isProcessing.value && threadState?.activeRunId && !hasNewInput) {
     try {
       await agentApi.cancelAgentRun(threadState.activeRunId)
       threadState.pendingInterrupt = null
@@ -3146,6 +3294,63 @@ watch(currentChatId, (threadId, oldThreadId) => {
     width: 100%;
     max-width: 800px;
     margin: 0 auto;
+
+    .queued-request-list {
+      margin-bottom: 8px;
+      padding: 8px 12px;
+      background: var(--gray-10);
+      border: 1px solid var(--gray-150);
+      border-radius: 8px;
+    }
+
+    .queued-request-title,
+    .queued-request-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .queued-request-title {
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      line-height: 20px;
+
+      :deep(.anticon) {
+        color: var(--color-warning-700);
+      }
+    }
+
+    .queued-request-item {
+      min-width: 0;
+      padding: 4px 0 0 24px;
+      color: var(--color-text);
+      font-size: 13px;
+      line-height: 20px;
+    }
+
+    .queued-request-content {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .queued-request-position {
+      flex: none;
+      color: var(--color-text-secondary);
+      font-size: 12px;
+    }
+
+    .queued-request-cancel {
+      flex: none;
+      color: var(--color-text-secondary);
+
+      &:hover {
+        color: var(--color-error-700);
+        background: var(--color-error-50);
+      }
+    }
 
     .bottom-actions {
       display: flex;
