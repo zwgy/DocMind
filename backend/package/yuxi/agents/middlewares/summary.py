@@ -46,6 +46,8 @@ from yuxi.utils.paths import VIRTUAL_PATH_CONVERSATION_HISTORY
 
 _SOURCE_WINDOW_TOOL_NAMES = frozenset({"read_file", "open_kb_document"})
 _TOOL_CALL_ARGUMENTS_SAVED_KEY = "_yuxi_saved_arguments_path"
+# 反问参数体积很小且属于中断协议；保留结构化历史可避免本地模型把归档回执仿写成下一次调用参数。
+_TOOL_CALL_ARGUMENTS_ARCHIVE_EXCLUDED_TOOL_NAMES = frozenset({"ask_user_question"})
 # 管理端可能已经保存旧版或自定义摘要提示词，因此持久事实合并不能只写进默认模板。
 # 固定协议刻意保持很短，避免为了提升摘要质量反而挤占小上下文模型的摘要输入预算。
 _SUMMARY_UPDATE_PROTOCOL = (
@@ -721,6 +723,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                     or call_id not in completed_call_ids
                     or not isinstance(args, dict)
                     or _TOOL_CALL_ARGUMENTS_SAVED_KEY in args
+                    or tool_call.get("name") in _TOOL_CALL_ARGUMENTS_ARCHIVE_EXCLUDED_TOOL_NAMES
                 ):
                     continue
                 content = _tool_call_arguments_text(tool_call)

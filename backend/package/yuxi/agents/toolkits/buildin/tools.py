@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 from typing import Annotated
@@ -6,7 +7,7 @@ from langchain.tools import InjectedToolCallId
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.types import Command, interrupt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from yuxi.agents.toolkits.registry import ToolExtraMetadata, _all_tool_instances, _extra_registry, tool
 from yuxi.utils import logger
@@ -184,11 +185,88 @@ answer 为 object，格式为 {question_id: answer}。
 """
 
 
+def _decode_question_items(raw_questions: str) -> list[object]:
+    """解析本地模型偶发输出的一个或多个连续 JSON 值。"""
+    decoder = json.JSONDecoder()
+    cursor = 0
+    items: list[object] = []
+    while cursor < len(raw_questions):
+        while cursor < len(raw_questions) and (raw_questions[cursor].isspace() or raw_questions[cursor] == ","):
+            cursor += 1
+        if cursor >= len(raw_questions):
+            break
+        value, cursor = decoder.raw_decode(raw_questions, cursor)
+        items.extend(value if isinstance(value, list) else [value])
+    return items
+
+
+class AskUserQuestionOption(BaseModel):
+    """反问选项的模型调用契约。"""
+
+    label: str = Field(min_length=1, description="展示给用户的选项文本")
+    value: str = Field(min_length=1, description="用户选择该项时返回的值")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_string_option(cls, value):
+        # 对外 Schema 始终要求对象；这里只兼容本地模型偶发输出的简单字符串选项。
+        if isinstance(value, str):
+            return {"label": value, "value": value}
+        return value
+
+
+class AskUserQuestionItem(BaseModel):
+    """单个反问问题的模型调用契约。"""
+
+    question_id: str | None = Field(default=None, description="稳定的问题标识；省略时由工具生成")
+    question: str = Field(min_length=1, description="展示给用户的问题")
+    options: list[AskUserQuestionOption] = Field(
+        min_length=2,
+        max_length=5,
+        description="仅包含本题允许用户选择的选项",
+    )
+    multi_select: bool = Field(default=False, description="是否允许多选")
+    allow_other: bool = Field(default=True, description="是否允许用户输入给定选项之外的答案")
+    operation: str | None = Field(default=None, description="可选的前端操作标识")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_question_text(cls, value):
+        if not isinstance(value, dict) or value.get("question"):
+            return value
+        # 部分本地模型会把题干写入 label/text；边界处规范化后仍按唯一 question 字段执行。
+        question = value.get("label") or value.get("text")
+        if not question:
+            return value
+        return {**value, "question": question}
+
+
+class AskUserQuestionInput(BaseModel):
+    """ask_user_question 的严格公开参数契约。"""
+
+    questions: list[AskUserQuestionItem] = Field(
+        min_length=1,
+        max_length=5,
+        description="需要用户回答的问题列表",
+    )
+
+    @field_validator("questions", mode="before")
+    @classmethod
+    def recover_stringified_questions(cls, value):
+        # Schema 不公布字符串分支，避免继续诱导模型拼接 JSON；预校验只承担兼容既有本地模型的职责。
+        if isinstance(value, str):
+            return _decode_question_items(value)
+        if isinstance(value, dict):
+            return [value]
+        return value
+
+
 @tool(
     category="buildin",
     tags=["交互"],
     display_name="向用户提问",
     description=ASK_USER_QUESTION_DESCRIPTION,
+    args_schema=AskUserQuestionInput,
 )
 def ask_user_question(
     questions: Annotated[
@@ -197,12 +275,9 @@ def ask_user_question(
     ] = None,
 ) -> dict:
     """向用户发起问题并等待回答。"""
-    # 解析 questions 参数：如果是字符串，尝试解析为 JSON
     if isinstance(questions, str):
         try:
-            import json
-
-            questions = json.loads(questions)
+            questions = _decode_question_items(questions)
             logger.debug(f"Parsed string questions to list: {questions}")
         except Exception as e:
             logger.error(f"Failed to parse questions string: {e}, using None")

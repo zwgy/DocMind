@@ -492,6 +492,58 @@ def test_completed_tool_call_argument_candidate_prefers_largest_reduction() -> N
 
 
 @pytest.mark.unit
+def test_completed_tool_call_arguments_never_archive_ask_user_question() -> None:
+    messages = [
+        HumanMessage(content="请先向我确认", id="user-current"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-question",
+                    "name": "ask_user_question",
+                    "args": {
+                        "questions": [
+                            {
+                                "question": "风险等级" + "重要" * 2_000,
+                                "options": [
+                                    {"label": "低", "value": "低"},
+                                    {"label": "中", "value": "中"},
+                                ],
+                            }
+                        ]
+                    },
+                },
+                {
+                    "id": "call-write",
+                    "name": "write_file",
+                    "args": {
+                        "file_path": "/outputs/result.txt",
+                        "content": "result\n" * 500,
+                    },
+                },
+            ],
+            id="tool-calls",
+        ),
+        ToolMessage(content="已回答", tool_call_id="call-question", name="ask_user_question"),
+        ToolMessage(content="已写入", tool_call_id="call-write", name="write_file"),
+    ]
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    candidate = middleware._next_completed_tool_call_arguments_candidate(
+        request,
+        messages=messages,
+        summary="",
+        budget=resolve_context_budget(request),
+        failed=set(),
+    )
+
+    assert candidate is not None
+    assert candidate["call_index"] == 1
+    assert '"content":"result\\n' in candidate["content"]
+
+
+@pytest.mark.unit
 def test_final_request_replaces_large_source_window_without_second_offload(monkeypatch) -> None:
     monkeypatch.setattr(
         summary_module,

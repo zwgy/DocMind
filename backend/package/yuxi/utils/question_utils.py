@@ -29,10 +29,14 @@ def normalize_questions(raw_questions: Any, default_question_id_prefix: str = "q
 
     questions: list[dict[str, Any]] = []
     for idx, item in enumerate(raw_questions):
+        # 显式工具 Schema 校验后，LangChain 可能保留 Pydantic 子模型实例，需要先回到统一字典边界。
+        if hasattr(item, "model_dump"):
+            item = item.model_dump()
         if not isinstance(item, dict):
             continue
 
-        question = str(item.get("question") or "").strip()
+        # 本地模型偶发沿用选项结构，把题干写到 label/text；这里只统一字段名，不补造问题。
+        question = str(item.get("question") or item.get("label") or item.get("text") or "").strip()
         if not question:
             continue
 
