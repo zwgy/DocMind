@@ -46,6 +46,20 @@ from yuxi.agents.toolkits import buildin, mysql  # 触发 @tool 装饰器执行
 
 Qwen-Image 生成能力已迁移为内置 Skill `image-gen`。模型调用与图片下载在 Agent 沙盒中完成，生成后的图片保存到 `/home/gem/user-data/outputs/`，再通过 `present_artifacts` 展示。
 
+### 文档导出工具 (document)
+
+`export_office_file` 是具有 `ToolRuntime` 上下文的原生工具，由 `office-export` Skill 或业务 Skill
+按需加载。它读取当前会话中的受限 JSON 定义，生成 DOCX、PDF 或 XLSX，并支持插入当前会话图片。
+SVG 只在写入 Office 文件时临时转换为 PNG，不会同时生成两个交付物。
+
+| 工具 | 说明 |
+|------|------|
+| `export_office_file` | 根据 definition 虚拟路径生成 DOCX、PDF 或 XLSX |
+
+`office-export/references` 分别维护 DOCX、PDF、XLSX 的模型输入契约。业务 Skill 只维护业务字段、
+工作表和证据口径，并通过 Skill 依赖名读取 `office-export` 入口，不写入它的物理 reference
+路径，也不重复维护通用 Office 格式规则。
+
 ### MySQL 工具 (mysql)
 
 | 工具 | 说明 |
@@ -90,10 +104,11 @@ Phase 3 首批业务 Skill：
 | Skill | 用途 | 依赖 |
 |------|------|------|
 | `incoming-document` | 来文查询、统计、单篇综合解读和按附件核验 | 查询、读取、统计来文、向用户提问 |
-| `build-risk-ledger` | 按时间范围生成风险汇总和 XLSX 台账 | 查询、读取、统计来文、向用户提问，`document-exporter` |
-| `summarize-assessment-actions` | 汇总通报、考评、奖惩和后续任务 | 查询、读取、统计来文、向用户提问，`document-exporter` |
+| `build-risk-ledger` | 按时间范围生成风险汇总和 XLSX 台账 | 查询、读取、统计来文、向用户提问，`office-export` |
+| `summarize-assessment-actions` | 汇总通报、考评、奖惩和后续任务 | 查询、读取、统计来文、向用户提问，`office-export` |
 
-`document-exporter` 是离线内置 MCP，全新部署默认启用，但不会成为 Agent 默认工具；只有 Agent 直接配置它，或上述业务 Skill 被激活时，生成工具才会向模型开放。
+`office-export` 不会成为 Agent 默认能力；只有 Agent 配置该 Skill，或业务 Skill 声明依赖时，
+`export_office_file` 才会向模型开放。
 
 ## 工具组装
 
@@ -101,7 +116,7 @@ Phase 3 首批业务 Skill：
 
 1. **基础工具**：从 `context.tools` 中按名称筛选
 2. **MCP 工具**：根据 `context.mcps` 加载 MCP 服务器工具
-3. **Skill 依赖工具**：由 `SkillsMiddleware` 在 Skill 激活后按需追加，包括 `knowledge-base` 绑定的知识库工具和各来文 Skill 绑定的来文工具、文档导出 MCP
+3. **Skill 依赖工具**：由 `SkillsMiddleware` 在 Skill 激活后按需追加，包括知识库、来文和 Office 导出原生工具
 
 ```python
 from yuxi.agents.context import prepare_agent_runtime_context

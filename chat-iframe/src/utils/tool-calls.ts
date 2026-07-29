@@ -25,6 +25,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   render_data_chart: '生成数据图表',
   render_flowchart: '生成流程图',
   render_mindmap: '生成思维导图',
+  export_office_file: '导出 Office 文件',
   search_file: '搜索文件',
   search_incoming_documents: '查询来文',
   tavily_search: '网页搜索',

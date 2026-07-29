@@ -70,6 +70,7 @@ cache
 *.pdf
 src/data
 */package-lock.json
+!backend/package-lock.json
 web/package-lock.json
 saves
 saves_dev

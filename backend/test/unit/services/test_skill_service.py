@@ -326,7 +326,9 @@ def test_phase3_incoming_business_skill_specs():
         assert incoming_tools < set(spec["tool_dependencies"])
         assert "ask_user_question" in spec["tool_dependencies"]
         assert "present_artifacts" in spec["tool_dependencies"]
-        assert spec["mcp_dependencies"] == ["document-exporter"]
+        assert "export_office_file" in spec["tool_dependencies"]
+        assert spec["mcp_dependencies"] == []
+        assert spec["skill_dependencies"] == ["office-export"]
         assert (spec["source_dir"] / "SKILL.md").exists()
         assert "page_size=50" in (spec["source_dir"] / "SKILL.md").read_text(encoding="utf-8")
 

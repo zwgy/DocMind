@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from yuxi.agents.skills.buildin import BUILTIN_SKILLS
 
@@ -34,6 +35,32 @@ def test_echarts_renderers_dispose_their_ssr_instance() -> None:
 
     for script_name in ("render_data_chart.mjs", "render_mindmap.mjs"):
         assert "chart.dispose()" in (scripts_dir / script_name).read_text(encoding="utf-8")
+
+
+def test_backend_node_manifest_is_not_owned_by_a_skill() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    visualization_spec = next(spec for spec in BUILTIN_SKILLS if spec.slug == "visualization")
+    scripts_dir = visualization_spec.source_dir.parents[1] / "scripts"
+    converter = backend_root / "package" / "yuxi" / "services" / "scripts" / "svg_to_png.mjs"
+
+    assert backend_root.joinpath("package.json").is_file()
+    assert backend_root.joinpath("package-lock.json").is_file()
+    assert not scripts_dir.joinpath("package.json").exists()
+    assert "visualization" not in converter.read_text(encoding="utf-8")
+
+
+def test_static_renderers_use_d2_and_multi_hue_echarts_themes() -> None:
+    visualization_spec = next(spec for spec in BUILTIN_SKILLS if spec.slug == "visualization")
+    scripts_dir = visualization_spec.source_dir.parents[1] / "scripts"
+    flowchart = scripts_dir.joinpath("render_flowchart.py").read_text(encoding="utf-8")
+    data_chart = scripts_dir.joinpath("render_data_chart.mjs").read_text(encoding="utf-8")
+    mindmap = scripts_dir.joinpath("render_mindmap.mjs").read_text(encoding="utf-8")
+
+    assert '["d2", "--layout=dagre", "--theme=0"' in flowchart
+    assert "graphviz" not in flowchart.lower()
+    for color in ("#2F6F5E", "#4F6F8F", "#B56B2D", "#9B4D5B"):
+        assert color in data_chart
+        assert color in mindmap
 
 
 def test_flowchart_skill_provides_the_renderer_json_contract() -> None:

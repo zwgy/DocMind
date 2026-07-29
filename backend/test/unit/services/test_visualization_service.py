@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib.util
+import json
 import subprocess
-import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -43,14 +45,7 @@ def test_reserve_output_never_overwrites_existing_artifact(tmp_path: Path) -> No
     assert virtual_path.endswith("/report-2.svg")
 
 
-def test_flowchart_renderer_removes_graphviz_doctype(tmp_path: Path) -> None:
-    source = tmp_path / "flow.flow.json"
-    output = tmp_path / "flow.svg"
-    source.write_text(
-        '{"nodes":[{"id":"start","kind":"start","label":"开始"},{"id":"end","kind":"end","label":"结束"}],'
-        '"edges":[{"source":"start","target":"end"}]}',
-        encoding="utf-8",
-    )
+def _load_flowchart_renderer():
     script = (
         Path(__file__).parents[3]
         / "package"
@@ -62,14 +57,98 @@ def test_flowchart_renderer_removes_graphviz_doctype(tmp_path: Path) -> None:
         / "scripts"
         / "render_flowchart.py"
     )
+    spec = importlib.util.spec_from_file_location("flowchart_renderer_test", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_flowchart_renderer_builds_controlled_d2_and_valid_svg(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "flow.svg"
+    renderer = _load_flowchart_renderer()
+    data = {
+        "nodes": [
+            {"id": "start", "kind": "start", "label": "开始"},
+            {"id": "end", "kind": "end", "label": "结束"},
+        ],
+        "edges": [{"source": "start", "target": "end"}],
+    }
+    d2_source = renderer._build_d2(data)
+    captured: dict = {}
+
+    def fake_run(command, **_kwargs):
+        captured["command"] = command
+        Path(command[-1]).write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg"><text>开始</text></svg>',
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(renderer.subprocess, "run", fake_run)
+    renderer._render_d2(d2_source, output)
+
+    assert "classes:" in d2_source
+    assert 'node_1: "开始"' in d2_source
+    assert captured["command"][:3] == ["d2", "--layout=dagre", "--theme=0"]
+    _validate_svg(output)
+
+
+@pytest.mark.parametrize(
+    ("script_name", "source_name", "source_content", "render_request"),
+    [
+        (
+            "render_data_chart.mjs",
+            "chart.csv",
+            "月份,销量\n一月,10\n二月,14\n",
+            {
+                "chart_type": "bar",
+                "title": "月度销量",
+                "encoding": {"category": "月份", "values": ["销量"]},
+            },
+        ),
+        (
+            "render_mindmap.mjs",
+            "map.mindmap.md",
+            "- 项目\n  - 计划\n    - 里程碑\n  - 风险\n",
+            {"layout": "horizontal"},
+        ),
+    ],
+)
+def test_echarts_renderers_generate_themed_safe_svg(
+    tmp_path: Path,
+    script_name: str,
+    source_name: str,
+    source_content: str,
+    render_request: dict,
+) -> None:
+    source = tmp_path / source_name
+    output = tmp_path / f"{source_name}.svg"
+    source.write_text(source_content, encoding="utf-8")
+    script = (
+        Path(__file__).parents[3]
+        / "package"
+        / "yuxi"
+        / "agents"
+        / "skills"
+        / "buildin"
+        / "visualization"
+        / "scripts"
+        / script_name
+    )
 
     subprocess.run(
-        [sys.executable, str(script)],
-        input=f'{{"source_path": "{source.as_posix()}", "output": "{output.as_posix()}"}}',
+        ["node", str(script)],
+        input=json.dumps(render_request | {"source_path": str(source), "output": str(output)}, ensure_ascii=False),
         text=True,
+        encoding="utf-8",
         check=True,
         capture_output=True,
     )
 
-    assert "<!doctype" not in output.read_text(encoding="utf-8").lower()
+    content = output.read_text(encoding="utf-8")
+    assert "#2F6F5E" in content or "#2f6f5e" in content
     _validate_svg(output)

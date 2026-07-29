@@ -300,8 +300,8 @@ async def test_awrap_model_call_keeps_gated_tools_when_activated():
 @pytest.mark.asyncio
 async def test_awrap_model_call_loads_activated_skill_mcp_dependencies(monkeypatch):
     async def fake_get_enabled_mcp_tools(server_name: str):
-        assert server_name == "document-exporter"
-        return [SimpleNamespace(name="generate_xlsx")]
+        assert server_name == "demo-mcp"
+        return [SimpleNamespace(name="demo_export")]
 
     monkeypatch.setattr(skills_middleware, "get_enabled_mcp_tools", fake_get_enabled_mcp_tools)
 
@@ -313,7 +313,7 @@ async def test_awrap_model_call_loads_activated_skill_mcp_dependencies(monkeypat
                     _runtime_skill_dependency_map={
                         "build-risk-ledger": {
                             "tools": ["present_artifacts"],
-                            "mcps": ["document-exporter"],
+                            "mcps": ["demo-mcp"],
                             "skills": [],
                         }
                     },
@@ -342,7 +342,7 @@ async def test_awrap_model_call_loads_activated_skill_mcp_dependencies(monkeypat
     )
 
     assert result == "ok"
-    assert captured["tools"] == {"present_artifacts", "generate_xlsx"}
+    assert captured["tools"] == {"present_artifacts", "demo_export"}
 
 
 def test_read_file_activates_only_readable_skill() -> None:

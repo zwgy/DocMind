@@ -94,6 +94,7 @@ test('listKbsItems unwraps tool result content and labels skill files', () => {
 test('getToolCallLabel uses readable names for common execution and visualization tools', () => {
   assert.equal(getToolCallLabel({ id: 'execute', name: 'execute' }), '执行命令')
   assert.equal(getToolCallLabel({ id: 'chart', name: 'render_data_chart' }), '生成数据图表')
+  assert.equal(getToolCallLabel({ id: 'office', name: 'export_office_file' }), '导出 Office 文件')
   assert.equal(getToolCallLabel({ id: 'custom', name: 'custom_reporter' }), 'Custom Reporter')
 })
 

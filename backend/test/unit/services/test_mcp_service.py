@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest_asyncio
-from mcp.types import CallToolResult, TextContent
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -69,6 +68,19 @@ async def test_ensure_builtin_mcp_servers_removes_retired_system_server(monkeypa
             updated_by="system",
         )
     )
+    mcp_session.add(
+        MCPServer(
+            slug="document-exporter",
+            name="历史文档导出 MCP",
+            description="old builtin document exporter",
+            transport="stdio",
+            command="python",
+            args=["/app/package/yuxi/agents/mcp/buildin/document_exporter.py"],
+            enabled=1,
+            created_by="system",
+            updated_by="system",
+        )
+    )
     await mcp_session.commit()
 
     monkeypatch.setattr(
@@ -84,42 +96,44 @@ async def test_ensure_builtin_mcp_servers_removes_retired_system_server(monkeypa
     document_exporter = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "document-exporter"))
     assert retired is None
     assert chart is None
-    assert document_exporter is not None
-    assert document_exporter.command == "python"
-    assert document_exporter.enabled == 1
+    assert document_exporter is None
 
 
-async def test_stage_builtin_mcp_artifact_copies_file_to_thread_outputs(tmp_path, monkeypatch):
-    from yuxi.agents.backends.sandbox import paths as sandbox_paths
-
-    artifact_dir = tmp_path / "mcp-artifacts"
-    artifact_dir.mkdir()
-    source = artifact_dir / "source.docx"
-    source.write_bytes(b"document")
-    outputs_dir = tmp_path / "outputs"
-    outputs_dir.mkdir()
-    monkeypatch.setattr(mcp_service, "_BUILTIN_MCP_ARTIFACT_DIR", artifact_dir)
-    monkeypatch.setattr(sandbox_paths, "ensure_thread_dirs", lambda *_: None)
-    monkeypatch.setattr(sandbox_paths, "sandbox_outputs_dir", lambda _: outputs_dir)
-
-    async def handler(_):
-        return CallToolResult(
-            content=[TextContent(type="text", text="generated")],
-            structuredContent={"artifact_path": str(source), "filename": "report.docx"},
-        )
-
-    request = SimpleNamespace(
-        runtime=SimpleNamespace(
-            context=SimpleNamespace(file_thread_id="thread", uid="user"),
-            tool_call_id="call-1",
-        )
+async def test_ensure_builtin_mcp_servers_syncs_generic_default_registry(monkeypatch, mcp_session):
+    default_config = {
+        "name": "演示内置 MCP",
+        "description": "初始描述",
+        "transport": "stdio",
+        "command": "demo-mcp",
+        "args": ["serve"],
+        "tags": ["内置"],
+        "enabled": 0,
+    }
+    monkeypatch.setattr(mcp_service, "_DEFAULT_MCP_SERVERS", {"demo-builtin": default_config})
+    monkeypatch.setattr(
+        postgres_manager.pg_manager,
+        "get_async_session_context",
+        lambda: _AsyncSessionContext(mcp_session),
     )
-    result = await mcp_service._stage_builtin_mcp_artifact(request, handler)
 
-    assert result.content.endswith("outputs/report.docx，请调用 present_artifacts 交付。")
-    assert result.tool_call_id == "call-1"
-    assert (outputs_dir / "report.docx").read_bytes() == b"document"
-    assert not source.exists()
+    await mcp_service.ensure_builtin_mcp_servers_in_db()
+
+    server = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "demo-builtin"))
+    assert server is not None
+    assert server.command == "demo-mcp"
+    assert server.args == ["serve"]
+    assert server.enabled == 0
+    assert server.created_by == "system"
+
+    server.enabled = 1
+    await mcp_session.commit()
+    default_config["description"] = "更新后的描述"
+
+    await mcp_service.ensure_builtin_mcp_servers_in_db()
+
+    await mcp_session.refresh(server)
+    assert server.description == "更新后的描述"
+    assert server.enabled == 1
 
 
 async def test_ensure_builtin_mcp_servers_preserves_user_server_with_retired_slug(monkeypatch, mcp_session):

@@ -59,6 +59,16 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
         tool_dependencies=("render_mindmap", "present_artifacts"),
     ),
     BuiltinSkillSpec(
+        slug="office-export",
+        source_dir=_SKILLS_ROOT / "office-export",
+        description=(
+            "用户要求生成或导出 DOCX、Word、PDF、XLSX、Excel 文件，或要求把当前会话中的图片、"
+            "图表、流程图、思维导图插入这些文件时必须先读取此 Skill。"
+        ),
+        version="2026.07.29",
+        tool_dependencies=("export_office_file", "present_artifacts"),
+    ),
+    BuiltinSkillSpec(
         slug="image-gen",
         source_dir=_SKILLS_ROOT / "image-gen",
         description="在 Agent 沙盒中生成图片并保存到 outputs，默认支持 Qwen-Image，也可接入其它图片生成接口。",
@@ -110,8 +120,9 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
             "get_incoming_document_statistics",
             "ask_user_question",
             "present_artifacts",
+            "export_office_file",
         ),
-        mcp_dependencies=("document-exporter",),
+        skill_dependencies=("office-export",),
     ),
     BuiltinSkillSpec(
         slug="summarize-assessment-actions",
@@ -124,8 +135,9 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
             "get_incoming_document_statistics",
             "ask_user_question",
             "present_artifacts",
+            "export_office_file",
         ),
-        mcp_dependencies=("document-exporter",),
+        skill_dependencies=("office-export",),
     ),
     BuiltinSkillSpec(
         slug="mysql-reporter",

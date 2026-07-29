@@ -629,12 +629,20 @@ onUnmounted(() => {
                     <Download :size="14" />
                   </button>
                 </div>
-                <img
+                <button
                   v-if="inlineSvgUrl(artifact)"
-                  class="artifact-inline-svg"
-                  :src="inlineSvgUrl(artifact)"
-                  :alt="artifact.name"
-                />
+                  type="button"
+                  class="artifact-inline-preview"
+                  title="打开完整预览"
+                  :disabled="Boolean(artifactBusyPath)"
+                  @click="previewArtifact(artifact)"
+                >
+                  <img
+                    class="artifact-inline-svg"
+                    :src="inlineSvgUrl(artifact)"
+                    :alt="artifact.name"
+                  />
+                </button>
               </article>
               <p v-if="artifactError" class="error-hint">{{ artifactError }}</p>
             </section>
@@ -712,18 +720,20 @@ onUnmounted(() => {
           :aria-label="`${artifactPreview.name} 预览`"
           @click="closeArtifactPreview"
         >
-          <section class="artifact-preview-dialog" @click.stop>
+          <section
+            class="artifact-preview-dialog"
+            :class="{ 'is-image': artifactPreview.kind === 'image' }"
+            @click.stop
+          >
             <header>
               <strong>{{ artifactPreview.name }}</strong
               ><button type="button" title="关闭预览" @click="closeArtifactPreview">
                 <X :size="17" />
               </button>
             </header>
-            <img
-              v-if="artifactPreview.kind === 'image'"
-              :src="artifactPreview.url"
-              :alt="artifactPreview.name"
-            />
+            <div v-if="artifactPreview.kind === 'image'" class="artifact-preview-image-viewport">
+              <img :src="artifactPreview.url" :alt="artifactPreview.name" />
+            </div>
             <iframe
               v-else-if="artifactPreview.kind === 'pdf'"
               :src="artifactPreview.url"

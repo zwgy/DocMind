@@ -4,6 +4,8 @@ MCP（Model Context Protocol）是扩展智能体能力的重要方式。系统�
 
 内置 MCP 服务器以代码为事实源：系统启动时会自动补齐缺失项，并用代码中的最新连接与展示字段覆盖数据库定义；是否“已添加”以及工具级禁用列表仍保留数据库状态。
 
+平台自身需要用户、线程或文件上下文的能力优先实现为原生 Tool，避免把宿主路径或大段二进制内容传给独立 MCP 进程。
+
 ## 支持的传输协议
 
 | 协议 | 说明 | 适用场景 |
@@ -45,14 +47,6 @@ MCP（Model Context Protocol）是扩展智能体能力的重要方式。系统�
 
 - 已添加：`enabled=true`，会加载到运行时缓存并可供 Agent 使用
 - 可添加：`enabled=false`，记录保留但不会进入运行时
-
-## 内置文档导出 MCP
-
-源码位于 `backend/package/yuxi/agents/mcp/buildin/document_exporter.py`，提供 `generate_docx`、`generate_pdf`、`generate_xlsx` 三个工具。它以 stdio 运行，由 LangChain `MultiServerMCPClient` 通过 MCP `tools/list` 加载为 LangChain tools。
-
-系统启动时会自动注册该内置 MCP。管理员只需在「扩展管理 → MCP」中添加它，再分配给目标 Agent；不会自动启用给所有 Agent。
-
-MCP 只生成文件并返回临时产物路径。LangChain MCP adapter 的 `ToolCallInterceptor` 会将其复制到当前线程的 `outputs`，再由现有 `present_artifacts` 链路交付给用户；不需要额外 HTTP 路由、下载命令或 Compose 服务。
 
 ## 工具管理
 

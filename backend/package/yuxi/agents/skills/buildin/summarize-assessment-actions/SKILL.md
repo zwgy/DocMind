@@ -66,8 +66,10 @@ description: "汇总指定时间范围内多份来文中的通报、考评、表
 用户要求文件时只生成其指定格式：
 
 - 文件名使用“通报考评奖惩汇总-起始日期-结束日期”；日期未限定时范围使用“全部”。
-- DOCX：调用 `generate_docx`，正文使用标题和逐条文本；当前导出器不生成真正的 Word 表格。
-- XLSX：调用 `generate_xlsx`，创建“统计、考评事项、奖惩通报、后续任务”工作表；第一行是表头。所有单元格只能是字符串或数字；多个附件和引用用换行拼成字符串，不传入 list 或 dict。
+- 生成 DOCX 或 XLSX 前先读取依赖 Skill `office-export` 的入口文件，由它选择用户指定格式的契约。
+- DOCX：使用标题、段落和真正的 Word 表格组织汇总范围、考评事项、奖惩通报与后续任务。
+- XLSX：创建“统计、考评事项、奖惩通报、后续任务”工作表；第一行是表头，多个附件和引用用换行拼成一个字符串。
+- DOCX 或 XLSX 定义写入当前会话后调用 `export_office_file`，使用对应 `output_format`。
 - Markdown：用 `write_file` 写入 `/home/gem/user-data/outputs/通报考评奖惩汇总-范围.md`。
 - 文件生成成功后调用 `present_artifacts` 交付；失败时不要声称已交付。
 

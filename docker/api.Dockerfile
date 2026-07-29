@@ -1,3 +1,11 @@
+# D2 使用固定源码版本构建原生 CLI，运行镜像无需 Go 工具链和在线下载。
+FROM golang:1.24-bookworm AS d2-builder
+ARG D2_VERSION=v0.7.1
+ARG D2_GO_PROXY=https://goproxy.cn,direct
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOBIN=/out CGO_ENABLED=0 GOPROXY=${D2_GO_PROXY} go install oss.terrastruct.com/d2@${D2_VERSION}
+
 # 使用轻量级Python基础镜像
 FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.7.2 /uv /uvx /bin/
@@ -6,6 +14,7 @@ COPY --from=node:24-slim /usr/local/bin /usr/local/bin
 COPY --from=node:24-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node:24-slim /usr/local/include /usr/local/include
 COPY --from=node:24-slim /usr/local/share /usr/local/share
+COPY --from=d2-builder /out/d2 /usr/local/bin/d2
 
 # 设置工作目录
 WORKDIR /app
@@ -33,7 +42,6 @@ RUN set -ex; \
         apt-get update; \
         apt-get install -y --no-install-recommends --fix-missing \
             curl \
-            graphviz \
             ffmpeg \
             fonts-liberation \
             fonts-noto-cjk \
@@ -66,10 +74,11 @@ COPY ../backend/pyproject.toml /app/pyproject.toml
 COPY ../backend/.python-version /app/.python-version
 COPY ../backend/uv.lock /app/uv.lock
 
-# 图表运行时依赖在构建阶段固定安装，开发环境挂载 package 不会覆盖 /app/node_modules。
-COPY ../backend/package/yuxi/agents/skills/buildin/visualization/scripts/package.json /app/package.json
-COPY ../backend/package/yuxi/agents/skills/buildin/visualization/scripts/package-lock.json /app/package-lock.json
+# 后端 Node 脚本共用一份固定依赖，开发环境挂载 Python package 不会覆盖 /app/node_modules。
+COPY ../backend/package.json /app/package.json
+COPY ../backend/package-lock.json /app/package-lock.json
 RUN npm ci --omit=dev --no-audit --no-fund
+RUN d2 --version
 
 # 先复制 package 目录，因为 pyproject.toml 中 yuxi = { path = "package", editable = true }
 COPY ../backend/package /app/package

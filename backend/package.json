@@ -1,0 +1,1 @@
+{"name":"yuxi-backend-runtime","private":true,"type":"module","dependencies":{"@resvg/resvg-js":"2.6.2","csv-parse":"5.6.0","echarts":"5.6.0"}}

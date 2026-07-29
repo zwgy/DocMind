@@ -22,6 +22,7 @@ const assertDistinctFields = fields => {
   const selected = fields.filter(Boolean);
   if (new Set(selected).size !== selected.length) fail("字段映射不能重复使用同一列");
 };
+const palette = ["#2F6F5E", "#4F6F8F", "#B56B2D", "#9B4D5B", "#6B5B95", "#4B7F86", "#8A6D3B", "#537A5A"];
 let option;
 if (["bar", "line", "area"].includes(request.chart_type)) {
   if (!has(encoding.category) || !Array.isArray(encoding.values) || !encoding.values.length) fail("需要 category 和 values 字段映射");
@@ -66,6 +67,66 @@ if (["bar", "line", "area"].includes(request.chart_type)) {
   option = { animation: false, title: { text: request.title }, xAxis: {}, yAxis: {}, series: [{ type: "scatter", label: { show: Boolean(encoding.label), formatter: "{b}" }, data }] };
 } else fail("不支持的图表类型");
 if (rows.length > 2000) fail("数据点超过 2000 个限制");
+option = {
+  ...option,
+  color: palette,
+  backgroundColor: "#FFFFFF",
+  textStyle: { fontFamily: "Noto Sans CJK SC, sans-serif", color: "#263746" },
+  title: {
+    ...option.title,
+    left: 44,
+    top: 24,
+    textStyle: { fontFamily: "Noto Sans CJK SC, sans-serif", color: "#263746", fontSize: 22, fontWeight: 600 },
+  },
+};
+if (option.legend) {
+  option.legend = { ...option.legend, top: 30, right: 44, textStyle: { color: "#526170" } };
+}
+if (option.xAxis) {
+  option.grid = { left: 72, right: 44, top: 104, bottom: 62, containLabel: true };
+  option.xAxis = {
+    ...option.xAxis,
+    axisLine: { lineStyle: { color: "#AAB5C0" } },
+    axisTick: { alignWithLabel: true, lineStyle: { color: "#AAB5C0" } },
+    axisLabel: { color: "#526170", margin: 14 },
+  };
+  option.yAxis = {
+    ...option.yAxis,
+    axisLabel: { color: "#526170" },
+    splitLine: { lineStyle: { color: "#E4E9EE" } },
+  };
+}
+if (request.chart_type === "bar") {
+  option.series = option.series.map(series => ({
+    ...series,
+    barMaxWidth: 48,
+    itemStyle: { borderRadius: [4, 4, 0, 0] },
+  }));
+} else if (["line", "area"].includes(request.chart_type)) {
+  option.series = option.series.map(series => ({
+    ...series,
+    smooth: true,
+    symbolSize: 7,
+    lineStyle: { width: 3 },
+    areaStyle: request.chart_type === "area" ? { opacity: 0.16 } : undefined,
+  }));
+} else if (request.chart_type === "pie") {
+  option.legend = { orient: "vertical", right: 48, top: "middle", textStyle: { color: "#526170" } };
+  option.series = option.series.map(series => ({
+    ...series,
+    radius: ["38%", "66%"],
+    center: ["42%", "55%"],
+    itemStyle: { borderColor: "#FFFFFF", borderWidth: 3 },
+    label: { color: "#263746", formatter: "{b}\n{d}%" },
+  }));
+} else if (request.chart_type === "scatter") {
+  option.grid = { left: 72, right: 44, top: 92, bottom: 62, containLabel: true };
+  option.series = option.series.map(series => ({
+    ...series,
+    symbolSize: series.symbolSize || 12,
+    itemStyle: { opacity: 0.78 },
+  }));
+}
 const chart = echarts.init(null, null, { renderer: "svg", ssr: true, width: 1200, height: 720 });
 chart.setOption(option);
 const svg = chart.renderToSVGString();
