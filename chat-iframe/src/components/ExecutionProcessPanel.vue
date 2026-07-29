@@ -1,13 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import {
-  Bot,
-  ChevronDown,
-  ChevronRight,
-  CircleAlert,
-  LoaderCircle,
-  Workflow
-} from 'lucide-vue-next'
+import { ChevronDown, ChevronRight, Workflow } from 'lucide-vue-next'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
 import type { ChatMessage } from '@/types'
@@ -28,6 +21,7 @@ const props = withDefaults(
 )
 
 const expanded = ref(true)
+const openReasoning = ref<Record<string, boolean>>({})
 const toolCalls = computed(() => props.messages.flatMap((message) => message.toolCalls || []))
 const skillCount = computed(
   () => new Set(toolCalls.value.map(skillName).filter(Boolean)).size
@@ -96,28 +90,21 @@ function fallbackToolEvents(message: ChatMessage) {
       <template v-for="message in messages" :key="message.id">
         <article
           v-if="message.content || message.reasoningContent || message.errorMessage"
-          class="execution-model-reply"
-          :class="{ 'has-error': message.status === 'error' || message.status === 'stopped' }"
+          class="execution-stage-message"
         >
-          <header>
-            <CircleAlert
-              v-if="message.status === 'error' || message.status === 'stopped'"
-              :size="14"
-            />
-            <LoaderCircle
-              v-else-if="message.status === 'streaming'"
-              :size="14"
-              class="execution-process-spinner"
-            />
-            <Bot v-else :size="14" />
-            <strong>模型阶段回复</strong>
-            <small v-if="message.status === 'streaming'">生成中</small>
-          </header>
-          <MarkdownPreview v-if="message.content" :content="message.content" />
-          <details v-if="message.reasoningContent" class="execution-reasoning">
-            <summary>推理过程</summary>
+          <details
+            v-if="message.reasoningContent"
+            class="reasoning-box"
+            :open="openReasoning[message.id]"
+          >
+            <summary
+              @click.prevent="openReasoning[message.id] = !openReasoning[message.id]"
+            >
+              {{ message.status === 'streaming' ? '正在思考...' : '推理过程' }}
+            </summary>
             <p>{{ message.reasoningContent }}</p>
           </details>
+          <MarkdownPreview v-if="message.content" :content="message.content" />
           <p
             v-if="message.errorMessage && message.errorMessage !== message.content"
             class="error-hint"
@@ -130,7 +117,6 @@ function fallbackToolEvents(message: ChatMessage) {
           v-if="message.toolCalls?.length"
           :tool-calls="message.toolCalls"
           :is-active="isActive"
-          embedded
         />
 
         <div

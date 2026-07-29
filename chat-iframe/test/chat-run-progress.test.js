@@ -16,6 +16,10 @@ const toolCallsPanelSource = readFileSync(
   new URL('../src/components/ToolCallsPanel.vue', import.meta.url),
   'utf8'
 )
+const executionProcessSource = readFileSync(
+  new URL('../src/components/ExecutionProcessPanel.vue', import.meta.url),
+  'utf8'
+)
 const chatStoreSource = readFileSync(new URL('../src/stores/chat.ts', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/assets/css/app.css', import.meta.url), 'utf8')
 
@@ -82,6 +86,16 @@ test('only successful tool groups collapse; running and failed groups stay expan
     toolCallsPanelSource,
     /if \(isActive \|\| running \|\| failed\) \{\s*expanded\.value = true\s*\} else if \(wasActive \|\| wasRunning \|\| wasFailed\) \{\s*[\s\S]*expanded\.value = false/
   )
+})
+
+test('execution process adds one outer fold without restyling its original contents', () => {
+  const panelStyles = styles.match(/\.execution-process-panel\s*\{([^}]*)\}/)?.[1] || ''
+
+  assert.doesNotMatch(panelStyles, /\b(?:background|border|padding)\s*:/)
+  assert.match(executionProcessSource, /<MarkdownPreview v-if="message\.content"/)
+  assert.match(executionProcessSource, /<ToolCallsPanel[\s\S]*:tool-calls="message\.toolCalls"/)
+  assert.doesNotMatch(executionProcessSource, /\bembedded\b/)
+  assert.doesNotMatch(executionProcessSource, />模型阶段回复</)
 })
 
 test('artifacts stay attached to the final assistant message and use authenticated retrieval', () => {
