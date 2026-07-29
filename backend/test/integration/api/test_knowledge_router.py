@@ -482,25 +482,50 @@ async def test_get_database_mindmap_not_exists(test_client, admin_headers, knowl
 
 
 async def test_generate_and_get_mindmap(test_client, admin_headers, knowledge_database):
-    """测试生成并获取思维导图
-
-    注意：此测试需要知识库中有文件才能完整测试核心功能。
-    由于没有前置的文件上传 fixture，测试会先验证空文件场景（预期400），
-    然后使用 xfail 标记等待后续完善。
-    """
+    """上传临时文本后，验证导图生成和读取走真实存储、模型及接口链路。"""
     kb_id = knowledge_database["kb_id"]
-
-    # 空文件场景 - 预期返回400错误
-    generate_response = await test_client.post(
-        f"/api/knowledge/databases/{kb_id}/mindmap/generate",
-        json={"file_ids": [], "user_prompt": ""},
+    filename = f"mindmap-e2e-{uuid.uuid4().hex[:8]}.md"
+    content = b"# Project plan\n\nIncludes initiation, implementation, and acceptance stages.\n"
+    upload_response = await test_client.post(
+        f"/api/knowledge/files/upload?kb_id={kb_id}",
+        files={"file": (filename, content, "text/markdown")},
         headers=admin_headers,
     )
-    assert generate_response.status_code == 400
-    assert "中没有文件" in generate_response.json()["detail"]
+    assert upload_response.status_code == 200, upload_response.text
+    uploaded = upload_response.json()
+    file_path = uploaded["file_path"]
 
-    # 标记此测试需要文件上传支持才能完整执行
-    pytest.skip("需要先上传文件才能完整测试思维导图生成功能")
+    add_response = await test_client.post(
+        f"/api/knowledge/databases/{kb_id}/documents/add",
+        json={
+            "items": [file_path],
+            "params": {
+                "content_type": "file",
+                "content_hashes": {file_path: uploaded["content_hash"]},
+                "file_sizes": {file_path: uploaded["size"]},
+            },
+        },
+        headers=admin_headers,
+    )
+    assert add_response.status_code == 200, add_response.text
+    added_items = add_response.json()["items"]
+    assert len(added_items) == 1, add_response.text
+    file_id = added_items[0]["file_id"]
+
+    generate_response = await test_client.post(
+        f"/api/knowledge/databases/{kb_id}/mindmap/generate",
+        json={"file_ids": [file_id], "user_prompt": ""},
+        headers=admin_headers,
+    )
+    assert generate_response.status_code == 200, generate_response.text
+    generated = generate_response.json()
+    assert generated["mindmap"]
+    assert generated["file_count"] == 1
+
+    get_response = await test_client.get(f"/api/knowledge/databases/{kb_id}/mindmap", headers=admin_headers)
+    assert get_response.status_code == 200, get_response.text
+    assert get_response.json()["mindmap"] == generated["mindmap"]
+    assert get_response.json()["mindmap_file_ids"] == {file_id: filename}
 
 
 # =============================================================================
