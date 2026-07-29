@@ -12,6 +12,10 @@ const tokenUsageSource = readFileSync(
   new URL('../src/utils/token-usage.ts', import.meta.url),
   'utf8'
 )
+const toolCallsPanelSource = readFileSync(
+  new URL('../src/components/ToolCallsPanel.vue', import.meta.url),
+  'utf8'
+)
 const chatStoreSource = readFileSync(new URL('../src/stores/chat.ts', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/assets/css/app.css', import.meta.url), 'utf8')
 
@@ -67,6 +71,13 @@ test('context usage is an optional input control next to model selection', () =>
 
 test('tool call icons use an explicit high-contrast color on white backgrounds', () => {
   assert.match(styles, /\.tool-card-summary > svg:first-child \{\s*color: var\(--main-700\)/)
+})
+
+test('completed tool groups collapse after their active run finishes', () => {
+  assert.match(
+    toolCallsPanelSource,
+    /if \(isActive \|\| running\) \{\s*expanded\.value = true\s*\} else if \(wasActive \|\| wasRunning\) \{\s*[\s\S]*expanded\.value = false/
+  )
 })
 
 test('artifacts stay attached to the final assistant message and use authenticated retrieval', () => {

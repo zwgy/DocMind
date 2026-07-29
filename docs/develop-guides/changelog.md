@@ -7,6 +7,7 @@
 ## v0.7.1 (current)
 
 ### 离线可视化
+- 可视化渲染工具成功后会将受校验的 SVG 自动登记为当前轮交付物，不再依赖模型额外调用 `present_artifacts`；chat-iframe 的工具调用组在运行期间自动展开、全部完成后自动收起，避免长任务过程淹没正式回答。
 
 - 新增离线可视化能力包：通过按需激活的中文 Skill 生成 CSV 数据图表、流程图和思维导图，渲染结果统一为 SVG 并复用现有 artifact 预览、下载与保存链路。渲染工具不进入 Agent 默认工具集，新用户请求会清空上一请求激活的专用 Skill；中间 CSV 和结构文件不会被自动交付。默认 Charts MCP 已退役，API/worker 镜像在构建阶段安装 ECharts、csv-parse 与 Graphviz；项目沙盒运行时镜像固定安装 PyMySQL，MySQL 数据准备在禁网环境不再触发依赖下载。
 - SVG 交付物现在通过鉴权 artifact 接口直接显示在聊天列表，保留原有预览和下载操作；切换会话或卸载组件时会释放临时 Blob URL。

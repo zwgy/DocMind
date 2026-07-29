@@ -467,6 +467,9 @@ async def _save_tool_message(conv_repo: ConversationRepository, msg_dict: dict) 
     )
 
 
+_VISUALIZATION_TOOL_NAMES = frozenset({"render_data_chart", "render_flowchart", "render_mindmap"})
+
+
 def _presented_artifacts_from_tool_message(msg_dict: dict) -> list[str]:
     """只接受成功的 present_artifacts 工具结果，不能根据 outputs 文件推测交付意图。"""
     if msg_dict.get("type") != "tool" or msg_dict.get("status") == "error":
@@ -476,6 +479,32 @@ def _presented_artifacts_from_tool_message(msg_dict: dict) -> list[str]:
     if not isinstance(paths, list):
         return []
     return list(dict.fromkeys(path.strip() for path in paths if isinstance(path, str) and path.strip()))
+
+
+def _visualization_delivery_candidates(pending_messages: list[tuple[str, dict]]) -> list[str]:
+    """将成功渲染的 SVG 作为确定性交付物，避免模型遗漏登记步骤。"""
+    candidates: list[str] = []
+    for msg_type, msg_dict in pending_messages:
+        if (
+            msg_type != "tool"
+            or msg_dict.get("status") == "error"
+            or msg_dict.get("name") not in _VISUALIZATION_TOOL_NAMES
+        ):
+            continue
+
+        content = msg_dict.get("content")
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(content, dict):
+            continue
+
+        path = content.get("artifact_path")
+        if isinstance(path, str) and path.startswith(f"{VIRTUAL_PATH_OUTPUTS}/") and path.lower().endswith(".svg"):
+            candidates.append(path)
+    return list(dict.fromkeys(candidates))
 
 
 def _present_artifact_tool_call_ids(msg_dict: dict) -> set[str]:
@@ -497,7 +526,8 @@ def _present_artifact_tool_call_ids(msg_dict: dict) -> set[str]:
         and tool_call.get("id")
         and (
             tool_call.get("name") == "present_artifacts"
-            or isinstance(tool_call.get("function"), dict) and tool_call["function"].get("name") == "present_artifacts"
+            or isinstance(tool_call.get("function"), dict)
+            and tool_call["function"].get("name") == "present_artifacts"
         )
     }
 
@@ -628,6 +658,10 @@ async def save_messages_from_langgraph_state(
         if msg_type == "tool" and msg_dict.get("tool_call_id") in present_artifact_call_ids
         for path in _presented_artifacts_from_tool_message(msg_dict)
     ]
+    # 可视化工具只会在校验后的 outputs 根目录写入 SVG。该结果本身已表达
+    # 用户要求生成图表的交付意图，不能再依赖模型额外调用 present_artifacts。
+    presented_artifacts.extend(_visualization_delivery_candidates(current_turn_pending_messages))
+    presented_artifacts = list(dict.fromkeys(presented_artifacts))
     if not presented_artifacts:
         # 只信任本轮 write_file 的成功回执：它既证明文件真实写入，也避免扫描 outputs
         # 把附件物化、工具缓存或历史文件误认为用户交付物。

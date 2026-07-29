@@ -31,8 +31,13 @@ const hasRunningTool = computed(() => normalizedToolCalls.value.some((tool) => t
 
 watch(
   [() => props.isActive, hasRunningTool],
-  ([isActive, running]) => {
-    if (isActive || running) expanded.value = true
+  ([isActive, running], [wasActive, wasRunning]) => {
+    if (isActive || running) {
+      expanded.value = true
+    } else if (wasActive || wasRunning) {
+      // 运行过程保持展开，完成后自动收起，避免长任务的历史工具卡片淹没正式回答。
+      expanded.value = false
+    }
   },
   { immediate: true }
 )

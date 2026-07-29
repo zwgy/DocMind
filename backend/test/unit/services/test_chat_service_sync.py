@@ -317,6 +317,84 @@ def test_write_file_delivery_candidates_excludes_temporary_and_edit_results() ->
     assert candidates == ["/home/gem/user-data/outputs/最终报告.docx"]
 
 
+def test_visualization_delivery_candidates_accepts_only_successful_output_svgs() -> None:
+    candidates = svc._visualization_delivery_candidates(
+        [
+            (
+                "tool",
+                {
+                    "name": "render_data_chart",
+                    "status": "success",
+                    "content": '{"artifact_path":"/home/gem/user-data/outputs/inspection-cycle.svg"}',
+                },
+            ),
+            (
+                "tool",
+                {
+                    "name": "render_flowchart",
+                    "status": "error",
+                    "content": {"artifact_path": "/home/gem/user-data/outputs/failed.svg"},
+                },
+            ),
+            (
+                "tool",
+                {
+                    "name": "render_mindmap",
+                    "status": "success",
+                    "content": {"artifact_path": "/home/gem/user-data/outputs/not-a-chart.txt"},
+                },
+            ),
+        ]
+    )
+
+    assert candidates == ["/home/gem/user-data/outputs/inspection-cycle.svg"]
+
+
+@pytest.mark.asyncio
+async def test_save_messages_registers_visualization_when_model_omits_presentation() -> None:
+    class FakeGraph:
+        async def aget_state(self, _config):
+            return SimpleNamespace(
+                values={
+                    "messages": [
+                        {"id": "human-current", "type": "human", "content": "请生成检修周期图表"},
+                        {
+                            "id": "ai-chart",
+                            "type": "ai",
+                            "content": "",
+                            "tool_calls": [{"id": "chart-1", "name": "render_data_chart", "args": {}}],
+                        },
+                        {
+                            "id": "tool-chart",
+                            "type": "tool",
+                            "name": "render_data_chart",
+                            "tool_call_id": "chart-1",
+                            "content": '{"artifact_path":"/home/gem/user-data/outputs/inspection-cycle.svg"}',
+                            "status": "success",
+                        },
+                        {"id": "ai-final", "type": "ai", "content": "图表已生成"},
+                    ]
+                }
+            )
+
+    class FakeAgent:
+        async def get_graph(self):
+            return FakeGraph()
+
+    conv_repo = _FakeConvRepo(None)
+    await svc.save_messages_from_langgraph_state(
+        agent_instance=FakeAgent(),
+        thread_id="thread-1",
+        conv_repo=conv_repo,
+        config_dict={"configurable": {"thread_id": "thread-1", "uid": "user-1"}},
+        trace_info=None,
+    )
+
+    assert conv_repo.saved_messages[-1]["extra_metadata"]["presented_artifacts"] == [
+        "/home/gem/user-data/outputs/inspection-cycle.svg"
+    ]
+
+
 @pytest.mark.asyncio
 async def test_save_messages_does_not_register_write_file_from_previous_unsaved_turn() -> None:
     class FakeGraph:
