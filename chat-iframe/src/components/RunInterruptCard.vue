@@ -280,6 +280,7 @@ function submit() {
   margin: 0;
   appearance: none;
   border: 1.5px solid var(--gray-400);
+  outline: none;
   background: var(--gray-0);
   transition:
     border-color 160ms ease,

@@ -137,7 +137,7 @@ test('interrupt panel replaces the composer with a centered header and symmetric
   )
   assert.match(
     componentSource,
-    /\.interrupt-option input \{[\s\S]*width: 18px;[\s\S]*appearance: none;/
+    /\.interrupt-option input \{[\s\S]*width: 18px;[\s\S]*appearance: none;[\s\S]*outline: none;/
   )
   assert.match(
     componentSource,
