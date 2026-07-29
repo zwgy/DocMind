@@ -261,13 +261,34 @@ async def knowledge_database(
     db_name = f"pytest_kb_{timestamp}_{unique_id}"
     kb_id = None
 
+    embedding_models_response = await test_client.get(
+        "/api/system/model-providers/models/v2",
+        params={"model_type": "embedding"},
+        headers=admin_headers,
+    )
+    if embedding_models_response.status_code != 200:
+        pytest.fail(f"Failed to list embedding models: {embedding_models_response.text}")
+    providers = (embedding_models_response.json().get("data") or {}).values()
+    embedding_model_spec = next(
+        (
+            str(model["spec"])
+            for provider in providers
+            for model in provider.get("models") or []
+            if model.get("spec")
+        ),
+        None,
+    )
+    if not embedding_model_spec:
+        pytest.fail("No enabled embedding model is available for knowledge integration tests.")
+
     try:
         create_response = await test_client.post(
             "/api/knowledge/databases",
             json={
                 "database_name": db_name,
                 "description": "Pytest managed knowledge base",
-                "embedding_model_spec": "siliconflow-cn:Pro/BAAI/bge-m3",
+                # 集成环境的模型供应商由部署配置决定，不能把已废弃供应商名称固化到真实 API fixture。
+                "embedding_model_spec": embedding_model_spec,
                 "kb_type": "milvus",
                 "additional_params": {},
             },
