@@ -69,8 +69,18 @@ async function parseResponse<T>(response: Response, fallbackMessage: string): Pr
   if (response.ok) return response.json() as Promise<T>
   let message = fallbackMessage
   try {
-    const data = await response.json()
-    message = data.detail || data.message || message
+    const data = (await response.json()) as Record<string, unknown>
+    const detail = data.detail
+    // FastAPI 的 detail 可能携带 run_id 等结构化字段；只取用户可读消息，
+    // 避免对象被 Error 隐式转换成无意义的 "[object Object]"。
+    if (typeof detail === 'string') message = detail
+    else if (
+      detail &&
+      typeof detail === 'object' &&
+      typeof (detail as Record<string, unknown>).message === 'string'
+    )
+      message = (detail as Record<string, unknown>).message as string
+    else if (typeof data.message === 'string') message = data.message
   } catch {
     // 后端偶发非 JSON 错误时，保留 HTTP 语义即可；这里不做二次包装，避免遮住真实状态码。
   }

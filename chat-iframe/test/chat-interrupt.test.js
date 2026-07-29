@@ -96,3 +96,41 @@ test('interrupted run restores checkpoint questions instead of replaying its fin
   assert.equal(runtime.isStreaming, false)
   assert.equal(calls.some((url) => url.includes('/events')), false)
 })
+
+test('send restores a missed interrupt from final state and blocks duplicate input', async () => {
+  setActivePinia(createPinia())
+  let runCreates = 0
+  globalThis.fetch = async (url, options = {}) => {
+    if (url === '/api/agent/runs' && options.method === 'POST') {
+      runCreates += 1
+      return Response.json({ id: 'parent-run' })
+    }
+    if (url.startsWith('/api/agent/runs/parent-run/events')) {
+      return new Response('event: end\ndata: {"payload":{"status":"completed"}}\nid: 1-0\n\n')
+    }
+    if (url === '/api/chat/thread/thread-1/state') {
+      return Response.json({
+        interrupt: {
+          status: 'ask_user_question_required',
+          run_id: 'parent-run',
+          questions: [{ question_id: 'q-1', question: 'Continue?', options: ['yes', 'no'] }]
+        }
+      })
+    }
+    if (url === '/api/chat/thread/thread-1/history') return Response.json({ history: [] })
+    return Response.json({})
+  }
+
+  const chat = useChatStore()
+  chat.currentThreadId = 'thread-1'
+  const runtime = chat.ensureRuntime('thread-1')
+
+  await chat.send({ text: 'first question' }, 'token-1')
+  const duplicateResult = await chat.send({ text: 'duplicate question' }, 'token-1')
+
+  assert.equal(runtime.pendingInterrupt?.parentRunId, 'parent-run')
+  assert.equal(runtime.activeRunId, 'parent-run')
+  assert.equal(runtime.isSending, false)
+  assert.equal(duplicateResult, null)
+  assert.equal(runCreates, 1)
+})

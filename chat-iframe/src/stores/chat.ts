@@ -758,7 +758,7 @@ export const useChatStore = defineStore('chat', {
     ): Promise<SendResult> {
       const text = options.text.trim()
       const runtime = this.ensureRuntime()
-      if (!text || runtime.isSending) return null
+      if (!text || runtime.isSending || runtime.pendingInterrupt) return null
       const isFirstTurn = !runtime.messages.some((message) => message.role === 'user')
       const selectedModelSpec =
         this.modelSpecsByThread[this.currentThreadId || DRAFT_THREAD_KEY] || this.selectedModelSpec
@@ -992,6 +992,13 @@ export const useChatStore = defineStore('chat', {
         attachRunArtifacts(runtime)
         const state = await getThreadState(threadId, token).catch(() => null)
         if (state?.agent_state) runtime.agentState = state.agent_state
+        const pendingInterrupt = pendingInterruptFromState(state)
+        if (pendingInterrupt) {
+          // SSE 结束与 checkpoint 状态落库存在短暂先后；收尾时以线程状态补齐反问，
+          // 避免输入框先恢复导致用户在待回答期间误发第二个 run。
+          runtime.pendingInterrupt = pendingInterrupt
+          runtime.activeRunId = pendingInterrupt.parentRunId
+        }
         if (
           !assistantMessages.some((message) => message.content) &&
           assistantMessage.status !== 'error'
@@ -1042,7 +1049,7 @@ export const useChatStore = defineStore('chat', {
         runtime.isSending = false
         runtime.isStreaming = false
         runtime.isCompacting = false
-        runtime.activeRunId = ''
+        if (!runtime.pendingInterrupt) runtime.activeRunId = ''
         runtime.abortController = null
       }
     }

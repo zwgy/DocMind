@@ -549,6 +549,31 @@ test('sendMessageStream posts iframe context separately from the query', async (
   assert.equal(body.meta.iframe_context.files[0].fileId, 'file1')
 })
 
+test('sendMessageStream reads the message from structured FastAPI error detail', async () => {
+  globalThis.fetch = async () =>
+    Response.json(
+      {
+        detail: {
+          message: '该会话正在等待用户回答或审批',
+          run_id: 'interrupted-run',
+          run_interrupted: true
+        }
+      },
+      { status: 409 }
+    )
+
+  await assert.rejects(
+    () =>
+      sendMessageStream({
+        text: 'duplicate',
+        threadId: 'thread-1',
+        includePage: false,
+        includeFile: false
+      }),
+    { message: '该会话正在等待用户回答或审批' }
+  )
+})
+
 test('sendMessageStream keeps historical conversations usable without crypto.randomUUID', async () => {
   const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
   const calls = []

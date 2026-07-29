@@ -155,17 +155,20 @@ function submit() {
   max-height: min(78vh, 540px);
   min-width: 0;
   margin: 0 10px 10px;
-  border: 1px solid var(--gray-150);
+  border: 1px solid var(--gray-300);
+  border-top: 3px solid var(--main-700);
   border-radius: 8px;
   background: var(--gray-0);
-  box-shadow: 0 8px 24px rgb(15 23 42 / 12%);
+  box-shadow:
+    0 -12px 32px rgb(15 23 42 / 16%),
+    0 4px 12px rgb(15 23 42 / 8%);
   overflow: hidden;
 }
 
 .interrupt-header {
   padding: 16px 16px 14px;
-  border-bottom: 1px solid var(--gray-100);
-  background: var(--gray-50);
+  border-bottom: 1px solid var(--main-200);
+  background: var(--main-50);
   text-align: center;
 }
 
@@ -175,7 +178,7 @@ function submit() {
 }
 
 .interrupt-title {
-  color: var(--gray-900);
+  color: var(--main-900);
   font-size: 16px;
   font-weight: 600;
   line-height: 1.35;
@@ -183,7 +186,7 @@ function submit() {
 
 .interrupt-description {
   margin-top: 2px;
-  color: var(--gray-500);
+  color: var(--main-700);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -199,9 +202,15 @@ function submit() {
 
 .interrupt-question {
   min-width: 0;
-  margin: 14px 0 0;
-  padding: 0;
+  margin: 0;
+  padding: 14px 0;
   border: 0;
+  border-bottom: 1px solid var(--gray-150);
+}
+
+.interrupt-question:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 
 .interrupt-question legend {
@@ -233,7 +242,7 @@ function submit() {
   gap: 8px;
   min-height: 40px;
   padding: 7px 10px;
-  border: 1px solid transparent;
+  border: 1px solid var(--gray-150);
   border-radius: 6px;
   color: var(--gray-700);
   background: var(--gray-25);
@@ -309,8 +318,8 @@ function submit() {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   padding: 12px 16px 16px;
-  border-top: 1px solid var(--gray-100);
-  background: var(--gray-25);
+  border-top: 1px solid var(--gray-300);
+  background: var(--gray-50);
 }
 
 .interrupt-actions button {
