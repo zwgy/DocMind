@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  countToolCallKinds,
   getToolCallLabel,
   getToolKbDescription,
   groupKbChunksByFile,
@@ -27,6 +28,25 @@ test('normalizeToolCalls keeps supported historical and streaming shapes', () =>
   assert.equal(calls[0].name, 'query_kb')
   assert.equal(calls[0].status, 'done')
   assert.equal(calls[1].status, 'running')
+})
+
+test('countToolCallKinds separates unique skills from ordinary tool calls', () => {
+  const counts = countToolCallKinds([
+    {
+      id: 'skill-1',
+      name: 'read_file',
+      args: { file_path: '/agents/data-chart/SKILL.md' }
+    },
+    {
+      id: 'skill-2',
+      name: 'read_file',
+      args: { file_path: '/agents/data-chart/SKILL.md' }
+    },
+    { id: 'execute', name: 'execute' },
+    { id: 'chart', name: 'render_data_chart' }
+  ])
+
+  assert.deepEqual(counts, { skillCount: 1, toolCount: 2 })
 })
 
 test('parseQueryKbResult accepts results, chunks and graph fields', () => {

@@ -4,6 +4,7 @@ import { Atom, BookOpen, ChevronDown, ChevronRight, FileText, Loader, Search } f
 import KbResultGroupedList from '@/components/KbResultGroupedList.vue'
 import type { ChatToolCall } from '@/types'
 import {
+  countToolCallKinds,
   displayToolName,
   formatJson,
   getToolArgs,
@@ -27,6 +28,8 @@ const props = withDefaults(defineProps<{ toolCalls?: ChatToolCall[]; isActive?: 
 const expanded = ref(false)
 const expandedTools = ref<Record<string, boolean>>({})
 const normalizedToolCalls = computed(() => normalizeToolCalls(props.toolCalls))
+const hasMultipleToolCalls = computed(() => normalizedToolCalls.value.length > 1)
+const callCounts = computed(() => countToolCallKinds(normalizedToolCalls.value))
 const hasRunningTool = computed(() => normalizedToolCalls.value.some((tool) => tool.status === 'running'))
 const hasFailedTool = computed(() => normalizedToolCalls.value.some((tool) => tool.status === 'error'))
 
@@ -140,14 +143,20 @@ const statusText = computed(() => {
 })
 
 const title = computed(() => {
-  if (normalizedToolCalls.value.length === 1) return getToolCallLabel(normalizedToolCalls.value[0])
-  return `执行 ${normalizedToolCalls.value.length} 个工具`
+  if (callCounts.value.skillCount && !callCounts.value.toolCount) {
+    return `激活 ${callCounts.value.skillCount} 个 Skill`
+  }
+  if (!callCounts.value.skillCount) {
+    return `调用 ${callCounts.value.toolCount} 个工具`
+  }
+  return `${callCounts.value.skillCount} 个 Skill · ${callCounts.value.toolCount} 个工具`
 })
 </script>
 
 <template>
   <section v-if="normalizedToolCalls.length" class="tool-calls-panel">
     <button
+      v-if="hasMultipleToolCalls"
       type="button"
       class="tool-summary"
       :class="{ 'is-expanded': expanded }"
@@ -156,12 +165,16 @@ const title = computed(() => {
     >
       <Atom :size="14" />
       <span>{{ title }}</span>
-      <small v-if="normalizedToolCalls.length > 1 && toolNames">{{ toolNames }}</small>
+      <small v-if="toolNames">{{ toolNames }}</small>
       <em v-if="statusText">{{ statusText }}</em>
       <component :is="expanded ? ChevronDown : ChevronRight" :size="14" />
     </button>
 
-    <div v-if="expanded" class="tool-list">
+    <div
+      v-if="!hasMultipleToolCalls || expanded"
+      class="tool-list"
+      :class="{ 'is-grouped': hasMultipleToolCalls }"
+    >
       <article v-for="(tool, index) in normalizedToolCalls" :key="toolKey(tool, index)" class="tool-card">
         <button
           type="button"

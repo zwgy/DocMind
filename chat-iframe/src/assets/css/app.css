@@ -1584,6 +1584,9 @@
 .tool-list {
   display: grid;
   gap: 4px;
+}
+
+.tool-list.is-grouped {
   margin: 4px 0 8px;
   padding-top: 4px;
   border-top: 1px solid var(--gray-100);

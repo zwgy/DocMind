@@ -5,7 +5,7 @@ import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
 import type { ChatMessage } from '@/types'
 import { executionProcessShouldExpand } from '@/utils/message-display'
-import { normalizeToolCalls, skillName } from '@/utils/tool-calls'
+import { countToolCallKinds, normalizeToolCalls } from '@/utils/tool-calls'
 
 const props = withDefaults(
   defineProps<{
@@ -26,9 +26,7 @@ const toolCalls = computed(() =>
   // 摘要必须与工具面板使用同一可见工具口径，避免展示交付物等内部工具导致实时与历史计数不同。
   normalizeToolCalls(props.messages.flatMap((message) => message.toolCalls || []))
 )
-const skillCount = computed(
-  () => new Set(toolCalls.value.map(skillName).filter(Boolean)).size
-)
+const callCounts = computed(() => countToolCallKinds(toolCalls.value))
 const hasFailure = computed(() =>
   props.messages.some(
     (message) =>
@@ -57,8 +55,8 @@ const statusText = computed(() => {
 
 const summaryText = computed(() => {
   return [
-    skillCount.value ? `${skillCount.value} 个 Skill` : '',
-    toolCalls.value.length ? `${toolCalls.value.length} 个工具` : ''
+    callCounts.value.skillCount ? `${callCounts.value.skillCount} 个 Skill` : '',
+    callCounts.value.toolCount ? `${callCounts.value.toolCount} 个工具` : ''
   ]
     .filter(Boolean)
     .join(' · ')

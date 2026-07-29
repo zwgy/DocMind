@@ -95,6 +95,23 @@ export function skillName(tool: ChatToolCall): string {
   return parts.length >= 2 ? parts[parts.length - 2] : ''
 }
 
+export function countToolCallKinds(toolCalls: ChatToolCall[]) {
+  const skills = new Set<string>()
+  let toolCount = 0
+
+  for (const tool of toolCalls) {
+    const skill = skillName(tool)
+    if (skill) {
+      // Skill 激活在事件协议中仍是 read_file；展示计数需单独归类，避免一条调用同时计入 Skill 和工具。
+      skills.add(skill)
+    } else {
+      toolCount += 1
+    }
+  }
+
+  return { skillCount: skills.size, toolCount }
+}
+
 export function getToolCallLabel(tool: ChatToolCall): string {
   const skill = skillName(tool)
   if (skill) return `激活 Skill：${skill}`

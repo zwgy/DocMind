@@ -100,6 +100,8 @@ test('execution process adds one outer fold without restyling its original conte
 
 test('execution summaries count only visible tools and keep compact accessible controls', () => {
   assert.match(executionProcessSource, /normalizeToolCalls\(props\.messages\.flatMap/)
+  assert.match(executionProcessSource, /countToolCallKinds\(toolCalls\.value\)/)
+  assert.match(executionProcessSource, /callCounts\.value\.toolCount/)
   assert.doesNotMatch(executionProcessSource, /stageReplyCount|阶段回复/)
   assert.match(executionProcessSource, /:aria-expanded="expanded"/)
   assert.match(toolCallsPanelSource, /:aria-expanded="expanded"/)
@@ -107,6 +109,19 @@ test('execution summaries count only visible tools and keep compact accessible c
   assert.match(styles, /\.execution-process-summary \{[\s\S]*min-height: 32px/)
   assert.match(styles, /\.tool-summary \{\s*min-height: 28px/)
   assert.match(styles, /\.tool-card-summary \{[\s\S]*min-height: 28px/)
+})
+
+test('single calls render one direct row while multi-call messages keep one group summary', () => {
+  assert.match(
+    toolCallsPanelSource,
+    /const hasMultipleToolCalls = computed\(\(\) => normalizedToolCalls\.value\.length > 1\)/
+  )
+  assert.match(toolCallsPanelSource, /v-if="hasMultipleToolCalls"[\s\S]*class="tool-summary"/)
+  assert.match(
+    toolCallsPanelSource,
+    /v-if="!hasMultipleToolCalls \|\| expanded"[\s\S]*:class="\{ 'is-grouped': hasMultipleToolCalls \}"/
+  )
+  assert.match(styles, /\.tool-list\.is-grouped \{[\s\S]*border-top: 1px solid var\(--gray-100\)/)
 })
 
 test('artifacts stay attached to the final assistant message and use authenticated retrieval', () => {
