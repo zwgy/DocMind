@@ -351,6 +351,20 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => context.windowState,
+  (state, previousState) => {
+    if (state !== 'normal' && state !== 'maximized') return
+    if (previousState !== 'minimized' && previousState !== 'closed') return
+    // 父页面在隐藏悬浮窗期间无法完成有效滚动；恢复尺寸后再等一帧通知消息区，
+    // 保证首次展开已有长会话时以最后一条消息作为起点。
+    requestAnimationFrame(() => {
+      historyScrollRequest.value += 1
+    })
+  },
+  { flush: 'post' }
+)
+
 onMounted(() => {
   if (!context.files.length) refreshExtraction()
   document.addEventListener('visibilitychange', resumeVisibleThread)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { Send, X } from 'lucide-vue-next'
 import {
   buildInterruptAnswers,
@@ -23,14 +23,18 @@ const emit = defineEmits<{
 
 const answers = ref<Record<string, InterruptSelection>>({})
 const otherTexts = ref<Record<string, string>>({})
+const contentEl = ref<HTMLElement | null>(null)
 const questions = computed(() => normalizeInterruptQuestions(props.interrupt.questions))
 const isApproval = computed(() => props.interrupt.status === 'human_approval_required')
 
 watch(
   questions,
-  (items) => {
+  async (items) => {
     answers.value = Object.fromEntries(items.map((item) => [item.id, item.multiple ? [] : '']))
     otherTexts.value = {}
+    await nextTick()
+    // 新问题或刷新恢复后必须从第一题开始展示，避免浏览器保留焦点滚动导致用户先看到半截选项。
+    contentEl.value?.scrollTo({ top: 0, behavior: 'auto' })
   },
   { immediate: true }
 )
@@ -73,7 +77,7 @@ function submit() {
       <p class="interrupt-description">完成回答后，助手将继续处理</p>
     </header>
 
-    <div class="interrupt-content">
+    <div ref="contentEl" class="interrupt-content">
       <fieldset v-for="question in questions" :key="question.id" class="interrupt-question">
         <legend>
           {{ question.text }}
@@ -147,17 +151,21 @@ function submit() {
   box-sizing: border-box;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  width: 100%;
-  max-height: min(62vh, 520px);
+  width: calc(100% - 20px);
+  max-height: min(78vh, 540px);
   min-width: 0;
-  border-top: 1px solid var(--gray-200);
+  margin: 0 10px 10px;
+  border: 1px solid var(--gray-150);
+  border-radius: 8px;
   background: var(--gray-0);
-  box-shadow: 0 -8px 24px rgb(15 23 42 / 8%);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 12%);
+  overflow: hidden;
 }
 
 .interrupt-header {
-  padding: 14px 16px 12px;
+  padding: 16px 16px 14px;
   border-bottom: 1px solid var(--gray-100);
+  background: var(--gray-50);
   text-align: center;
 }
 
@@ -168,7 +176,7 @@ function submit() {
 
 .interrupt-title {
   color: var(--gray-900);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   line-height: 1.35;
 }
@@ -182,8 +190,11 @@ function submit() {
 
 .interrupt-content {
   min-height: 0;
-  padding: 0 16px;
+  padding: 0 16px 16px;
   overflow-y: auto;
+  background: var(--gray-0);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .interrupt-question {
@@ -227,7 +238,7 @@ function submit() {
   color: var(--gray-700);
   background: var(--gray-25);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -297,9 +308,9 @@ function submit() {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  margin: 14px 16px 0;
-  padding: 12px 0 16px;
+  padding: 12px 16px 16px;
   border-top: 1px solid var(--gray-100);
+  background: var(--gray-25);
 }
 
 .interrupt-actions button {
@@ -307,7 +318,7 @@ function submit() {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 40px;
+  min-height: 42px;
   border-radius: 6px;
   padding: 8px 16px;
   cursor: pointer;
@@ -354,6 +365,11 @@ function submit() {
 }
 
 @media (max-width: 380px) {
+  .interrupt-card {
+    width: calc(100% - 16px);
+    margin: 0 8px 8px;
+  }
+
   .interrupt-options {
     grid-template-columns: minmax(0, 1fr);
   }

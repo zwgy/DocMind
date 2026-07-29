@@ -102,6 +102,8 @@ test('interrupt panel replaces the composer with a centered header and symmetric
   assert.doesNotMatch(componentSource, /CircleHelp|interrupt-icon/)
   assert.match(componentSource, /<X :size="16"/)
   assert.match(componentSource, /<Send :size="16"/)
+  assert.match(componentSource, /ref="contentEl"/)
+  assert.match(componentSource, /contentEl\.value\?\.scrollTo\(\{ top: 0, behavior: 'auto' \}\)/)
   assert.match(componentSource, /class="interrupt-other-input"/)
   assert.match(componentSource, /isApproval \? '请确认操作' : '请补充信息'/)
   assert.match(componentSource, />完成回答后，助手将继续处理</)
@@ -109,13 +111,20 @@ test('interrupt panel replaces the composer with a centered header and symmetric
   assert.match(componentSource, />提交回答</)
   assert.match(
     componentSource,
-    /\.interrupt-card \{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\) auto;[\s\S]*width: 100%;/
+    /\.interrupt-card \{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\) auto;[\s\S]*width: calc\(100% - 20px\);[\s\S]*max-height: min\(78vh, 540px\);[\s\S]*border: 1px solid var\(--gray-150\);[\s\S]*border-radius: 8px;/
   )
-  assert.match(componentSource, /\.interrupt-content \{[\s\S]*overflow-y: auto;/)
   assert.match(
     componentSource,
-    /\.interrupt-actions \{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/
+    /\.interrupt-content \{[\s\S]*overflow-y: auto;[\s\S]*background: var\(--gray-0\);/
   )
+  assert.match(componentSource, /\.interrupt-header \{[\s\S]*background: var\(--gray-50\);/)
+  assert.match(componentSource, /\.interrupt-title \{[\s\S]*font-size: 16px;/)
+  assert.match(componentSource, /\.interrupt-option \{[\s\S]*font-size: 12px;/)
+  assert.match(
+    componentSource,
+    /\.interrupt-actions \{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[\s\S]*background: var\(--gray-25\);/
+  )
+  assert.match(componentSource, /\.interrupt-actions button \{[\s\S]*min-height: 42px;/)
   assert.match(
     appSource,
     /<RunInterruptCard[\s\S]*v-if="chat\.pendingInterrupt"[\s\S]*\/>\s*<ChatInput\s+v-else/

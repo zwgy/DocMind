@@ -45,3 +45,15 @@ test('conversation selection requests bottom positioning after history has loade
   assert.match(source, /historyScrollRequest\.value \+= 1/)
   assert.match(source, /:history-scroll-request="historyScrollRequest"/)
 })
+
+test('restoring a hidden assistant requests bottom positioning after layout becomes visible', () => {
+  assert.match(
+    source,
+    /watch\(\s*\(\) => context\.windowState,[\s\S]*state !== 'normal' && state !== 'maximized'/
+  )
+  assert.match(source, /previousState !== 'minimized' && previousState !== 'closed'/)
+  assert.match(
+    source,
+    /requestAnimationFrame\(\(\) => \{\s*historyScrollRequest\.value \+= 1\s*\}\)/
+  )
+})
