@@ -91,3 +91,8 @@ studyYuxi
 daily_report/
 chat-iframe/public/test1
 chat-iframe/public/test2
+.pytest-tmp-runtime/test_list_thread_files_runs_di0/outputs/result.txt
+.pytest-tmp-runtime/test_read_thread_file_content_0/notes.txt
+.pytest-tmp-runtime/test_resolve_thread_artifact_v0/outside.txt
+.pytest-tmp-ocr/test_convert_upload_to_markdow0/a2ab034b51864e5fa825693cc8534bf6.txt
+.pytest-tmp-ocr/test_convert_upload_to_markdow1/32e9536af26947d9ba04b7d27b8c556a.md

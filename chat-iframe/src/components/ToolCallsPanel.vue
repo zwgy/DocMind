@@ -88,12 +88,12 @@ function headerMeta(tool: ChatToolCall) {
   }
 
   const skill = skillName(tool)
-  if (skill) return { icon: FileText, note: 'Skill', description: skill }
+  if (skill) return { icon: FileText, note: '激活 Skill', description: skill }
 
   const args = getToolArgs(tool)
   return {
     icon: FileText,
-    note: tool.name === 'read_file' ? 'Read file' : displayToolName(tool.name),
+    note: displayToolName(tool.name),
     description: basename(args.file_path)
   }
 }
@@ -140,8 +140,8 @@ const statusText = computed(() => {
 })
 
 const title = computed(() => {
-  if (normalizedToolCalls.value.length === 1) return `调用: ${getToolCallLabel(normalizedToolCalls.value[0])}`
-  return `已调用 ${normalizedToolCalls.value.length} 个工具`
+  if (normalizedToolCalls.value.length === 1) return getToolCallLabel(normalizedToolCalls.value[0])
+  return `执行 ${normalizedToolCalls.value.length} 个工具`
 })
 </script>
 
@@ -151,6 +151,7 @@ const title = computed(() => {
       type="button"
       class="tool-summary"
       :class="{ 'is-expanded': expanded }"
+      :aria-expanded="expanded"
       @click="expanded = !expanded"
     >
       <Atom :size="14" />
@@ -162,7 +163,12 @@ const title = computed(() => {
 
     <div v-if="expanded" class="tool-list">
       <article v-for="(tool, index) in normalizedToolCalls" :key="toolKey(tool, index)" class="tool-card">
-        <button type="button" class="tool-card-summary" @click="toggleTool(tool, index)">
+        <button
+          type="button"
+          class="tool-card-summary"
+          :aria-expanded="Boolean(expandedTools[toolKey(tool, index)])"
+          @click="toggleTool(tool, index)"
+        >
           <component
             :is="isToolRunning(tool) ? Loader : headerMeta(tool).icon"
             :size="15"

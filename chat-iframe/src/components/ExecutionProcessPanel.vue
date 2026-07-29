@@ -5,7 +5,7 @@ import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
 import type { ChatMessage } from '@/types'
 import { executionProcessShouldExpand } from '@/utils/message-display'
-import { skillName } from '@/utils/tool-calls'
+import { normalizeToolCalls, skillName } from '@/utils/tool-calls'
 
 const props = withDefaults(
   defineProps<{
@@ -22,12 +22,12 @@ const props = withDefaults(
 
 const expanded = ref(true)
 const openReasoning = ref<Record<string, boolean>>({})
-const toolCalls = computed(() => props.messages.flatMap((message) => message.toolCalls || []))
+const toolCalls = computed(() =>
+  // 摘要必须与工具面板使用同一可见工具口径，避免展示交付物等内部工具导致实时与历史计数不同。
+  normalizeToolCalls(props.messages.flatMap((message) => message.toolCalls || []))
+)
 const skillCount = computed(
   () => new Set(toolCalls.value.map(skillName).filter(Boolean)).size
-)
-const stageReplyCount = computed(
-  () => props.messages.filter((message) => message.content.trim()).length
 )
 const hasFailure = computed(() =>
   props.messages.some(
@@ -58,8 +58,7 @@ const statusText = computed(() => {
 const summaryText = computed(() => {
   return [
     skillCount.value ? `${skillCount.value} 个 Skill` : '',
-    toolCalls.value.length ? `${toolCalls.value.length} 次工具调用` : '',
-    stageReplyCount.value ? `${stageReplyCount.value} 条阶段回复` : ''
+    toolCalls.value.length ? `${toolCalls.value.length} 个工具` : ''
   ]
     .filter(Boolean)
     .join(' · ')
@@ -77,6 +76,7 @@ function fallbackToolEvents(message: ChatMessage) {
       type="button"
       class="execution-process-summary"
       :class="{ 'is-expanded': expanded }"
+      :aria-expanded="expanded"
       @click="expanded = !expanded"
     >
       <Workflow :size="15" />

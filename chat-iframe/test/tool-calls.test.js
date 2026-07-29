@@ -67,8 +67,14 @@ test('listKbsItems unwraps tool result content and labels skill files', () => {
   assert.equal(kbs[0].name, 'test1')
   assert.equal(
     getToolCallLabel({ id: 'read', name: 'read_file', args: { file_path: '/agents/knowledge-base/SKILL.md' } }),
-    'Skill'
+    '激活 Skill：knowledge-base'
   )
+})
+
+test('getToolCallLabel uses readable names for common execution and visualization tools', () => {
+  assert.equal(getToolCallLabel({ id: 'execute', name: 'execute' }), '执行命令')
+  assert.equal(getToolCallLabel({ id: 'chart', name: 'render_data_chart' }), '生成数据图表')
+  assert.equal(getToolCallLabel({ id: 'custom', name: 'custom_reporter' }), 'Custom Reporter')
 })
 
 test('resolveKbDisplayName prefers list_kbs names over raw kb ids', () => {

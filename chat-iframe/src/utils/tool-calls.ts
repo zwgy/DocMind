@@ -4,6 +4,33 @@ const HIDDEN_TOOLS = new Set(['present_artifacts'])
 
 type LooseRecord = Record<string, unknown>
 
+// 运行事件只携带工具机器名，无法获得后端注册表中的 display_name；
+// 在 iframe 端为常用内置工具提供稳定中文名称，避免把 Execute 等实现细节暴露给普通用户。
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  ask_user_question: '向用户提问',
+  edit_file: '编辑文件',
+  execute: '执行命令',
+  find_kb_document: '查找知识库文档',
+  get_incoming_document_statistics: '统计来文',
+  get_mindmap: '获取思维导图',
+  glob: '查找文件',
+  grep: '搜索文件内容',
+  list_kbs: '列出知识库',
+  ls: '列出目录',
+  open_kb_document: '打开知识库文档',
+  present_artifacts: '展示交付物',
+  query_kb: '检索知识库',
+  read_file: '读取文件',
+  read_incoming_document: '读取来文',
+  render_data_chart: '生成数据图表',
+  render_flowchart: '生成流程图',
+  render_mindmap: '生成思维导图',
+  search_file: '搜索文件',
+  search_incoming_documents: '查询来文',
+  tavily_search: '网页搜索',
+  write_file: '写入文件'
+}
+
 function asRecord(value: unknown): LooseRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as LooseRecord) : {}
 }
@@ -58,7 +85,7 @@ export function normalizeToolCalls(value: unknown): ChatToolCall[] {
 }
 
 export function displayToolName(name = 'tool') {
-  return name.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+  return TOOL_DISPLAY_NAMES[name] || name.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
 export function skillName(tool: ChatToolCall): string {
@@ -69,7 +96,8 @@ export function skillName(tool: ChatToolCall): string {
 }
 
 export function getToolCallLabel(tool: ChatToolCall): string {
-  if (skillName(tool)) return 'Skill'
+  const skill = skillName(tool)
+  if (skill) return `激活 Skill：${skill}`
   return displayToolName(tool.name)
 }
 

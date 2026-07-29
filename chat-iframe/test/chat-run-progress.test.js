@@ -98,6 +98,17 @@ test('execution process adds one outer fold without restyling its original conte
   assert.doesNotMatch(executionProcessSource, />模型阶段回复</)
 })
 
+test('execution summaries count only visible tools and keep compact accessible controls', () => {
+  assert.match(executionProcessSource, /normalizeToolCalls\(props\.messages\.flatMap/)
+  assert.doesNotMatch(executionProcessSource, /stageReplyCount|阶段回复/)
+  assert.match(executionProcessSource, /:aria-expanded="expanded"/)
+  assert.match(toolCallsPanelSource, /:aria-expanded="expanded"/)
+  assert.match(toolCallsPanelSource, /:aria-expanded="Boolean\(expandedTools\[toolKey\(tool, index\)\]\)"/)
+  assert.match(styles, /\.execution-process-summary \{[\s\S]*min-height: 32px/)
+  assert.match(styles, /\.tool-summary \{\s*min-height: 28px/)
+  assert.match(styles, /\.tool-card-summary \{[\s\S]*min-height: 28px/)
+})
+
 test('artifacts stay attached to the final assistant message and use authenticated retrieval', () => {
   assert.match(source, /item\.message\.artifacts\?\.length/)
   assert.match(source, /fetchThreadArtifact\(props\.threadId, artifact\.path, props\.token/)
