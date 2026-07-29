@@ -73,10 +73,14 @@ test('tool call icons use an explicit high-contrast color on white backgrounds',
   assert.match(styles, /\.tool-card-summary > svg:first-child \{\s*color: var\(--main-700\)/)
 })
 
-test('completed tool groups collapse after their active run finishes', () => {
+test('only successful tool groups collapse; running and failed groups stay expanded', () => {
   assert.match(
     toolCallsPanelSource,
-    /if \(isActive \|\| running\) \{\s*expanded\.value = true\s*\} else if \(wasActive \|\| wasRunning\) \{\s*[\s\S]*expanded\.value = false/
+    /const hasFailedTool = computed\(\(\) => normalizedToolCalls\.value\.some\(\(tool\) => tool\.status === 'error'\)\)/
+  )
+  assert.match(
+    toolCallsPanelSource,
+    /if \(isActive \|\| running \|\| failed\) \{\s*expanded\.value = true\s*\} else if \(wasActive \|\| wasRunning \|\| wasFailed\) \{\s*[\s\S]*expanded\.value = false/
   )
 })
 

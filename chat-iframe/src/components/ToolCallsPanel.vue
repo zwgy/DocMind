@@ -28,14 +28,15 @@ const expanded = ref(false)
 const expandedTools = ref<Record<string, boolean>>({})
 const normalizedToolCalls = computed(() => normalizeToolCalls(props.toolCalls))
 const hasRunningTool = computed(() => normalizedToolCalls.value.some((tool) => tool.status === 'running'))
+const hasFailedTool = computed(() => normalizedToolCalls.value.some((tool) => tool.status === 'error'))
 
 watch(
-  [() => props.isActive, hasRunningTool],
-  ([isActive, running], [wasActive, wasRunning]) => {
-    if (isActive || running) {
+  [() => props.isActive, hasRunningTool, hasFailedTool],
+  ([isActive, running, failed], [wasActive, wasRunning, wasFailed]) => {
+    if (isActive || running || failed) {
       expanded.value = true
-    } else if (wasActive || wasRunning) {
-      // 运行过程保持展开，完成后自动收起，避免长任务的历史工具卡片淹没正式回答。
+    } else if (wasActive || wasRunning || wasFailed) {
+      // 进行中与失败项保留展开，便于观察进度和排错；仅全部成功完成后才自动收起。
       expanded.value = false
     }
   },
