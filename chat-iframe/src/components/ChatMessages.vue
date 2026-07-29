@@ -14,7 +14,7 @@ import {
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import MessageRefs from '@/components/MessageRefs.vue'
-import ToolCallsPanel from '@/components/ToolCallsPanel.vue'
+import ExecutionProcessPanel from '@/components/ExecutionProcessPanel.vue'
 import { fetchThreadArtifact } from '@/apis/chat'
 import type { ChatArtifact, ChatMessage, ExtractionItem, IncomingPageFile } from '@/types'
 import {
@@ -67,7 +67,9 @@ const artifactPreview = ref<{
 const artifactBusyPath = ref('')
 const artifactError = ref('')
 const inlineSvgUrls = ref<Record<string, string>>({})
-const displayItems = computed(() => groupMessageDisplayItems(props.messages))
+const displayItems = computed(() =>
+  groupMessageDisplayItems(props.messages, { streaming: props.streaming })
+)
 const showGeneratingStatus = computed(
   () => props.streaming && props.messages.some((message) => message.role === 'user')
 )
@@ -348,16 +350,8 @@ function summaryEmptyText(message: ChatMessage) {
   return '暂无结构化摘要明细。'
 }
 
-function hasToolCalls(message: ChatMessage) {
-  return Boolean(message.toolCalls?.length)
-}
-
-function hasRunningToolCalls(toolCalls: Array<{ status?: string }> = []) {
-  return toolCalls.some((tool) => tool.status === 'running')
-}
-
 function showThinkingPlaceholder(message: ChatMessage) {
-  return !props.streaming && !message.content && !message.reasoningContent && !hasToolCalls(message)
+  return !props.streaming && !message.content && !message.reasoningContent
 }
 
 function showAssistantRefs(message: ChatMessage) {
@@ -411,16 +405,17 @@ onUnmounted(() => {
         :key="item.key"
         class="chat-message"
         :class="
-          item.type === 'tool-group'
-            ? ['assistant', 'tool-group-message']
+          item.type === 'execution-process'
+            ? ['assistant', 'execution-process-message']
             : [item.message.role, item.message.status]
         "
       >
-        <template v-if="item.type === 'tool-group'">
+        <template v-if="item.type === 'execution-process'">
           <div class="message-content">
-            <ToolCallsPanel
-              :tool-calls="item.toolCalls"
-              :is-active="hasRunningToolCalls(item.toolCalls)"
+            <ExecutionProcessPanel
+              :messages="item.messages"
+              :is-active="item.isActive"
+              :has-final-answer="item.hasFinalAnswer"
             />
           </div>
         </template>

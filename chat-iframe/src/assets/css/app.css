@@ -1457,6 +1457,150 @@
   margin: 4px 0 8px;
 }
 
+.tool-calls-panel.is-embedded {
+  margin: 0;
+}
+
+.tool-calls-panel.is-embedded .tool-list {
+  margin: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.execution-process-panel {
+  margin: 4px 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--gray-150);
+  border-radius: 8px;
+  background: var(--gray-25);
+}
+
+.execution-process-panel.has-failure {
+  border-color: var(--color-error-700);
+  background: var(--color-error-50);
+}
+
+.execution-process-summary {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  color: var(--gray-700);
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+
+.execution-process-summary:hover,
+.execution-process-summary:focus-visible {
+  color: var(--gray-900);
+}
+
+.execution-process-summary > svg {
+  flex: 0 0 auto;
+  color: var(--main-700);
+}
+
+.execution-process-summary span,
+.execution-process-summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.execution-process-summary span {
+  font-weight: 600;
+}
+
+.execution-process-summary small {
+  color: var(--gray-500);
+  font-size: 12px;
+}
+
+.execution-process-summary em {
+  margin-left: auto;
+  color: var(--gray-500);
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.execution-process-panel.has-failure .execution-process-summary em {
+  color: var(--color-error-700);
+}
+
+.execution-process-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--gray-150);
+}
+
+.execution-model-reply {
+  display: grid;
+  gap: 6px;
+  padding-left: 12px;
+  border-left: 2px solid var(--gray-200);
+}
+
+.execution-model-reply.has-error {
+  border-left-color: var(--color-error-700);
+}
+
+.execution-model-reply header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gray-600);
+  font-size: 12px;
+}
+
+.execution-model-reply header strong {
+  font-weight: 600;
+}
+
+.execution-model-reply header small {
+  margin-left: auto;
+  color: var(--gray-500);
+  font-size: 11px;
+}
+
+.execution-model-reply .markdown-preview {
+  color: var(--gray-700);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.execution-reasoning {
+  color: var(--gray-600);
+  font-size: 12px;
+}
+
+.execution-reasoning summary {
+  cursor: pointer;
+}
+
+.execution-reasoning p {
+  margin-top: 6px;
+}
+
+.execution-tool-event {
+  padding-left: 12px;
+  border-left: 2px solid var(--gray-200);
+  color: var(--gray-600);
+  font-size: 12px;
+}
+
+.execution-process-spinner {
+  color: var(--main-700);
+  animation: spin 0.9s linear infinite;
+}
+
 .tool-summary,
 .tool-card-summary,
 .message-refs button {

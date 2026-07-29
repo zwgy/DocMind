@@ -19,10 +19,14 @@ import {
   skillName
 } from '@/utils/tool-calls'
 
-const props = withDefaults(defineProps<{ toolCalls?: ChatToolCall[]; isActive?: boolean }>(), {
-  toolCalls: () => [],
-  isActive: false
-})
+const props = withDefaults(
+  defineProps<{ toolCalls?: ChatToolCall[]; isActive?: boolean; embedded?: boolean }>(),
+  {
+    toolCalls: () => [],
+    isActive: false,
+    embedded: false
+  }
+)
 
 const expanded = ref(false)
 const expandedTools = ref<Record<string, boolean>>({})
@@ -146,8 +150,18 @@ const title = computed(() => {
 </script>
 
 <template>
-  <section v-if="normalizedToolCalls.length" class="tool-calls-panel">
-    <button type="button" class="tool-summary" :class="{ 'is-expanded': expanded }" @click="expanded = !expanded">
+  <section
+    v-if="normalizedToolCalls.length"
+    class="tool-calls-panel"
+    :class="{ 'is-embedded': embedded }"
+  >
+    <button
+      v-if="!embedded"
+      type="button"
+      class="tool-summary"
+      :class="{ 'is-expanded': expanded }"
+      @click="expanded = !expanded"
+    >
       <Atom :size="14" />
       <span>{{ title }}</span>
       <small v-if="normalizedToolCalls.length > 1 && toolNames">{{ toolNames }}</small>
@@ -155,7 +169,7 @@ const title = computed(() => {
       <component :is="expanded ? ChevronDown : ChevronRight" :size="14" />
     </button>
 
-    <div v-if="expanded" class="tool-list">
+    <div v-if="embedded || expanded" class="tool-list">
       <article v-for="(tool, index) in normalizedToolCalls" :key="toolKey(tool, index)" class="tool-card">
         <button type="button" class="tool-card-summary" @click="toggleTool(tool, index)">
           <component
