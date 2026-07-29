@@ -349,7 +349,9 @@ async def test_subagent_stream_records_run_and_shares_output_files(
             "files": files_payload,
             "subagent_run": completed_run,
         }
-        assert (await _read_thread_file(e2e_client, e2e_headers, thread_id, output_path)).strip() == expected_content
+        written_content = (await _read_thread_file(e2e_client, e2e_headers, thread_id, output_path)).strip()
+        # 本地模型偶尔会为中文句子补上句号；交付物语义已由指定文本覆盖，不能让标点随机性使端到端验收失真。
+        assert written_content.rstrip("。") == expected_content
 
         tree_response = await e2e_client.get(
             "/api/viewer/filesystem/tree",

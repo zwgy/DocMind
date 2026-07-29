@@ -39,16 +39,16 @@ async def _create_run(
     client: httpx.AsyncClient,
     headers: dict[str, str],
     *,
-    agent_config_id: int,
+    agent_id: str,
     thread_id: str,
     query: str,
 ) -> str:
     request_id = f"agent-bubble-sort-{uuid.uuid4()}"
     response = await client.post(
-        "/api/chat/runs",
+        "/api/agent/runs",
         json={
             "query": query,
-            "agent_config_id": agent_config_id,
+            "agent_id": agent_id,
             "thread_id": thread_id,
             "meta": {"request_id": request_id},
         },
@@ -65,7 +65,7 @@ async def _wait_for_run(client: httpx.AsyncClient, headers: dict[str, str], run_
     last_payload: dict | None = None
 
     while asyncio.get_running_loop().time() < deadline:
-        response = await client.get(f"/api/chat/runs/{run_id}", headers=headers)
+        response = await client.get(f"/api/agent/runs/{run_id}", headers=headers)
         assert response.status_code == 200, response.text
 
         last_payload = response.json().get("run") or {}
@@ -124,7 +124,7 @@ async def test_agent_bubble_sort_run_creates_expected_artifacts(
     run_id = await _create_run(
         e2e_client,
         e2e_headers,
-        agent_config_id=int(e2e_agent_context["agent_config_id"]),
+        agent_id=str(e2e_agent_context["agent_id"]),
         thread_id=thread_id,
         query=query,
     )
