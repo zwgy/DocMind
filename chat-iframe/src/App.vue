@@ -30,6 +30,7 @@ const results = ref<Record<string, ExtractionResult>>({})
 const selectedPageFiles = ref<IncomingPageFile[]>([])
 const showSidebar = ref(false)
 const draggingWindow = ref(false)
+const historyScrollRequest = ref(0)
 const ingestingFileIds = new Set<string>()
 let extractionRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -198,6 +199,9 @@ async function createChat() {
 
 async function selectThread(threadId: string) {
   await chat.selectThread(threadId, context.config.token)
+  // 会话 ID 会先于异步历史写入组件；完成加载后显式通知消息区定位，
+  // 避免依赖流式状态或消息数组更新时机来猜测是否需要滚动。
+  historyScrollRequest.value += 1
   showSidebar.value = false
 }
 
@@ -337,11 +341,11 @@ watch(
       return
     }
     if (!context.config.token) return
-    void chat.bootstrap(
-      context.config.token,
-      context.config.agentId,
-      context.config.conversationScopeKey
-    )
+    void chat
+      .bootstrap(context.config.token, context.config.agentId, context.config.conversationScopeKey)
+      .then(() => {
+        historyScrollRequest.value += 1
+      })
     void refreshExtraction()
   },
   { immediate: true }
@@ -457,6 +461,7 @@ onUnmounted(() => {
           :agent-state="chat.agentState"
           :thread-id="chat.currentThreadId"
           :token="context.config.token"
+          :history-scroll-request="historyScrollRequest"
           @feedback="submitFeedback"
         />
         <RunInterruptCard
@@ -467,6 +472,7 @@ onUnmounted(() => {
           @cancel="submitInterrupt('reject')"
         />
         <ChatInput
+          v-else
           :disabled="chat.isSending || Boolean(context.config.authError) || !context.config.token"
           :streaming="chat.isStreaming"
           :ask-page="chat.askPage"

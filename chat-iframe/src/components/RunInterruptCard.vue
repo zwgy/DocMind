@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { CircleHelp, Send, X } from 'lucide-vue-next'
+import { Send, X } from 'lucide-vue-next'
 import {
   buildInterruptAnswers,
   isInterruptQuestionAnswered,
@@ -69,66 +69,65 @@ function submit() {
 <template>
   <section class="interrupt-card" :aria-label="isApproval ? '人工审批' : '需要补充信息'">
     <header class="interrupt-header">
-      <span class="interrupt-icon" aria-hidden="true"><CircleHelp :size="18" /></span>
-      <div>
-        <p class="interrupt-title">{{ isApproval ? '需要人工审批' : '需要你的选择' }}</p>
-        <p class="interrupt-description">回答后，助手将继续当前任务</p>
-      </div>
+      <p class="interrupt-title">{{ isApproval ? '请确认操作' : '请补充信息' }}</p>
+      <p class="interrupt-description">完成回答后，助手将继续处理</p>
     </header>
 
-    <fieldset v-for="question in questions" :key="question.id" class="interrupt-question">
-      <legend>
-        {{ question.text }}
-        <small v-if="question.multiple">可多选</small>
-      </legend>
-      <div v-if="question.options.length" class="interrupt-options">
-        <label
-          v-for="option in question.options"
-          :key="option.value"
-          class="interrupt-option"
-          :class="{
-            'is-selected': isSelected(question, option.value),
-            'is-disabled': disabled
-          }"
-        >
+    <div class="interrupt-content">
+      <fieldset v-for="question in questions" :key="question.id" class="interrupt-question">
+        <legend>
+          {{ question.text }}
+          <small v-if="question.multiple">可多选</small>
+        </legend>
+        <div v-if="question.options.length" class="interrupt-options">
+          <label
+            v-for="option in question.options"
+            :key="option.value"
+            class="interrupt-option"
+            :class="{
+              'is-selected': isSelected(question, option.value),
+              'is-disabled': disabled
+            }"
+          >
+            <input
+              v-if="question.multiple"
+              type="checkbox"
+              :checked="isSelected(question, option.value)"
+              :disabled="disabled"
+              @change="toggle(question, option.value)"
+            />
+            <input
+              v-else
+              v-model="answers[question.id]"
+              type="radio"
+              :name="question.id"
+              :value="option.value"
+              :disabled="disabled"
+            />
+            <span>{{ option.label }}</span>
+          </label>
           <input
-            v-if="question.multiple"
-            type="checkbox"
-            :checked="isSelected(question, option.value)"
+            v-if="
+              question.allowOther &&
+              isOtherSelected(question, answers[question.id] ?? (question.multiple ? [] : ''))
+            "
+            v-model.trim="otherTexts[question.id]"
+            class="interrupt-other-input"
+            type="text"
             :disabled="disabled"
-            @change="toggle(question, option.value)"
+            placeholder="请输入其他答案"
+            aria-label="其他答案"
           />
-          <input
-            v-else
-            v-model="answers[question.id]"
-            type="radio"
-            :name="question.id"
-            :value="option.value"
-            :disabled="disabled"
-          />
-          <span>{{ option.label }}</span>
-        </label>
-        <input
-          v-if="
-            question.allowOther &&
-            isOtherSelected(question, answers[question.id] ?? (question.multiple ? [] : ''))
-          "
-          v-model.trim="otherTexts[question.id]"
-          class="interrupt-other-input"
-          type="text"
+        </div>
+        <textarea
+          v-else
+          v-model.trim="answers[question.id]"
+          rows="2"
           :disabled="disabled"
-          placeholder="请输入其他答案"
-          aria-label="其他答案"
+          placeholder="请输入回答"
         />
-      </div>
-      <textarea
-        v-else
-        v-model.trim="answers[question.id]"
-        rows="2"
-        :disabled="disabled"
-        placeholder="请输入回答"
-      />
-    </fieldset>
+      </fieldset>
+    </div>
 
     <div class="interrupt-actions">
       <button type="button" class="interrupt-cancel" :disabled="disabled" @click="emit('cancel')">
@@ -146,32 +145,20 @@ function submit() {
 <style scoped>
 .interrupt-card {
   box-sizing: border-box;
-  width: calc(100% - 24px);
-  margin: 8px 12px 12px;
-  padding: 16px;
-  border: 1px solid var(--gray-150);
-  border-radius: 8px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: 100%;
+  max-height: min(62vh, 520px);
+  min-width: 0;
+  border-top: 1px solid var(--gray-200);
   background: var(--gray-0);
+  box-shadow: 0 -8px 24px rgb(15 23 42 / 8%);
 }
 
 .interrupt-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-bottom: 12px;
+  padding: 14px 16px 12px;
   border-bottom: 1px solid var(--gray-100);
-}
-
-.interrupt-icon {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 7px;
-  color: var(--main-700);
-  background: var(--main-50);
+  text-align: center;
 }
 
 .interrupt-title,
@@ -181,7 +168,7 @@ function submit() {
 
 .interrupt-title {
   color: var(--gray-900);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.35;
 }
@@ -191,6 +178,12 @@ function submit() {
   color: var(--gray-500);
   font-size: 12px;
   line-height: 1.4;
+}
+
+.interrupt-content {
+  min-height: 0;
+  padding: 0 16px;
+  overflow-y: auto;
 }
 
 .interrupt-question {
@@ -219,6 +212,7 @@ function submit() {
 
 .interrupt-options {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -281,6 +275,7 @@ function submit() {
 }
 
 .interrupt-other-input {
+  grid-column: 1 / -1;
   height: 40px;
   margin-top: 2px;
   padding: 0 10px;
@@ -299,11 +294,11 @@ function submit() {
 }
 
 .interrupt-actions {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  margin-top: 16px;
-  padding-top: 12px;
+  margin: 14px 16px 0;
+  padding: 12px 0 16px;
   border-top: 1px solid var(--gray-100);
 }
 
@@ -322,7 +317,6 @@ function submit() {
 }
 
 .interrupt-cancel {
-  min-width: 112px;
   border: 1px solid var(--gray-200);
   color: var(--gray-700);
   background: var(--gray-0);
@@ -335,7 +329,6 @@ function submit() {
 }
 
 .interrupt-submit {
-  min-width: 132px;
   border: 1px solid var(--main-700);
   color: var(--gray-0);
   background: var(--main-700);
@@ -358,5 +351,11 @@ function submit() {
   color: var(--gray-500);
   background: var(--gray-100);
   cursor: not-allowed;
+}
+
+@media (max-width: 380px) {
+  .interrupt-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

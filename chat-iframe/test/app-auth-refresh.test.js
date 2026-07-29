@@ -39,3 +39,9 @@ test('page attachments are synchronized only after the user selects them for a s
 test('structured extraction items are folded by default', () => {
   assert.doesNotMatch(messagesSource, /class="context-summary-group"\s+open/)
 })
+
+test('conversation selection requests bottom positioning after history has loaded', () => {
+  assert.match(source, /await chat\.selectThread\(threadId, context\.config\.token\)/)
+  assert.match(source, /historyScrollRequest\.value \+= 1/)
+  assert.match(source, /:history-scroll-request="historyScrollRequest"/)
+})

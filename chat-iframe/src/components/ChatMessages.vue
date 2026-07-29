@@ -37,6 +37,7 @@ const props = withDefaults(
     agentState?: Record<string, unknown> | null
     threadId?: string
     token?: string
+    historyScrollRequest?: number
   }>(),
   {
     messages: () => [],
@@ -46,7 +47,8 @@ const props = withDefaults(
     showRunProgress: false,
     agentState: null,
     threadId: '',
-    token: ''
+    token: '',
+    historyScrollRequest: 0
   }
 )
 
@@ -366,18 +368,28 @@ function assistantSources(message: ChatMessage) {
   return extractFinalAnswerSources(props.messages, message.id)
 }
 
-async function scrollToBottom() {
-  if (!props.streaming) return
+async function scrollToBottom(behavior: 'auto' | 'smooth') {
   await nextTick()
   requestAnimationFrame(() => {
     const el = messagesEl.value
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior })
   })
 }
 
-watch([displayItems, showGeneratingStatus, showRunProgress, () => props.compacting], scrollToBottom, {
+function scrollStreamingToBottom() {
+  if (props.streaming) void scrollToBottom('smooth')
+}
+
+watch([displayItems, showGeneratingStatus, showRunProgress, () => props.compacting], scrollStreamingToBottom, {
   flush: 'post'
 })
+// 历史加载完成与流式增量是两种不同的滚动语义：切换会话必须立即落到底部，
+// 不能复用 streaming 判断，否则已完成会话会停留在列表顶部。
+watch(
+  () => props.historyScrollRequest,
+  () => void scrollToBottom('auto'),
+  { flush: 'post' }
+)
 watch(() => props.threadId, clearInlineSvgUrls, { immediate: true })
 // 交付物会在运行结束后补挂到最终消息；直接跟踪实际驱动卡片渲染的显示项，避免原始消息数组的更新时机错过预加载。
 watch(

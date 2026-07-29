@@ -13,6 +13,7 @@ const componentSource = readFileSync(
   new URL('../src/components/RunInterruptCard.vue', import.meta.url),
   'utf8'
 )
+const appSource = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
 
 test('interrupt questions add one Other option when allow_other is enabled', () => {
   const questions = normalizeInterruptQuestions([
@@ -97,11 +98,26 @@ test('interrupt Other selection is incomplete until custom text is entered', () 
   )
 })
 
-test('interrupt card uses stable icon buttons and explicit Other input', () => {
-  assert.match(componentSource, /CircleHelp/)
+test('interrupt panel replaces the composer with a centered header and symmetric actions', () => {
+  assert.doesNotMatch(componentSource, /CircleHelp|interrupt-icon/)
   assert.match(componentSource, /<X :size="16"/)
   assert.match(componentSource, /<Send :size="16"/)
   assert.match(componentSource, /class="interrupt-other-input"/)
+  assert.match(componentSource, /isApproval \? '请确认操作' : '请补充信息'/)
+  assert.match(componentSource, />完成回答后，助手将继续处理</)
   assert.match(componentSource, />暂不回答</)
   assert.match(componentSource, />提交回答</)
+  assert.match(
+    componentSource,
+    /\.interrupt-card \{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\) auto;[\s\S]*width: 100%;/
+  )
+  assert.match(componentSource, /\.interrupt-content \{[\s\S]*overflow-y: auto;/)
+  assert.match(
+    componentSource,
+    /\.interrupt-actions \{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/
+  )
+  assert.match(
+    appSource,
+    /<RunInterruptCard[\s\S]*v-if="chat\.pendingInterrupt"[\s\S]*\/>\s*<ChatInput\s+v-else/
+  )
 })

@@ -30,6 +30,15 @@ test('SVG artifacts use the existing image preview path', () => {
 test('streaming auto-scroll observes display item replacement without deep traversal', () => {
   assert.match(
     component,
-    /watch\(\[displayItems, showGeneratingStatus, showRunProgress, \(\) => props\.compacting\], scrollToBottom, \{\s*flush: 'post'\s*\}\)/
+    /watch\(\s*\[displayItems, showGeneratingStatus, showRunProgress, \(\) => props\.compacting\],[\s\S]*scrollStreamingToBottom,[\s\S]*\{ flush: 'post' \}\s*\)/
+  )
+  assert.match(component, /if \(props\.streaming\) void scrollToBottom\('smooth'\)/)
+})
+
+test('completed conversation history scrolls to its last message without animation', () => {
+  assert.match(component, /historyScrollRequest\?: number/)
+  assert.match(
+    component,
+    /watch\(\s*\(\) => props\.historyScrollRequest,[\s\S]*\(\) => void scrollToBottom\('auto'\),[\s\S]*\{ flush: 'post' \}\s*\)/
   )
 })
