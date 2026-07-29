@@ -8,7 +8,26 @@ from types import SimpleNamespace
 
 import pytest
 
-from yuxi.services.visualization_service import VisualizationError, _reserve_output, _validate_svg
+from yuxi.services.visualization_service import (
+    VisualizationError,
+    _renderer_error_detail,
+    _reserve_output,
+    _validate_svg,
+)
+
+
+def test_renderer_error_detail_prefers_actionable_node_error() -> None:
+    stderr = b"""file:///app/render_mindmap.mjs:14
+throw new Error("invalid outline");
+^
+
+Error: outline must use unordered list items
+    at file:///app/render_mindmap.mjs:14:20
+
+Node.js v24.18.0
+"""
+
+    assert _renderer_error_detail(stderr) == "Error: outline must use unordered list items"
 
 
 def test_validate_svg_accepts_local_fragment_reference(tmp_path: Path) -> None:

@@ -23,6 +23,15 @@ class VisualizationError(ValueError):
     """向模型返回的可执行中文可视化错误。"""
 
 
+def _renderer_error_detail(stderr: bytes) -> str:
+    """提取渲染器真实异常，避免 Node.js 版本尾行覆盖可执行错误。"""
+    lines = [line.strip() for line in stderr.decode("utf-8", errors="replace").splitlines() if line.strip()]
+    for line in reversed(lines):
+        if line.startswith("Error:") or re.match(r"^[A-Za-z_][\w.]*?(?:Error|Exception):", line):
+            return line[:300]
+    return (lines[-1] if lines else "渲染器执行失败")[:300]
+
+
 def _require_input_path(thread_id: str, uid: str, virtual_path: str, suffix: str) -> Path:
     # paths 模块会初始化 agents 包；延迟导入可避免 services 与 toolkits 的注册循环。
     from yuxi.agents.backends.sandbox.paths import resolve_virtual_path
@@ -120,8 +129,7 @@ async def render_visualization(
         )
         stdout, stderr = await asyncio.wait_for(process.communicate(payload), timeout=20)
         if process.returncode != 0:
-            reason = stderr.decode("utf-8", errors="replace").strip().splitlines()[-1:] or ["渲染器执行失败"]
-            raise VisualizationError(f"渲染失败：{reason[0][:300]}")
+            raise VisualizationError(f"渲染失败：{_renderer_error_detail(stderr)}")
         summary = json.loads(stdout.decode("utf-8"))
         _validate_svg(temporary)
         final, virtual_path = _reserve_output(directory, normalized_name)
