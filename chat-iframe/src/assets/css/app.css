@@ -637,6 +637,8 @@
 
 .chat-message.assistant {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   color: var(--gray-900);
 }
 
@@ -1461,6 +1463,17 @@
   margin: 4px 0 8px;
 }
 
+.execution-process-panel,
+.execution-process-list,
+.execution-process-list > *,
+.tool-calls-panel,
+.tool-list,
+.tool-card,
+.tool-card-body {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .execution-process-summary {
   display: flex;
   align-items: center;
@@ -1658,6 +1671,8 @@
 .tool-card-body {
   display: grid;
   gap: 8px;
+  box-sizing: border-box;
+  max-width: calc(100% - 22px);
   margin-left: 22px;
   padding: 4px 0 6px;
 }

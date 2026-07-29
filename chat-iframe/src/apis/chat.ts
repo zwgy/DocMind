@@ -504,7 +504,19 @@ export async function listMessages(threadId: string, token?: string): Promise<Ch
     response,
     '获取聊天记录失败'
   )
-  return (data.history || []).map(normalizeChatMessage)
+  return (data.history || [])
+    .filter((message) => {
+      const extra =
+        message.extra_metadata && typeof message.extra_metadata === 'object'
+          ? (message.extra_metadata as Record<string, unknown>)
+          : {}
+      // resume 消息是恢复 LangGraph checkpoint 的内部协议载荷，不是用户的新发言；
+      // 在历史边界过滤可保证实时回写与页面刷新使用同一展示口径。
+      return (
+        message.message_type !== 'resume' && extra.source !== 'ask_user_question_resume'
+      )
+    })
+    .map(normalizeChatMessage)
 }
 
 export async function sendMessageStream(

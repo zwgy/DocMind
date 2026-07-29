@@ -23,6 +23,42 @@ test('selectThread restores persisted token usage with message history', async (
   assert.deepEqual(chat.agentState?.token_usage, { prompt_tokens: 1200, prompt_budget: 102400 })
 })
 
+test('selectThread hides internal ask_user_question resume messages', async () => {
+  setActivePinia(createPinia())
+  globalThis.fetch = async (url) => {
+    if (url === '/api/chat/thread/thread-resume/history') {
+      return Response.json({
+        history: [
+          { id: 'question', type: 'human', content: '请选择输出格式' },
+          {
+            id: 'resume',
+            type: 'human',
+            content: '{"format":"excel"}',
+            message_type: 'resume'
+          },
+          {
+            id: 'legacy-resume',
+            type: 'human',
+            content: 'reject',
+            extra_metadata: { source: 'ask_user_question_resume' }
+          },
+          { id: 'answer', type: 'ai', content: '已选择 Excel' }
+        ]
+      })
+    }
+    if (url === '/api/chat/thread/thread-resume/state') return Response.json({})
+    return Response.json({})
+  }
+
+  const chat = useChatStore()
+  await chat.selectThread('thread-resume', 'token-1')
+
+  assert.deepEqual(
+    chat.messages.map((message) => message.id),
+    ['question', 'answer']
+  )
+})
+
 test('terminal run replaces its optimistic turn with server history ids', async () => {
   setActivePinia(createPinia())
   let requestId = ''

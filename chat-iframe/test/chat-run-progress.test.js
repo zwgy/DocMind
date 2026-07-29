@@ -98,6 +98,12 @@ test('execution process adds one outer fold without restyling its original conte
   assert.doesNotMatch(executionProcessSource, />模型阶段回复</)
 })
 
+test('execution process and tool details cannot widen the iframe message viewport', () => {
+  assert.match(styles, /\.chat-message\.assistant \{[\s\S]*min-width: 0/)
+  assert.match(styles, /\.execution-process-panel,[\s\S]*\.tool-card-body \{[\s\S]*min-width: 0/)
+  assert.match(styles, /\.tool-card-body \{[\s\S]*max-width: calc\(100% - 22px\)/)
+})
+
 test('execution summaries count only visible tools and keep compact accessible controls', () => {
   assert.match(executionProcessSource, /normalizeToolCalls\(props\.messages\.flatMap/)
   assert.match(executionProcessSource, /countToolCallKinds\(toolCalls\.value\)/)
