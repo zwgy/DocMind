@@ -111,29 +111,37 @@ test('interrupt panel replaces the composer with a centered header and symmetric
   assert.match(componentSource, />提交回答</)
   assert.match(
     componentSource,
-    /\.interrupt-card \{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\) auto;[\s\S]*width: calc\(100% - 20px\);[\s\S]*max-height: min\(78vh, 540px\);[\s\S]*border: 1px solid var\(--gray-300\);[\s\S]*border-top: 3px solid var\(--main-700\);[\s\S]*border-radius: 8px;[\s\S]*0 -12px 32px rgb\(15 23 42 \/ 16%\),/
+    /\.interrupt-card \{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\) auto;[\s\S]*width: calc\(100% - 20px\);[\s\S]*max-height: min\(78vh, 540px\);[\s\S]*border: 1px solid var\(--gray-200\);[\s\S]*border-top: 3px solid var\(--main-700\);[\s\S]*border-radius: 8px;[\s\S]*0 -8px 24px rgb\(15 23 42 \/ 12%\),/
   )
   assert.match(
     componentSource,
-    /\.interrupt-content \{[\s\S]*overflow-y: auto;[\s\S]*background: var\(--gray-0\);/
+    /\.interrupt-content \{[\s\S]*overflow-y: auto;[\s\S]*background: var\(--gray-25\);/
   )
   assert.match(
     componentSource,
-    /\.interrupt-header \{[\s\S]*border-bottom: 1px solid var\(--main-200\);[\s\S]*background: var\(--main-50\);/
+    /\.interrupt-header \{[\s\S]*border-bottom: 1px solid var\(--gray-150\);[\s\S]*background: var\(--gray-0\);/
   )
   assert.match(componentSource, /\.interrupt-title \{[\s\S]*font-size: 16px;/)
   assert.match(componentSource, /\.interrupt-option \{[\s\S]*font-size: 12px;/)
   assert.match(
     componentSource,
-    /\.interrupt-question \{[\s\S]*border-bottom: 1px solid var\(--gray-150\);/
+    /\.interrupt-question \{[\s\S]*border-bottom: 1px solid var\(--gray-200\);/
   )
   assert.match(
     componentSource,
-    /\.interrupt-option \{[\s\S]*border: 1px solid var\(--gray-150\);/
+    /\.interrupt-option \{[\s\S]*border: 1px solid var\(--gray-200\);[\s\S]*background: var\(--gray-0\);/
   )
   assert.match(
     componentSource,
-    /\.interrupt-actions \{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[\s\S]*border-top: 1px solid var\(--gray-300\);[\s\S]*background: var\(--gray-50\);/
+    /\.interrupt-option:hover \{[\s\S]*border-color: var\(--main-200\);[\s\S]*background: var\(--main-50\);/
+  )
+  assert.match(
+    componentSource,
+    /\.interrupt-option input \{[\s\S]*width: 18px;[\s\S]*appearance: none;/
+  )
+  assert.match(
+    componentSource,
+    /\.interrupt-actions \{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[\s\S]*border-top: 1px solid var\(--gray-200\);[\s\S]*background: var\(--gray-0\);[\s\S]*0 -4px 12px rgb\(15 23 42 \/ 4%\);/
   )
   assert.match(componentSource, /\.interrupt-actions button \{[\s\S]*min-height: 42px;/)
   assert.match(
