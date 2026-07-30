@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 import aiofiles
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile, File
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,7 +28,13 @@ from yuxi.services.conversation_service import (
     upload_thread_attachment_view,
     upload_tmp_attachment_view,
 )
-from yuxi.services.file_preview import detect_media_type
+from yuxi.services.file_preview import (
+    MAX_BINARY_PREVIEW_SIZE_BYTES,
+    OfficePreviewConversionError,
+    convert_office_to_pdf,
+    detect_media_type,
+    is_office_pdf_preview_file,
+)
 from yuxi.services.thread_files_service import (
     list_thread_files_view,
     read_thread_file_content_view,
@@ -546,6 +552,7 @@ async def get_thread_artifact(
     thread_id: str,
     path: str,
     download: bool = Query(False),
+    preview: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_required_user),
 ):
@@ -556,6 +563,22 @@ async def get_thread_artifact(
         db=db,
         path=path,
     )
+
+    if preview and not download and is_office_pdf_preview_file(file_path.name):
+        if file_path.stat().st_size > MAX_BINARY_PREVIEW_SIZE_BYTES:
+            raise HTTPException(status_code=413, detail="文件过大，当前仅支持 30 MB 以内的 Office 预览")
+        async with aiofiles.open(file_path, "rb") as artifact_file:
+            content = await artifact_file.read()
+        try:
+            pdf_content = await convert_office_to_pdf(file_path.name, content)
+        except OfficePreviewConversionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        preview_name = f"{file_path.stem or 'preview'}.pdf"
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(preview_name)}"},
+        )
 
     async with aiofiles.open(file_path, "rb") as artifact_file:
         file_head = await artifact_file.read(512)

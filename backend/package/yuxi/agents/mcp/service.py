@@ -36,12 +36,21 @@ _mcp_tools_cache: dict[str, list[Callable[..., Any]]] = {}
 _mcp_tools_stats: dict[str, dict[str, int]] = {}
 _UNSET = object()
 
-# 内置 MCP 仍以此注册表作为代码事实源。当前没有默认项；后续新增内置 MCP 时只需在这里声明，
-# 启动同步逻辑会负责创建或更新系统记录，同时保留管理员在数据库中设置的启用状态。
-_DEFAULT_MCP_SERVERS: dict[str, dict[str, Any]] = {}
+# 内置 MCP 以此注册表作为代码事实源。启动同步逻辑负责创建或更新系统记录，
+# 同时保留管理员在数据库中设置的启用状态，后续新增内置 MCP 也只需在这里声明。
+_DEFAULT_MCP_SERVERS: dict[str, dict[str, Any]] = {
+    "mcp-server-chart": {
+        "command": "npx",
+        "args": ["-y", "@antv/mcp-server-chart"],
+        "transport": "stdio",
+        "description": "图表生成工具，支持生成各类图表（柱状图、折线图、饼图等）",
+        "icon": "📊",
+        "tags": ["内置", "图表"],
+    },
+}
 
 # 仅清理系统自动创建的退役 MCP，用户手工创建的同名配置仍由用户自行管理。
-_RETIRED_BUILTIN_MCP_SERVER_SLUGS = ("sequentialthinking", "mcp-server-chart", "document-exporter")
+_RETIRED_BUILTIN_MCP_SERVER_SLUGS = ("sequentialthinking", "document-exporter")
 
 _SYNCED_MCP_FIELDS = (
     "description",

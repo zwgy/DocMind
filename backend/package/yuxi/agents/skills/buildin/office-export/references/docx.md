@@ -11,7 +11,8 @@
 - `page_break`：另起一页
 
 表格单元格只能是字符串、数字、布尔值或 `null`。图片支持 SVG、PNG、JPEG、GIF、BMP、TIFF、WebP；
-SVG 会在写入 Word 时临时转换为高分辨率 PNG。
+SVG 会在写入 Word 时临时转换为高分辨率 PNG。`width_cm` 是最大宽度；导出器还会按页面可用高度
+等比缩小纵向长图，为标题和图题保留空间，不会裁剪图片。
 
 完整示例：
 

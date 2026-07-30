@@ -415,14 +415,19 @@ export async function fetchThreadArtifact(
   threadId: string,
   path: string,
   token?: string,
-  download = false
+  download = false,
+  preview = false
 ) {
   const encodedPath = path
     .split('/')
     .filter(Boolean)
     .map((part) => encodeURIComponent(part))
     .join('/')
-  const suffix = download ? '?download=true' : ''
+  const params = new URLSearchParams()
+  if (download) params.set('download', 'true')
+  if (preview) params.set('preview', 'true')
+  const query = params.toString()
+  const suffix = query ? `?${query}` : ''
   const response = await fetch(
     apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}/artifacts/${encodedPath}${suffix}`),
     {

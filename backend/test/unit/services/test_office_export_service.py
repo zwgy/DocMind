@@ -20,8 +20,8 @@ def _resolver(paths: dict[str, Path]):
     return resolve
 
 
-def _png(path: Path) -> None:
-    Image.new("RGB", (320, 180), "#2f6f5e").save(path)
+def _png(path: Path, size: tuple[int, int] = (320, 180)) -> None:
+    Image.new("RGB", size, "#2f6f5e").save(path)
 
 
 @pytest.mark.asyncio
@@ -66,6 +66,49 @@ async def test_export_docx_inserts_table_picture_and_caption(tmp_path: Path) -> 
     assert len(document.inline_shapes) == 1
     assert any(paragraph.text == "图 1 风险分布" for paragraph in document.paragraphs)
     assert {path.suffix for path in outputs.iterdir()} == {".docx"}
+
+
+@pytest.mark.asyncio
+async def test_export_docx_scales_tall_picture_within_page(tmp_path: Path) -> None:
+    image = tmp_path / "flow.png"
+    definition = tmp_path / "report.json"
+    outputs = tmp_path / "outputs"
+    _png(image, (400, 1600))
+    definition.write_text(
+        json.dumps(
+            {
+                "kind": "document",
+                "blocks": [
+                    {
+                        "type": "image",
+                        "source_path": "/home/gem/user-data/outputs/flow.png",
+                        "caption": "图 1 纵向流程图",
+                        "width_cm": 16,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    await service.export_office_file(
+        definition_path=definition,
+        output_format="docx",
+        output_name="纵向流程图",
+        output_directory=outputs,
+        virtual_output_directory="/home/gem/user-data/outputs",
+        source_resolver=_resolver({"/home/gem/user-data/outputs/flow.png": image}),
+    )
+
+    document = Document(outputs / "纵向流程图.docx")
+    shape = document.inline_shapes[0]
+    section = document.sections[0]
+    max_height_cm = (section.page_height - section.top_margin - section.bottom_margin) / service.Cm(
+        1
+    ) - service._DOCX_IMAGE_VERTICAL_RESERVE_CM
+    assert shape.height / service.Cm(1) <= max_height_cm + 0.01
+    assert shape.width / shape.height == pytest.approx(0.25, abs=0.001)
 
 
 @pytest.mark.asyncio

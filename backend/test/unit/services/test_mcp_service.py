@@ -43,7 +43,7 @@ class _FakeClient:
         return self._tools
 
 
-async def test_ensure_builtin_mcp_servers_removes_retired_system_server(monkeypatch, mcp_session):
+async def test_ensure_builtin_mcp_servers_syncs_chart_and_removes_retired_servers(monkeypatch, mcp_session):
     retired_server = MCPServer(
         slug="sequentialthinking",
         name="sequentialthinking",
@@ -55,19 +55,6 @@ async def test_ensure_builtin_mcp_servers_removes_retired_system_server(monkeypa
         updated_by="system",
     )
     mcp_session.add(retired_server)
-    mcp_session.add(
-        MCPServer(
-            slug="mcp-server-chart",
-            name="历史图表 MCP",
-            description="old builtin chart server",
-            transport="stdio",
-            command="npx",
-            args=["-y", "@antv/mcp-server-chart"],
-            enabled=1,
-            created_by="system",
-            updated_by="system",
-        )
-    )
     mcp_session.add(
         MCPServer(
             slug="document-exporter",
@@ -95,7 +82,11 @@ async def test_ensure_builtin_mcp_servers_removes_retired_system_server(monkeypa
     chart = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "mcp-server-chart"))
     document_exporter = await mcp_session.scalar(select(MCPServer).where(MCPServer.slug == "document-exporter"))
     assert retired is None
-    assert chart is None
+    assert chart is not None
+    assert chart.command == "npx"
+    assert chart.args == ["-y", "@antv/mcp-server-chart"]
+    assert chart.enabled == 0
+    assert chart.created_by == "system"
     assert document_exporter is None
 
 

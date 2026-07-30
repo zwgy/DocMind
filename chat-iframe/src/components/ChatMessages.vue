@@ -161,18 +161,28 @@ function closeImagePreviewOnEscape(event: KeyboardEvent) {
   if (event.key === 'Escape') closeImagePreview()
 }
 
-function artifactKind(artifact: ChatArtifact): 'image' | 'pdf' | 'text' | null {
+const OFFICE_ARTIFACT_EXTENSIONS = new Set(['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'])
+
+function artifactExtension(artifact: ChatArtifact) {
   // 交付物 path 可能是虚拟目录或工具回传值；界面类型必须以用户可见文件名为准，读取仍使用 path。
-  const extension = (artifact.name || artifact.path).split('.').pop()?.toLowerCase() || ''
+  return (artifact.name || artifact.path).split('.').pop()?.toLowerCase() || ''
+}
+
+function isOfficeArtifact(artifact: ChatArtifact) {
+  return OFFICE_ARTIFACT_EXTENSIONS.has(artifactExtension(artifact))
+}
+
+function artifactKind(artifact: ChatArtifact): 'image' | 'pdf' | 'text' | null {
+  const extension = artifactExtension(artifact)
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(extension)) return 'image'
-  if (extension === 'pdf') return 'pdf'
+  if (extension === 'pdf' || OFFICE_ARTIFACT_EXTENSIONS.has(extension)) return 'pdf'
   if (['txt', 'md', 'json', 'csv', 'yaml', 'yml', 'xml', 'html', 'log'].includes(extension))
     return 'text'
   return null
 }
 
 function isInlineSvgArtifact(artifact: ChatArtifact) {
-  return artifactKind(artifact) === 'image' && artifact.name.toLowerCase().endsWith('.svg')
+  return artifactKind(artifact) === 'image' && artifactExtension(artifact) === 'svg'
 }
 
 function inlineSvgKey(artifact: ChatArtifact) {
@@ -224,7 +234,13 @@ async function previewArtifact(artifact: ChatArtifact) {
   artifactBusyPath.value = artifact.path
   artifactError.value = ''
   try {
-    const response = await fetchThreadArtifact(props.threadId, artifact.path, props.token)
+    const response = await fetchThreadArtifact(
+      props.threadId,
+      artifact.path,
+      props.token,
+      false,
+      isOfficeArtifact(artifact)
+    )
     if (kind === 'text') {
       artifactPreview.value = { name: artifact.name, kind, text: await response.text() }
     } else {

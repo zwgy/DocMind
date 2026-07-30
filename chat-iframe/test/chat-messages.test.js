@@ -35,6 +35,16 @@ test('SVG artifacts use the existing image preview path', () => {
   )
 })
 
+test('Office artifacts use authenticated PDF preview while preserving original download', () => {
+  assert.match(component, /OFFICE_ARTIFACT_EXTENSIONS/)
+  assert.match(component, /extension === 'pdf' \|\| OFFICE_ARTIFACT_EXTENSIONS\.has\(extension\)/)
+  assert.match(
+    component,
+    /fetchThreadArtifact\(\s*props\.threadId,\s*artifact\.path,\s*props\.token,\s*false,\s*isOfficeArtifact\(artifact\)\s*\)/
+  )
+  assert.match(component, /fetchThreadArtifact\(props\.threadId, artifact\.path, props\.token, true\)/)
+})
+
 test('streaming auto-scroll observes display item replacement without deep traversal', () => {
   assert.match(
     component,

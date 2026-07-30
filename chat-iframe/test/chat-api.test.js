@@ -7,6 +7,7 @@ import {
   cancelRun,
   createConversation,
   deleteConversation,
+  fetchThreadArtifact,
   listConversations,
   readRunEventStream,
   sendMessageStream,
@@ -662,6 +663,38 @@ test('chat management APIs use web-compatible endpoints', async () => {
     ]
   )
   assert.deepEqual(JSON.parse(calls[0].options.body), { title: '新标题', is_pinned: true })
+})
+
+test('fetchThreadArtifact requests Office PDF preview without changing download semantics', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, options })
+    return new Response(btoa('artifact'))
+  }
+
+  await fetchThreadArtifact(
+    'thread-1',
+    '/home/gem/user-data/outputs/检查 报告.docx',
+    'token-1',
+    false,
+    true
+  )
+  await fetchThreadArtifact(
+    'thread-1',
+    '/home/gem/user-data/outputs/检查 报告.docx',
+    'token-1',
+    true
+  )
+
+  assert.equal(
+    calls[0].url,
+    '/api/chat/thread/thread-1/artifacts/home/gem/user-data/outputs/%E6%A3%80%E6%9F%A5%20%E6%8A%A5%E5%91%8A.docx?preview=true'
+  )
+  assert.equal(
+    calls[1].url,
+    '/api/chat/thread/thread-1/artifacts/home/gem/user-data/outputs/%E6%A3%80%E6%9F%A5%20%E6%8A%A5%E5%91%8A.docx?download=true'
+  )
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer token-1')
 })
 
 test('uploadImage posts image multipart payload', async () => {

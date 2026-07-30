@@ -32,6 +32,7 @@ _MAX_DEFINITION_BYTES = 2 * 1024 * 1024
 _MAX_IMAGE_PIXELS = 100_000_000
 _MAX_SHEETS = 20
 _MAX_ROWS_PER_SHEET = 20_000
+_DOCX_IMAGE_VERTICAL_RESERVE_CM = 3.5
 _INVALID_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _CELL_ANCHOR_RE = re.compile(r"^[A-Z]{1,3}[1-9][0-9]{0,6}$")
 _SHEET_INVALID_RE = re.compile(r"[\[\]:*?/\\]")
@@ -310,6 +311,9 @@ def _build_docx(definition: DocumentDefinition, resolver: SourceResolver) -> byt
     section.bottom_margin = Cm(2.2)
     section.left_margin = Cm(2.4)
     section.right_margin = Cm(2.4)
+    content_width_cm = (section.page_width - section.left_margin - section.right_margin) / Cm(1)
+    content_height_cm = (section.page_height - section.top_margin - section.bottom_margin) / Cm(1)
+    max_image_height_cm = content_height_cm - _DOCX_IMAGE_VERTICAL_RESERVE_CM
 
     normal = document.styles["Normal"]
     normal.font.name = "Noto Sans CJK SC"
@@ -351,9 +355,25 @@ def _build_docx(definition: DocumentDefinition, resolver: SourceResolver) -> byt
                 # Word、WPS 和 LibreOffice 三端的文档内容一致。
                 width_px = min(2400, max(600, round(block.width_cm / 2.54 * 240)))
                 source = images.materialize(block.source_path, width_px=width_px)
+                with Image.open(source) as image:
+                    image_width_px, image_height_px = image.size
+
+                # width_cm 是期望最大宽度。纵向流程图如果只按宽度写入会高出页面，
+                # 因此还要为同页标题、图题和段落间距预留空间，再按原始比例整体缩小。
+                picture_width_cm = min(block.width_cm, content_width_cm)
+                picture_height_cm = picture_width_cm * image_height_px / image_width_px
+                if picture_height_cm > max_image_height_cm:
+                    scale = max_image_height_cm / picture_height_cm
+                    picture_width_cm *= scale
+                    picture_height_cm = max_image_height_cm
+
                 paragraph = document.add_paragraph()
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                paragraph.add_run().add_picture(str(source), width=Cm(block.width_cm))
+                paragraph.add_run().add_picture(
+                    str(source),
+                    width=Cm(picture_width_cm),
+                    height=Cm(picture_height_cm),
+                )
                 if block.caption:
                     caption = document.add_paragraph(block.caption, style="Caption")
                     caption.alignment = WD_ALIGN_PARAGRAPH.CENTER

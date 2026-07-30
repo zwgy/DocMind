@@ -11,6 +11,8 @@ LibreOffice 转换为 PDF。不要另外生成 HTML 或调用浏览器打印。
 - `image`：当前会话图片 `source_path`、可选 `caption`、2 至 17 的 `width_cm`
 - `page_break`：另起一页
 
+`width_cm` 是图片最大宽度；导出器会同时按 PDF 页面可用高度等比缩小纵向长图，不会裁剪图片。
+
 完整示例：
 
 ```json
