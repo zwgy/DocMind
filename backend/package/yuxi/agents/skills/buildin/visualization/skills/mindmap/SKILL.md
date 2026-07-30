@@ -25,4 +25,5 @@ description: 用户明确要求思维导图、脑图或 mind map 时必须先读
      "layout": "horizontal"
    }
    ```
-6. `render_mind_map` 成功返回后系统会自动展示 SVG，不再调用 `present_artifacts`，也不再次调用渲染工具。最终回答简要说明已生成、节点数、布局和返回的 `artifact_path`。节点使用短语，不写 HTML、链接、图片或脚本。
+6. `outline` 不超过 8,000 个字符、100 个节点，单节点不超过 48 个字符；长文先归纳为短语式层级大纲。
+7. `render_mind_map` 成功返回后系统会自动展示 SVG，不再调用 `present_artifacts`，也不再次调用渲染工具。最终回答简要说明已生成、节点数、布局和返回的 `artifact_path`。节点不写 HTML、链接、图片或脚本。

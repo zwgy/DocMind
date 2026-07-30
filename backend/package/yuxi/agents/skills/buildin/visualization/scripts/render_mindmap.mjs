@@ -14,7 +14,7 @@ for (const line of lines) {
   const match = line.match(/^( *)(- )(.+)$/);
   if (!match || match[1].length % 2) throw new Error("大纲只支持两个空格一级的无序列表");
   const name = match[3].trim();
-  if (!name || name.length > 80) throw new Error("节点不能为空且不得超过 80 个字符");
+  if (!name || name.length > 48) throw new Error("节点不能为空且不得超过 48 个字符");
   const node = { id: `node-${count + 1}`, name, children: [] };
   const depth = match[1].length / 2;
   if (depth > 6) throw new Error("思维导图最多支持 7 层");
@@ -30,7 +30,7 @@ for (const line of lines) {
   count++;
   maxDepth = Math.max(maxDepth, depth);
 }
-if (!root || count > 150) throw new Error("思维导图缺少根节点或节点过多");
+if (!root || count > 100) throw new Error("思维导图缺少根节点或节点超过 100 个");
 
 const branchPalette = [
   { stroke: "#2F6F5E", fill: "#E7F4EC", text: "#214E43" },

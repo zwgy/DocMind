@@ -100,7 +100,7 @@ async def render_mindmap(
         str,
         Field(
             min_length=3,
-            max_length=16_000,
+            max_length=8_000,
             description=(
                 "Markdown 无序列表大纲正文；参数名必须是 outline，不是 outline_path、file_path 或 source_path；"
                 "首行是唯一根节点且以 '- ' 开头，子级每层缩进两个空格"

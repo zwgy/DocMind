@@ -99,6 +99,8 @@ def test_mindmap_skill_uses_direct_outline_and_automatic_delivery() -> None:
     assert "不调用 `ls`、`write_file`、`edit_file` 或 `execute`" in content
     assert "不再调用 `present_artifacts`" in content
     assert "优先使用 `horizontal` 双向中心布局" in content
+    assert "100 个节点" in content
+    assert "48 个字符" in content
     assert specs["mindmap"].tool_dependencies == ("render_mind_map",)
 
 

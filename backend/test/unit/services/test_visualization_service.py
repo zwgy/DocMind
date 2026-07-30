@@ -185,3 +185,49 @@ def test_echarts_renderers_generate_themed_safe_svg(
         }
         # 默认横向脑图必须把一级分支分布在中心主题两侧，而不是退化回单向树。
         assert text_positions["风险"] < text_positions["项目"] < text_positions["计划"]
+
+
+@pytest.mark.parametrize(
+    ("outline", "expected_error"),
+    [
+        (f"- {'节' * 49}", "节点不能为空且不得超过 48 个字符"),
+        ("- 根节点\n" + "".join(f"  - 节点{i}\n" for i in range(100)), "节点超过 100 个"),
+    ],
+)
+def test_mindmap_renderer_rejects_content_beyond_published_limits(
+    tmp_path: Path,
+    outline: str,
+    expected_error: str,
+) -> None:
+    script = (
+        Path(__file__).parents[3]
+        / "package"
+        / "yuxi"
+        / "agents"
+        / "skills"
+        / "buildin"
+        / "visualization"
+        / "scripts"
+        / "render_mindmap.mjs"
+    )
+    output = tmp_path / "mindmap.svg"
+
+    result = subprocess.run(
+        ["node", str(script)],
+        input=json.dumps(
+            {
+                "outline": outline,
+                "layout": "horizontal",
+                "output": str(output),
+            },
+            ensure_ascii=False,
+        ),
+        text=True,
+        encoding="utf-8",
+        check=False,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+    assert not output.exists()
