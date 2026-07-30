@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 const component = readFileSync(new URL('../src/components/ChatMessages.vue', import.meta.url), 'utf8')
+const styles = readFileSync(new URL('../src/assets/css/app.css', import.meta.url), 'utf8')
 
 test('context summary renders all extraction items grouped by schema', () => {
   assert.match(component, /contextSummaryItemGroups/, '结构化摘要应按 schema 分组渲染')
@@ -27,6 +28,11 @@ test('SVG artifacts use the existing image preview path', () => {
   assert.match(component, /class="artifact-inline-svg"/)
   assert.match(component, /\(\) => props\.token/)
   assert.match(component, /\[displayItems, \(\) => props\.threadId, \(\) => props\.token\]/)
+  assert.match(
+    styles,
+    /\.artifact-preview-image-viewport img\s*\{[\s\S]*max-width:\s*100%;[\s\S]*max-height:\s*100%;[\s\S]*object-fit:\s*contain;/,
+    '完整预览应按可用区域缩放整张静态图，不能只展示原始尺寸的局部'
+  )
 })
 
 test('streaming auto-scroll observes display item replacement without deep traversal', () => {
