@@ -200,13 +200,12 @@ function clearInlineSvgUrls() {
   inlineSvgUrls.value = {}
 }
 
-async function preloadRecentInlineSvgs() {
+async function preloadInlineSvgs() {
   const threadId = props.threadId
   if (!threadId || !props.token) return
   const artifacts = props.messages
     .flatMap((message) => message.artifacts || [])
     .filter(isInlineSvgArtifact)
-    .slice(-3)
 
   for (const artifact of artifacts) {
     const key = `${threadId}\u0000${artifact.path}`
@@ -416,7 +415,7 @@ watch(() => props.threadId, clearInlineSvgUrls, { immediate: true })
 // 交付物会在运行结束后补挂到最终消息；直接跟踪实际驱动卡片渲染的显示项，避免原始消息数组的更新时机错过预加载。
 watch(
   [displayItems, () => props.threadId, () => props.token],
-  () => void preloadRecentInlineSvgs(),
+  () => void preloadInlineSvgs(),
   { deep: true, immediate: true }
 )
 onUnmounted(() => {

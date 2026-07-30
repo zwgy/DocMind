@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.types import Command
+from pydantic import Field
 
 from yuxi.agents.artifacts import artifact_delivery_payload, delivered_artifact_paths
 from yuxi.agents.context import build_agent_input_context
@@ -39,7 +40,7 @@ TASK_SYSTEM_PROMPT = """## `task`（子智能体任务工具）
 - 继续既有子智能体任务时传入之前结果中的 `thread_id`；新任务不要填写 `thread_id`。
 - 不要并行调用同一个 `thread_id`，避免多个续跑请求同时写入同一子线程。
 - 简单问题或少量直接工具调用不要委派。
-- 调用时必须选择下方可用的 `subagent_type`，并在 `description` 中写清目标、上下文和期望输出。
+- 调用时必须选择下方可用的 `subagent_type`；`description` 使用 20 至 4000 个字符写清目标、上下文和期望输出。
 - 不要通过 shell、curl、HTTP API 或命令行间接调用子智能体；需要子智能体时必须使用 `task` 工具。
 
 Available subagent types:
@@ -51,13 +52,17 @@ TASK_TOOL_DESCRIPTION = """Launch a configured Yuxi subagent to handle an isolat
 Available subagent types:
 {available_agents}
 
-Use `subagent_type` to select one available subagent and put the full task brief in `description`.
+Use `subagent_type` to select one available subagent. `description` must contain 20 to 4000 characters and
+state the objective, necessary context, and expected output; placeholders such as "none" are invalid.
 Omit `thread_id` for a new task. To continue a previous subagent task, pass the child thread ID returned by
 that prior task result as `thread_id`.
 Do not call subagents through shell, curl, HTTP APIs, or command-line indirection."""
 
 
-TASK_DESCRIPTION_ARG = "需要子智能体独立完成的任务描述，包含必要上下文和期望输出。"
+TASK_DESCRIPTION_ARG = (
+    "需要子智能体独立完成的完整任务简报，至少 20 个字符；必须写清目标、必要上下文和期望输出，"
+    "不能填写“无”、占位词或只写任务名称。"
+)
 SUBAGENT_TYPE_ARG = "要调用的子智能体标识，必须是工具描述中列出的可用类型之一。"
 THREAD_ID_ARG = "可选。要继续的既有子智能体线程 ID，必须来自之前 task 工具结果；新任务不要填写。"
 
@@ -370,7 +375,7 @@ class YuxiSubAgentMiddleware(AgentMiddleware[Any, ContextT, ResponseT]):
 
     def _build_task_tool(self, available_agents: str) -> StructuredTool:
         def task(
-            description: Annotated[str, TASK_DESCRIPTION_ARG],
+            description: Annotated[str, Field(min_length=20, max_length=4_000, description=TASK_DESCRIPTION_ARG)],
             subagent_type: Annotated[str, SUBAGENT_TYPE_ARG],
             runtime: ToolRuntime,
             thread_id: Annotated[str | None, THREAD_ID_ARG] = None,
@@ -378,11 +383,15 @@ class YuxiSubAgentMiddleware(AgentMiddleware[Any, ContextT, ResponseT]):
             return "task 工具仅支持异步调用"
 
         async def atask(
-            description: Annotated[str, TASK_DESCRIPTION_ARG],
+            description: Annotated[str, Field(min_length=20, max_length=4_000, description=TASK_DESCRIPTION_ARG)],
             subagent_type: Annotated[str, SUBAGENT_TYPE_ARG],
             runtime: ToolRuntime,
             thread_id: Annotated[str | None, THREAD_ID_ARG] = None,
         ) -> str | Command:
+            description = description.strip()
+            # Schema 会拦截正常模型调用；这里保留同一边界，防止内部代码绕过 StructuredTool 直接调用 coroutine。
+            if len(description) < 20 or len(description) > 4_000:
+                return "无法调用子智能体：description 必须为 20 至 4000 个字符，并写清目标、必要上下文和期望输出"
             if subagent_type not in self.subagents:
                 allowed = ", ".join(f"`{slug}`" for slug in self.subagents)
                 return f"无法调用子智能体 {subagent_type}，可用子智能体只有：{allowed}"
@@ -497,13 +506,17 @@ class YuxiSubAgentMiddleware(AgentMiddleware[Any, ContextT, ResponseT]):
                 result, runtime.tool_call_id, _with_run_payload(subagent_run, completed_run)
             )
 
-        return StructuredTool.from_function(
+        task_tool = StructuredTool.from_function(
             name="task",
             func=task,
             coroutine=atask,
             description=TASK_TOOL_DESCRIPTION.format(available_agents=available_agents),
             infer_schema=True,
         )
+        task_tool.handle_validation_error = (
+            "task 参数校验失败：description 必须为 20 至 4000 个字符，并写清目标、必要上下文和期望输出"
+        )
+        return task_tool
 
     def wrap_model_call(
         self,

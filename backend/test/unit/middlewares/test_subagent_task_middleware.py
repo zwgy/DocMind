@@ -12,8 +12,11 @@ from langgraph.types import Command
 from yuxi.agents.artifacts import ARTIFACT_DELIVERY_SCHEMA
 from yuxi.agents.buildin.chatbot.state import merge_subagent_runs
 from yuxi.agents.middlewares.subagent_task import YUXI_SUBAGENTS_STREAM_KEY, YuxiSubAgentMiddleware
-from yuxi.utils.subagent_thread_utils import make_child_thread_id
 from yuxi.repositories.agent_repository import SUB_AGENT_BACKEND_ID
+from yuxi.utils.subagent_thread_utils import make_child_thread_id
+
+_REPORT_TASK = "目标：根据当前材料编写项目报告；上下文：沿用主智能体已提供的信息；期望输出：结构化报告正文。"
+_CONTINUE_REPORT_TASK = "目标：继续完善既有项目报告；上下文：沿用指定子线程中的报告内容；期望输出：更新后的完整正文。"
 
 
 class _ChildContext:
@@ -135,6 +138,67 @@ def test_yuxi_subagent_transformer_does_not_conflict_with_langchain_default() ->
 
 
 @pytest.mark.asyncio
+async def test_task_tool_schema_requires_complete_description() -> None:
+    middleware = YuxiSubAgentMiddleware(
+        parent_context=SimpleNamespace(thread_id="parent-thread", uid="user-1"),
+        subagents=[
+            SimpleNamespace(
+                slug="worker",
+                name="Worker",
+                description="work on scoped tasks",
+                backend_id=SUB_AGENT_BACKEND_ID,
+                config_json={},
+            )
+        ],
+    )
+    schema = middleware.tools[0].tool_call_schema
+
+    assert schema.model_json_schema()["properties"]["description"]["minLength"] == 20
+    assert "目标、必要上下文和期望输出" in str(middleware.tools[0].handle_validation_error)
+    with pytest.raises(ValueError):
+        schema.model_validate({"description": "无", "subagent_type": "worker"})
+    result = await middleware.tools[0].ainvoke(
+        {
+            "description": "无",
+            "subagent_type": "worker",
+            "runtime": ToolRuntime(
+                state={},
+                context=None,
+                tool_call_id="tool-1",
+                store=None,
+                stream_writer=lambda _: None,
+                config={},
+            ),
+        }
+    )
+    assert result == "task 参数校验失败：description 必须为 20 至 4000 个字符，并写清目标、必要上下文和期望输出"
+
+
+@pytest.mark.asyncio
+async def test_task_tool_code_guard_rejects_placeholder_description() -> None:
+    middleware = YuxiSubAgentMiddleware(
+        parent_context=SimpleNamespace(thread_id="parent-thread", uid="user-1"),
+        subagents=[
+            SimpleNamespace(
+                slug="worker",
+                name="Worker",
+                description="work on scoped tasks",
+                backend_id=SUB_AGENT_BACKEND_ID,
+                config_json={},
+            )
+        ],
+    )
+
+    result = await middleware.tools[0].coroutine(
+        description="无",
+        subagent_type="worker",
+        runtime=SimpleNamespace(tool_call_id="tool-1"),
+    )
+
+    assert result == "无法调用子智能体：description 必须为 20 至 4000 个字符，并写清目标、必要上下文和期望输出"
+
+
+@pytest.mark.asyncio
 async def test_task_tool_rejects_unconfigured_subagent() -> None:
     middleware = YuxiSubAgentMiddleware(
         parent_context=SimpleNamespace(thread_id="parent-thread", uid="user-1"),
@@ -158,7 +222,7 @@ async def test_task_tool_rejects_unconfigured_subagent() -> None:
     )
 
     result = await middleware.tools[0].ainvoke(
-        {"description": "do work", "subagent_type": "missing", "runtime": runtime}
+        {"description": _REPORT_TASK, "subagent_type": "missing", "runtime": runtime}
     )
 
     assert result == "无法调用子智能体 missing，可用子智能体只有：`worker`"
@@ -240,7 +304,7 @@ async def test_task_tool_invokes_subagent_with_child_scope(monkeypatch) -> None:
     )
 
     result = await middleware.tools[0].coroutine(
-        description="write a report",
+        description=_REPORT_TASK,
         subagent_type="worker.agent",
         runtime=runtime,
     )
@@ -260,7 +324,7 @@ async def test_task_tool_invokes_subagent_with_child_scope(monkeypatch) -> None:
             "subagent_type": "worker.agent",
             "subagent_name": "Worker",
             "child_thread_id": child_thread_id,
-            "description": "write a report",
+            "description": _REPORT_TASK,
             "created_at": "2026-05-31T01:00:00Z",
             "run_id": "sub-run-tool-1",
             "parent_agent_run_id": "parent-run",
@@ -275,7 +339,7 @@ async def test_task_tool_invokes_subagent_with_child_scope(monkeypatch) -> None:
     assert captured["state"]["parent_thread_id"] == "parent-thread"
     assert captured["state"]["file_thread_id"] == "parent-file-thread"
     assert captured["state"]["skills_thread_id"] == child_thread_id
-    assert captured["state"]["messages"] == [HumanMessage(content="write a report")]
+    assert captured["state"]["messages"] == [HumanMessage(content=_REPORT_TASK)]
     assert "todos" not in captured["state"]
     assert "activated_skills" not in captured["state"]
     assert captured["config"]["callbacks"] == ["stream-callback"]
@@ -390,7 +454,7 @@ async def test_task_tool_inherits_parent_model_when_subagent_model_empty(monkeyp
     runtime = SimpleNamespace(tool_call_id="tool-1", state={}, config={})
 
     result = await middleware.tools[0].coroutine(
-        description="write a report",
+        description=_REPORT_TASK,
         subagent_type="worker",
         runtime=runtime,
     )
@@ -439,7 +503,7 @@ async def test_task_tool_records_failed_subagent_run(monkeypatch) -> None:
     runtime = SimpleNamespace(tool_call_id="tool-1", state={}, config={})
 
     result = await middleware.tools[0].coroutine(
-        description="write a report",
+        description=_REPORT_TASK,
         subagent_type="worker",
         runtime=runtime,
     )
@@ -456,7 +520,7 @@ async def test_task_tool_records_failed_subagent_run(monkeypatch) -> None:
             "subagent_type": "worker",
             "subagent_name": "Worker",
             "child_thread_id": child_thread_id,
-            "description": "write a report",
+            "description": _REPORT_TASK,
             "created_at": "2026-05-31T02:00:00Z",
             "run_id": "sub-run-tool-1",
             "parent_agent_run_id": "parent-run",
@@ -526,7 +590,7 @@ async def test_task_tool_continues_existing_subagent_thread(monkeypatch) -> None
     )
 
     result = await middleware.tools[0].coroutine(
-        description="continue the report",
+        description=_CONTINUE_REPORT_TASK,
         subagent_type="worker.agent",
         runtime=runtime,
         thread_id=child_thread_id,
@@ -540,7 +604,7 @@ async def test_task_tool_continues_existing_subagent_thread(monkeypatch) -> None
             "subagent_type": "worker.agent",
             "subagent_name": "Worker",
             "child_thread_id": child_thread_id,
-            "description": "continue the report",
+            "description": _CONTINUE_REPORT_TASK,
             "created_at": "2026-05-31T03:00:00Z",
             "run_id": "sub-run-tool-2",
             "parent_agent_run_id": "parent-run",
@@ -555,7 +619,7 @@ async def test_task_tool_continues_existing_subagent_thread(monkeypatch) -> None
         "parent_thread_id": "parent-thread",
         "file_thread_id": "parent-thread",
         "skills_thread_id": child_thread_id,
-        "messages": [HumanMessage(content="continue the report")],
+        "messages": [HumanMessage(content=_CONTINUE_REPORT_TASK)],
     }
     assert captured["config"]["configurable"] == {
         "thread_id": child_thread_id,
@@ -613,7 +677,7 @@ async def test_task_tool_rejects_invalid_continuation_thread(monkeypatch) -> Non
     unknown_thread_id = "opaque-child-thread"
     runtime = SimpleNamespace(tool_call_id="tool-2", state={}, config={})
     result = await middleware.tools[0].coroutine(
-        description="continue",
+        description=_CONTINUE_REPORT_TASK,
         subagent_type="worker",
         runtime=runtime,
         thread_id=unknown_thread_id,

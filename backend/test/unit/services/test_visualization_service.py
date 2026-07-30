@@ -13,6 +13,7 @@ from yuxi.services.visualization_service import (
     VisualizationError,
     _renderer_error_detail,
     _reserve_output,
+    _validate_output_name,
     _validate_svg,
 )
 
@@ -63,6 +64,16 @@ def test_reserve_output_never_overwrites_existing_artifact(tmp_path: Path) -> No
     assert reserved.name == "report-2.svg"
     assert reserved.read_bytes() == b""
     assert virtual_path.endswith("/report-2.svg")
+
+
+def test_visualization_output_name_preserves_safe_chinese_name() -> None:
+    assert _validate_output_name("端到端验收-思维导图-0730") == "端到端验收-思维导图-0730"
+
+
+@pytest.mark.parametrize("output_name", ["../报告", "报告.svg", "报告 0730", "-报告", "报告/0730"])
+def test_visualization_output_name_rejects_unsafe_characters(output_name: str) -> None:
+    with pytest.raises(VisualizationError, match="output_name"):
+        _validate_output_name(output_name)
 
 
 def _load_flowchart_renderer():

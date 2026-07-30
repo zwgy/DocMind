@@ -46,7 +46,14 @@ async def render_data_chart(
     chart_type: Annotated[Literal["bar", "line", "area", "pie", "scatter"], Field(description="图表类型")],
     title: Annotated[str, Field(min_length=1, max_length=200, description="中文图表标题")],
     encoding: Annotated[ChartEncoding, Field(description="字段角色映射")],
-    output_name: Annotated[str, Field(description="ASCII 文件名主体，不含扩展名")],
+    output_name: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=80,
+            description="文件名主体，不含扩展名；用户明确指定名称时保留原名称，可使用中文",
+        ),
+    ],
     tool_call_id: Annotated[str, InjectedToolCallId],
     runtime: ToolRuntime = None,
 ) -> Command:
@@ -81,7 +88,14 @@ async def render_data_chart(
 @tool(category="visualization", tags=["可视化"], display_name="生成流程图")
 async def render_flowchart(
     definition_path: Annotated[str, Field(description="当前会话中的 .flow.json 虚拟路径")],
-    output_name: Annotated[str, Field(description="ASCII 文件名主体，不含扩展名")],
+    output_name: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=80,
+            description="文件名主体，不含扩展名；用户明确指定名称时保留原名称，可使用中文",
+        ),
+    ],
     tool_call_id: Annotated[str, InjectedToolCallId],
     runtime: ToolRuntime = None,
 ) -> Command:
@@ -124,7 +138,14 @@ async def render_mindmap(
             ),
         ),
     ],
-    output_name: Annotated[str, Field(description="ASCII 文件名主体，不含扩展名")],
+    output_name: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=80,
+            description="文件名主体，不含扩展名；用户明确指定名称时保留原名称，可使用中文",
+        ),
+    ],
     tool_call_id: Annotated[str, InjectedToolCallId],
     layout: Annotated[
         Literal["horizontal", "radial"],

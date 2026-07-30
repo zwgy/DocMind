@@ -13,7 +13,6 @@ from xml.etree import ElementTree
 
 from yuxi.utils.paths import VIRTUAL_PATH_OUTPUTS
 
-_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
 _ALLOWED_INPUT_DIRS = ("workspace", "uploads", "outputs")
 _MAX_SVG_BYTES = 5 * 1024 * 1024
 _MAX_REQUEST_BYTES = 64 * 1024
@@ -53,12 +52,22 @@ def _require_input_path(thread_id: str, uid: str, virtual_path: str, suffix: str
     return actual
 
 
+def _validate_output_name(output_name: str) -> str:
+    name = str(output_name or "")
+    if (
+        not 1 <= len(name) <= 80
+        or not name[0].isalnum()
+        or any(not (character.isalnum() or character in "_-") for character in name)
+    ):
+        raise VisualizationError("output_name 只能使用 1 至 80 个中英文字母、数字、下划线或短横线")
+    return name
+
+
 def _output_directory(thread_id: str, uid: str, output_name: str) -> tuple[Path, str]:
     # 同上：仅在真正操作当前线程目录时才加载沙盒路径适配层。
     from yuxi.agents.backends.sandbox.paths import ensure_thread_dirs, resolve_virtual_path
 
-    if not _NAME_RE.fullmatch(str(output_name or "")):
-        raise VisualizationError("output_name 只能使用 1 至 80 个 ASCII 字母、数字、下划线或短横线")
+    output_name = _validate_output_name(output_name)
     ensure_thread_dirs(thread_id, uid)
     directory = resolve_virtual_path(thread_id, VIRTUAL_PATH_OUTPUTS, uid=uid)
     return directory, output_name

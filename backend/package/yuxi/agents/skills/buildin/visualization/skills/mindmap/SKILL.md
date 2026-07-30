@@ -15,13 +15,13 @@ description: 用户明确要求思维导图、脑图或 mind map 时必须先读
      - 风险
        - 风险识别
    ```
-3. `output_name` 只能使用 1 至 80 个 ASCII 字母、数字、下划线或短横线，不含扩展名；中文标题也要转换为英文文件名，如 `project-kickoff-mindmap`。
+3. `output_name` 使用 1 至 80 个中英文字母、数字、下划线或短横线，不含扩展名；用户明确指定名称时原样使用，不要翻译或改写，如 `项目启动思维导图-0730`。
 4. 默认并优先使用 `horizontal` 双向中心布局；只有用户明确要求环形/径向导图，且节点较少、各分支规模接近时才使用 `radial`。
 5. 首次调用直接套用以下参数结构，不得猜测 `outline_path`、`file_path` 或 `source_path`：
    ```json
    {
      "outline": "- 项目治理\n  - 计划\n    - 里程碑\n  - 风险\n    - 风险识别",
-     "output_name": "project-governance-mindmap",
+     "output_name": "项目治理思维导图",
      "layout": "horizontal"
    }
    ```

@@ -26,7 +26,12 @@ test('context summary renders supplementary attachments without duplicating thei
 test('SVG artifacts use the existing image preview path', () => {
   assert.match(component, /\(artifact\.name \|\| artifact\.path\)/)
   assert.match(component, /artifactPreview\.kind === 'image'/)
-  assert.match(component, /preloadRecentInlineSvgs/)
+  assert.match(component, /preloadInlineSvgs/)
+  assert.doesNotMatch(
+    component,
+    /\.filter\(isInlineSvgArtifact\)\s*\.slice\(-3\)/,
+    '所有 SVG 交付物都应直接展示，不能只预加载最近三项'
+  )
   assert.match(component, /class="artifact-inline-preview"/)
   assert.match(component, /class="artifact-preview-image-viewport"/)
   assert.match(component, /class="artifact-inline-svg"/)

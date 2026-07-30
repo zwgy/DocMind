@@ -49,6 +49,18 @@ def test_mindmap_tool_schema_accepts_outline_without_intermediate_path() -> None
     assert render_mindmap.tool_call_schema.model_json_schema()["properties"]["outline"]["maxLength"] == 8_000
 
 
+def test_visualization_tool_schema_accepts_user_requested_chinese_output_name() -> None:
+    result = render_mindmap.tool_call_schema.model_validate(
+        {
+            "outline": "- 端到端验收\n  - 思维导图",
+            "output_name": "端到端验收-思维导图-0730",
+            "layout": "horizontal",
+        }
+    )
+
+    assert result.output_name == "端到端验收-思维导图-0730"
+
+
 def test_visualization_tools_accept_injected_runtime_without_exposing_it_to_model() -> None:
     runtime = ToolRuntime(
         state={},

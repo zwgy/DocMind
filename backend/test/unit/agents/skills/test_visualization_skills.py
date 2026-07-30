@@ -79,14 +79,15 @@ def test_flowchart_skill_provides_the_renderer_json_contract() -> None:
         assert field_name in content
 
 
-def test_visualization_skills_require_ascii_output_names() -> None:
+def test_visualization_skills_preserve_user_requested_output_names() -> None:
     specs = {spec.slug: spec for spec in BUILTIN_SKILLS}
 
-    # 工具 Schema 的简短字段说明不足以稳定约束本地小模型，必须在激活后的 Skill 主流程中重复这一硬契约。
+    # 本地小模型容易自行翻译文件名，必须在激活后的 Skill 主流程中重复保留用户原名的契约。
     for slug in ("data-chart", "flowchart", "mindmap"):
         content = specs[slug].source_dir.joinpath("SKILL.md").read_text(encoding="utf-8")
         assert "`output_name`" in content
-        assert "ASCII" in content
+        assert "用户明确指定名称时原样使用" in content
+        assert "不要翻译或改写" in content
         assert "不含扩展名" in content
 
 

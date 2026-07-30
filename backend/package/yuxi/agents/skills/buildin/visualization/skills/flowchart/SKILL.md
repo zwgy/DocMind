@@ -29,5 +29,5 @@ description: 用户明确要求流程图、审批流程或业务流程图时必�
 }
 ```
 
-5. `output_name` 只能使用 1 至 80 个 ASCII 字母、数字、下划线或短横线，不含扩展名；中文标题也要转换为英文文件名，如 `application-approval-process`。
+5. `output_name` 使用 1 至 80 个中英文字母、数字、下划线或短横线，不含扩展名；用户明确指定名称时原样使用，不要翻译或改写，如 `申请审批流程-0730`。
 6. 调用 `render_flowchart`；成功后系统自动展示 SVG，不再调用 `present_artifacts`。不生成 D2、DOT、HTML 或渲染器属性。
