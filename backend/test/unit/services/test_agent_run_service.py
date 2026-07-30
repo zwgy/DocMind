@@ -294,7 +294,12 @@ async def test_stream_agent_run_events_compacts_verbose_false(monkeypatch: pytes
                     "event": "end",
                     "payload": {
                         "status": "completed",
-                        "chunk": {"status": "finished", "request_id": "req-1", "meta": {"uid": "user-1"}},
+                        "chunk": {
+                            "status": "finished",
+                            "request_id": "req-1",
+                            "meta": {"uid": "user-1"},
+                            "presented_artifacts": ["/home/gem/user-data/outputs/mindmap.svg"],
+                        },
                     },
                     "created_at": "2026-05-27T00:00:02+00:00",
                 },
@@ -344,6 +349,7 @@ async def test_stream_agent_run_events_compacts_verbose_false(monkeypatch: pytes
     assert end_data["payload"]["status"] == "completed"
     assert "request_id" not in end_data["payload"]["chunk"]
     assert "meta" not in end_data["payload"]["chunk"]
+    assert end_data["payload"]["chunk"]["presented_artifacts"] == ["/home/gem/user-data/outputs/mindmap.svg"]
 
 
 @pytest.mark.asyncio

@@ -166,6 +166,7 @@ def _compact_stream_chunk(chunk: dict) -> dict:
             "interrupt_info",
             "source",
             "agent_state",
+            "presented_artifacts",
         )
         if chunk.get(key) is not None and chunk.get(key) != ""
     }
