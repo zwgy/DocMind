@@ -171,6 +171,9 @@ test('terminal run attaches artifacts from the authoritative finished event', as
         ]
       })
     }
+    if (url === '/api/chat/thread/thread-artifact/state') {
+      return Response.json({ agent_state: { artifacts: [] } })
+    }
     return Response.json({})
   }
 

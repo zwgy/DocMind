@@ -705,11 +705,7 @@ export const useChatStore = defineStore('chat', {
         }
         if (reachedTerminalEvent && !controller.signal.aborted) {
           const state = await getThreadState(threadId, token).catch(() => null)
-          if (state?.agent_state) {
-            runtime.agentState = state.agent_state
-            // 最终状态可能先于消息历史写入完成，必须直接据此补齐本轮交付物。
-            refreshRunArtifacts(runtime)
-          }
+          if (state?.agent_state) runtime.agentState = state.agent_state
           attachRunArtifacts(runtime)
           await this.syncThreadHistory(threadId, token).catch(() => null)
           attachRunArtifacts(runtime)
@@ -1006,11 +1002,7 @@ export const useChatStore = defineStore('chat', {
         })
         attachRunArtifacts(runtime)
         const state = await getThreadState(threadId, token).catch(() => null)
-        if (state?.agent_state) {
-          runtime.agentState = state.agent_state
-          // 最终状态可能先于消息历史写入完成，必须直接据此补齐本轮交付物。
-          refreshRunArtifacts(runtime)
-        }
+        if (state?.agent_state) runtime.agentState = state.agent_state
         const pendingInterrupt = pendingInterruptFromState(state)
         if (pendingInterrupt) {
           // SSE 结束与 checkpoint 状态落库存在短暂先后；收尾时以线程状态补齐反问，
