@@ -139,3 +139,55 @@ test('terminal run keeps a complete streamed answer until delayed history catche
   assert.equal(chat.messages[1].content, 'complete streamed answer')
   assert.equal(chat.messages[1].modelName, 'Qwen3.6')
 })
+
+test('terminal run attaches artifacts from final state before delayed history catches up', async () => {
+  setActivePinia(createPinia())
+  let requestId = ''
+  globalThis.fetch = async (url, options = {}) => {
+    if (url === '/api/agent/runs' && options.method === 'POST') {
+      requestId = JSON.parse(options.body).meta.request_id
+      return Response.json({ id: 'run-artifact' })
+    }
+    if (url.startsWith('/api/agent/runs/run-artifact/events')) {
+      return new Response(
+        'event: messages\ndata: {"payload":{"items":[{"status":"running","stream_event":{"type":"message_delta","content":"artifact answer"}}]}}\n\nevent: end\ndata: {"payload":{"status":"completed"}}\n\n'
+      )
+    }
+    if (url === '/api/chat/thread/thread-artifact/history') {
+      return Response.json({
+        history: [
+          {
+            id: 'server-user',
+            type: 'human',
+            content: 'question',
+            extra_metadata: { request_id: requestId }
+          },
+          {
+            id: 'server-assistant',
+            type: 'ai',
+            content: 'artifact answer',
+            extra_metadata: { request_id: requestId }
+          }
+        ]
+      })
+    }
+    if (url === '/api/chat/thread/thread-artifact/state') {
+      return Response.json({
+        agent_state: {
+          artifacts: ['/home/gem/user-data/outputs/mindmap.svg']
+        }
+      })
+    }
+    return Response.json({})
+  }
+
+  const chat = useChatStore()
+  chat.currentThreadId = 'thread-artifact'
+  chat.ensureRuntime('thread-artifact')
+
+  await chat.send({ text: 'question' }, 'token-1')
+
+  assert.deepEqual(chat.messages[1].artifacts, [
+    { path: '/home/gem/user-data/outputs/mindmap.svg', name: 'mindmap.svg' }
+  ])
+})
