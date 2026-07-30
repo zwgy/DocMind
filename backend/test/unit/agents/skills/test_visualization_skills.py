@@ -90,14 +90,16 @@ def test_visualization_skills_require_ascii_output_names() -> None:
         assert "不含扩展名" in content
 
 
-def test_mindmap_skill_requires_the_written_outline_path() -> None:
+def test_mindmap_skill_uses_direct_outline_and_automatic_delivery() -> None:
     specs = {spec.slug: spec for spec in BUILTIN_SKILLS}
     content = specs["mindmap"].source_dir.joinpath("SKILL.md").read_text(encoding="utf-8")
 
-    assert "`outline_path`" in content
-    assert "`write_file` 成功返回的完整路径" in content
-    assert "`.mindmap.md` 扩展名" in content
+    assert "`render_mindmap.outline`" in content
+    assert '"outline"' in content
+    assert "不调用 `ls`、`write_file`、`edit_file` 或 `execute`" in content
+    assert "不再调用 `present_artifacts`" in content
     assert "优先使用 `horizontal` 双向中心布局" in content
+    assert specs["mindmap"].tool_dependencies == ("render_mindmap",)
 
 
 def test_visualization_skill_metadata_routes_explicit_requests_to_child_skills() -> None:

@@ -3,7 +3,8 @@ import { mindmap as mindmapLayout } from "@antv/hierarchy";
 import * as echarts from "echarts";
 
 const request = JSON.parse(fs.readFileSync(0, "utf8"));
-const lines = fs.readFileSync(request.source_path, "utf8").split(/\r?\n/).filter(Boolean);
+if (typeof request.outline !== "string") throw new Error("outline 必须是 Markdown 无序列表大纲正文");
+const lines = request.outline.split(/\r?\n/).filter(line => line.trim());
 const stack = [];
 let root = null;
 let count = 0;

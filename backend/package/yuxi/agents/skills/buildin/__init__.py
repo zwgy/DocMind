@@ -53,10 +53,11 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
         source_dir=_SKILLS_ROOT / "visualization" / "skills" / "mindmap",
         description=(
             "用户明确要求思维导图、脑图或 mind map 时必须先读取此 Skill；"
-            "只用 render_mindmap 生成 SVG，禁止改用文档生成工具或手写 SVG。"
+            "第一步直接读取系统列出的此 Skill 路径，禁止先列目录；随后只调用 render_mindmap 生成 SVG，"
+            "禁止改用文档生成工具或手写 SVG。"
         ),
-        version="2026.07.28",
-        tool_dependencies=("render_mindmap", "present_artifacts"),
+        version="2026.07.30",
+        tool_dependencies=("render_mindmap",),
     ),
     BuiltinSkillSpec(
         slug="office-export",

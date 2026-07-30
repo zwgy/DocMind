@@ -1,13 +1,13 @@
 ---
 name: 思维导图
 slug: mindmap
-description: 用户明确要求思维导图、脑图或 mind map 时必须先读取此 Skill；只用 render_mindmap 生成 SVG，禁止改用文档生成工具或手写 SVG。
+description: 用户明确要求思维导图、脑图或 mind map 时必须先读取此 Skill；第一步直接读取系统列出的此 Skill 路径，禁止先列目录；随后只调用 render_mindmap 生成 SVG，禁止改用文档生成工具或手写 SVG。
 ---
 
 # 思维导图
 
-1. 用 `write_file` 写入 `outputs/.visualization-specs/<name>.mindmap.md`。
-2. 使用两个空格一级的 Markdown 无序列表；第一项是唯一中心主题。根节点也必须写成 `- 项目治理`，禁止使用 `# 项目治理` 等标题语法。
+1. 不调用 `ls`、`write_file`、`edit_file` 或 `execute`；直接把完整 Markdown 大纲放入 `render_mindmap.outline`。
+2. `outline` 使用两个空格一级的 Markdown 无序列表；第一项是唯一中心主题。根节点必须写成 `- 项目治理`，禁止使用 `# 项目治理` 等标题语法。
    ```text
    - 项目治理
      - 计划
@@ -16,6 +16,13 @@ description: 用户明确要求思维导图、脑图或 mind map 时必须先读
        - 风险识别
    ```
 3. `output_name` 只能使用 1 至 80 个 ASCII 字母、数字、下划线或短横线，不含扩展名；中文标题也要转换为英文文件名，如 `project-kickoff-mindmap`。
-4. `outline_path` 必须原样使用 `write_file` 成功返回的完整路径并保留 `.mindmap.md` 扩展名，不能传文件名主体。
-5. 调用 `render_mindmap`，默认并优先使用 `horizontal` 双向中心布局；只有用户明确要求环形/径向导图，且节点较少、各分支规模接近时才使用 `radial`。成功后调用 `present_artifacts`。
-6. 节点使用短语，不写 HTML、链接、图片或脚本。
+4. 默认并优先使用 `horizontal` 双向中心布局；只有用户明确要求环形/径向导图，且节点较少、各分支规模接近时才使用 `radial`。
+5. 首次调用直接套用以下参数结构，不得猜测 `outline_path`、`file_path` 或 `source_path`：
+   ```json
+   {
+     "outline": "- 项目治理\n  - 计划\n    - 里程碑\n  - 风险\n    - 风险识别",
+     "output_name": "project-governance-mindmap",
+     "layout": "horizontal"
+   }
+   ```
+6. `render_mindmap` 成功返回后系统会自动展示 SVG，不再调用 `present_artifacts`。节点使用短语，不写 HTML、链接、图片或脚本。

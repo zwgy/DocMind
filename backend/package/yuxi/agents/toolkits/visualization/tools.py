@@ -11,7 +11,6 @@ from yuxi.services.visualization_service import (
     VisualizationError,
     chart_source_path,
     flow_source_path,
-    mindmap_source_path,
     render_visualization,
 )
 
@@ -92,21 +91,33 @@ async def render_flowchart(
 
 @tool(category="visualization", tags=["可视化"], display_name="生成思维导图")
 async def render_mindmap(
-    outline_path: Annotated[str, Field(description="当前会话中的 .mindmap.md 虚拟路径")],
+    outline: Annotated[
+        str,
+        Field(
+            min_length=3,
+            max_length=16_000,
+            description=(
+                "Markdown 无序列表大纲正文；参数名必须是 outline，不是 outline_path、file_path 或 source_path；"
+                "首行是唯一根节点且以 '- ' 开头，子级每层缩进两个空格"
+            ),
+        ),
+    ],
     output_name: Annotated[str, Field(description="ASCII 文件名主体，不含扩展名")],
-    layout: Annotated[Literal["horizontal", "radial"], Field(description="思维导图布局")] = "horizontal",
+    layout: Annotated[
+        Literal["horizontal", "radial"],
+        Field(description="默认使用 horizontal；只有用户明确要求径向布局时使用 radial"),
+    ] = "horizontal",
     runtime: ToolRuntime = None,
 ) -> dict:
-    """根据受限 Markdown 大纲生成静态 SVG 思维导图。"""
+    """直接根据受限 Markdown 大纲正文生成并自动交付静态 SVG 思维导图。"""
     uid, thread_id = _scope(runtime)
     try:
-        source = mindmap_source_path(thread_id, uid, outline_path)
         return await render_visualization(
             thread_id=thread_id,
             uid=uid,
             script_name="render_mindmap.mjs",
             output_name=output_name,
-            request={"source_path": str(source), "layout": layout},
+            request={"outline": outline, "layout": layout},
         )
     except VisualizationError as exc:
         raise ToolException(str(exc)) from exc

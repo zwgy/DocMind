@@ -152,7 +152,3 @@ def chart_source_path(thread_id: str, uid: str, value: str) -> Path:
 
 def flow_source_path(thread_id: str, uid: str, value: str) -> Path:
     return _require_input_path(thread_id, uid, value, ".flow.json")
-
-
-def mindmap_source_path(thread_id: str, uid: str, value: str) -> Path:
-    return _require_input_path(thread_id, uid, value, ".mindmap.md")

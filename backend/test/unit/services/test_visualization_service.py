@@ -134,7 +134,10 @@ def test_flowchart_renderer_builds_controlled_d2_and_valid_svg(
             "render_mindmap.mjs",
             "map.mindmap.md",
             "- 项目\n  - 计划\n    - 里程碑\n  - 风险\n",
-            {"layout": "horizontal"},
+            {
+                "outline": "- 项目\n  - 计划\n    - 里程碑\n  - 风险\n",
+                "layout": "horizontal",
+            },
         ),
     ],
 )
@@ -160,9 +163,10 @@ def test_echarts_renderers_generate_themed_safe_svg(
         / script_name
     )
 
+    request = render_request if script_name == "render_mindmap.mjs" else render_request | {"source_path": str(source)}
     subprocess.run(
         ["node", str(script)],
-        input=json.dumps(render_request | {"source_path": str(source), "output": str(output)}, ensure_ascii=False),
+        input=json.dumps(request | {"output": str(output)}, ensure_ascii=False),
         text=True,
         encoding="utf-8",
         check=True,
