@@ -1,12 +1,12 @@
 ---
 name: 思维导图
 slug: mindmap
-description: 用户明确要求思维导图、脑图或 mind map 时必须先读取此 Skill；第一步直接读取系统列出的此 Skill 路径，禁止先列目录；随后只调用 render_mindmap 生成 SVG，禁止改用文档生成工具或手写 SVG。
+description: 用户明确要求思维导图、脑图或 mind map 时必须先读取此 Skill；第一步直接读取系统列出的此 Skill 路径，禁止先列目录；随后只调用 render_mind_map 生成 SVG，禁止改用文档生成工具或手写 SVG。
 ---
 
 # 思维导图
 
-1. 不调用 `ls`、`write_file`、`edit_file` 或 `execute`；直接把完整 Markdown 大纲放入 `render_mindmap.outline`。
+1. 不调用 `ls`、`write_file`、`edit_file` 或 `execute`；直接把完整 Markdown 大纲放入 `render_mind_map.outline`。
 2. `outline` 使用两个空格一级的 Markdown 无序列表；第一项是唯一中心主题。根节点必须写成 `- 项目治理`，禁止使用 `# 项目治理` 等标题语法。
    ```text
    - 项目治理
@@ -25,4 +25,4 @@ description: 用户明确要求思维导图、脑图或 mind map 时必须先读
      "layout": "horizontal"
    }
    ```
-6. `render_mindmap` 成功返回后系统会自动展示 SVG，不再调用 `present_artifacts`。节点使用短语，不写 HTML、链接、图片或脚本。
+6. `render_mind_map` 成功返回后系统会自动展示 SVG，不再调用 `present_artifacts`，也不再次调用渲染工具。最终回答简要说明已生成、节点数、布局和返回的 `artifact_path`。节点使用短语，不写 HTML、链接、图片或脚本。

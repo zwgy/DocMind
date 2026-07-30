@@ -20,7 +20,7 @@
 - 修复可视化渲染工具的运行时注入与自定义 Schema 冲突，避免框架内部 `runtime` 参数触发校验失败。
 - 修复数据图表嵌套字段映射未转换为 JSON 数据的问题，避免真实渲染任务因 Pydantic 对象无法序列化而失败。
 - 补全流程图子 Skill 的 JSON 字段契约与最小分支模板，避免本地模型在 `render_flowchart` 前反复猜测节点和边字段。
-- 三类可视化子 Skill 在主流程中显式约束 `output_name` 使用 ASCII 文件名主体；思维导图进一步取消无复用价值的 `.mindmap.md` 中间文件，`render_mindmap` 直接接收受限 Markdown 大纲正文并自动交付 SVG。Skill 同步给出完整首次调用参数模板，要求直接读取 Skill、禁止先列目录或调用文件/命令工具，避免本地模型猜测 `file_path`、`outline_path` 后反复修正。
+- 三类可视化子 Skill 在主流程中显式约束 `output_name` 使用 ASCII 文件名主体；思维导图进一步取消无复用价值的 `.mindmap.md` 中间文件，公开工具名调整为更易分词的 `render_mind_map`，直接接收受限 Markdown 大纲正文并自动交付 SVG。Skill 同步给出完整首次调用参数模板，要求直接读取 Skill、禁止先列目录或调用文件/命令工具，避免本地模型猜测路径参数、漏写工具名字符后反复修正。
 - 明确思维导图中心主题也必须使用无序列表项而不是 Markdown 标题；渲染失败时优先返回 Node.js/Python 的真实异常行，不再用运行时版本尾行覆盖可执行错误。
 
 ### 上下文管理

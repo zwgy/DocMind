@@ -339,7 +339,7 @@ def test_visualization_delivery_candidates_accepts_only_successful_output_svgs()
             (
                 "tool",
                 {
-                    "name": "render_mindmap",
+                    "name": "render_mind_map",
                     "status": "success",
                     "content": {"artifact_path": "/home/gem/user-data/outputs/not-a-chart.txt"},
                 },

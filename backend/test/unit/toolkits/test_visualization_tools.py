@@ -42,6 +42,7 @@ def test_mindmap_tool_schema_accepts_outline_without_intermediate_path() -> None
     )
 
     assert result.outline.startswith("- 项目治理")
+    assert render_mindmap.name == "render_mind_map"
     assert set(render_mindmap.tool_call_schema.model_fields) == {"outline", "output_name", "layout"}
 
 

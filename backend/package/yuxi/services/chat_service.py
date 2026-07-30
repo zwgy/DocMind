@@ -467,7 +467,7 @@ async def _save_tool_message(conv_repo: ConversationRepository, msg_dict: dict) 
     )
 
 
-_VISUALIZATION_TOOL_NAMES = frozenset({"render_data_chart", "render_flowchart", "render_mindmap"})
+_VISUALIZATION_TOOL_NAMES = frozenset({"render_data_chart", "render_flowchart", "render_mind_map"})
 
 
 def _presented_artifacts_from_tool_message(msg_dict: dict) -> list[str]:

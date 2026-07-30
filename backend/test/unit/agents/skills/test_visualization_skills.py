@@ -11,7 +11,7 @@ def test_visualization_skill_specs_use_independent_skill_directories() -> None:
     expected_tools = {
         "data-chart": "render_data_chart",
         "flowchart": "render_flowchart",
-        "mindmap": "render_mindmap",
+        "mindmap": "render_mind_map",
     }
     specs = {spec.slug: spec for spec in BUILTIN_SKILLS}
 
@@ -94,12 +94,12 @@ def test_mindmap_skill_uses_direct_outline_and_automatic_delivery() -> None:
     specs = {spec.slug: spec for spec in BUILTIN_SKILLS}
     content = specs["mindmap"].source_dir.joinpath("SKILL.md").read_text(encoding="utf-8")
 
-    assert "`render_mindmap.outline`" in content
+    assert "`render_mind_map.outline`" in content
     assert '"outline"' in content
     assert "不调用 `ls`、`write_file`、`edit_file` 或 `execute`" in content
     assert "不再调用 `present_artifacts`" in content
     assert "优先使用 `horizontal` 双向中心布局" in content
-    assert specs["mindmap"].tool_dependencies == ("render_mindmap",)
+    assert specs["mindmap"].tool_dependencies == ("render_mind_map",)
 
 
 def test_visualization_skill_metadata_routes_explicit_requests_to_child_skills() -> None:
@@ -107,7 +107,7 @@ def test_visualization_skill_metadata_routes_explicit_requests_to_child_skills()
     expected = {
         "data-chart": ("数据图表", "render_data_chart"),
         "flowchart": ("流程图", "render_flowchart"),
-        "mindmap": ("思维导图", "render_mindmap"),
+        "mindmap": ("思维导图", "render_mind_map"),
     }
 
     # description 是小模型选择 Skill 前唯一可见的信息，必须直接给出触发词和排他性的执行入口。

@@ -89,7 +89,12 @@ async def render_flowchart(
         raise ToolException(str(exc)) from exc
 
 
-@tool(category="visualization", tags=["可视化"], display_name="生成思维导图")
+@tool(
+    name_or_callable="render_mind_map",
+    category="visualization",
+    tags=["可视化"],
+    display_name="生成思维导图",
+)
 async def render_mindmap(
     outline: Annotated[
         str,
