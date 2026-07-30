@@ -46,6 +46,7 @@ from yuxi.utils.paths import VIRTUAL_PATH_CONVERSATION_HISTORY
 
 _SOURCE_WINDOW_TOOL_NAMES = frozenset({"read_file", "open_kb_document"})
 _TOOL_CALL_ARGUMENTS_SAVED_KEY = "_yuxi_saved_arguments_path"
+_TOOL_CALL_ARGUMENTS_MIN_REDUCTION_TOKENS = 128
 # 反问参数体积很小且属于中断协议；保留结构化历史可避免本地模型把归档回执仿写成下一次调用参数。
 _TOOL_CALL_ARGUMENTS_ARCHIVE_EXCLUDED_TOOL_NAMES = frozenset({"ask_user_question"})
 # 管理端可能已经保存旧版或自定义摘要提示词，因此持久事实合并不能只写进默认模板。
@@ -732,7 +733,9 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
                 replaced_calls[call_index] = _tool_call_arguments_receipt(tool_call, path)
                 replacement = message.model_copy(update={"tool_calls": replaced_calls})
                 reduction = estimate_messages_tokens([message]) - estimate_messages_tokens([replacement])
-                if reduction > 0:
+                # 小参数替换为归档占位只能节省少量上下文，却会给本地模型提供一个不属于
+                # 任何工具 schema 的错误示例；仅归档大正文、大 JSON 等有实质收益的参数。
+                if reduction >= _TOOL_CALL_ARGUMENTS_MIN_REDUCTION_TOKENS:
                     candidates.append(
                         {
                             "reduction": reduction,

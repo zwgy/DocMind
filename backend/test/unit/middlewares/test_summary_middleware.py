@@ -492,6 +492,41 @@ def test_completed_tool_call_argument_candidate_prefers_largest_reduction() -> N
 
 
 @pytest.mark.unit
+def test_completed_tool_call_arguments_keep_small_structured_args() -> None:
+    messages = [
+        HumanMessage(content="current user " + "x" * 2_400, id="user-current"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-export",
+                    "name": "export_office_file",
+                    "args": {
+                        "definition_path": "/outputs/report.json",
+                        "output_format": "pdf",
+                        "output_name": "report",
+                    },
+                }
+            ],
+            id="tool-call",
+        ),
+        ToolMessage(content="已生成 PDF", tool_call_id="call-export", name="export_office_file"),
+    ]
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    candidate = middleware._next_completed_tool_call_arguments_candidate(
+        request,
+        messages=messages,
+        summary="",
+        budget=resolve_context_budget(request),
+        failed=set(),
+    )
+
+    assert candidate is None
+
+
+@pytest.mark.unit
 def test_completed_tool_call_arguments_never_archive_ask_user_question() -> None:
     messages = [
         HumanMessage(content="请先向我确认", id="user-current"),
