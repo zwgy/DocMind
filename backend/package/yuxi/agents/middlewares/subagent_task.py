@@ -14,6 +14,7 @@ from langchain_core.tools import StructuredTool
 from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.types import Command
 
+from yuxi.agents.artifacts import artifact_delivery_payload, delivered_artifact_paths
 from yuxi.agents.context import build_agent_input_context
 from yuxi.repositories.agent_repository import SUB_AGENT_BACKEND_ID, AgentRepository
 from yuxi.repositories.agent_run_repository import AgentRunRepository
@@ -86,6 +87,21 @@ def _result_artifacts(result: dict[str, Any]) -> list[str]:
     return list(artifacts) if isinstance(artifacts, list) else []
 
 
+def _result_delivered_artifacts(result: dict[str, Any]) -> list[str]:
+    """只提取子智能体最后一轮明确发布的产物，避免续跑时重新交付历史文件。"""
+    artifacts: list[str] = []
+    for message in result.get("messages") or []:
+        if hasattr(message, "model_dump"):
+            message = message.model_dump()
+        if not isinstance(message, dict):
+            continue
+        if message.get("type") == "human":
+            artifacts = []
+        elif message.get("type") == "tool":
+            artifacts.extend(delivered_artifact_paths(message))
+    return list(dict.fromkeys(artifacts))
+
+
 def _preview_text(text: str, limit: int = 500) -> str:
     return text if len(text) <= limit else f"{text[:limit]}..."
 
@@ -121,6 +137,7 @@ def _with_run_payload(subagent_run: dict[str, Any], run) -> dict[str, Any]:
 def _completed_tool_response(result: dict[str, Any], tool_call_id: str, subagent_run: dict[str, Any]) -> Command:
     final_text = _final_assistant_text(result.get("messages") or [])
     artifacts = _result_artifacts(result)
+    delivered_artifacts = _result_delivered_artifacts(result)
     subagent_run = {
         **subagent_run,
         "status": "completed",
@@ -130,7 +147,14 @@ def _completed_tool_response(result: dict[str, Any], tool_call_id: str, subagent
         "artifacts": artifacts,
     }
     tool_result = _tool_result_with_thread_id(subagent_run["child_thread_id"], final_text)
-    update: dict[str, Any] = {"messages": [ToolMessage(tool_result, tool_call_id=tool_call_id)]}
+    # 子图已经在共享文件线程中校验并发布路径；父图只转发协议，
+    # 使 chat_service 能按父工具消息归属本轮产物，而无需识别 task 工具名称。
+    tool_message = ToolMessage(
+        tool_result,
+        tool_call_id=tool_call_id,
+        artifact=artifact_delivery_payload(delivered_artifacts) if delivered_artifacts else None,
+    )
+    update: dict[str, Any] = {"messages": [tool_message]}
     if artifacts:
         update["artifacts"] = artifacts
     update["subagent_runs"] = [subagent_run]

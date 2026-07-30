@@ -1,3 +1,15 @@
+from dataclasses import dataclass
+
+import pytest
+from langchain_core.messages import AIMessage
+from langgraph.prebuilt import ToolNode
+from langgraph.graph import END, START, StateGraph
+
+from yuxi.agents.artifacts import (
+    ARTIFACT_DELIVERY_SCHEMA,
+    delivered_artifact_paths,
+    normalize_artifact_path,
+)
 from yuxi.agents.backends.sandbox import (
     VIRTUAL_PATH_PREFIX,
     ensure_thread_dirs,
@@ -5,8 +17,8 @@ from yuxi.agents.backends.sandbox import (
     sandbox_uploads_dir,
 )
 from yuxi.agents.buildin.chatbot.state import merge_subagent_runs
-from yuxi.agents.state import merge_artifacts
-from yuxi.agents.toolkits.buildin.tools import _normalize_presented_artifact_path, present_artifacts
+from yuxi.agents.state import BaseState, merge_artifacts
+from yuxi.agents.toolkits.buildin.tools import present_artifacts
 from yuxi.services.chat_service import extract_agent_state
 from yuxi.utils.paths import CONVERSATION_HISTORY_DIR_NAME, LARGE_TOOL_RESULTS_DIR_NAME
 
@@ -14,6 +26,12 @@ from yuxi.utils.paths import CONVERSATION_HISTORY_DIR_NAME, LARGE_TOOL_RESULTS_D
 def _runtime_with_thread(thread_id: str, uid: str = "user-1"):
     context = type("RuntimeContext", (), {"thread_id": thread_id, "uid": uid})()
     return type("RuntimeStub", (), {"context": context})()
+
+
+@dataclass
+class _ArtifactRuntimeContext:
+    thread_id: str
+    uid: str
 
 
 def test_merge_artifacts_deduplicates_and_preserves_order():
@@ -45,7 +63,7 @@ def test_normalize_presented_artifact_path_accepts_host_path():
     output_file = sandbox_outputs_dir(thread_id) / "report.md"
     output_file.write_text("# demo", encoding="utf-8")
 
-    normalized = _normalize_presented_artifact_path(str(output_file), _runtime_with_thread(thread_id))
+    normalized = normalize_artifact_path(str(output_file), _runtime_with_thread(thread_id))
 
     assert normalized == f"{VIRTUAL_PATH_PREFIX}/outputs/report.md"
 
@@ -56,7 +74,7 @@ def test_normalize_presented_artifact_path_accepts_virtual_path():
     output_file = sandbox_outputs_dir(thread_id) / "summary.txt"
     output_file.write_text("demo", encoding="utf-8")
 
-    normalized = _normalize_presented_artifact_path(
+    normalized = normalize_artifact_path(
         f"{VIRTUAL_PATH_PREFIX}/outputs/summary.txt",
         _runtime_with_thread(thread_id),
     )
@@ -71,7 +89,7 @@ def test_normalize_presented_artifact_path_rejects_non_outputs_path():
     upload_file.write_text("demo", encoding="utf-8")
 
     try:
-        _normalize_presented_artifact_path(str(upload_file), _runtime_with_thread(thread_id))
+        normalize_artifact_path(str(upload_file), _runtime_with_thread(thread_id))
     except ValueError as exc:
         assert f"{VIRTUAL_PATH_PREFIX}/outputs/" in str(exc)
     else:
@@ -88,7 +106,7 @@ def test_normalize_presented_artifact_path_rejects_internal_output_files():
         output_file.write_text("internal", encoding="utf-8")
 
         try:
-            _normalize_presented_artifact_path(str(output_file), _runtime_with_thread(thread_id))
+            normalize_artifact_path(str(output_file), _runtime_with_thread(thread_id))
         except ValueError as exc:
             assert "工具调用阶段文件" in str(exc)
         else:
@@ -108,7 +126,74 @@ def test_present_artifacts_records_paths_on_successful_tool_message():
     )
     tool_message = command.update["messages"][0]
 
-    assert tool_message.additional_kwargs["presented_artifacts"] == [f"{VIRTUAL_PATH_PREFIX}/outputs/report.md"]
+    expected = [f"{VIRTUAL_PATH_PREFIX}/outputs/report.md"]
+    assert command.update["artifacts"] == expected
+    assert tool_message.artifact == {
+        "schema": ARTIFACT_DELIVERY_SCHEMA,
+        "paths": expected,
+    }
+    assert delivered_artifact_paths(tool_message.model_dump()) == expected
+
+
+@pytest.mark.asyncio
+async def test_tool_node_preserves_artifact_delivery_command() -> None:
+    thread_id = "artifacts-tool-node"
+    ensure_thread_dirs(thread_id, "user-1")
+    output_file = sandbox_outputs_dir(thread_id) / "report.md"
+    output_file.write_text("# demo", encoding="utf-8")
+    builder = StateGraph(BaseState, context_schema=_ArtifactRuntimeContext)
+    builder.add_node("tools", ToolNode([present_artifacts]))
+    builder.add_edge(START, "tools")
+    builder.add_edge("tools", END)
+    graph = builder.compile()
+
+    result = await graph.ainvoke(
+        {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "present_artifacts",
+                            "args": {"filepaths": [f"{VIRTUAL_PATH_PREFIX}/outputs/report.md"]},
+                            "id": "call-tool-node",
+                            "type": "tool_call",
+                        }
+                    ],
+                )
+            ]
+        },
+        context=_ArtifactRuntimeContext(thread_id=thread_id, uid="user-1"),
+    )
+
+    assert result["artifacts"] == [f"{VIRTUAL_PATH_PREFIX}/outputs/report.md"]
+    assert delivered_artifact_paths(result["messages"][-1].model_dump()) == [f"{VIRTUAL_PATH_PREFIX}/outputs/report.md"]
+
+
+def test_delivered_artifact_paths_rejects_unmarked_or_failed_tool_results():
+    assert (
+        delivered_artifact_paths(
+            {
+                "type": "tool",
+                "status": "success",
+                "artifact": {"paths": ["/home/gem/user-data/outputs/unmarked.md"]},
+            }
+        )
+        == []
+    )
+    assert (
+        delivered_artifact_paths(
+            {
+                "type": "tool",
+                "status": "error",
+                "artifact": {
+                    "schema": ARTIFACT_DELIVERY_SCHEMA,
+                    "paths": ["/home/gem/user-data/outputs/failed.md"],
+                },
+            }
+        )
+        == []
+    )
 
 
 def test_extract_agent_state_includes_artifacts():

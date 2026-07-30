@@ -16,7 +16,7 @@ description: "查询 MySQL 并生成离线报表或数据图表；适用于统�
 4. 必要时用 `python scripts/describe_table.py --table 表名` 查看表结构
 5. 生成正确且高效的只读 SQL。需要图表时使用 `python scripts/query.py --sql "SQL语句" --timeout 60 --output /home/gem/user-data/outputs/.visualization-data/report.csv` 写出聚合 CSV
 6. 读取 `data-chart/SKILL.md`，根据 CSV 的列名、行数和一条样本调用 `render_data_chart`
-7. 使用 `present_artifacts` 交付 SVG，不嵌入远程图片或 markdown 图片 URL
+7. `render_data_chart` 成功后按 `data-chart` 的自动交付规则直接完成回答；不嵌入远程图片或 markdown 图片 URL
 
 ## 环境变量缺失处理
 

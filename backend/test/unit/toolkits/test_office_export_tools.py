@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import pytest
 from langgraph.prebuilt.tool_node import ToolRuntime
 
+from yuxi.agents.artifacts import ARTIFACT_DELIVERY_SCHEMA
+from yuxi.agents.backends.sandbox import ensure_thread_dirs, sandbox_outputs_dir
 from yuxi.agents.toolkits.office_export import tools
 from yuxi.agents.toolkits.office_export import export_office_file
 from yuxi.agents.toolkits.registry import get_extra_metadata
@@ -48,7 +50,6 @@ async def test_office_export_tool_passes_runtime_scope_to_service(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     definition = tmp_path / "report.json"
-    output_directory = tmp_path / "outputs"
     definition.write_text('{"kind":"document","blocks":[]}', encoding="utf-8")
     captured: dict = {}
 
@@ -58,23 +59,24 @@ async def test_office_export_tool_passes_runtime_scope_to_service(
 
     async def fake_export(**kwargs):
         captured.update(kwargs)
+        ensure_thread_dirs("thread-1", "user-1")
+        sandbox_outputs_dir("thread-1").joinpath("report.docx").write_bytes(b"docx")
         return {"artifact_path": "/home/gem/user-data/outputs/report.docx"}
 
     monkeypatch.setattr(tools, "_source_resolver", fake_source_resolver)
     monkeypatch.setattr(tools, "run_office_export", fake_export)
-    monkeypatch.setattr(
-        "yuxi.agents.backends.sandbox.paths.resolve_virtual_path",
-        lambda *_args, **_kwargs: output_directory,
-    )
-    monkeypatch.setattr("yuxi.agents.backends.sandbox.paths.ensure_thread_dirs", lambda *_: None)
-
     result = await export_office_file.coroutine(
         definition_path="/home/gem/user-data/outputs/report.json",
         output_format="docx",
         output_name="检查报告",
+        tool_call_id="call-1",
         runtime=_runtime(),
     )
 
-    assert result["artifact_path"].endswith("report.docx")
+    tool_message = result.update["messages"][0]
+    assert tool_message.artifact == {
+        "schema": ARTIFACT_DELIVERY_SCHEMA,
+        "paths": ["/home/gem/user-data/outputs/report.docx"],
+    }
     assert captured["definition_path"] == definition
-    assert captured["output_directory"] == output_directory
+    assert captured["output_directory"] == sandbox_outputs_dir("thread-1").resolve()

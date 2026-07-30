@@ -10,6 +10,8 @@ def test_chatbot_prompt_uses_general_tool_and_source_rules():
     assert "引用来源内容时，明确区分逐字引用、摘要和推断" in prompt
     assert "用户只要求查询、核验或读取内容时" in prompt
     assert "优先使用当前上下文中已提供的信息" in prompt
+    assert "明确说明成功后会自动交付" in prompt
+    assert "不要重复交付" in prompt
     assert "`grep` 是字面搜索" not in prompt
     assert "不得用 `execute`、`glob`、`ls`" not in prompt
     assert "不得把序号自行解释成“第几款”" not in prompt

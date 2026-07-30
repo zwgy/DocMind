@@ -11,8 +11,11 @@ def test_office_export_skill_exposes_native_tool_and_format_references() -> None
     specs = {spec.slug: spec for spec in BUILTIN_SKILLS}
     spec = specs["office-export"]
 
-    assert spec.tool_dependencies == ("export_office_file", "present_artifacts")
+    assert spec.tool_dependencies == ("export_office_file",)
     assert spec.mcp_dependencies == ()
+    content = spec.source_dir.joinpath("SKILL.md").read_text(encoding="utf-8")
+    assert "成功后文件已由系统自动交付" in content
+    assert "不要重复调用 `present_artifacts`" in content
     for format_name in ("docx", "pdf", "xlsx"):
         assert spec.source_dir.joinpath("references", f"{format_name}.md").is_file()
 

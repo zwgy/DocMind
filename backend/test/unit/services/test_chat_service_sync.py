@@ -6,6 +6,7 @@ import pytest
 from langchain.messages import AIMessage, HumanMessage
 
 from yuxi.agents import context as agent_context
+from yuxi.agents.artifacts import ARTIFACT_DELIVERY_SCHEMA
 from yuxi.services import chat_service as svc
 
 
@@ -196,20 +197,21 @@ async def test_save_messages_persists_successfully_registered_artifacts_on_final
                             "content": "",
                             "tool_calls": [
                                 {
-                                    "id": "present-1",
-                                    "name": "present_artifacts",
-                                    "args": {
-                                        "filepaths": ["/user-data/outputs/report.pdf", "/user-data/outputs/report.pdf"]
-                                    },
+                                    "id": "export-1",
+                                    "name": "custom_export",
+                                    "args": {},
                                 }
                             ],
                         },
                         {
                             "id": "tool-artifacts",
                             "type": "tool",
-                            "tool_call_id": "present-1",
-                            "content": "已将交付物展示给用户",
-                            "additional_kwargs": {"presented_artifacts": ["/user-data/outputs/report.pdf"]},
+                            "tool_call_id": "export-1",
+                            "content": "已生成报告",
+                            "artifact": {
+                                "schema": ARTIFACT_DELIVERY_SCHEMA,
+                                "paths": ["/user-data/outputs/report.pdf", "/user-data/outputs/report.pdf"],
+                            },
                         },
                         {"id": "ai-final", "type": "ai", "content": "报告已生成"},
                     ]
@@ -235,7 +237,7 @@ async def test_save_messages_persists_successfully_registered_artifacts_on_final
 
 
 @pytest.mark.asyncio
-async def test_save_messages_registers_current_run_write_file_when_presentation_is_omitted() -> None:
+async def test_save_messages_does_not_infer_delivery_from_write_file_result() -> None:
     class FakeGraph:
         async def aget_state(self, _config):
             return SimpleNamespace(
@@ -280,75 +282,7 @@ async def test_save_messages_registers_current_run_write_file_when_presentation_
         trace_info=None,
     )
 
-    assert conv_repo.saved_messages[-1]["extra_metadata"]["presented_artifacts"] == [
-        "/home/gem/user-data/outputs/通知.txt"
-    ]
-
-
-def test_write_file_delivery_candidates_excludes_temporary_and_edit_results() -> None:
-    candidates = svc._write_file_delivery_candidates(
-        [
-            (
-                "tool",
-                {
-                    "name": "write_file",
-                    "status": "success",
-                    "content": "Updated file /home/gem/user-data/outputs/最终报告.docx",
-                },
-            ),
-            (
-                "tool",
-                {
-                    "name": "write_file",
-                    "status": "success",
-                    "content": "Updated file /home/gem/user-data/outputs/tmp/草稿.md",
-                },
-            ),
-            (
-                "tool",
-                {
-                    "name": "edit_file",
-                    "status": "success",
-                    "content": "Updated file /home/gem/user-data/outputs/既有文件.docx",
-                },
-            ),
-        ]
-    )
-
-    assert candidates == ["/home/gem/user-data/outputs/最终报告.docx"]
-
-
-def test_visualization_delivery_candidates_accepts_only_successful_output_svgs() -> None:
-    candidates = svc._visualization_delivery_candidates(
-        [
-            (
-                "tool",
-                {
-                    "name": "render_data_chart",
-                    "status": "success",
-                    "content": '{"artifact_path":"/home/gem/user-data/outputs/inspection-cycle.svg"}',
-                },
-            ),
-            (
-                "tool",
-                {
-                    "name": "render_flowchart",
-                    "status": "error",
-                    "content": {"artifact_path": "/home/gem/user-data/outputs/failed.svg"},
-                },
-            ),
-            (
-                "tool",
-                {
-                    "name": "render_mind_map",
-                    "status": "success",
-                    "content": {"artifact_path": "/home/gem/user-data/outputs/not-a-chart.txt"},
-                },
-            ),
-        ]
-    )
-
-    assert candidates == ["/home/gem/user-data/outputs/inspection-cycle.svg"]
+    assert "presented_artifacts" not in conv_repo.saved_messages[-1]["extra_metadata"]
 
 
 @pytest.mark.asyncio
@@ -372,6 +306,10 @@ async def test_save_messages_registers_visualization_when_model_omits_presentati
                             "tool_call_id": "chart-1",
                             "content": '{"artifact_path":"/home/gem/user-data/outputs/inspection-cycle.svg"}',
                             "status": "success",
+                            "artifact": {
+                                "schema": ARTIFACT_DELIVERY_SCHEMA,
+                                "paths": ["/home/gem/user-data/outputs/inspection-cycle.svg"],
+                            },
                         },
                         {"id": "ai-final", "type": "ai", "content": "图表已生成"},
                     ]
@@ -502,7 +440,10 @@ async def test_save_messages_does_not_reassign_previous_turn_artifacts() -> None
                             "type": "tool",
                             "tool_call_id": "present-previous",
                             "content": "已将交付物展示给用户",
-                            "additional_kwargs": {"presented_artifacts": ["/user-data/outputs/previous.pdf"]},
+                            "artifact": {
+                                "schema": ARTIFACT_DELIVERY_SCHEMA,
+                                "paths": ["/user-data/outputs/previous.pdf"],
+                            },
                         },
                         {"id": "human-current", "type": "human", "content": "给我一个下载链接"},
                         {"id": "ai-current", "type": "ai", "content": "本轮没有交付物"},
@@ -532,7 +473,7 @@ async def test_save_messages_does_not_reassign_previous_turn_artifacts() -> None
 
 
 @pytest.mark.asyncio
-async def test_save_messages_accepts_openai_function_style_presented_artifacts() -> None:
+async def test_save_messages_reads_delivery_protocol_without_matching_tool_name() -> None:
     class FakeGraph:
         async def aget_state(self, _config):
             return SimpleNamespace(
@@ -543,24 +484,17 @@ async def test_save_messages_accepts_openai_function_style_presented_artifacts()
                             "id": "ai-artifacts",
                             "type": "ai",
                             "content": "",
-                            "additional_kwargs": {
-                                "tool_calls": [
-                                    {
-                                        "id": "present-1",
-                                        "function": {
-                                            "name": "present_artifacts",
-                                            "arguments": '{"filepaths":["/user-data/outputs/report.md"]}',
-                                        },
-                                    }
-                                ]
-                            },
+                            "tool_calls": [{"id": "deliver-1", "name": "future_export_tool", "args": {}}],
                         },
                         {
                             "id": "tool-artifacts",
                             "type": "tool",
-                            "tool_call_id": "present-1",
+                            "tool_call_id": "deliver-1",
                             "content": "已将交付物展示给用户",
-                            "additional_kwargs": {"presented_artifacts": ["/user-data/outputs/report.md"]},
+                            "artifact": {
+                                "schema": ARTIFACT_DELIVERY_SCHEMA,
+                                "paths": ["/user-data/outputs/report.md"],
+                            },
                         },
                         {"id": "ai-final", "type": "ai", "content": "已生成文件"},
                     ]

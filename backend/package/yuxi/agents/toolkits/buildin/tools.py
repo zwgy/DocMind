@@ -1,6 +1,5 @@
 import json
 import os
-from pathlib import Path
 from typing import Annotated
 
 from langchain.tools import InjectedToolCallId
@@ -9,6 +8,7 @@ from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from yuxi.agents.artifacts import deliver_artifacts
 from yuxi.agents.toolkits.registry import ToolExtraMetadata, _all_tool_instances, _extra_registry, tool
 from yuxi.utils import logger
 from yuxi.utils.paths import CONVERSATION_HISTORY_DIR_NAME, LARGE_TOOL_RESULTS_DIR_NAME, VIRTUAL_PATH_OUTPUTS
@@ -16,10 +16,6 @@ from yuxi.utils.question_utils import normalize_questions
 
 # Lazy initialization for TavilySearch (only when API key is available)
 _tavily_search_instance = None
-
-_PRESENT_ARTIFACTS_INTERNAL_DIR_NAMES = frozenset(
-    {CONVERSATION_HISTORY_DIR_NAME, LARGE_TOOL_RESULTS_DIR_NAME, "large_tool_history"}
-)
 
 
 def _create_tavily_search():
@@ -63,50 +59,6 @@ class PresentArtifactsInput(BaseModel):
     )
 
 
-def _normalize_presented_artifact_path(filepath: str, runtime: ToolRuntime) -> str:
-    from yuxi.agents.backends.sandbox.paths import (
-        VIRTUAL_PATH_PREFIX,
-        ensure_thread_dirs,
-        resolve_virtual_path,
-        sandbox_outputs_dir,
-    )
-
-    outputs_virtual_prefix = f"{VIRTUAL_PATH_PREFIX}/outputs"
-    runtime_context = runtime.context
-    thread_id = getattr(runtime_context, "file_thread_id", None) or getattr(runtime_context, "thread_id", None)
-    if not thread_id:
-        raise ValueError("当前运行时缺少 thread_id")
-    uid = getattr(runtime_context, "uid", None)
-    if not uid:
-        raise ValueError("当前运行时缺少 uid")
-
-    ensure_thread_dirs(thread_id, str(uid))
-    outputs_dir = sandbox_outputs_dir(thread_id).resolve()
-    normalized_input = str(filepath or "").strip()
-    if not normalized_input:
-        raise ValueError("文件路径不能为空")
-
-    stripped = normalized_input.lstrip("/")
-    virtual_prefix = VIRTUAL_PATH_PREFIX.lstrip("/")
-    if stripped == virtual_prefix or stripped.startswith(f"{virtual_prefix}/"):
-        actual_path = resolve_virtual_path(thread_id, normalized_input, uid=str(uid))
-    else:
-        actual_path = Path(normalized_input).expanduser().resolve()
-
-    if not actual_path.exists() or not actual_path.is_file():
-        raise ValueError(f"文件不存在或不是普通文件: {normalized_input}")
-
-    try:
-        relative_path = actual_path.relative_to(outputs_dir)
-    except ValueError as exc:
-        raise ValueError(f"只允许展示 {outputs_virtual_prefix}/ 下的文件: {normalized_input}") from exc
-
-    if relative_path.parts and relative_path.parts[0] in _PRESENT_ARTIFACTS_INTERNAL_DIR_NAMES:
-        raise ValueError(f"不允许展示工具调用阶段文件: {outputs_virtual_prefix}/{relative_path.as_posix()}")
-
-    return f"{outputs_virtual_prefix}/{relative_path.as_posix()}"
-
-
 PRESENT_ARTIFACTS_DESCRIPTION = f"""
 将已经生成好的结果文件展示给用户。
 
@@ -122,6 +74,7 @@ PRESENT_ARTIFACTS_DESCRIPTION = f"""
    - `{VIRTUAL_PATH_OUTPUTS}/{LARGE_TOOL_RESULTS_DIR_NAME}`
    - `{VIRTUAL_PATH_OUTPUTS}/{CONVERSATION_HISTORY_DIR_NAME}`
 4. 可以一次传多个文件
+5. 产物工具已经说明会自动交付时，不要再次调用本工具交付同一文件
 """
 
 
@@ -139,23 +92,24 @@ def present_artifacts(
 ) -> Command:
     """登记当前线程 outputs 目录下的交付物文件，使前端在对话结束后展示给用户。"""
     try:
-        normalized_paths = [_normalize_presented_artifact_path(filepath, runtime) for filepath in filepaths]
+        return deliver_artifacts(
+            filepaths=filepaths,
+            runtime=runtime,
+            tool_call_id=tool_call_id,
+            content="已将交付物展示给用户",
+        )
     except ValueError as exc:
-        return Command(update={"messages": [ToolMessage(content=f"Error: {exc}", tool_call_id=tool_call_id)]})
-
-    return Command(
-        update={
-            "artifacts": normalized_paths,
-            # 历史持久化只信任已成功执行的工具结果，避免模型仅生成调用参数就被误认为完成交付。
-            "messages": [
-                ToolMessage(
-                    content="已将交付物展示给用户",
-                    tool_call_id=tool_call_id,
-                    additional_kwargs={"presented_artifacts": normalized_paths},
-                )
-            ],
-        }
-    )
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content=f"Error: {exc}",
+                        tool_call_id=tool_call_id,
+                        status="error",
+                    )
+                ]
+            }
+        )
 
 
 ASK_USER_QUESTION_DESCRIPTION = """

@@ -72,7 +72,7 @@ description: "按时间范围汇总多份来文中的风险事项、管理要求
 1. 先读取依赖 Skill `office-export` 的入口文件，由它选择 XLSX 格式契约并按其流程生成 workbook definition。
 2. 创建“统计”和“风险台账”两个工作表；第一行必须是表头。“风险台账”列顺序使用“序号、事项类型、事项、涉及对象、时间/期限、措施/要求、来文、附件、原文依据”。
 3. 文件名使用“风险台账-起始日期-结束日期”；日期未限定时范围使用“全部”。多个附件和引用用换行拼成一个字符串。
-4. 调用 `export_office_file`，`output_format` 使用 `xlsx`；成功后调用 `present_artifacts` 交付。
+4. 调用 `export_office_file`，`output_format` 使用 `xlsx`；成功后按 `office-export` 的自动交付规则直接完成回答。
 5. 未成功生成文件时明确报错，不声称已交付。
 
 ## 禁止事项

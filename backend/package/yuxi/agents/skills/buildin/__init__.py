@@ -25,7 +25,7 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
             "仅当用户未明确可视化类型时读取此 Skill，并选择数据图表、流程图或思维导图子 Skill；"
             "类型明确时直接读取对应子 Skill。"
         ),
-        version="2026.07.28",
+        version="2026.07.30",
         skill_dependencies=("data-chart", "flowchart", "mindmap"),
     ),
     BuiltinSkillSpec(
@@ -35,8 +35,8 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
             "用户明确要求数据图表、柱状图、折线图、面积图、饼图或散点图时必须先读取此 Skill；"
             "只用 render_data_chart 生成 SVG，禁止改用文档生成工具或手写 SVG。"
         ),
-        version="2026.07.28",
-        tool_dependencies=("render_data_chart", "present_artifacts"),
+        version="2026.07.30",
+        tool_dependencies=("render_data_chart",),
     ),
     BuiltinSkillSpec(
         slug="flowchart",
@@ -45,8 +45,8 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
             "用户明确要求流程图、审批流程或业务流程图时必须先读取此 Skill；"
             "只用 render_flowchart 生成 SVG，禁止改用文档生成工具或手写 SVG。"
         ),
-        version="2026.07.28",
-        tool_dependencies=("render_flowchart", "present_artifacts"),
+        version="2026.07.30",
+        tool_dependencies=("render_flowchart",),
     ),
     BuiltinSkillSpec(
         slug="mindmap",
@@ -66,8 +66,8 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
             "用户要求生成或导出 DOCX、Word、PDF、XLSX、Excel 文件，或要求把当前会话中的图片、"
             "图表、流程图、思维导图插入这些文件时必须先读取此 Skill。"
         ),
-        version="2026.07.29",
-        tool_dependencies=("export_office_file", "present_artifacts"),
+        version="2026.07.30",
+        tool_dependencies=("export_office_file",),
     ),
     BuiltinSkillSpec(
         slug="image-gen",
@@ -114,13 +114,12 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
         slug="build-risk-ledger",
         source_dir=_SKILLS_ROOT / "build-risk-ledger",
         description="按时间范围汇总多份来文中的风险、管理要求和任务，生成可追溯风险台账。",
-        version="2026.07.18",
+        version="2026.07.30",
         tool_dependencies=(
             "search_incoming_documents",
             "read_incoming_document",
             "get_incoming_document_statistics",
             "ask_user_question",
-            "present_artifacts",
             "export_office_file",
         ),
         skill_dependencies=("office-export",),
@@ -129,7 +128,7 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
         slug="summarize-assessment-actions",
         source_dir=_SKILLS_ROOT / "summarize-assessment-actions",
         description="按时间范围汇总多份来文中的通报、考评和奖惩事项，保留对象、结果、后续要求及依据。",
-        version="2026.07.18",
+        version="2026.07.30",
         tool_dependencies=(
             "search_incoming_documents",
             "read_incoming_document",
@@ -144,7 +143,7 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
         slug="mysql-reporter",
         source_dir=_SKILLS_ROOT / "mysql-reporter",
         description="生成 MySQL 查询报表并生成可视化图表。",
-        version="2026.06.05",
+        version="2026.07.30",
         skill_dependencies=("data-chart",),
     ),
 ]

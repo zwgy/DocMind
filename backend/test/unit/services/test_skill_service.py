@@ -325,13 +325,14 @@ def test_phase3_incoming_business_skill_specs():
         spec = specs[slug]
         assert incoming_tools < set(spec["tool_dependencies"])
         assert "ask_user_question" in spec["tool_dependencies"]
-        assert "present_artifacts" in spec["tool_dependencies"]
         assert "export_office_file" in spec["tool_dependencies"]
         assert spec["mcp_dependencies"] == []
         assert spec["skill_dependencies"] == ["office-export"]
         assert (spec["source_dir"] / "SKILL.md").exists()
         assert "page_size=50" in (spec["source_dir"] / "SKILL.md").read_text(encoding="utf-8")
 
+    assert "present_artifacts" not in specs["build-risk-ledger"]["tool_dependencies"]
+    assert "present_artifacts" in specs["summarize-assessment-actions"]["tool_dependencies"]
     assessment_content = (specs["summarize-assessment-actions"]["source_dir"] / "SKILL.md").read_text(encoding="utf-8")
     assert 'classifications=["notification", "assessment", "reward_punishment"]' in assessment_content
 

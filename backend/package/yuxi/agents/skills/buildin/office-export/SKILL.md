@@ -15,5 +15,5 @@ description: 用户要求生成或导出 DOCX、Word、PDF、XLSX、Excel 文件
 4. 图表、流程图和思维导图保持 SVG；Office 导出工具会在确有需要时临时转换，不要提前生成 PNG。
 5. `output_name` 使用不含路径和扩展名的文件名，可使用中文。
 6. 调用 `export_office_file`，原样传入 `write_file` 返回的 definition 完整路径。
-7. 工具成功返回后调用 `present_artifacts`；失败时根据错误修正一次，仍失败则明确报告，不声称已经交付。
+7. `export_office_file` 成功后文件已由系统自动交付，直接完成回答，不要重复调用 `present_artifacts`；失败时根据错误修正一次，仍失败则明确报告，不声称已经交付。
 8. 用户要求多个格式时逐个生成定义并串行导出，每次只调用一个工具。

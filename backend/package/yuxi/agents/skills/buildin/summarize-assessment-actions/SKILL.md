@@ -71,7 +71,9 @@ description: "汇总指定时间范围内多份来文中的通报、考评、表
 - XLSX：创建“统计、考评事项、奖惩通报、后续任务”工作表；第一行是表头，多个附件和引用用换行拼成一个字符串。
 - DOCX 或 XLSX 定义写入当前会话后调用 `export_office_file`，使用对应 `output_format`。
 - Markdown：用 `write_file` 写入 `/home/gem/user-data/outputs/通报考评奖惩汇总-范围.md`。
-- 文件生成成功后调用 `present_artifacts` 交付；失败时不要声称已交付。
+- DOCX 或 XLSX：`export_office_file` 成功后文件已自动交付，直接完成回答，不要重复调用 `present_artifacts`。
+- Markdown：`write_file` 成功后调用 `present_artifacts` 交付生成的文件。
+- 任一生成或交付步骤失败时明确报告，不声称已经交付。
 
 ## 禁止事项
 

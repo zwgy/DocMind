@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
+from langchain.tools import InjectedToolCallId
 from langchain_core.tools import ToolException
 from langgraph.prebuilt.tool_node import ToolRuntime
+from langgraph.types import Command
 from pydantic import BaseModel, Field
 
+from yuxi.agents.artifacts import deliver_artifacts
 from yuxi.agents.toolkits.registry import tool
 from yuxi.services.visualization_service import (
     VisualizationError,
@@ -44,15 +47,16 @@ async def render_data_chart(
     title: Annotated[str, Field(min_length=1, max_length=200, description="中文图表标题")],
     encoding: Annotated[ChartEncoding, Field(description="字段角色映射")],
     output_name: Annotated[str, Field(description="ASCII 文件名主体，不含扩展名")],
+    tool_call_id: Annotated[str, InjectedToolCallId],
     runtime: ToolRuntime = None,
-) -> dict:
+) -> Command:
     """根据当前会话 CSV 和受限字段映射生成静态 SVG 数据图表。"""
     uid, thread_id = _scope(runtime)
     try:
         if not title.strip():
             raise VisualizationError("图表标题不能为空")
         source = chart_source_path(thread_id, uid, source_path)
-        return await render_visualization(
+        result = await render_visualization(
             thread_id=thread_id,
             uid=uid,
             script_name="render_data_chart.mjs",
@@ -64,6 +68,12 @@ async def render_data_chart(
                 "encoding": encoding.model_dump(exclude_none=True),
             },
         )
+        return deliver_artifacts(
+            filepaths=[result["artifact_path"]],
+            runtime=runtime,
+            tool_call_id=tool_call_id,
+            content=result,
+        )
     except VisualizationError as exc:
         raise ToolException(str(exc)) from exc
 
@@ -72,18 +82,25 @@ async def render_data_chart(
 async def render_flowchart(
     definition_path: Annotated[str, Field(description="当前会话中的 .flow.json 虚拟路径")],
     output_name: Annotated[str, Field(description="ASCII 文件名主体，不含扩展名")],
+    tool_call_id: Annotated[str, InjectedToolCallId],
     runtime: ToolRuntime = None,
-) -> dict:
+) -> Command:
     """根据受限流程 JSON 生成静态 SVG 流程图。"""
     uid, thread_id = _scope(runtime)
     try:
         source = flow_source_path(thread_id, uid, definition_path)
-        return await render_visualization(
+        result = await render_visualization(
             thread_id=thread_id,
             uid=uid,
             script_name="render_flowchart.py",
             output_name=output_name,
             request={"source_path": str(source)},
+        )
+        return deliver_artifacts(
+            filepaths=[result["artifact_path"]],
+            runtime=runtime,
+            tool_call_id=tool_call_id,
+            content=result,
         )
     except VisualizationError as exc:
         raise ToolException(str(exc)) from exc
@@ -108,21 +125,28 @@ async def render_mindmap(
         ),
     ],
     output_name: Annotated[str, Field(description="ASCII 文件名主体，不含扩展名")],
+    tool_call_id: Annotated[str, InjectedToolCallId],
     layout: Annotated[
         Literal["horizontal", "radial"],
         Field(description="默认使用 horizontal；只有用户明确要求径向布局时使用 radial"),
     ] = "horizontal",
     runtime: ToolRuntime = None,
-) -> dict:
+) -> Command:
     """直接根据受限 Markdown 大纲正文生成并自动交付静态 SVG 思维导图。"""
     uid, thread_id = _scope(runtime)
     try:
-        return await render_visualization(
+        result = await render_visualization(
             thread_id=thread_id,
             uid=uid,
             script_name="render_mindmap.mjs",
             output_name=output_name,
             request={"outline": outline, "layout": layout},
+        )
+        return deliver_artifacts(
+            filepaths=[result["artifact_path"]],
+            runtime=runtime,
+            tool_call_id=tool_call_id,
+            content=result,
         )
     except VisualizationError as exc:
         raise ToolException(str(exc)) from exc

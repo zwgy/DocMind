@@ -5,8 +5,10 @@ from types import SimpleNamespace
 import pytest
 from langgraph.prebuilt.tool_node import ToolRuntime
 
-from yuxi.agents.toolkits.visualization import tools
+from yuxi.agents.artifacts import ARTIFACT_DELIVERY_SCHEMA
+from yuxi.agents.backends.sandbox import ensure_thread_dirs, sandbox_outputs_dir
 from yuxi.agents.toolkits.registry import get_extra_metadata
+from yuxi.agents.toolkits.visualization import tools
 from yuxi.agents.toolkits.visualization import render_data_chart, render_flowchart, render_mindmap
 
 
@@ -87,20 +89,27 @@ async def test_data_chart_serializes_encoding_before_rendering(monkeypatch) -> N
 
     async def fake_render_visualization(**kwargs):
         captured.update(kwargs)
+        ensure_thread_dirs("thread-1", "user-1")
+        sandbox_outputs_dir("thread-1").joinpath("monthly-sales.svg").write_text("<svg/>", encoding="utf-8")
         return {"artifact_path": "/home/gem/user-data/outputs/monthly-sales.svg"}
 
     monkeypatch.setattr(tools, "render_visualization", fake_render_visualization)
 
-    await render_data_chart.coroutine(
+    command = await render_data_chart.coroutine(
         source_path="/home/gem/user-data/outputs/.visualization-data/chart.csv",
         chart_type="bar",
         title="月度销售",
         encoding=tools.ChartEncoding(category="month", values=["sales"]),
         output_name="monthly-sales",
+        tool_call_id="call-1",
         runtime=runtime,
     )
 
     assert captured["request"]["encoding"] == {"category": "month", "values": ["sales"]}
+    assert command.update["messages"][0].artifact == {
+        "schema": ARTIFACT_DELIVERY_SCHEMA,
+        "paths": ["/home/gem/user-data/outputs/monthly-sales.svg"],
+    }
 
 
 @pytest.mark.asyncio
@@ -117,16 +126,20 @@ async def test_mindmap_sends_outline_directly_to_renderer(monkeypatch) -> None:
 
     async def fake_render_visualization(**kwargs):
         captured.update(kwargs)
+        ensure_thread_dirs("thread-1", "user-1")
+        sandbox_outputs_dir("thread-1").joinpath("project-governance.svg").write_text("<svg/>", encoding="utf-8")
         return {"artifact_path": "/home/gem/user-data/outputs/project-governance.svg"}
 
     monkeypatch.setattr(tools, "render_visualization", fake_render_visualization)
     outline = "- 项目治理\n  - 计划\n    - 里程碑"
 
-    await render_mindmap.coroutine(
+    command = await render_mindmap.coroutine(
         outline=outline,
         output_name="project-governance",
+        tool_call_id="call-1",
         layout="horizontal",
         runtime=runtime,
     )
 
     assert captured["request"] == {"outline": outline, "layout": "horizontal"}
+    assert command.update["artifacts"] == ["/home/gem/user-data/outputs/project-governance.svg"]

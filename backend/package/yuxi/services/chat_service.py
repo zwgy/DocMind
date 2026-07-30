@@ -8,6 +8,7 @@ from typing import Any
 from langchain.messages import AIMessage, AIMessageChunk, HumanMessage
 from langgraph.types import Command
 from yuxi import config as conf
+from yuxi.agents.artifacts import delivered_artifact_paths
 from yuxi.agents.buildin import agent_manager
 from yuxi.agents.context import build_agent_input_context, normalize_agent_context_config
 from yuxi.agents.state import AgentStatePayload
@@ -26,7 +27,6 @@ from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_business import Agent, User
 from yuxi.utils.guard import content_guard
 from yuxi.utils.logging_config import logger
-from yuxi.utils.paths import CONVERSATION_HISTORY_DIR_NAME, LARGE_TOOL_RESULTS_DIR_NAME, VIRTUAL_PATH_OUTPUTS
 from yuxi.utils.question_utils import (
     normalize_questions as _normalize_interrupt_questions,
 )
@@ -467,94 +467,6 @@ async def _save_tool_message(conv_repo: ConversationRepository, msg_dict: dict) 
     )
 
 
-_VISUALIZATION_TOOL_NAMES = frozenset({"render_data_chart", "render_flowchart", "render_mind_map"})
-
-
-def _presented_artifacts_from_tool_message(msg_dict: dict) -> list[str]:
-    """只接受成功的 present_artifacts 工具结果，不能根据 outputs 文件推测交付意图。"""
-    if msg_dict.get("type") != "tool" or msg_dict.get("status") == "error":
-        return []
-    additional_kwargs = msg_dict.get("additional_kwargs")
-    paths = additional_kwargs.get("presented_artifacts") if isinstance(additional_kwargs, dict) else None
-    if not isinstance(paths, list):
-        return []
-    return list(dict.fromkeys(path.strip() for path in paths if isinstance(path, str) and path.strip()))
-
-
-def _visualization_delivery_candidates(pending_messages: list[tuple[str, dict]]) -> list[str]:
-    """将成功渲染的 SVG 作为确定性交付物，避免模型遗漏登记步骤。"""
-    candidates: list[str] = []
-    for msg_type, msg_dict in pending_messages:
-        if (
-            msg_type != "tool"
-            or msg_dict.get("status") == "error"
-            or msg_dict.get("name") not in _VISUALIZATION_TOOL_NAMES
-        ):
-            continue
-
-        content = msg_dict.get("content")
-        if isinstance(content, str):
-            try:
-                content = json.loads(content)
-            except json.JSONDecodeError:
-                continue
-        if not isinstance(content, dict):
-            continue
-
-        path = content.get("artifact_path")
-        if isinstance(path, str) and path.startswith(f"{VIRTUAL_PATH_OUTPUTS}/") and path.lower().endswith(".svg"):
-            candidates.append(path)
-    return list(dict.fromkeys(candidates))
-
-
-def _present_artifact_tool_call_ids(msg_dict: dict) -> set[str]:
-    """仅关联本次新增 AI 消息中的登记调用，避免历史 ToolMessage 重复归属到新回答。"""
-    tool_calls = msg_dict.get("tool_calls")
-    if not isinstance(tool_calls, list) and isinstance(msg_dict.get("additional_kwargs"), dict):
-        tool_calls = msg_dict["additional_kwargs"].get("tool_calls")
-    if not isinstance(tool_calls, list) and isinstance(msg_dict.get("content"), list):
-        tool_calls = [
-            item for item in msg_dict["content"] if isinstance(item, dict) and item.get("type") == "tool_call"
-        ]
-    if not isinstance(tool_calls, list):
-        return set()
-
-    return {
-        str(tool_call["id"])
-        for tool_call in tool_calls
-        if isinstance(tool_call, dict)
-        and tool_call.get("id")
-        and (
-            tool_call.get("name") == "present_artifacts"
-            or isinstance(tool_call.get("function"), dict)
-            and tool_call["function"].get("name") == "present_artifacts"
-        )
-    }
-
-
-def _write_file_delivery_candidates(pending_messages: list[tuple[str, dict]]) -> list[str]:
-    """只返回当前未持久化轮次中明确成功写入的最终文件。"""
-    excluded_prefixes = (
-        f"{VIRTUAL_PATH_OUTPUTS}/tmp/",
-        f"{VIRTUAL_PATH_OUTPUTS}/{CONVERSATION_HISTORY_DIR_NAME}/",
-        f"{VIRTUAL_PATH_OUTPUTS}/{LARGE_TOOL_RESULTS_DIR_NAME}/",
-        f"{VIRTUAL_PATH_OUTPUTS}/.visualization-data/",
-        f"{VIRTUAL_PATH_OUTPUTS}/.visualization-specs/",
-    )
-    candidates: list[str] = []
-    for msg_type, msg_dict in pending_messages:
-        if msg_type != "tool" or msg_dict.get("name") != "write_file" or msg_dict.get("status") == "error":
-            continue
-        content = msg_dict.get("content")
-        if not isinstance(content, str) or not content.startswith("Updated file "):
-            continue
-        path = content.removeprefix("Updated file ").strip()
-        if not path.startswith(f"{VIRTUAL_PATH_OUTPUTS}/") or path.startswith(excluded_prefixes):
-            continue
-        candidates.append(path)
-    return list(dict.fromkeys(candidates))
-
-
 async def save_partial_message(
     conv_repo: ConversationRepository,
     thread_id: str,
@@ -646,26 +558,13 @@ async def save_messages_from_langgraph_state(
         if current_turn_started:
             current_turn_pending_messages.append((msg_type, msg_dict))
 
-    present_artifact_call_ids = {
-        tool_call_id
-        for msg_type, msg_dict in current_turn_pending_messages
-        if msg_type == "ai"
-        for tool_call_id in _present_artifact_tool_call_ids(msg_dict)
-    }
     presented_artifacts = [
         path
         for msg_type, msg_dict in current_turn_pending_messages
-        if msg_type == "tool" and msg_dict.get("tool_call_id") in present_artifact_call_ids
-        for path in _presented_artifacts_from_tool_message(msg_dict)
+        if msg_type == "tool"
+        for path in delivered_artifact_paths(msg_dict)
     ]
-    # 可视化工具只会在校验后的 outputs 根目录写入 SVG。该结果本身已表达
-    # 用户要求生成图表的交付意图，不能再依赖模型额外调用 present_artifacts。
-    presented_artifacts.extend(_visualization_delivery_candidates(current_turn_pending_messages))
     presented_artifacts = list(dict.fromkeys(presented_artifacts))
-    if not presented_artifacts:
-        # 只信任本轮 write_file 的成功回执：它既证明文件真实写入，也避免扫描 outputs
-        # 把附件物化、工具缓存或历史文件误认为用户交付物。
-        presented_artifacts = _write_file_delivery_candidates(current_turn_pending_messages)
     if presented_artifacts:
         for msg_type, msg_dict in reversed(pending_messages):
             if msg_type == "ai":

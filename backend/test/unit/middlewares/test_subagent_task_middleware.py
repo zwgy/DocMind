@@ -5,10 +5,11 @@ from types import SimpleNamespace
 import pytest
 import yuxi.agents.middlewares.subagent_task as subagent_task_middleware
 from langchain.agents._subagent_transformer import SubagentTransformer as LangChainSubagentTransformer
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.stream._mux import StreamMux
 from langgraph.types import Command
+from yuxi.agents.artifacts import ARTIFACT_DELIVERY_SCHEMA
 from yuxi.agents.buildin.chatbot.state import merge_subagent_runs
 from yuxi.agents.middlewares.subagent_task import YUXI_SUBAGENTS_STREAM_KEY, YuxiSubAgentMiddleware
 from yuxi.utils.subagent_thread_utils import make_child_thread_id
@@ -174,7 +175,18 @@ async def test_task_tool_invokes_subagent_with_child_scope(monkeypatch) -> None:
             captured["config"] = config
             captured["context"] = context
             return {
-                "messages": [AIMessage(content="child done")],
+                "messages": [
+                    HumanMessage(content="write a report"),
+                    ToolMessage(
+                        content="report generated",
+                        tool_call_id="child-tool-1",
+                        artifact={
+                            "schema": ARTIFACT_DELIVERY_SCHEMA,
+                            "paths": ["/home/gem/user-data/outputs/report.md"],
+                        },
+                    ),
+                    AIMessage(content="child done"),
+                ],
                 "artifacts": ["/home/gem/user-data/outputs/report.md"],
                 "todos": ["should not merge"],
             }
@@ -237,6 +249,10 @@ async def test_task_tool_invokes_subagent_with_child_scope(monkeypatch) -> None:
     assert isinstance(result, Command)
     assert result.update["messages"][0].content == f"> 子智能体线程 ID: {child_thread_id}\n\n---\n\nchild done"
     assert result.update["messages"][0].tool_call_id == "tool-1"
+    assert result.update["messages"][0].artifact == {
+        "schema": ARTIFACT_DELIVERY_SCHEMA,
+        "paths": ["/home/gem/user-data/outputs/report.md"],
+    }
     assert result.update["artifacts"] == ["/home/gem/user-data/outputs/report.md"]
     assert result.update["subagent_runs"] == [
         {
@@ -286,6 +302,53 @@ async def test_task_tool_invokes_subagent_with_child_scope(monkeypatch) -> None:
     assert captured["context"].skills_thread_id == child_thread_id
     assert not hasattr(captured["context"], "subagents")
     assert captured["context"].is_subagent_runtime is True
+
+
+def test_completed_subagent_response_only_forwards_last_turn_delivery(monkeypatch) -> None:
+    previous_path = "/home/gem/user-data/outputs/previous.md"
+    current_path = "/home/gem/user-data/outputs/current.md"
+    monkeypatch.setattr(subagent_task_middleware, "utc_isoformat", lambda: "2026-05-31T01:00:03Z")
+
+    result = {
+        "messages": [
+            HumanMessage(content="first task"),
+            ToolMessage(
+                content="previous generated",
+                tool_call_id="child-tool-1",
+                artifact={
+                    "schema": ARTIFACT_DELIVERY_SCHEMA,
+                    "paths": [previous_path],
+                },
+            ),
+            AIMessage(content="first done"),
+            HumanMessage(content="continue"),
+            ToolMessage(
+                content="current generated",
+                tool_call_id="child-tool-2",
+                artifact={
+                    "schema": ARTIFACT_DELIVERY_SCHEMA,
+                    "paths": [current_path],
+                },
+            ),
+            AIMessage(content="continued done"),
+        ],
+        "artifacts": [previous_path, current_path],
+    }
+
+    command = subagent_task_middleware._completed_tool_response(
+        result,
+        "parent-tool-2",
+        {
+            "child_thread_id": "child-thread",
+            "subagent_type": "worker",
+        },
+    )
+
+    assert command.update["artifacts"] == [previous_path, current_path]
+    assert command.update["messages"][0].artifact == {
+        "schema": ARTIFACT_DELIVERY_SCHEMA,
+        "paths": [current_path],
+    }
 
 
 @pytest.mark.asyncio

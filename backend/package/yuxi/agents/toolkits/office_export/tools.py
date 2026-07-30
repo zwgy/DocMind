@@ -3,10 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Literal
 
+from langchain.tools import InjectedToolCallId
 from langchain_core.tools import ToolException
 from langgraph.prebuilt.tool_node import ToolRuntime
+from langgraph.types import Command
 from pydantic import Field
 
+from yuxi.agents.artifacts import deliver_artifacts
 from yuxi.agents.toolkits.registry import tool
 from yuxi.services.office_export_service import OfficeExportError, export_office_file as run_office_export
 from yuxi.utils.paths import VIRTUAL_PATH_OUTPUTS
@@ -53,8 +56,9 @@ async def export_office_file(
     definition_path: Annotated[str, Field(description="当前会话中的 Office JSON 定义文件虚拟路径")],
     output_format: Annotated[Literal["docx", "pdf", "xlsx"], Field(description="导出格式")],
     output_name: Annotated[str, Field(min_length=1, max_length=100, description="不含路径和扩展名的输出文件名")],
+    tool_call_id: Annotated[str, InjectedToolCallId],
     runtime: ToolRuntime = None,
-) -> dict[str, str]:
+) -> Command:
     """根据受限定义文件生成带表格和本地图片的 DOCX、PDF 或 XLSX。"""
     uid, thread_id = _scope(runtime)
     resolver = _source_resolver(thread_id, uid)
@@ -64,13 +68,19 @@ async def export_office_file(
 
         ensure_thread_dirs(thread_id, uid)
         output_directory = resolve_virtual_path(thread_id, VIRTUAL_PATH_OUTPUTS, uid=uid)
-        return await run_office_export(
+        result = await run_office_export(
             definition_path=definition,
             output_format=output_format,
             output_name=output_name,
             output_directory=output_directory,
             virtual_output_directory=VIRTUAL_PATH_OUTPUTS,
             source_resolver=resolver,
+        )
+        return deliver_artifacts(
+            filepaths=[result["artifact_path"]],
+            runtime=runtime,
+            tool_call_id=tool_call_id,
+            content=result,
         )
     except OfficeExportError as exc:
         raise ToolException(str(exc)) from exc

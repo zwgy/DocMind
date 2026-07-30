@@ -104,6 +104,19 @@ def test_mindmap_skill_uses_direct_outline_and_automatic_delivery() -> None:
     assert specs["mindmap"].tool_dependencies == ("render_mind_map",)
 
 
+def test_visualization_renderers_deliver_without_exposing_present_artifacts() -> None:
+    specs = {spec.slug: spec for spec in BUILTIN_SKILLS}
+
+    for slug, tool_name in (
+        ("data-chart", "render_data_chart"),
+        ("flowchart", "render_flowchart"),
+        ("mindmap", "render_mind_map"),
+    ):
+        content = specs[slug].source_dir.joinpath("SKILL.md").read_text(encoding="utf-8")
+        assert specs[slug].tool_dependencies == (tool_name,)
+        assert "不再调用 `present_artifacts`" in content
+
+
 def test_visualization_skill_metadata_routes_explicit_requests_to_child_skills() -> None:
     specs = {spec.slug: spec for spec in BUILTIN_SKILLS}
     expected = {
