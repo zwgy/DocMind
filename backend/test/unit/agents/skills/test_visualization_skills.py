@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -45,6 +46,8 @@ def test_backend_node_manifest_is_not_owned_by_a_skill() -> None:
 
     assert backend_root.joinpath("package.json").is_file()
     assert backend_root.joinpath("package-lock.json").is_file()
+    manifest = json.loads(backend_root.joinpath("package.json").read_text(encoding="utf-8"))
+    assert manifest["dependencies"]["@antv/hierarchy"] == "0.7.1"
     assert not scripts_dir.joinpath("package.json").exists()
     assert "visualization" not in converter.read_text(encoding="utf-8")
 
@@ -61,6 +64,10 @@ def test_static_renderers_use_d2_and_multi_hue_echarts_themes() -> None:
     for color in ("#2F6F5E", "#4F6F8F", "#B56B2D", "#9B4D5B"):
         assert color in data_chart
         assert color in mindmap
+    assert "wrapLabel" in mindmap
+    assert 'import { mindmap as mindmapLayout } from "@antv/hierarchy"' in mindmap
+    assert 'direction: radial ? "LR" : "H"' in mindmap
+    assert 'type: "bezierCurve"' in mindmap
 
 
 def test_flowchart_skill_provides_the_renderer_json_contract() -> None:
@@ -90,6 +97,7 @@ def test_mindmap_skill_requires_the_written_outline_path() -> None:
     assert "`outline_path`" in content
     assert "`write_file` 成功返回的完整路径" in content
     assert "`.mindmap.md` 扩展名" in content
+    assert "优先使用 `horizontal` 双向中心布局" in content
 
 
 def test_visualization_skill_metadata_routes_explicit_requests_to_child_skills() -> None:

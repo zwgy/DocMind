@@ -5,6 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from xml.etree import ElementTree
 
 import pytest
 
@@ -171,3 +172,12 @@ def test_echarts_renderers_generate_themed_safe_svg(
     content = output.read_text(encoding="utf-8")
     assert "#2F6F5E" in content or "#2f6f5e" in content
     _validate_svg(output)
+    if script_name == "render_mindmap.mjs":
+        svg = ElementTree.fromstring(content)
+        text_positions = {
+            "".join(element.itertext()): float(element.attrib["x"])
+            for element in svg.iter()
+            if element.tag.rsplit("}", 1)[-1] == "text"
+        }
+        # 默认横向脑图必须把一级分支分布在中心主题两侧，而不是退化回单向树。
+        assert text_positions["风险"] < text_positions["项目"] < text_positions["计划"]

@@ -269,8 +269,12 @@ async function downloadArtifact(artifact: ChatArtifact) {
     const link = document.createElement('a')
     link.href = url
     link.download = artifact.name
+    link.hidden = true
+    document.body.appendChild(link)
     link.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    link.remove()
+    // 内置 Chromium 可能在 click 返回后才消费 Blob；立即释放会偶发得到空下载。
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   } catch (error) {
     artifactError.value = error instanceof Error ? error.message : '交付物下载失败'
   } finally {

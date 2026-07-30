@@ -62,6 +62,11 @@ test('Office artifacts use authenticated PDF preview while preserving original d
   )
 })
 
+test('artifact download keeps the Blob alive until Chromium consumes the attached link', () => {
+  assert.match(component, /document\.body\.appendChild\(link\)[\s\S]*link\.click\(\)[\s\S]*link\.remove\(\)/)
+  assert.match(component, /window\.setTimeout\(\(\) => URL\.revokeObjectURL\(url\), 1000\)/)
+})
+
 test('streaming auto-scroll observes display item replacement without deep traversal', () => {
   assert.match(
     component,

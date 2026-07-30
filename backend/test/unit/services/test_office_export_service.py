@@ -119,11 +119,17 @@ async def test_export_docx_scales_tall_picture_within_page(tmp_path: Path) -> No
 @pytest.mark.asyncio
 async def test_export_xlsx_inserts_rows_and_picture(tmp_path: Path) -> None:
     image = tmp_path / "chart.svg"
+    tall_image = tmp_path / "flow.svg"
     definition = tmp_path / "ledger.json"
     outputs = tmp_path / "outputs"
     image.write_text(
         '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180">'
         '<rect width="320" height="180" fill="#2f6f5e"/></svg>',
+        encoding="utf-8",
+    )
+    tall_image.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="800">'
+        '<rect width="320" height="800" fill="#4f6f8f"/></svg>',
         encoding="utf-8",
     )
     definition.write_text(
@@ -141,7 +147,18 @@ async def test_export_xlsx_inserts_rows_and_picture(tmp_path: Path) -> None:
                                 "width_px": 640,
                             }
                         ],
-                    }
+                    },
+                    {
+                        "name": "流程图",
+                        "rows": [["流程图"]],
+                        "images": [
+                            {
+                                "source_path": "/home/gem/user-data/outputs/flow.svg",
+                                "anchor": "B3",
+                                "width_px": 640,
+                            }
+                        ],
+                    },
                 ],
             },
             ensure_ascii=False,
@@ -155,7 +172,12 @@ async def test_export_xlsx_inserts_rows_and_picture(tmp_path: Path) -> None:
         output_name="风险台账",
         output_directory=outputs,
         virtual_output_directory="/home/gem/user-data/outputs",
-        source_resolver=_resolver({"/home/gem/user-data/outputs/chart.svg": image}),
+        source_resolver=_resolver(
+            {
+                "/home/gem/user-data/outputs/chart.svg": image,
+                "/home/gem/user-data/outputs/flow.svg": tall_image,
+            }
+        ),
     )
 
     workbook = load_workbook(outputs / "风险台账.xlsx")
@@ -163,6 +185,17 @@ async def test_export_xlsx_inserts_rows_and_picture(tmp_path: Path) -> None:
     assert list(worksheet.values) == [("类型", "数量"), ("风险", 2)]
     assert worksheet.freeze_panes == "A2"
     assert len(worksheet._images) == 1
+    assert worksheet.sheet_view.showGridLines is False
+    assert worksheet.sheet_properties.pageSetUpPr.fitToPage is True
+    assert str(worksheet.page_setup.paperSize) == worksheet.PAPERSIZE_A4
+    assert worksheet.page_setup.orientation == worksheet.ORIENTATION_LANDSCAPE
+    assert worksheet.page_setup.fitToWidth == 1
+    assert worksheet.page_setup.fitToHeight == 1
+    flow_worksheet = workbook["流程图"]
+    assert len(flow_worksheet._images) == 1
+    assert flow_worksheet.page_setup.orientation == flow_worksheet.ORIENTATION_PORTRAIT
+    assert flow_worksheet.page_setup.fitToWidth == 1
+    assert flow_worksheet.page_setup.fitToHeight == 1
 
 
 @pytest.mark.asyncio

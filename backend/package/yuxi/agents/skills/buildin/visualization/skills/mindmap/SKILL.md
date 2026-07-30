@@ -17,5 +17,5 @@ description: 用户明确要求思维导图、脑图或 mind map 时必须先读
    ```
 3. `output_name` 只能使用 1 至 80 个 ASCII 字母、数字、下划线或短横线，不含扩展名；中文标题也要转换为英文文件名，如 `project-kickoff-mindmap`。
 4. `outline_path` 必须原样使用 `write_file` 成功返回的完整路径并保留 `.mindmap.md` 扩展名，不能传文件名主体。
-5. 调用 `render_mindmap`，可选 `horizontal` 或 `radial`，成功后调用 `present_artifacts`。
+5. 调用 `render_mindmap`，默认并优先使用 `horizontal` 双向中心布局；只有用户明确要求环形/径向导图，且节点较少、各分支规模接近时才使用 `radial`。成功后调用 `present_artifacts`。
 6. 节点使用短语，不写 HTML、链接、图片或脚本。

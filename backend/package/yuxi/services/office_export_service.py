@@ -415,6 +415,7 @@ def _build_xlsx(definition: WorkbookDefinition, resolver: SourceResolver) -> byt
         images = _ImageMaterializer(resolver, Path(temporary))
         for sheet_definition in definition.sheets:
             worksheet = workbook.create_sheet(sheet_definition.name)
+            dominant_image_size: tuple[int, int] | None = None
             for row_index, row in enumerate(sheet_definition.rows, start=1):
                 for column_index, value in enumerate(row, start=1):
                     cell = worksheet.cell(row=row_index, column=column_index)
@@ -445,7 +446,33 @@ def _build_xlsx(definition: WorkbookDefinition, resolver: SourceResolver) -> byt
                     ratio = image_definition.width_px / image.width
                     image.width = image_definition.width_px
                     image.height = round(image.height * ratio)
+                image_size = (int(image.width), int(image.height))
+                if dominant_image_size is None or image_size[0] * image_size[1] > (
+                    dominant_image_size[0] * dominant_image_size[1]
+                ):
+                    dominant_image_size = image_size
                 worksheet.add_image(image, image_definition.anchor)
+
+            if dominant_image_size is not None:
+                # 图片在 Excel 编辑视图中是浮动绘图对象，不会被单元格裁切；这里补充打印
+                # 语义，让 LibreOffice/PDF 预览也按图片主方向排版，避免宽图被横向截断。
+                worksheet.sheet_view.showGridLines = False
+                worksheet.sheet_properties.pageSetUpPr.fitToPage = True
+                worksheet.page_setup.paperSize = worksheet.PAPERSIZE_A4
+                worksheet.page_setup.orientation = (
+                    worksheet.ORIENTATION_LANDSCAPE
+                    if dominant_image_size[0] >= dominant_image_size[1]
+                    else worksheet.ORIENTATION_PORTRAIT
+                )
+                worksheet.page_setup.fitToWidth = 1
+                # 展示型工作表通常只有标题或少量说明，适合把整张静态图收进一页；
+                # 数据量大的工作表保留纵向分页，避免为了图片把表格正文缩小到不可读。
+                worksheet.page_setup.fitToHeight = 1 if len(sheet_definition.rows) <= 50 else 0
+                worksheet.page_margins.left = 0.25
+                worksheet.page_margins.right = 0.25
+                worksheet.page_margins.top = 0.35
+                worksheet.page_margins.bottom = 0.35
+                worksheet.print_options.horizontalCentered = True
 
         # openpyxl 在 save() 时才读取图片内容，因此保存必须发生在 SVG 等临时 PNG
         # 仍处于生命周期内的阶段；提前退出临时目录会生成无法写入图片的工作簿。
