@@ -264,6 +264,17 @@ export const useChatStore = defineStore('chat', {
     },
     consumeRunStatus(runtime: ThreadRuntime, chunk: Record<string, unknown>) {
       const status = String(chunk.status || '')
+      const presentedArtifacts = normalizeChatArtifacts(
+        Array.isArray(chunk.presented_artifacts) ? chunk.presented_artifacts : []
+      )
+      if (presentedArtifacts.length) {
+        // finished 事件由服务端在消息保存后发出，是本轮交付物的权威完成契约。
+        runtime.runArtifacts = normalizeChatArtifacts([
+          ...runtime.runArtifacts.map((artifact) => artifact.path),
+          ...presentedArtifacts.map((artifact) => artifact.path)
+        ])
+        attachRunArtifacts(runtime)
+      }
       if (status === 'stream_event') {
         const event =
           chunk.event && typeof chunk.event === 'object'
@@ -523,22 +534,8 @@ export const useChatStore = defineStore('chat', {
         start,
         nextUser < 0 ? runtime.messages.length : nextUser
       )
-      // run 刚结束时持久化文本可能比本地流式正文短，不能覆盖完整回答；但服务端已确认的
-      // 交付物元数据仍需立即合并，否则用户只能刷新页面后才能看到交付卡片。
-      if (assistantTextLength(persistedTurn) < assistantTextLength(localTurn)) {
-        const persistedArtifacts = normalizeChatArtifacts(artifactPaths(persistedTurn))
-        const localAnswer = [...localTurn]
-          .reverse()
-          .find((message) => message.role === 'assistant' && message.content.trim())
-        if (localAnswer && persistedArtifacts.length) {
-          localAnswer.artifacts = normalizeChatArtifacts([
-            ...(localAnswer.artifacts || []).map((artifact) => artifact.path),
-            ...persistedArtifacts.map((artifact) => artifact.path)
-          ])
-          runtime.messages = [...runtime.messages]
-        }
-        return []
-      }
+      // run 刚结束时历史写库可能尚未完成；不能用较短的持久化片段覆盖已经展示的完整回答。
+      if (assistantTextLength(persistedTurn) < assistantTextLength(localTurn)) return []
       const localModelName = [...localTurn]
         .reverse()
         .find((message) => message.role === 'assistant')?.modelName

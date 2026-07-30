@@ -121,15 +121,7 @@ test('terminal run keeps a complete streamed answer until delayed history catche
       return Response.json({
         history: [
           { id: 'server-user', type: 'human', content: 'question', extra_metadata: { request_id: requestId } },
-          {
-            id: 'server-assistant',
-            type: 'ai',
-            content: 'partial',
-            extra_metadata: {
-              request_id: requestId,
-              presented_artifacts: ['/home/gem/user-data/outputs/mindmap.svg']
-            }
-          }
+          { id: 'server-assistant', type: 'ai', content: 'partial', extra_metadata: { request_id: requestId } }
         ]
       })
     }
@@ -146,12 +138,9 @@ test('terminal run keeps a complete streamed answer until delayed history catche
 
   assert.equal(chat.messages[1].content, 'complete streamed answer')
   assert.equal(chat.messages[1].modelName, 'Qwen3.6')
-  assert.deepEqual(chat.messages[1].artifacts, [
-    { path: '/home/gem/user-data/outputs/mindmap.svg', name: 'mindmap.svg' }
-  ])
 })
 
-test('terminal run attaches artifacts from final state before delayed history catches up', async () => {
+test('terminal run attaches artifacts from the authoritative finished event', async () => {
   setActivePinia(createPinia())
   let requestId = ''
   globalThis.fetch = async (url, options = {}) => {
@@ -161,7 +150,7 @@ test('terminal run attaches artifacts from final state before delayed history ca
     }
     if (url.startsWith('/api/agent/runs/run-artifact/events')) {
       return new Response(
-        'event: messages\ndata: {"payload":{"items":[{"status":"running","stream_event":{"type":"message_delta","content":"artifact answer"}}]}}\n\nevent: end\ndata: {"payload":{"status":"completed"}}\n\n'
+        'event: messages\ndata: {"payload":{"items":[{"status":"running","stream_event":{"type":"message_delta","content":"artifact answer"}}]}}\n\nevent: end\ndata: {"payload":{"status":"completed","chunk":{"status":"finished","presented_artifacts":["/home/gem/user-data/outputs/mindmap.svg"]}}}\n\n'
       )
     }
     if (url === '/api/chat/thread/thread-artifact/history') {
@@ -180,13 +169,6 @@ test('terminal run attaches artifacts from final state before delayed history ca
             extra_metadata: { request_id: requestId }
           }
         ]
-      })
-    }
-    if (url === '/api/chat/thread/thread-artifact/state') {
-      return Response.json({
-        agent_state: {
-          artifacts: ['/home/gem/user-data/outputs/mindmap.svg']
-        }
       })
     }
     return Response.json({})

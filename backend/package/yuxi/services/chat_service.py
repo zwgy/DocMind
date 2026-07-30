@@ -604,10 +604,10 @@ async def save_messages_from_langgraph_state(
     trace_info: dict[str, Any] | None = None,
     run_id: str | None = None,
     request_id: str | None = None,
-) -> None:
+) -> list[str]:
     messages = await _get_langgraph_messages(agent_instance, config_dict)
     if messages is None:
-        return
+        return []
 
     existing_ids = await _get_existing_message_ids(conv_repo, thread_id)
 
@@ -691,6 +691,8 @@ async def save_messages_from_langgraph_state(
         run_repo = AgentRunRepository(conv_repo.db)
         await run_repo.set_output_message(run_id, last_ai_message.id)
         await conv_repo.db.commit()
+
+    return presented_artifacts
 
 
 def _extract_interrupt_info(state) -> Any | None:
@@ -1373,9 +1375,10 @@ async def stream_agent_chat(
             last_agent_state_signature = final_signature
             yield make_chunk(status="agent_state", agent_state=agent_state, meta=meta)
 
-        # 先存储数据库，再返回 finished，避免前端查询时数据未落库
+        # 先存储数据库，再把本轮交付物放入 finished 事件，避免前端依赖紧邻终态的历史查询时序。
+        presented_artifacts: list[str] = []
         try:
-            await save_messages_from_langgraph_state(
+            presented_artifacts = await save_messages_from_langgraph_state(
                 agent_instance=agent,
                 thread_id=thread_id,
                 conv_repo=conv_repo,
@@ -1391,7 +1394,7 @@ async def stream_agent_chat(
         if interrupted:
             return
 
-        yield make_chunk(status="finished", meta=meta)
+        yield make_chunk(status="finished", presented_artifacts=presented_artifacts, meta=meta)
 
     except (asyncio.CancelledError, ConnectionError) as e:
         logger.warning(f"Client disconnected, cancelling stream: {e}")
@@ -1594,10 +1597,11 @@ async def stream_agent_resume(
         if final_signature and final_signature != last_agent_state_signature:
             yield make_resume_chunk(status="agent_state", agent_state=agent_state, meta=meta)
 
-        # 先存储数据库，再返回 finished，避免前端查询时数据未落库
+        # 恢复运行与普通运行使用同一完成契约，交付物不依赖完成后的历史查询时序。
         conv_repo = ConversationRepository(db)
+        presented_artifacts: list[str] = []
         try:
-            await save_messages_from_langgraph_state(
+            presented_artifacts = await save_messages_from_langgraph_state(
                 agent_instance=agent,
                 thread_id=thread_id,
                 conv_repo=conv_repo,
@@ -1613,7 +1617,7 @@ async def stream_agent_resume(
         if interrupted:
             return
 
-        yield make_resume_chunk(status="finished", meta=meta)
+        yield make_resume_chunk(status="finished", presented_artifacts=presented_artifacts, meta=meta)
 
     except (asyncio.CancelledError, ConnectionError) as e:
         logger.warning(f"Client disconnected during resume: {e}")
