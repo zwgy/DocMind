@@ -1443,20 +1443,20 @@
 }
 
 .artifact-preview-image-viewport {
-  display: grid;
-  place-items: center;
+  position: relative;
   min-width: 0;
   min-height: 0;
-  padding: 12px;
   overflow: hidden;
   background: var(--gray-50);
 }
 
 .artifact-preview-image-viewport img {
   /* 静态图应在打开预览时先呈现完整结构，避免流程图或思维导图初始视口只落在局部分支。 */
+  position: absolute;
+  inset: 12px;
   display: block;
-  max-width: 100%;
-  max-height: 100%;
+  width: calc(100% - 24px);
+  height: calc(100% - 24px);
   object-fit: contain;
 }
 

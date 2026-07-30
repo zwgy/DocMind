@@ -30,7 +30,7 @@ test('SVG artifacts use the existing image preview path', () => {
   assert.match(component, /\[displayItems, \(\) => props\.threadId, \(\) => props\.token\]/)
   assert.match(
     styles,
-    /\.artifact-preview-image-viewport img\s*\{[\s\S]*max-width:\s*100%;[\s\S]*max-height:\s*100%;[\s\S]*object-fit:\s*contain;/,
+    /\.artifact-preview-image-viewport img\s*\{[\s\S]*position:\s*absolute;[\s\S]*width:\s*calc\(100% - 24px\);[\s\S]*height:\s*calc\(100% - 24px\);[\s\S]*object-fit:\s*contain;/,
     '完整预览应按可用区域缩放整张静态图，不能只展示原始尺寸的局部'
   )
 })
