@@ -523,8 +523,22 @@ export const useChatStore = defineStore('chat', {
         start,
         nextUser < 0 ? runtime.messages.length : nextUser
       )
-      // run 刚结束时历史写库可能尚未完成；不能用较短的持久化片段覆盖已经展示的完整回答。
-      if (assistantTextLength(persistedTurn) < assistantTextLength(localTurn)) return []
+      // run 刚结束时持久化文本可能比本地流式正文短，不能覆盖完整回答；但服务端已确认的
+      // 交付物元数据仍需立即合并，否则用户只能刷新页面后才能看到交付卡片。
+      if (assistantTextLength(persistedTurn) < assistantTextLength(localTurn)) {
+        const persistedArtifacts = normalizeChatArtifacts(artifactPaths(persistedTurn))
+        const localAnswer = [...localTurn]
+          .reverse()
+          .find((message) => message.role === 'assistant' && message.content.trim())
+        if (localAnswer && persistedArtifacts.length) {
+          localAnswer.artifacts = normalizeChatArtifacts([
+            ...(localAnswer.artifacts || []).map((artifact) => artifact.path),
+            ...persistedArtifacts.map((artifact) => artifact.path)
+          ])
+          runtime.messages = [...runtime.messages]
+        }
+        return []
+      }
       const localModelName = [...localTurn]
         .reverse()
         .find((message) => message.role === 'assistant')?.modelName

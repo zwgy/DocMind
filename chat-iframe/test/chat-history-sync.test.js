@@ -121,7 +121,15 @@ test('terminal run keeps a complete streamed answer until delayed history catche
       return Response.json({
         history: [
           { id: 'server-user', type: 'human', content: 'question', extra_metadata: { request_id: requestId } },
-          { id: 'server-assistant', type: 'ai', content: 'partial', extra_metadata: { request_id: requestId } }
+          {
+            id: 'server-assistant',
+            type: 'ai',
+            content: 'partial',
+            extra_metadata: {
+              request_id: requestId,
+              presented_artifacts: ['/home/gem/user-data/outputs/mindmap.svg']
+            }
+          }
         ]
       })
     }
@@ -138,6 +146,9 @@ test('terminal run keeps a complete streamed answer until delayed history catche
 
   assert.equal(chat.messages[1].content, 'complete streamed answer')
   assert.equal(chat.messages[1].modelName, 'Qwen3.6')
+  assert.deepEqual(chat.messages[1].artifacts, [
+    { path: '/home/gem/user-data/outputs/mindmap.svg', name: 'mindmap.svg' }
+  ])
 })
 
 test('terminal run attaches artifacts from final state before delayed history catches up', async () => {
