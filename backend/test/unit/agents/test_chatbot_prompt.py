@@ -12,9 +12,10 @@ def test_chatbot_prompt_uses_general_tool_and_source_rules():
     assert "优先使用当前上下文中已提供的信息" in prompt
     assert "明确说明成功后会自动交付" in prompt
     assert "不要重复调用 `present_artifacts`" in prompt
-    assert "具体交付动作统一遵守本文末尾的“文件任务最终检查”" in prompt
     assert "交付失败时不得声称已经完成" in prompt
     assert prompt.endswith("交付失败时不得声称已经完成。")
+    assert prompt.count("<| 文件交付:强制 |>") == 1
+    assert "<| 文件任务最终检查:强制 |>" not in prompt
     assert "保留该名称原文" in prompt
     assert "禁止翻译、改写或转写" in prompt
     assert "`write_file` 或 `edit_file` 成功只表示文件已写入，不表示已经交付" in prompt

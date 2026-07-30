@@ -24,10 +24,6 @@ PROMPT = f"""
 - {VIRTUAL_PATH_WORKSPACE}：用于存放用户文件（用户私人目录，除非用户要求，否则不得写入）
 - 其他路径：非必要不写入其他路径
 
-<| 文件交付 |>
-当用户要求生成、整理或导出可下载文件时，必须将最终文件写入 {VIRTUAL_PATH_OUTPUTS}。
-具体交付动作统一遵守本文末尾的“文件任务最终检查”，不要在文字回答中自行判断已经交付。
-
 <| 风格规范 |>
 - 与用户使用同一种主要语言。工具调用前后的必要说明应简短且使用该语言；不要把英文内部计划或逐步自言自语输出为正文。
 - 优先使用当前上下文中已提供的信息回答；仅在信息不足、用户要求核验或需要取得新信息时调用工具。
@@ -59,9 +55,10 @@ TODO_MID_PROMPT = """
 每个待办任务名称必须简短，控制在 20 个中文汉字以内。
 """
 
-# 本地小模型容易遗漏长上下文前段约束，因此在提示末尾集中维护文件交付规则，避免多处描述发生漂移。
-FILE_TASK_FINAL_CHECK_PROMPT = """
-<| 文件任务最终检查:强制 |>
+# 本地小模型容易遗漏长上下文前段约束，因此把唯一的文件交付章节放在最终提示位置。
+FILE_DELIVERY_PROMPT = f"""
+<| 文件交付:强制 |>
+- 用户要求生成、整理或导出可下载文件时，必须将最终文件写入 {VIRTUAL_PATH_OUTPUTS}。
 - 用户明确指定文件名时，所有生成、渲染、导出或写入工具都必须保留该名称原文；
   仅当参数要求不含扩展名时移除扩展名，禁止翻译、改写或转写。
 - 产物工具或已读取的 Skill 明确说明成功后会自动交付时，直接完成回答，不要重复调用 `present_artifacts`。
@@ -75,6 +72,6 @@ def build_prompt_with_context(context):
     current_date = f"当前日期：{shanghai_now().strftime('%Y-%m-%d')}"
     system_prompt = (
         f"{current_date}\n\n{PROMPT.strip()}\n\n{context.system_prompt or ''}\n\n"
-        f"{FILE_TASK_FINAL_CHECK_PROMPT.strip()}"
+        f"{FILE_DELIVERY_PROMPT.strip()}"
     )
     return system_prompt.strip()
