@@ -15,6 +15,11 @@ def test_chatbot_prompt_uses_general_tool_and_source_rules():
     assert "最终回答前检查本轮文件操作" in prompt
     assert "write_file 或 edit_file 已生成用户要求的最终文件" in prompt
     assert "交付失败时不得声称已经完成" in prompt
+    assert prompt.endswith("中间文件不交付。")
+    assert "保留该名称原文" in prompt
+    assert "禁止翻译、改写或转写" in prompt
+    assert "`write_file` 或 `edit_file` 成功只表示文件已写入，不表示已经交付" in prompt
+    assert "下一步必须调用 `present_artifacts`" in prompt
     assert "`grep` 是字面搜索" not in prompt
     assert "不得用 `execute`、`glob`、`ls`" not in prompt
     assert "不得把序号自行解释成“第几款”" not in prompt
