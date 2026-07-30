@@ -594,9 +594,7 @@ async def get_agent_request_view(*, request_id: str, current_uid: str, db: Async
     return {"request": _build_agent_request_response(request)}
 
 
-async def list_queued_agent_requests_view(
-    *, thread_id: str, agent_id: str, current_uid: str, db: AsyncSession
-) -> dict:
+async def list_queued_agent_requests_view(*, thread_id: str, agent_id: str, current_uid: str, db: AsyncSession) -> dict:
     conversation = await ConversationRepository(db).get_conversation_by_thread_id(thread_id)
     if not conversation or conversation.uid != str(current_uid) or conversation.status == "deleted":
         raise HTTPException(status_code=404, detail="对话线程不存在")

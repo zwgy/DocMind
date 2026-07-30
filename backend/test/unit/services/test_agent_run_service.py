@@ -1373,6 +1373,7 @@ def _patch_common_run_repos(
     monkeypatch.setattr(agent_run_service.agent_manager, "get_agent", lambda backend_id: _FakeBackend())
     monkeypatch.setattr(agent_run_service, "AgentRepository", AgentRepo)
     monkeypatch.setattr(agent_run_service, "ConversationRepository", ConvRepo)
+
     class RunRepoWithCheckpointGuards(run_repo_cls):
         async def get_active_run_by_checkpoint_thread(self, checkpoint_thread_id: str):
             method = getattr(super(), "get_active_run_by_checkpoint_thread", None)
