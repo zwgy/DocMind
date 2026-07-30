@@ -328,16 +328,28 @@ def _build_docx(definition: DocumentDefinition, resolver: SourceResolver) -> byt
             for run in title.runs:
                 _set_run_font(run, size=20, bold=True)
 
+        pending_page_break = False
         for block in definition.blocks:
+            if isinstance(block, PageBreakBlock):
+                # 将分页要求附着到下一个内容块，避免高图恰好占满页面时，独立分页符
+                # 被排到下一页后再次分页，从而在 LibreOffice/PDF 中产生整页空白。
+                pending_page_break = True
+                continue
+
             if isinstance(block, HeadingBlock):
                 paragraph = document.add_heading(block.text, level=block.level)
+                paragraph.paragraph_format.page_break_before = pending_page_break
                 for run in paragraph.runs:
                     _set_run_font(run, bold=True)
             elif isinstance(block, ParagraphBlock):
                 paragraph = document.add_paragraph(block.text)
+                paragraph.paragraph_format.page_break_before = pending_page_break
                 paragraph.paragraph_format.space_after = Pt(6)
                 paragraph.paragraph_format.line_spacing = 1.35
             elif isinstance(block, TableBlock):
+                if pending_page_break:
+                    paragraph = document.add_paragraph()
+                    paragraph.paragraph_format.page_break_before = True
                 table = document.add_table(rows=len(block.rows), cols=len(block.rows[0]))
                 table.style = "Table Grid"
                 for row_index, row in enumerate(block.rows):
@@ -369,6 +381,7 @@ def _build_docx(definition: DocumentDefinition, resolver: SourceResolver) -> byt
 
                 paragraph = document.add_paragraph()
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                paragraph.paragraph_format.page_break_before = pending_page_break
                 paragraph.add_run().add_picture(
                     str(source),
                     width=Cm(picture_width_cm),
@@ -379,8 +392,7 @@ def _build_docx(definition: DocumentDefinition, resolver: SourceResolver) -> byt
                     caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     for run in caption.runs:
                         _set_run_font(run, size=9)
-            else:
-                document.add_page_break()
+            pending_page_break = False
 
     output = BytesIO()
     document.save(output)

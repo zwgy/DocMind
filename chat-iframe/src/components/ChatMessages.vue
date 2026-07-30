@@ -11,7 +11,7 @@ import {
   LoaderCircle,
   X
 } from 'lucide-vue-next'
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } from 'vue'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import MessageRefs from '@/components/MessageRefs.vue'
 import ExecutionProcessPanel from '@/components/ExecutionProcessPanel.vue'
@@ -26,6 +26,8 @@ import {
 import { groupMessageDisplayItems } from '@/utils/message-display'
 import { extractFinalAnswerSources } from '@/utils/tool-calls'
 import { copyToClipboard } from '@/utils/clipboard'
+
+const PdfArtifactPreview = defineAsyncComponent(() => import('@/components/PdfArtifactPreview.vue'))
 
 const props = withDefaults(
   defineProps<{
@@ -750,10 +752,9 @@ onUnmounted(() => {
             <div v-if="artifactPreview.kind === 'image'" class="artifact-preview-image-viewport">
               <img :src="artifactPreview.url" :alt="artifactPreview.name" />
             </div>
-            <iframe
+            <PdfArtifactPreview
               v-else-if="artifactPreview.kind === 'pdf'"
-              :src="artifactPreview.url"
-              :title="artifactPreview.name"
+              :src="artifactPreview.url || ''"
             />
             <pre v-else>{{ artifactPreview.text }}</pre>
           </section>

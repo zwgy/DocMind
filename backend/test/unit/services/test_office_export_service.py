@@ -84,7 +84,9 @@ async def test_export_docx_scales_tall_picture_within_page(tmp_path: Path) -> No
                         "source_path": "/home/gem/user-data/outputs/flow.png",
                         "caption": "图 1 纵向流程图",
                         "width_cm": 16,
-                    }
+                    },
+                    {"type": "page_break"},
+                    {"type": "heading", "level": 1, "text": "后续章节"},
                 ],
             },
             ensure_ascii=False,
@@ -109,6 +111,9 @@ async def test_export_docx_scales_tall_picture_within_page(tmp_path: Path) -> No
     ) - service._DOCX_IMAGE_VERTICAL_RESERVE_CM
     assert shape.height / service.Cm(1) <= max_height_cm + 0.01
     assert shape.width / shape.height == pytest.approx(0.25, abs=0.001)
+    next_heading = next(paragraph for paragraph in document.paragraphs if paragraph.text == "后续章节")
+    assert next_heading.paragraph_format.page_break_before is True
+    assert 'w:type="page"' not in document._element.xml
 
 
 @pytest.mark.asyncio

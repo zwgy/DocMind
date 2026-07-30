@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 const component = readFileSync(new URL('../src/components/ChatMessages.vue', import.meta.url), 'utf8')
+const pdfPreview = readFileSync(
+  new URL('../src/components/PdfArtifactPreview.vue', import.meta.url),
+  'utf8'
+)
 const styles = readFileSync(new URL('../src/assets/css/app.css', import.meta.url), 'utf8')
 
 test('context summary renders all extraction items grouped by schema', () => {
@@ -43,6 +47,19 @@ test('Office artifacts use authenticated PDF preview while preserving original d
     /fetchThreadArtifact\(\s*props\.threadId,\s*artifact\.path,\s*props\.token,\s*false,\s*isOfficeArtifact\(artifact\)\s*\)/
   )
   assert.match(component, /fetchThreadArtifact\(props\.threadId, artifact\.path, props\.token, true\)/)
+  assert.match(component, /defineAsyncComponent\(\(\) => import\('@\/components\/PdfArtifactPreview\.vue'\)\)/)
+  assert.match(component, /<PdfArtifactPreview/)
+  assert.doesNotMatch(component, /<iframe[\s\S]*artifactPreview\.kind === 'pdf'/)
+  assert.match(pdfPreview, /from 'pdfjs-dist'/)
+  assert.match(pdfPreview, /class="pdf-artifact-viewport"/)
+  assert.match(pdfPreview, /title="缩小"/)
+  assert.match(pdfPreview, /title="放大"/)
+  assert.match(pdfPreview, /title="适合窗口"/)
+  assert.match(
+    pdfPreview,
+    /\.pdf-artifact-viewport\s*\{[\s\S]*overflow:\s*auto;/,
+    '多页 PDF 预览必须支持横向和纵向滚动'
+  )
 })
 
 test('streaming auto-scroll observes display item replacement without deep traversal', () => {
