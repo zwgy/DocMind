@@ -187,3 +187,34 @@ test('terminal run attaches artifacts from the authoritative finished event', as
     { path: '/home/gem/user-data/outputs/mindmap.svg', name: 'mindmap.svg' }
   ])
 })
+
+test('empty polled agent state does not erase artifacts from the finished event', () => {
+  setActivePinia(createPinia())
+  const chat = useChatStore()
+  chat.currentThreadId = 'thread-artifact-race'
+  const runtime = chat.ensureRuntime('thread-artifact-race')
+  runtime.messages = [
+    {
+      id: 'answer',
+      role: 'assistant',
+      content: 'artifact answer',
+      status: 'done'
+    }
+  ]
+
+  chat.consumeRunStatus(runtime, {
+    status: 'finished',
+    presented_artifacts: ['/home/gem/user-data/outputs/mindmap.svg']
+  })
+  chat.consumeRunStatus(runtime, {
+    status: 'agent_state',
+    agent_state: { artifacts: [] }
+  })
+
+  assert.deepEqual(runtime.runArtifacts, [
+    { path: '/home/gem/user-data/outputs/mindmap.svg', name: 'mindmap.svg' }
+  ])
+  assert.deepEqual(runtime.messages[0].artifacts, [
+    { path: '/home/gem/user-data/outputs/mindmap.svg', name: 'mindmap.svg' }
+  ])
+})

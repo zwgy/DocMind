@@ -163,7 +163,10 @@ function todoSignature(agentState: Record<string, unknown> | null) {
 function refreshRunArtifacts(runtime: ThreadRuntime) {
   const artifacts = normalizeChatArtifacts(runtime.agentState?.artifacts)
   const baseline = new Set(runtime.artifactBaseline)
-  runtime.runArtifacts = artifacts.filter((artifact) => !baseline.has(artifact.path))
+  runtime.runArtifacts = normalizeChatArtifacts([
+    ...runtime.runArtifacts.map((artifact) => artifact.path),
+    ...artifacts.filter((artifact) => !baseline.has(artifact.path)).map((artifact) => artifact.path)
+  ])
 }
 
 function attachRunArtifacts(runtime: ThreadRuntime) {
