@@ -15,3 +15,10 @@ test('stable iframe entry files disable browser caching', () => {
     /location = \/chat-iframe\/docmind-chat-iframe-parent\.js\s*\{[^}]*add_header Cache-Control "no-store";[^}]*\}/
   )
 })
+
+test('PDF.js module worker uses a browser-executable MIME type', () => {
+  assert.match(
+    nginxConfig,
+    /location ~ \\\s*\.mjs\$\s*\{[^}]*default_type application\/javascript;[^}]*try_files \$uri =404;[^}]*\}/
+  )
+})
