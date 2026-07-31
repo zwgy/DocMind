@@ -285,7 +285,7 @@ def test_current_incomplete_parallel_tool_round_is_not_compacted(
 
 
 @pytest.mark.unit
-def test_current_fixed_overhead_reports_generic_capacity_error_without_diagnosis(
+def test_fixed_overhead_fails_before_compaction_with_actionable_diagnostics(
     archive_backend: _ArchiveBackend,
 ) -> None:
     """P0 基线：旧实现未先隔离固定开销，只会返回与历史不足相同的通用错误。"""
@@ -301,13 +301,15 @@ def test_current_fixed_overhead_reports_generic_capacity_error_without_diagnosis
     )
     middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
 
-    with pytest.raises(ContextBudgetConfigurationError, match="不存在可安全压缩的完整历史交互段") as raised:
+    with pytest.raises(ContextBudgetConfigurationError, match="固定上下文开销超过可用输入预算") as raised:
         middleware.wrap_model_call(
             request,
             lambda _prepared: pytest.fail("固定开销已超预算时不能调用主模型"),
         )
 
-    assert "工具" not in str(raised.value)
+    assert "tool_count=1" in str(raised.value)
+    assert "system_tokens=" in str(raised.value)
+    assert "largest_tool_schema=oversized_tool" in str(raised.value)
     assert model.prompts == []
     assert archive_backend.writes == []
 

@@ -80,6 +80,8 @@ async def test_token_usage_middleware_records_provider_total_and_estimated_break
     assert token_usage["breakdown_estimate"]["tools"] > 0
     assert token_usage["protocol_correction_tokens"] == 12 - token_usage["estimated_input_tokens"]
     assert token_usage["tool_count"] == 1
+    assert len(token_usage["tool_schema_hash"]) == 64
+    assert len(token_usage["system_prompt_hash"]) == 64
     assert token_usage["context_window"] == 2_000
     assert token_usage["prompt_budget"] == 1_400
     assert token_usage["input_budget_delta"] == 1_388
@@ -88,7 +90,7 @@ async def test_token_usage_middleware_records_provider_total_and_estimated_break
 
 
 @pytest.mark.asyncio
-async def test_usage_calibrates_the_next_request_with_maximum_error_and_ratio() -> None:
+async def test_usage_calibrates_the_next_request_with_bucketed_positive_gap() -> None:
     def token_counter(_messages, **_kwargs):
         return 20_284
 
@@ -115,11 +117,12 @@ async def test_usage_calibrates_the_next_request_with_maximum_error_and_ratio() 
 
     assert snapshot["max_positive_error"] == 12_317
     assert snapshot["max_ratio"] == pytest.approx(32_601 / 20_284, rel=1e-6)
+    assert snapshot["max_positive_gap_by_bucket"] == {"medium": 12_317}
     assert estimate.source == "calibrated_estimate"
-    assert estimate.admission >= 32_601
+    assert estimate.admission == estimate.fallback + 12_317
 
 
-def test_tool_schema_change_resets_the_conversation_calibration() -> None:
+def test_tool_schema_change_preserves_same_deployment_bucket_calibration() -> None:
     def token_counter(_messages, **_kwargs):
         return 100
 
@@ -130,6 +133,7 @@ def test_tool_schema_change_resets_the_conversation_calibration() -> None:
         "calibration_samples": 2,
         "max_positive_error": 500,
         "max_ratio": 2.0,
+        "max_positive_gap_by_bucket": {"small": 500},
     }
     changed_request = _request(
         state={"token_usage": previous},
@@ -138,10 +142,10 @@ def test_tool_schema_change_resets_the_conversation_calibration() -> None:
 
     estimate = estimate_model_request(changed_request, token_counter=token_counter)
 
-    assert estimate.source == "fallback_estimate"
-    assert estimate.calibration_samples == 0
-    assert estimate.max_positive_error == 0
-    assert estimate.max_ratio == 1.0
+    assert estimate.source == "calibrated_estimate"
+    assert estimate.calibration_samples == 2
+    assert estimate.max_positive_gap_by_bucket == {"small": 500}
+    assert estimate.admission == estimate.fallback + 500
 
 
 @pytest.mark.asyncio
@@ -249,6 +253,94 @@ async def test_current_length_response_with_visible_content_is_not_input_overflo
 
     assert isinstance(result, ExtendedModelResponse)
     assert result.command.update["token_usage"]["provider_input_tokens"] == 100
+    assert result.command.update["token_usage"]["response_outcome"] == "output_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_empty_length_within_prompt_budget_is_output_exhaustion_not_history_overflow() -> None:
+    middleware = TokenUsageMiddleware()
+    request = _request()
+
+    async def handler(_request):
+        return ModelResponse(
+            result=[
+                AIMessage(
+                    content="",
+                    response_metadata={"finish_reason": "length"},
+                    usage_metadata={"input_tokens": 100, "output_tokens": 500, "total_tokens": 600},
+                )
+            ]
+        )
+
+    result = await middleware.awrap_model_call(request, handler)
+
+    assert result.command.update["token_usage"]["response_outcome"] == "output_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_length_with_tool_call_is_recorded_as_truncated_without_compaction_retry() -> None:
+    middleware = TokenUsageMiddleware()
+    request = _request()
+
+    async def handler(_request):
+        return ModelResponse(
+            result=[
+                AIMessage(
+                    content="",
+                    tool_calls=[{"id": "call-1", "name": "search_docs", "args": {"query": "partial"}}],
+                    response_metadata={"finish_reason": "length"},
+                    usage_metadata={"input_tokens": 100, "output_tokens": 500, "total_tokens": 600},
+                )
+            ]
+        )
+
+    result = await middleware.awrap_model_call(request, handler)
+
+    assert result.command.update["token_usage"]["response_outcome"] == "tool_call_truncated"
+
+
+def test_bucketed_gap_does_not_cross_request_size_boundaries() -> None:
+    def token_counter(_messages, **_kwargs):
+        return 20_000
+
+    request = _request(
+        state={
+            "token_usage": {
+                "calibration_key": estimate_model_request(_request(), token_counter=token_counter).calibration_key,
+                "calibration_samples": 1,
+                "max_positive_gap_by_bucket": {"small": 4_000},
+            }
+        }
+    )
+
+    estimate = estimate_model_request(request, token_counter=token_counter)
+
+    assert estimate.request_size_bucket == "medium"
+    assert estimate.source == "fallback_estimate"
+    assert estimate.admission == estimate.fallback
+
+
+@pytest.mark.asyncio
+async def test_invalid_provider_usage_does_not_create_a_calibration_sample() -> None:
+    middleware = TokenUsageMiddleware()
+    request = _request()
+
+    async def handler(_request):
+        return ModelResponse(
+            result=[
+                AIMessage(
+                    content="answer",
+                    usage_metadata={"input_tokens": 100, "output_tokens": 100, "total_tokens": 10},
+                )
+            ]
+        )
+
+    result = await middleware.awrap_model_call(request, handler)
+    snapshot = result.command.update["token_usage"]
+
+    assert snapshot["provider_input_tokens"] is None
+    assert snapshot["calibration_samples"] == 0
+    assert snapshot["max_positive_gap_by_bucket"] == {}
 
 
 def test_resolve_context_budget_preserves_minimum_reserve_for_smaller_explicit_output_limit() -> None:

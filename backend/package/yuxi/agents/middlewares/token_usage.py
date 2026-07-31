@@ -27,8 +27,16 @@ from yuxi.config import config as system_config
 from yuxi.agents.backends.composite import _TOOL_RESULT_SAVED_MARKER
 
 _REQUEST_PROTOCOL_VERSION = "langchain-openai-messages-v1"
+_REQUEST_TEMPLATE_VERSION = "yuxi-openai-compatible-template-v1"
 ACTIVE_CONTEXT_SUMMARY_STATE_KEY = "_active_context_summary"
 BASE_SYSTEM_MESSAGE_STATE_KEY = "_base_system_message"
+_CALIBRATION_BUCKETS: tuple[tuple[str, int | None], ...] = (
+    ("small", 8_000),
+    ("medium", 32_000),
+    ("large", 128_000),
+    ("xlarge", None),
+)
+_MINIMUM_CURRENT_INPUT_RECEIPT = "Current user input is retained outside the active context."
 
 
 class ContextBudgetConfigurationError(ValueError):
@@ -78,8 +86,12 @@ class TokenUsagePayload(TypedDict, total=False):
     protocol_correction_tokens: int | None
     max_positive_error: int
     max_ratio: float
+    max_positive_gap_by_bucket: dict[str, int]
     calibration_samples: int
     calibration_key: str
+    request_size_bucket: str
+    tool_schema_hash: str
+    system_prompt_hash: str
     context_window: int
     context_usage_ratio: float
     min_output_reserve_tokens: int
@@ -92,6 +104,7 @@ class TokenUsagePayload(TypedDict, total=False):
     tool_results_externalized: int
     summary_active: bool
     near_context_limit: bool
+    response_outcome: Literal["completed", "input_overflow", "output_exhausted", "tool_call_truncated"]
     measured_at: str
 
 
@@ -113,7 +126,23 @@ class RequestTokenEstimate:
     calibration_key: str
     max_positive_error: int
     max_ratio: float
+    max_positive_gap_by_bucket: dict[str, int]
+    request_size_bucket: str
     calibration_samples: int
+
+
+@dataclass(frozen=True)
+class FixedContextOverhead:
+    """Tokens that history compaction cannot reclaim from a final model request."""
+
+    fixed_overhead: int
+    minimum_current_input_receipt: int
+    system: int
+    tools: int
+    protocol_correction_envelope: int
+    tool_count: int
+    largest_tool_schema_name: str | None
+    largest_tool_schema_tokens: int
 
 
 def _safe_int(value: Any) -> int | None:
@@ -227,7 +256,12 @@ def estimate_messages_tokens(
     return max(baseline, unicode_estimate, serialization_estimate)
 
 
-def _calibration_key(request: ModelRequest, converted_tools: list[dict[str, Any]]) -> str:
+def _stable_hash(value: Any) -> str:
+    serialized = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _calibration_key(request: ModelRequest) -> str:
     model = request.model
     model_name = getattr(model, "model_name", None) or getattr(model, "model", None) or type(model).__name__
     base_url = getattr(model, "openai_api_base", None) or getattr(model, "base_url", None) or ""
@@ -236,10 +270,43 @@ def _calibration_key(request: ModelRequest, converted_tools: list[dict[str, Any]
         "model_type": f"{type(model).__module__}.{type(model).__qualname__}",
         "base_url": str(base_url).rstrip("/"),
         "protocol": _REQUEST_PROTOCOL_VERSION,
-        "tools": converted_tools,
+        "template": _REQUEST_TEMPLATE_VERSION,
     }
-    serialized = json.dumps(descriptor, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    # 工具 schema 和 System 提示词会随着 Skill 激活频繁变化；它们的真实开销已由当前 fallback
+    # 计入。若把它们放进 key，会在最需要历史误差保护的时刻清空校准包络。
+    return _stable_hash(descriptor)
+
+
+def _request_size_bucket(tokens: int) -> str:
+    for name, upper_bound in _CALIBRATION_BUCKETS:
+        if upper_bound is None or tokens <= upper_bound:
+            return name
+    raise AssertionError("calibration buckets must include an unbounded final bucket")
+
+
+def _positive_gap_by_bucket(value: Any) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    # Checkpoint state is persisted as JSON.  Only accept the known non-negative integer values so a
+    # malformed provider or an old state cannot make admission unexpectedly less conservative.
+    return {
+        bucket: gap
+        for bucket, upper_bound in _CALIBRATION_BUCKETS
+        if (gap := _safe_int(value.get(bucket))) is not None and gap >= 0
+    }
+
+
+def _largest_tool_schema(converted_tools: list[dict[str, Any]]) -> tuple[str | None, int]:
+    largest_name: str | None = None
+    largest_tokens = 0
+    for tool in converted_tools:
+        token_count = estimate_messages_tokens([], tools=[tool])
+        function = tool.get("function") if isinstance(tool, dict) else None
+        name = function.get("name") if isinstance(function, dict) else None
+        if token_count > largest_tokens:
+            largest_name = str(name) if name else None
+            largest_tokens = token_count
+    return largest_name, largest_tokens
 
 
 def _breakdown(
@@ -269,6 +336,52 @@ def _externalized_tool_result_count(messages: Iterable[AnyMessage]) -> int:
     )
 
 
+def fixed_context_overhead(request: ModelRequest) -> FixedContextOverhead:
+    """Calculate the request material that history compaction cannot reclaim."""
+    system_messages = [request.system_message] if request.system_message is not None else []
+    tools = list(request.tools or [])
+    system_tokens = estimate_messages_tokens(system_messages) if system_messages else 0
+    tool_tokens = estimate_messages_tokens([], tools=tools) if tools else 0
+    minimum_receipt_tokens = estimate_messages_tokens([SystemMessage(content=_MINIMUM_CURRENT_INPUT_RECEIPT)])
+    estimate = estimate_model_request(request)
+    fixed_request_size = system_tokens + tool_tokens + minimum_receipt_tokens
+    protocol_correction_envelope = estimate.max_positive_gap_by_bucket.get(
+        _request_size_bucket(fixed_request_size), 0
+    )
+    _, converted_tools = _serialized_request([], tools)
+    largest_name, largest_tokens = _largest_tool_schema(converted_tools)
+    return FixedContextOverhead(
+        fixed_overhead=system_tokens + tool_tokens + protocol_correction_envelope,
+        minimum_current_input_receipt=minimum_receipt_tokens,
+        system=system_tokens,
+        tools=tool_tokens,
+        protocol_correction_envelope=protocol_correction_envelope,
+        tool_count=len(tools),
+        largest_tool_schema_name=largest_name,
+        largest_tool_schema_tokens=largest_tokens,
+    )
+
+
+def ensure_fixed_context_fits(request: ModelRequest) -> None:
+    """Reject an impossible deployment before L1/L5 spend time on archive or summary calls."""
+    budget = resolve_context_budget(request)
+    overhead = fixed_context_overhead(request)
+    if overhead.fixed_overhead + overhead.minimum_current_input_receipt <= budget.prompt_budget:
+        return
+    largest_schema = overhead.largest_tool_schema_name or "<unknown>"
+    raise ContextBudgetConfigurationError(
+        "固定上下文开销超过可用输入预算："
+        f"context_window={budget.context_window}, "
+        f"output_reserve={budget.effective_output_reserve}, "
+        f"safety_tokens={budget.context_safety_tokens}, "
+        f"system_tokens={overhead.system}, tools_tokens={overhead.tools}, "
+        f"protocol_correction_tokens={overhead.protocol_correction_envelope}, "
+        f"tool_count={overhead.tool_count}, largest_tool_schema={largest_schema}, "
+        f"largest_tool_schema_tokens={overhead.largest_tool_schema_tokens}。"
+        "请减少同时激活的工具或 Skill，核对部署窗口配置，或改用更大上下文窗口模型。"
+    )
+
+
 def estimate_model_request(
     request: ModelRequest,
     *,
@@ -289,7 +402,7 @@ def estimate_model_request(
         math.ceil(ascii_chars / 4 + non_ascii_chars),
         math.ceil(len(serialized) / 2),
     )
-    calibration_key = _calibration_key(request, converted_tools)
+    calibration_key = _calibration_key(request)
     previous = request.state.get("token_usage")
     valid_previous = (
         isinstance(previous, Mapping)
@@ -303,20 +416,22 @@ def estimate_model_request(
     calibration_samples = _safe_int(previous.get("calibration_samples")) or 0 if valid_previous else 0
     # 绝对误差保护较固定的模板/工具开销，倍率保护随正文增长的分词误差；取最大值
     # 可以避免一次较小的新样本把已经观察到的高风险低估重新放行。
-    admission = max(
-        fallback,
-        baseline + max_positive_error,
-        math.ceil(baseline * max_ratio),
-    )
+    gap_by_bucket = _positive_gap_by_bucket(previous.get("max_positive_gap_by_bucket")) if valid_previous else {}
+    request_size_bucket = _request_size_bucket(fallback)
+    bucket_gap = gap_by_bucket.get(request_size_bucket, 0)
+    # 旧版 ratio 和跨规模 gap 只保留诊断价值；仅同规模桶的最大正误差可以安全参与本次准入。
+    admission = fallback + bucket_gap
     return RequestTokenEstimate(
         baseline=baseline,
         fallback=fallback,
         admission=admission,
-        source="calibrated_estimate" if valid_previous else "fallback_estimate",
+        source="calibrated_estimate" if bucket_gap > 0 else "fallback_estimate",
         breakdown=_breakdown(request, token_counter),
         calibration_key=calibration_key,
         max_positive_error=max_positive_error,
         max_ratio=max_ratio,
+        max_positive_gap_by_bucket=gap_by_bucket,
+        request_size_bucket=request_size_bucket,
         calibration_samples=calibration_samples,
     )
 
@@ -344,16 +459,27 @@ def _finish_reason(response: ModelResponse) -> str | None:
     return None
 
 
-def _is_empty_length_response(response: ModelResponse) -> bool:
+def _length_response_outcome(response: ModelResponse, snapshot: TokenUsagePayload) -> str | None:
+    """Classify `finish_reason=length` without confusing output limits with prompt overflow."""
     for message in reversed(response.result):
         if not isinstance(message, AIMessage):
             continue
-        return (
-            message.response_metadata.get("finish_reason") == "length"
-            and not message.content
-            and not message.tool_calls
-        )
-    return False
+        if message.response_metadata.get("finish_reason") != "length":
+            return None
+        if message.tool_calls or message.invalid_tool_calls:
+            # A length stop while emitting a tool call is unsafe to execute.  P3 will protect the
+            # ToolNode boundary; P1 records the distinct outcome instead of trying history compaction.
+            return "tool_call_truncated"
+        if message.content:
+            return "output_exhausted"
+        provider_input = snapshot.get("provider_input_tokens")
+        prompt_budget = snapshot.get("prompt_budget")
+        if isinstance(provider_input, int) and isinstance(prompt_budget, int) and provider_input > prompt_budget:
+            return "input_overflow"
+        # Empty visible text can still mean reasoning/output budget was exhausted.  Without a provider
+        # rejection or measured input excess, retrying after compaction only repeats the interruption.
+        return "output_exhausted"
+    return None
 
 
 class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
@@ -371,9 +497,16 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
         max_positive_error = estimate.max_positive_error
         max_ratio = estimate.max_ratio
         calibration_samples = estimate.calibration_samples
+        gap_by_bucket = dict(estimate.max_positive_gap_by_bucket)
         if provider_input is not None and estimate.baseline > 0:
             max_positive_error = max(max_positive_error, provider_input - estimate.baseline, 0)
             max_ratio = max(max_ratio, provider_input / estimate.baseline, 1.0)
+            # 只学习当前请求规模的低估绝对值。模型服务偶发的 usage 缺失或旧 ratio 不能被
+            # 伪造成样本，否则后续压缩时机会变得不可解释。
+            observed_gap = max(provider_input - estimate.fallback, 0)
+            gap_by_bucket[estimate.request_size_bucket] = max(
+                gap_by_bucket.get(estimate.request_size_bucket, 0), observed_gap
+            )
             calibration_samples += 1
 
         input_tokens = provider_input if provider_input is not None else estimate.admission
@@ -388,7 +521,7 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
             and provider_output is not None
             and provider_input + provider_output >= budget.context_window - budget.context_safety_tokens
         )
-        return {
+        snapshot: TokenUsagePayload = {
             "input_tokens": input_tokens,
             "input_source": input_source,
             "provider_input_tokens": provider_input,
@@ -402,8 +535,14 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
             ),
             "max_positive_error": max_positive_error,
             "max_ratio": round(max_ratio, 6),
+            "max_positive_gap_by_bucket": gap_by_bucket,
             "calibration_samples": calibration_samples,
             "calibration_key": estimate.calibration_key,
+            "request_size_bucket": estimate.request_size_bucket,
+            "tool_schema_hash": _stable_hash(_openai_tools(request.tools or [])),
+            "system_prompt_hash": _stable_hash(
+                request.system_message.text if request.system_message is not None else ""
+            ),
             "context_window": budget.context_window,
             "context_usage_ratio": round(input_tokens / budget.context_window, 4),
             "min_output_reserve_tokens": budget.min_output_reserve_tokens,
@@ -418,6 +557,9 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
             "near_context_limit": near_context_limit,
             "measured_at": datetime.now(UTC).isoformat(),
         }
+        outcome = _length_response_outcome(response, snapshot)
+        snapshot["response_outcome"] = outcome or "completed"
+        return snapshot
 
     def wrap_model_call(
         self,
@@ -428,7 +570,7 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
         response = handler(request)
         # 必须先生成快照再判断空正文 length，否则本次真实 usage 会随异常一起丢失。
         snapshot = self._build_snapshot(request, response)
-        if _is_empty_length_response(response):
+        if snapshot["response_outcome"] == "input_overflow":
             raise ContextWindowExceededError(
                 "模型在生成可见正文前已达到上下文上限",
                 snapshot,
@@ -447,7 +589,7 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
         response = await handler(request)
         # 异步链路与同步链路保持相同顺序，恢复逻辑才能使用同一份实测校准。
         snapshot = self._build_snapshot(request, response)
-        if _is_empty_length_response(response):
+        if snapshot["response_outcome"] == "input_overflow":
             raise ContextWindowExceededError(
                 "模型在生成可见正文前已达到上下文上限",
                 snapshot,

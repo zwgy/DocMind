@@ -27,6 +27,7 @@ from yuxi.agents.middlewares.token_usage import (
     ContextBudgetConfigurationError,
     ContextWindowExceededError,
     ResolvedContextBudget,
+    ensure_fixed_context_fits,
     estimate_messages_tokens,
     estimate_model_request,
     resolve_context_budget,
@@ -829,6 +830,9 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         compact_all_history: bool = False,
     ) -> _CompactionPlan | None:
         budget = resolve_context_budget(request)
+        # 历史归档和摘要都不能释放 system、当前工具 schema 或协议预留；在做任何 IO/模型调用前
+        # 先明确报告部署配置问题，避免错误地归因于会话历史并消耗一次摘要请求。
+        ensure_fixed_context_fits(request)
         state = request.state
         summary = str(state.get("context_summary") or "").strip()
         survivors, input_externalized = self._externalize_current_input(request, budget=budget)
@@ -940,6 +944,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
         compact_all_history: bool = False,
     ) -> _CompactionPlan | None:
         budget = resolve_context_budget(request)
+        ensure_fixed_context_fits(request)
         state = request.state
         summary = str(state.get("context_summary") or "").strip()
         survivors, input_externalized = await self._aexternalize_current_input(request, budget=budget)
