@@ -32,6 +32,7 @@ from yuxi.agents.middlewares.token_usage import (
     estimate_model_request,
     resolve_context_budget,
 )
+from yuxi.agents.middlewares.context_projection import projectable_rounds
 from yuxi.agents.backends.composite import (
     _TOOL_RESULT_SAVED_MARKER,
     _tool_result_path,
@@ -561,6 +562,31 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 return index
         return None
 
+    @classmethod
+    def _current_turn_message_indexes(cls, messages: list[AnyMessage]) -> set[int]:
+        """L1 只收敛当前请求内的超大载荷，历史交给有协议校验的 L2。"""
+        current_human_index = cls._current_human_input_index(messages)
+        if current_human_index is None:
+            return set()
+        return set(range(current_human_index, len(messages)))
+
+    @classmethod
+    def _historical_projectable_message_indexes(cls, messages: list[AnyMessage]) -> set[int]:
+        """仅选择最新用户请求之前、闭合且可安全回看的工具轮次。
+
+        这里先做完整 transcript 校验，原因是历史归档回执仍会随原 AI/Tool
+        消息发送给主模型；若静默跳过坏配对，后续请求依然会被兼容 provider
+        拒绝，且无法定位已经损坏的 checkpoint。
+        """
+        current_human_index = cls._current_human_input_index(messages)
+        if current_human_index is None:
+            return set()
+        return {
+            message_index
+            for round_ in projectable_rounds(messages, scope_end=current_human_index)
+            for message_index in range(round_.start, round_.end)
+        }
+
     def _externalize_current_input(
         self,
         request: ModelRequest,
@@ -612,6 +638,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         messages: list[AnyMessage],
         summary: str,
         budget: ResolvedContextBudget,
+        allowed_message_indexes: set[int] | None = None,
+        oldest_first: bool = False,
     ) -> tuple[list[AnyMessage], bool]:
         """按最终请求的实际缺口逐个收缩结果，优先处理 Token 最大的项。"""
         messages = list(messages)
@@ -623,6 +651,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 break
             candidates = []
             for index, message in enumerate(messages):
+                if allowed_message_indexes is not None and index not in allowed_message_indexes:
+                    continue
                 if not isinstance(message, ToolMessage) or message.additional_kwargs.get(_TOOL_RESULT_SAVED_MARKER):
                     continue
                 receipt = _planned_tool_receipt(messages, message)
@@ -632,7 +662,9 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             if not candidates:
                 return messages, changed
 
-            _, index, message, replacement = max(candidates, key=lambda item: item[0])
+            _, index, message, replacement = (
+                min(candidates, key=lambda item: item[1]) if oldest_first else max(candidates, key=lambda item: item[0])
+            )
             if message.name in _SOURCE_WINDOW_TOOL_NAMES:
                 pass
             else:
@@ -656,6 +688,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         messages: list[AnyMessage],
         summary: str,
         budget: ResolvedContextBudget,
+        allowed_message_indexes: set[int] | None = None,
+        oldest_first: bool = False,
     ) -> tuple[list[AnyMessage], bool]:
         messages = list(messages)
         changed = False
@@ -666,6 +700,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 break
             candidates = []
             for index, message in enumerate(messages):
+                if allowed_message_indexes is not None and index not in allowed_message_indexes:
+                    continue
                 if not isinstance(message, ToolMessage) or message.additional_kwargs.get(_TOOL_RESULT_SAVED_MARKER):
                     continue
                 receipt = _planned_tool_receipt(messages, message)
@@ -675,7 +711,9 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             if not candidates:
                 return messages, changed
 
-            _, index, message, replacement = max(candidates, key=lambda item: item[0])
+            _, index, message, replacement = (
+                min(candidates, key=lambda item: item[1]) if oldest_first else max(candidates, key=lambda item: item[0])
+            )
             if message.name in _SOURCE_WINDOW_TOOL_NAMES:
                 pass
             else:
@@ -700,6 +738,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         summary: str,
         budget: ResolvedContextBudget,
         failed: set[tuple[int, int]],
+        allowed_message_indexes: set[int] | None = None,
+        oldest_first: bool = False,
     ) -> _ToolCallArgumentsArchiveCandidate | None:
         prepared = self._request_with_summary(request, messages=messages, summary=summary)
         if self._request_tokens(prepared) <= budget.prompt_budget:
@@ -712,6 +752,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         }
         candidates: list[_ToolCallArgumentsArchiveCandidate] = []
         for message_index, message in enumerate(messages):
+            if allowed_message_indexes is not None and message_index not in allowed_message_indexes:
+                continue
             if not isinstance(message, AIMessage):
                 continue
             tool_calls = list(message.tool_calls or [])
@@ -752,6 +794,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             return None
         # 同步和异步入口必须使用完全相同的收益排序，否则同一段历史可能因调用方式不同
         # 生成不同的归档路径和活动上下文；这里只做确定性的候选选择，不执行任何 IO。
+        if oldest_first:
+            return min(candidates, key=lambda item: (item["message_index"], item["call_index"]))
         return max(candidates, key=lambda item: item["reduction"])
 
     def _shrink_completed_tool_call_arguments(
@@ -761,6 +805,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         messages: list[AnyMessage],
         summary: str,
         budget: ResolvedContextBudget,
+        allowed_message_indexes: set[int] | None = None,
+        oldest_first: bool = False,
     ) -> tuple[list[AnyMessage], bool]:
         """收纳已完成调用的大参数，避免 write_file 等工具把当前轮撑满。
 
@@ -780,6 +826,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 summary=summary,
                 budget=budget,
                 failed=failed,
+                allowed_message_indexes=allowed_message_indexes,
+                oldest_first=oldest_first,
             )
             if candidate is None:
                 return messages, changed
@@ -798,6 +846,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         messages: list[AnyMessage],
         summary: str,
         budget: ResolvedContextBudget,
+        allowed_message_indexes: set[int] | None = None,
+        oldest_first: bool = False,
     ) -> tuple[list[AnyMessage], bool]:
         messages = list(messages)
         changed = False
@@ -811,6 +861,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 summary=summary,
                 budget=budget,
                 failed=failed,
+                allowed_message_indexes=allowed_message_indexes,
+                oldest_first=oldest_first,
             )
             if candidate is None:
                 return messages, changed
@@ -836,21 +888,49 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         state = request.state
         summary = str(state.get("context_summary") or "").strip()
         survivors, input_externalized = self._externalize_current_input(request, budget=budget)
+        current_turn_indexes = self._current_turn_message_indexes(survivors)
         survivors, tool_results_shrunk = self._shrink_tool_results(
             request,
             messages=survivors,
             summary=summary,
             budget=budget,
+            allowed_message_indexes=current_turn_indexes,
         )
         survivors, tool_arguments_shrunk = self._shrink_completed_tool_call_arguments(
             request,
             messages=survivors,
             summary=summary,
             budget=budget,
+            allowed_message_indexes=current_turn_indexes,
+        )
+        # L2 不能按 Human turn 整段删除：每个历史 API round 都保留，只把已归档的
+        # 大载荷替换成短回执。这样单轮工具协议仍是完整的，必要时模型也有路径回读。
+        historical_indexes = self._historical_projectable_message_indexes(survivors)
+        survivors, historical_tool_results_shrunk = self._shrink_tool_results(
+            request,
+            messages=survivors,
+            summary=summary,
+            budget=budget,
+            allowed_message_indexes=historical_indexes,
+            oldest_first=True,
+        )
+        survivors, historical_tool_arguments_shrunk = self._shrink_completed_tool_call_arguments(
+            request,
+            messages=survivors,
+            summary=summary,
+            budget=budget,
+            allowed_message_indexes=historical_indexes,
+            oldest_first=True,
         )
         prepared = self._request_with_summary(request, messages=survivors, summary=summary)
         if self._request_tokens(prepared) <= budget.prompt_budget and not force_compaction:
-            if not (input_externalized or tool_results_shrunk or tool_arguments_shrunk):
+            if not (
+                input_externalized
+                or tool_results_shrunk
+                or tool_arguments_shrunk
+                or historical_tool_results_shrunk
+                or historical_tool_arguments_shrunk
+            ):
                 return None
             return {
                 "request": prepared,
@@ -948,21 +1028,47 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         state = request.state
         summary = str(state.get("context_summary") or "").strip()
         survivors, input_externalized = await self._aexternalize_current_input(request, budget=budget)
+        current_turn_indexes = self._current_turn_message_indexes(survivors)
         survivors, tool_results_shrunk = await self._ashrink_tool_results(
             request,
             messages=survivors,
             summary=summary,
             budget=budget,
+            allowed_message_indexes=current_turn_indexes,
         )
         survivors, tool_arguments_shrunk = await self._ashrink_completed_tool_call_arguments(
             request,
             messages=survivors,
             summary=summary,
             budget=budget,
+            allowed_message_indexes=current_turn_indexes,
+        )
+        historical_indexes = self._historical_projectable_message_indexes(survivors)
+        survivors, historical_tool_results_shrunk = await self._ashrink_tool_results(
+            request,
+            messages=survivors,
+            summary=summary,
+            budget=budget,
+            allowed_message_indexes=historical_indexes,
+            oldest_first=True,
+        )
+        survivors, historical_tool_arguments_shrunk = await self._ashrink_completed_tool_call_arguments(
+            request,
+            messages=survivors,
+            summary=summary,
+            budget=budget,
+            allowed_message_indexes=historical_indexes,
+            oldest_first=True,
         )
         prepared = self._request_with_summary(request, messages=survivors, summary=summary)
         if self._request_tokens(prepared) <= budget.prompt_budget and not force_compaction:
-            if not (input_externalized or tool_results_shrunk or tool_arguments_shrunk):
+            if not (
+                input_externalized
+                or tool_results_shrunk
+                or tool_arguments_shrunk
+                or historical_tool_results_shrunk
+                or historical_tool_arguments_shrunk
+            ):
                 return None
             return {
                 "request": prepared,

@@ -87,6 +87,12 @@ OpenAI 兼容服务若返回空正文且 `finish_reason=length`，TokenUsage 会
 
 前端“上次模型输入”优先显示供应商实测总量，否则显示 usage 校准估算或首次保守估算；“消息、私有摘要、系统、工具”始终只是本地估算构成。供应商实测总量与分项估算之差单独显示为“模型协议/模板校正”，不会伪装成某个分项的精确值。
 
+### 工具协议与历史投影
+
+`ContextCompactionMiddleware` 的 L1/L2 不会删除完整的工具交互。L1 只收纳当前用户请求内的超大工具结果或已完成的大参数；L2 使用与 Claude Code 相同的 API round 边界，处理最新用户消息之前、已经闭合的历史工具 round。每次投影都保留原 AI 消息、工具名称、`tool_call_id` 和 `ToolMessage`，仅把已写入线程隔离文件的正文替换为短回执，模型需要细节时按回执路径读取。
+
+投影前会验证完整持久化消息序列：工具调用 ID 必须非空且跨 round 唯一，每个结果必须在同一 round 中恰好匹配一次；错误结果和 `ask_user_question` round 受保护，不参与投影。缺失、重复、未知或跨 round 结果会在模型调用前抛出明确的工具协议错误，避免将无效 OpenAI 工具消息发送给本地模型。当前用户请求内的早期 round 和最近两轮保护策略由后续 L3 负责，因此 P3 不会提前改变当前请求的交互内容。
+
 ## 自定义中间件
 
 新增中间件时，将实现放入 `backend/package/yuxi/agents/middlewares`，再在具体 Agent 的 `get_graph()` 中加入 `middleware` 列表。新增前先确认它属于哪一种职责：

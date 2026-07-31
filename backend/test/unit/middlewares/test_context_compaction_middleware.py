@@ -14,6 +14,7 @@ from yuxi.agents.middlewares.context_compaction import (
     ContextCompactionMiddleware,
     create_context_compaction_middleware,
 )
+from yuxi.agents.middlewares.context_projection import ToolProtocolError
 from yuxi.agents.middlewares.token_usage import (
     ContextBudgetConfigurationError,
     ContextWindowExceededError,
@@ -712,6 +713,100 @@ def test_final_request_replaces_large_source_window_without_second_offload(monke
     assert '"path":"/outputs/a.txt"' in captured["messages"][-1].content
     assert raw_result not in captured["messages"][-1].content
     assert raw_result not in result.command.update["messages"].value[-2].content
+
+
+@pytest.mark.unit
+def test_l2_projects_old_completed_tool_result_and_keeps_tool_round(archive_backend: _ArchiveBackend) -> None:
+    raw_result = "historical result\n" * 1_000
+    messages = [
+        HumanMessage(content="old request", id="old-user"),
+        AIMessage(
+            content="",
+            id="old-tool-call",
+            tool_calls=[{"id": "old-call", "name": "query_kb", "args": {"query": "architecture"}}],
+        ),
+        ToolMessage(content=raw_result, tool_call_id="old-call", name="query_kb", id="old-tool-result"),
+        AIMessage(content="old answer", id="old-final-answer"),
+        HumanMessage(content="current request", id="current-user"),
+    ]
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    captured = {}
+
+    def handler(prepared: ModelRequest):
+        captured["messages"] = prepared.messages
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    result = middleware.wrap_model_call(request, handler)
+
+    old_round = captured["messages"][:3]
+    assert old_round[1].tool_calls[0]["id"] == "old-call"
+    assert old_round[2].tool_call_id == "old-call"
+    assert "[Tool result saved]" in old_round[2].content
+    assert raw_result not in old_round[2].content
+    assert archive_backend.writes[0][1] == raw_result
+    assert raw_result not in result.command.update["messages"].value[2].content
+
+
+@pytest.mark.unit
+def test_l2_projects_old_completed_tool_arguments_and_keeps_readable_receipt(archive_backend: _ArchiveBackend) -> None:
+    raw_definition = "step definition\n" * 1_000
+    messages = [
+        HumanMessage(content="old request", id="old-user"),
+        AIMessage(
+            content="",
+            id="old-tool-call",
+            tool_calls=[
+                {
+                    "id": "old-call",
+                    "name": "write_file",
+                    "args": {"file_path": "/outputs/old-plan.txt", "content": raw_definition},
+                }
+            ],
+        ),
+        ToolMessage(content="written", tool_call_id="old-call", name="write_file", id="old-tool-result"),
+        AIMessage(content="old answer", id="old-final-answer"),
+        HumanMessage(content="current request", id="current-user"),
+    ]
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    captured = {}
+
+    def handler(prepared: ModelRequest):
+        captured["messages"] = prepared.messages
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    middleware.wrap_model_call(request, handler)
+
+    saved_args = captured["messages"][1].tool_calls[0]["args"]
+    assert saved_args["_yuxi_saved_arguments_path"].endswith(".txt")
+    assert raw_definition not in str(captured["messages"][1].tool_calls)
+    assert any('"content":"step definition\\n' in content for _, content in archive_backend.writes)
+
+
+@pytest.mark.unit
+def test_incomplete_tool_protocol_fails_before_model_call() -> None:
+    messages = [
+        HumanMessage(content="current request", id="current-user"),
+        AIMessage(
+            content="",
+            id="unfinished-call",
+            tool_calls=[{"id": "unfinished", "name": "query_kb", "args": {}}],
+        ),
+    ]
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    invoked = False
+
+    def handler(_prepared: ModelRequest):
+        nonlocal invoked
+        invoked = True
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    with pytest.raises(ToolProtocolError):
+        middleware.wrap_model_call(request, handler)
+
+    assert not invoked
 
 
 @pytest.mark.unit
