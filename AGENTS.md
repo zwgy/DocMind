@@ -101,6 +101,13 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 3. 测试规范务必遵守 [testing-guidelines.md](docs/develop-guides/testing-guidelines.md) 中的规范，测试脚本务必放在 backend/test 目录下，并且在提交前确保测试通过。
 4. 非常重要！千万不要使用过度的防御/回退机制来掩盖设计上的缺陷，良好的软件应该在预设的条件下运行，其余情况均应该及时发现问题/错误并修复，而不是通过增加冗余代码来掩盖问题。
 
+### Firecrawl 调研工具
+
+- 调研任务确实需要使用 Firecrawl 时，先执行状态检查：Windows PowerShell 使用 `firecrawl.cmd --status`，避免 npm `.ps1` shim 受执行策略干扰；Linux/macOS 使用 `firecrawl --status`。
+- Codex 新会话的受限沙箱可能保留用户级包目录的 `PATH`，但拒绝读取或执行其中的文件。此时命令解析或全局包查询返回未找到/空结果属于沙箱假阴性，不能据此判断 Firecrawl 未安装。
+- 遇到未找到或拒绝访问时，必须使用 `sandbox_permissions=require_escalated` 在宿主机用户环境重试对应平台的状态命令。若命令名仍无法解析，则通过 `npm config get prefix` 获取全局 npm 前缀（Windows PowerShell 使用 `npm.cmd` 避免 `.ps1` shim 干扰），从该前缀的可执行文件目录中定位并授权运行 Firecrawl。后续 Firecrawl 调研命令沿用同一授权模式。
+- 只有宿主机授权检查也确认 CLI 不存在时，才能报告未安装或执行安装流程。不得在沙箱首次检测失败后直接回退到 `npx`，因为沙箱可能同时无法访问 npm 缓存和网络，从而产生误导性的启动超时。
+
 ### 需求沟通规范
 
 在沟通需求的时候，当需求不明确的时候，需要主动挖掘需求细节，对齐需求的验收标准，明确需求的优先级和范围，避免模糊需求导致的过度设计和不必要的工作。
