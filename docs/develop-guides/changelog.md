@@ -8,6 +8,7 @@
 
 ### 上下文预算（重构 P1.1）
 
+- 将项目上下文压缩入口重命名为 `ContextCompactionMiddleware` 和 `context_compaction.py`；主 Agent、SubAgent 与流事件测试统一使用新工厂，保留既有 checkpoint 状态键和压缩行为，为后续 L1/L2/L3/L5 控制器分阶段落地建立单一入口。
 - 调整 Agent 上下文准入校准：稳定校准键不再包含动态工具 schema，按请求规模桶保存 provider 相对保守 fallback 的最大正误差；schema 与 system hash 仅用于诊断，避免多 Skill/MCP 工具变化时丢失已验证的预算保护。
 - 修正 OpenAI 兼容服务的 `finish_reason=length` 处理：正常正文或空正文的输出耗尽不再触发历史压缩重试；仅当 provider usage 证明输入超过本地可用预算时进入恢复路径，并记录截断工具调用供后续工具协议保护。
 - 增加固定 system/tools 开销预检，在任何归档或摘要调用前给出包含窗口、预留、工具数量和最大 schema 的可操作配置诊断，避免不可压缩配置反复消耗摘要请求。

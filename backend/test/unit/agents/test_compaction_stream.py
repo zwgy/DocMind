@@ -10,8 +10,8 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.stream.transformers import CustomTransformer
 
-from yuxi.agents.middlewares import summary as summary_module
-from yuxi.agents.middlewares.summary import create_summary_middleware
+from yuxi.agents.middlewares import context_compaction as summary_module
+from yuxi.agents.middlewares.context_compaction import create_context_compaction_middleware
 
 
 class _CompactionStreamModel(BaseChatModel):
@@ -57,7 +57,7 @@ async def test_compaction_lifecycle_is_emitted_as_real_langgraph_custom_events(m
     graph = create_agent(
         model=model,
         tools=[],
-        middleware=[create_summary_middleware(model=model, summary_prompt="summary\n{messages}")],
+        middleware=[create_context_compaction_middleware(model=model, summary_prompt="summary\n{messages}")],
         checkpointer=InMemorySaver(),
     )
     events = []

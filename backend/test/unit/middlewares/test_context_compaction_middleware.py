@@ -9,14 +9,21 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.types import Command, Overwrite
 
-from yuxi.agents.middlewares import summary as summary_module
-from yuxi.agents.middlewares.summary import YuxiSummarizationMiddleware, create_summary_middleware
+from yuxi.agents.middlewares import context_compaction as context_compaction_module
+from yuxi.agents.middlewares.context_compaction import (
+    ContextCompactionMiddleware,
+    create_context_compaction_middleware,
+)
 from yuxi.agents.middlewares.token_usage import (
     ContextBudgetConfigurationError,
     ContextWindowExceededError,
     estimate_model_request,
     resolve_context_budget,
 )
+
+# P2 只迁移模块和生产 API；保留测试局部别名，避免数百条成熟断言因无业务价值的名称替换产生噪声。
+summary_module = context_compaction_module
+create_summary_middleware = create_context_compaction_middleware
 
 
 class _SummaryModel:
@@ -98,7 +105,7 @@ def test_factory_uses_project_owned_budget_middleware() -> None:
     model = _SummaryModel()
     middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
 
-    assert isinstance(middleware, YuxiSummarizationMiddleware)
+    assert isinstance(middleware, ContextCompactionMiddleware)
     assert not hasattr(middleware, "_lc_helper")
     assert model.bound_configs == [{"metadata": {"lc_source": "summarization"}}]
 

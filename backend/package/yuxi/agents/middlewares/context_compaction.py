@@ -62,7 +62,7 @@ _ARCHIVE_RECOVERY_INSTRUCTION = (
 )
 
 
-class ContextSummaryState(AgentState):
+class ContextCompactionState(AgentState):
     """Only private working-context metadata is stored in the graph state."""
 
     context_summary: NotRequired[str]
@@ -269,7 +269,7 @@ def _input_receipt(message: AnyMessage, path: str, tokens: int) -> AnyMessage:
     )
 
 
-class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
+class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
     """Keep the model working set inside the resolved input budget.
 
     The middleware deliberately owns its compaction control flow instead of extending
@@ -278,7 +278,7 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
     tool schemas and messages as one request.
     """
 
-    state_schema = ContextSummaryState
+    state_schema = ContextCompactionState
 
     def __init__(self, model: BaseChatModel, *, summary_prompt: str) -> None:
         super().__init__()
@@ -1161,10 +1161,10 @@ class YuxiSummarizationMiddleware(AgentMiddleware[ContextSummaryState]):
             return self._commit_plan(await handler(recovery_plan["request"]), recovery_plan)
 
 
-def create_summary_middleware(
+def create_context_compaction_middleware(
     model: BaseChatModel,
     *,
     summary_prompt: str,
-) -> YuxiSummarizationMiddleware:
-    """Create the single project-owned budget-driven summarization middleware."""
-    return YuxiSummarizationMiddleware(model=model, summary_prompt=summary_prompt)
+) -> ContextCompactionMiddleware:
+    """Create the single project-owned budget-driven context compaction middleware."""
+    return ContextCompactionMiddleware(model=model, summary_prompt=summary_prompt)

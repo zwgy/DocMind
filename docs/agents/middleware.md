@@ -25,7 +25,7 @@
 | `save_attachments_to_fs` / `AttachmentMiddleware` | 从 LangGraph state 的 `uploads` 读取附件路径，把可读路径注入系统提示，提示模型按需使用 `read_file` |
 | `SkillsMiddleware` | 注入可见 Skill 的提示段，监听读取 `SKILL.md` 后的 Skill 激活，并按依赖追加工具和 MCP 工具；知识库工具由内置 `knowledge-base` Skill 按需加载 |
 | `YuxiSubAgentMiddleware` | 仅主 Agent 在存在可见子智能体时挂载，提供 `task` 工具调用真实子 Agent graph |
-| `YuxiSummarizationMiddleware` | 按最终请求预算压缩完整历史交互段，归档原文并维护私有摘要状态 |
+| `ContextCompactionMiddleware` | 按最终请求预算执行上下文压缩，归档原文并维护私有 checkpoint 状态 |
 | `TodoListMiddleware` | 提供待办状态，让前端状态面板可展示 Agent 运行进度 |
 | `PatchToolCallsMiddleware` | 修正部分工具调用消息形态，提升工具调用兼容性 |
 | `ModelRetryMiddleware` | 在暂态模型调用失败时按配置重试；上下文溢出直接交由摘要恢复 |
@@ -62,9 +62,9 @@
 
 子智能体执行时会获得独立 child thread、独立 checkpoint 和 `agent_runs(run_type=subagent)` 记录；工具结果会返回 child thread ID，后续可以把该 ID 传回 `task` 继续同一个子任务。子智能体自身不会再挂载下一层 `task` 中间件，避免形成嵌套子智能体链路。
 
-## Summary 上下文压缩
+## 上下文压缩
 
-长对话压缩由项目自有的 `YuxiSummarizationMiddleware` 负责。它以最终模型请求的预算为唯一边界，不使用窗口百分比或固定保留消息数。
+长对话压缩由项目自有的 `ContextCompactionMiddleware` 负责。它以最终模型请求的预算为唯一边界，不使用窗口百分比或固定保留消息数。
 
 触发条件来自 Agent Context：
 

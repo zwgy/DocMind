@@ -12,7 +12,7 @@ from yuxi.agents.context import (
 from yuxi.agents.middlewares import (
     TokenUsageMiddleware,
     create_model_retry_middleware,
-    create_summary_middleware,
+    create_context_compaction_middleware,
     save_attachments_to_fs,
 )
 from yuxi.agents.middlewares.skills import SkillsMiddleware
@@ -28,7 +28,7 @@ async def _build_middlewares(context):
     """构建中间件列表"""
     summary_prompt = getattr(context, "summary_prompt", None) or DEFAULT_YUXI_SUMMARY_PROMPT
     model_spec = resolve_chat_model_spec(context.model)
-    summary_middleware = create_summary_middleware(
+    context_compaction_middleware = create_context_compaction_middleware(
         model=load_chat_model(fully_specified_name=model_spec),
         summary_prompt=summary_prompt,
     )
@@ -48,7 +48,7 @@ async def _build_middlewares(context):
         middlewares.append(subagent_middleware)
     middlewares.extend(
         [
-            summary_middleware,
+            context_compaction_middleware,
             TokenUsageMiddleware(),
             create_model_retry_middleware(max_retries=getattr(context, "model_retry_times", 2)),
         ]
