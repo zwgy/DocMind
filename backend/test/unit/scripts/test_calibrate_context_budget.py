@@ -59,7 +59,13 @@ def test_calibration_near_limit_probe_is_explicit_and_tool_counts_are_validated(
     )
 
     assert report["probe_near_limit"] is True
-    assert report["cases"][-1]["name"] == "synthetic-near-limit"
+    near_limit_cases = [case for case in report["cases"] if case["name"].startswith("synthetic-near-limit")]
+    assert [case["name"] for case in near_limit_cases] == [
+        "synthetic-near-limit-initial",
+        "synthetic-near-limit-adjusted",
+    ]
+    assert all(case["target_input_tokens"] > 0 for case in near_limit_cases)
+    assert all(case["near_limit_reached"] is False for case in near_limit_cases)
     assert _parse_tool_counts("0, 5,20") == [0, 5, 20]
     with pytest.raises(Exception, match="must not be empty"):
         _parse_tool_counts("")

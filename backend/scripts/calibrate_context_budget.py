@@ -55,10 +55,8 @@ def _sample_messages() -> list[SystemMessage | HumanMessage]:
     ]
 
 
-def _near_limit_messages(target_tokens: int) -> list[SystemMessage | HumanMessage]:
-    # This probe is opt-in because its estimate is intentionally approximate.  Leaving a 15% margin
-    # makes it useful for template verification without deliberately producing provider overflows.
-    repeated_text = "context budget calibration " * max(target_tokens // 4, 1)
+def _near_limit_messages(repeat_count: int) -> list[SystemMessage | HumanMessage]:
+    repeated_text = "context budget calibration " * max(repeat_count, 1)
     return [
         SystemMessage(content="You are a calibration endpoint. Reply with exactly: ok"),
         HumanMessage(content=f"Synthetic near-limit probe. {repeated_text}"),
@@ -120,6 +118,43 @@ def _run_case(model: Any, *, name: str, messages: list[Any], tools: list[dict[st
     return case
 
 
+def _near_limit_cases(model: Any, budget: Any) -> list[dict[str, Any]]:
+    """Use one measured adjustment because local fallback cannot prove the provider's real template size."""
+    target_input_tokens = int(budget.prompt_budget * 0.85)
+    initial_repeat_count = max(target_input_tokens // 4, 1)
+    initial_case = _run_case(
+        model,
+        name="synthetic-near-limit-initial",
+        messages=_near_limit_messages(initial_repeat_count),
+        tools=[],
+    )
+    initial_case["target_input_tokens"] = target_input_tokens
+    cases = [initial_case]
+    measured_input = initial_case.get("provider_input_tokens")
+    # One extra request is enough to distinguish a conservative local fallback from a deployment that
+    # really approaches its configured window.  The 2x cap prevents a bad usage value from escalating
+    # a diagnostic probe into an uncontrolled oversized request.
+    if isinstance(measured_input, int) and 0 < measured_input < int(target_input_tokens * 0.9):
+        adjusted_repeat_count = min(
+            max((initial_repeat_count * target_input_tokens + measured_input - 1) // measured_input, 1),
+            initial_repeat_count * 2,
+        )
+        adjusted_case = _run_case(
+            model,
+            name="synthetic-near-limit-adjusted",
+            messages=_near_limit_messages(adjusted_repeat_count),
+            tools=[],
+        )
+        adjusted_case["target_input_tokens"] = target_input_tokens
+        cases.append(adjusted_case)
+    for case in cases:
+        provider_input = case.get("provider_input_tokens")
+        case["near_limit_reached"] = (
+            isinstance(provider_input, int) and provider_input >= int(target_input_tokens * 0.9)
+        )
+    return cases
+
+
 def run_calibration(
     *,
     model: Any,
@@ -144,14 +179,7 @@ def run_calibration(
     ]
     budget = resolve_context_budget(_request(model, base_messages, []))
     if probe_near_limit:
-        cases.append(
-            _run_case(
-                model,
-                name="synthetic-near-limit",
-                messages=_near_limit_messages(int(budget.prompt_budget * 0.85)),
-                tools=[],
-            )
-        )
+        cases.extend(_near_limit_cases(model, budget))
 
     max_gap_by_bucket: dict[str, int] = {}
     for case in cases:
