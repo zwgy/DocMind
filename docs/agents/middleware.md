@@ -93,6 +93,8 @@ OpenAI 兼容服务若返回空正文且 `finish_reason=length`，TokenUsage 会
 
 投影前会验证完整持久化消息序列：工具调用 ID 必须非空且跨 round 唯一，每个结果必须在同一 round 中恰好匹配一次；错误结果和 `ask_user_question` round 受保护，不参与投影。缺失、重复、未知或跨 round 结果会在模型调用前抛出明确的工具协议错误，避免将无效 OpenAI 工具消息发送给本地模型。当前用户请求内的早期 round 和最近两轮保护策略由后续 L3 负责，因此 P3 不会提前改变当前请求的交互内容。
 
+L3 处理当前单条用户请求内的早期闭合 API round，仍只投影安全工具载荷；最近两个闭合 round、错误和人工确认保持完整。若 L1-L3 后仍超预算，L5 才以完整 API round 为单位生成私有 checkpoint：latest HumanMessage 及其所在 round 永远不裁剪，主模型成功后才原子替换活动 `messages` 和私有摘要。摘要请求不接收 Agent 工具，带九维任务/事实/文件/错误/待办/当前工作约束，并在适配器支持时绑定本次 checkpoint 的 `max_tokens`；摘要失败不会提交退化 checkpoint。
+
 ## 自定义中间件
 
 新增中间件时，将实现放入 `backend/package/yuxi/agents/middlewares`，再在具体 Agent 的 `get_graph()` 中加入 `middleware` 列表。新增前先确认它属于哪一种职责：

@@ -172,3 +172,49 @@ def projectable_rounds(
     if protected_tail_rounds:
         return eligible[:-protected_tail_rounds] if len(eligible) > protected_tail_rounds else []
     return eligible
+
+
+def compactable_api_rounds(messages: list[AnyMessage], *, protected_tail_rounds: int = 2) -> list[ApiRound]:
+    """Return whole rounds that L5 may replace with a semantic checkpoint.
+
+    L5 is allowed to remove complete protocol units, unlike L2/L3.  The latest
+    human input and the two most recent current-turn rounds remain real messages
+    so the next model call has both the exact request and immediate execution
+    context.  A round that straddles the latest human input is also protected.
+    """
+    if protected_tail_rounds < 0:
+        raise ValueError("protected_tail_rounds must not be negative")
+
+    rounds = group_messages_by_api_round(messages)
+    latest_human_index = next(
+        (index for index in range(len(messages) - 1, -1, -1) if getattr(messages[index], "type", None) == "human"),
+        None,
+    )
+    if latest_human_index is None:
+        return []
+
+    current_rounds = [round_ for round_ in rounds if round_.start >= latest_human_index]
+    protected_current = set(current_rounds[-protected_tail_rounds:]) if protected_tail_rounds else set()
+    candidates: list[ApiRound] = []
+    for round_ in rounds:
+        if round_.protected or round_ in protected_current:
+            continue
+        if round_.end <= latest_human_index or round_.start > latest_human_index:
+            candidates.append(round_)
+        elif round_.start < latest_human_index < round_.end:
+            # Claude Code's assistant-ID grouping keeps a final assistant response
+            # and the following HumanMessage together.  Its pre-Human prefix is a
+            # complete prior API unit and may be checkpointed; the latest request
+            # itself must never be split out of the real message sequence.
+            candidates.append(
+                ApiRound(
+                    start=round_.start,
+                    end=latest_human_index,
+                    tool_call_ids=round_.tool_call_ids,
+                    tool_result_indexes=tuple(
+                        index for index in round_.tool_result_indexes if index < latest_human_index
+                    ),
+                    protected=False,
+                )
+            )
+    return candidates

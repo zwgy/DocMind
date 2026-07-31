@@ -112,6 +112,33 @@ def test_factory_uses_project_owned_budget_middleware() -> None:
 
 
 @pytest.mark.unit
+def test_summary_request_binds_its_actual_output_budget() -> None:
+    class BoundSummaryModel(_SummaryModel):
+        def __init__(self) -> None:
+            super().__init__()
+            self.output_limits: list[int] = []
+
+        def bind(self, **kwargs):
+            self.output_limits.append(kwargs["max_tokens"])
+            return self
+
+    model = BoundSummaryModel()
+    _, request = _request([])
+    request = request.override(model=model)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    summary, _ = middleware._create_summary(
+        "",
+        [HumanMessage(content="old request")],
+        37,
+        resolve_context_budget(request),
+    )
+
+    assert summary
+    assert model.output_limits == [37]
+
+
+@pytest.mark.unit
 def test_compaction_counts_final_request_and_commits_private_summary_after_success(
     archive_backend: _ArchiveBackend,
 ) -> None:
@@ -359,7 +386,7 @@ def test_oversized_summary_is_bounded_and_marked_degraded() -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("asynchronous", [False, True])
-async def test_summary_generation_failure_uses_archive_receipt(
+async def test_summary_generation_failure_does_not_commit_or_call_main_model(
     asynchronous: bool, archive_backend: _ArchiveBackend
 ) -> None:
     class FailingSummaryModel(_SummaryModel):
@@ -376,23 +403,24 @@ async def test_summary_generation_failure_uses_archive_receipt(
     _, request = _request(messages)
     request = request.override(model=model)
     middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
-    captured = {}
+    invoked = False
 
-    def handler(prepared: ModelRequest):
-        captured["request"] = prepared
+    def handler(_prepared: ModelRequest):
+        nonlocal invoked
+        invoked = True
         return ModelResponse(result=[AIMessage(content="answer")])
 
     async def async_handler(prepared: ModelRequest):
         return handler(prepared)
 
-    if asynchronous:
-        result = await middleware.awrap_model_call(request, async_handler)
-    else:
-        result = middleware.wrap_model_call(request, handler)
+    with pytest.raises(RuntimeError, match="summary model unavailable"):
+        if asynchronous:
+            await middleware.awrap_model_call(request, async_handler)
+        else:
+            middleware.wrap_model_call(request, handler)
 
     assert len(archive_backend.writes) == 1
-    assert result.command.update["context_summary_quality"] == "degraded"
-    assert "private_context_archive" in captured["request"].system_message.text
+    assert not invoked
 
 
 @pytest.mark.unit
@@ -782,6 +810,75 @@ def test_l2_projects_old_completed_tool_arguments_and_keeps_readable_receipt(arc
     assert saved_args["_yuxi_saved_arguments_path"].endswith(".txt")
     assert raw_definition not in str(captured["messages"][1].tool_calls)
     assert any('"content":"step definition\\n' in content for _, content in archive_backend.writes)
+
+
+@pytest.mark.unit
+def test_l3_projects_early_rounds_of_a_single_human_request_and_protects_tail(
+    archive_backend: _ArchiveBackend,
+) -> None:
+    messages = [HumanMessage(content="complete the checks", id="current-user")]
+    for index in range(30):
+        content = "large early input\n" * 400 if index < 28 else "small"
+        call_id = f"call-{index}"
+        messages.extend(
+            [
+                AIMessage(
+                    content="",
+                    id=f"assistant-{index}",
+                    tool_calls=[{"id": call_id, "name": "write_file", "args": {"content": content}}],
+                ),
+                ToolMessage(content="written", tool_call_id=call_id, name="write_file", id=f"tool-{index}"),
+            ]
+        )
+    model, request = _request(messages)
+    model.profile = {"max_input_tokens": 32_000, "min_output_reserve_tokens": 4_096, "context_safety_tokens": 1_024}
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    captured = {}
+
+    def handler(prepared: ModelRequest):
+        captured["messages"] = prepared.messages
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    middleware.wrap_model_call(request, handler)
+
+    assert "_yuxi_saved_arguments_path" in captured["messages"][1].tool_calls[0]["args"]
+    assert captured["messages"][-2].tool_calls[0]["args"] == {"content": "small"}
+    assert captured["messages"][-1].tool_call_id == "call-29"
+    assert archive_backend.writes
+
+
+@pytest.mark.unit
+def test_l5_compacts_early_rounds_of_a_single_human_request_after_l3() -> None:
+    messages = [HumanMessage(content="complete the investigation", id="current-user")]
+    for index in range(30):
+        call_id = f"call-{index}"
+        messages.extend(
+            [
+                AIMessage(
+                    content="tool observation " * 1_000 if index < 28 else "recent observation",
+                    id=f"assistant-{index}",
+                    tool_calls=[{"id": call_id, "name": "query_kb", "args": {}}],
+                ),
+                ToolMessage(content="ok", tool_call_id=call_id, name="query_kb", id=f"tool-{index}"),
+            ]
+        )
+    model, request = _request(messages)
+    model.profile = {"max_input_tokens": 32_000, "min_output_reserve_tokens": 4_096, "context_safety_tokens": 1_024}
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    captured = {}
+
+    def handler(prepared: ModelRequest):
+        captured["request"] = prepared
+        return ModelResponse(result=[AIMessage(content="continued")])
+
+    result = middleware.wrap_model_call(request, handler)
+
+    assert "<checkpoint>" in model.prompts[0]
+    assert captured["request"].messages[0].id == "current-user"
+    assert captured["request"].messages[-4].id == "assistant-28"
+    assert captured["request"].messages[-2].id == "assistant-29"
+    assert result.command.update["context_summary"]
+    assert result.command.update["context_revision"] == 4
 
 
 @pytest.mark.unit

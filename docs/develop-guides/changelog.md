@@ -8,6 +8,7 @@
 
 ### 上下文预算（重构 P1.1）
 
+- 继续多级压缩重构：当前单用户请求按 API round 划分，L3 只外置较早 round 的大工具载荷并原样保护最近两个闭合 round；L5 改用完整 API round 生成 checkpoint，保护最新用户原文及其所在 round，避免单请求连续工具调用回退到“无安全历史段”。摘要请求固定带九维 checkpoint 约束，并按实际可用 checkpoint 空间绑定 `max_tokens`；摘要失败时不再提交降级摘要或裁剪消息，确保 LangGraph state 的原子性。
 - 新增 P3 工具历史投影：按 Claude Code 的 API round 边界校验已持久化工具协议，要求所有 `tool_call_id` 非空且全局唯一、每个 `ToolMessage` 在同一 round 内恰好匹配一次。L2 只处理最新用户请求之前已经闭合、非错误且非 `ask_user_question` 的历史 round；原 AI/Tool 消息和调用 ID 保持不变，仅将已写入线程隔离文件的大结果或大参数替换为短回执和可读取路径。未闭合、重复或跨 round 的工具结果会在主模型调用前以明确的协议错误终止，不再把损坏 checkpoint 发送给本地兼容模型。
 - 将项目上下文压缩入口重命名为 `ContextCompactionMiddleware` 和 `context_compaction.py`；主 Agent、SubAgent 与流事件测试统一使用新工厂，保留既有 checkpoint 状态键和压缩行为，为后续 L1/L2/L3/L5 控制器分阶段落地建立单一入口。
 - 调整 Agent 上下文准入校准：稳定校准键不再包含动态工具 schema，按请求规模桶保存 provider 相对保守 fallback 的最大正误差；schema 与 system hash 仅用于诊断，避免多 Skill/MCP 工具变化时丢失已验证的预算保护。

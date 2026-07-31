@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from yuxi.agents.middlewares.context_projection import (
     ToolProtocolError,
+    compactable_api_rounds,
     group_messages_by_api_round,
     projectable_rounds,
 )
@@ -115,3 +116,25 @@ def test_projectable_rounds_protects_recent_closed_rounds_inside_one_human_turn(
     assert len(rounds) == 28
     assert rounds[0].tool_call_ids == ("call-0",)
     assert rounds[-1].tool_call_ids == ("call-27",)
+
+
+@pytest.mark.unit
+def test_l5_candidates_keep_latest_human_and_current_protected_tail() -> None:
+    messages = [
+        HumanMessage(content="old", id="old-user"),
+        *_tool_round(0),
+        AIMessage(content="old answer", id="old-final"),
+    ]
+    messages.append(HumanMessage(content="current", id="current-user"))
+    for index in range(1, 4):
+        messages.extend(_tool_round(index))
+
+    candidates = compactable_api_rounds(messages)
+    removed_indexes = {index for round_ in candidates for index in range(round_.start, round_.end)}
+
+    assert (
+        messages.index(next(message for message in messages if getattr(message, "id", None) == "current-user"))
+        not in removed_indexes
+    )
+    assert messages[-4].id not in {messages[index].id for index in removed_indexes}
+    assert messages[-2].id not in {messages[index].id for index in removed_indexes}

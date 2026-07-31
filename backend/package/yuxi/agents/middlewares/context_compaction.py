@@ -32,7 +32,7 @@ from yuxi.agents.middlewares.token_usage import (
     estimate_model_request,
     resolve_context_budget,
 )
-from yuxi.agents.middlewares.context_projection import projectable_rounds
+from yuxi.agents.middlewares.context_projection import compactable_api_rounds, projectable_rounds
 from yuxi.agents.backends.composite import (
     _TOOL_RESULT_SAVED_MARKER,
     _tool_result_path,
@@ -43,7 +43,6 @@ from yuxi.agents.backends.composite import (
     create_agent_composite_backend,
     write_text_idempotently,
 )
-from yuxi.utils.logging_config import logger
 from yuxi.utils.paths import VIRTUAL_PATH_CONVERSATION_HISTORY
 
 _SOURCE_WINDOW_TOOL_NAMES = frozenset({"read_file", "open_kb_document"})
@@ -56,6 +55,11 @@ _TOOL_CALL_ARGUMENTS_ARCHIVE_EXCLUDED_TOOL_NAMES = frozenset({"ask_user_question
 _SUMMARY_UPDATE_PROTOCOL = (
     "<summary_update>Replace and merge previous_summary; keep verified exact facts unless corrected; "
     "discard narration first.</summary_update>"
+)
+_NINE_DIMENSION_SUMMARY_PROTOCOL = (
+    "<checkpoint>Use nine labeled fields: intent; concepts; files/code; errors/fixes; "
+    "progress; user messages; pending tasks; current work; next step. Preserve facts, constraints, paths, "
+    "identifiers and decisions; never invent.</checkpoint>"
 )
 # 有限摘要无法永久容纳无限历史的每个细节；缺失时回查不可变归档，才能避免模型按相似条目猜测。
 _ARCHIVE_RECOVERY_INSTRUCTION = (
@@ -333,6 +337,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             + "\n\n<previous_summary>\n"
             + (previous_summary or "None")
             + "\n</previous_summary>\n"
+            + _NINE_DIMENSION_SUMMARY_PROTOCOL
+            + "\n"
             + _SUMMARY_UPDATE_PROTOCOL
             + "\n"
             + f"Keep the replacement summary within {max(target_tokens, 1)} tokens."
@@ -350,6 +356,19 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         fixed_request = self._request_with_summary(request, messages=survivors, summary=previous_summary)
         fixed_tokens = self._request_tokens(fixed_request)
         return budget.prompt_budget - fixed_tokens
+
+    def _summary_model(self, target_tokens: int) -> Any:
+        """Bind a real output cap when the local provider adapter supports it.
+
+        Small local models may otherwise spend their entire reserve on reasoning
+        or narration and return a checkpoint that cannot fit the next request.
+        The summary call has no Agent tool schemas, and its cap is derived from
+        the already-calculated final-request space rather than a model-name rule.
+        """
+        bind = getattr(self.model, "bind", None)
+        if not callable(bind):
+            return self.model
+        return bind(max_tokens=max(target_tokens, 1))
 
     def _fit_summary_to_budget(
         self,
@@ -461,6 +480,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         summary = previous_summary
         degraded = False
         pending: list[AnyMessage] = []
+        summary_model = self._summary_model(target_tokens)
         for segment in _message_segments(messages):
             candidate = [*pending, *segment]
             prompt = self._render_summary_prompt(summary, candidate, target_tokens)
@@ -468,7 +488,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 pending = candidate
                 continue
             if pending:
-                response = self.model.invoke(self._render_summary_prompt(summary, pending, target_tokens))
+                response = summary_model.invoke(self._render_summary_prompt(summary, pending, target_tokens))
                 summary = _summary_text(response)
                 if not summary:
                     raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
@@ -482,7 +502,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             remaining = list(segment)
             while remaining:
                 piece, rest = self._largest_summary_piece(summary, remaining, target_tokens, budget)
-                response = self.model.invoke(
+                response = summary_model.invoke(
                     self._render_summary_prompt(summary, [SystemMessage(content=piece)], target_tokens)
                 )
                 summary = _summary_text(response)
@@ -495,7 +515,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 else:
                     remaining = [SystemMessage(content=rest)]
         if pending:
-            response = self.model.invoke(self._render_summary_prompt(summary, pending, target_tokens))
+            response = summary_model.invoke(self._render_summary_prompt(summary, pending, target_tokens))
             summary = _summary_text(response)
             if not summary:
                 raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
@@ -513,6 +533,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         summary = previous_summary
         degraded = False
         pending: list[AnyMessage] = []
+        summary_model = self._summary_model(target_tokens)
         for segment in _message_segments(messages):
             candidate = [*pending, *segment]
             prompt = self._render_summary_prompt(summary, candidate, target_tokens)
@@ -520,7 +541,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 pending = candidate
                 continue
             if pending:
-                response = await self.model.ainvoke(self._render_summary_prompt(summary, pending, target_tokens))
+                response = await summary_model.ainvoke(self._render_summary_prompt(summary, pending, target_tokens))
                 summary = _summary_text(response)
                 if not summary:
                     raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
@@ -534,7 +555,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             remaining = list(segment)
             while remaining:
                 piece, rest = self._largest_summary_piece(summary, remaining, target_tokens, budget)
-                response = await self.model.ainvoke(
+                response = await summary_model.ainvoke(
                     self._render_summary_prompt(summary, [SystemMessage(content=piece)], target_tokens)
                 )
                 summary = _summary_text(response)
@@ -547,7 +568,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 else:
                     remaining = [SystemMessage(content=rest)]
         if pending:
-            response = await self.model.ainvoke(self._render_summary_prompt(summary, pending, target_tokens))
+            response = await summary_model.ainvoke(self._render_summary_prompt(summary, pending, target_tokens))
             summary = _summary_text(response)
             if not summary:
                 raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
@@ -561,14 +582,6 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             if getattr(messages[index], "type", None) == "human":
                 return index
         return None
-
-    @classmethod
-    def _current_turn_message_indexes(cls, messages: list[AnyMessage]) -> set[int]:
-        """L1 只收敛当前请求内的超大载荷，历史交给有协议校验的 L2。"""
-        current_human_index = cls._current_human_input_index(messages)
-        if current_human_index is None:
-            return set()
-        return set(range(current_human_index, len(messages)))
 
     @classmethod
     def _historical_projectable_message_indexes(cls, messages: list[AnyMessage]) -> set[int]:
@@ -586,6 +599,29 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             for round_ in projectable_rounds(messages, scope_end=current_human_index)
             for message_index in range(round_.start, round_.end)
         }
+
+    @classmethod
+    def _current_projection_message_indexes(cls, messages: list[AnyMessage]) -> tuple[set[int], set[int]]:
+        """把当前单 Human 请求按 API round 分成 L3 候选和受保护尾部。
+
+        不能再以 HumanMessage 作为唯一压缩边界，否则一个请求内连续工具调用
+        只会得到“无旧历史”。最后两个闭合 round 仍由 L1 直接保护，既保留
+        最近执行细节，也避免本地模型在紧邻下一步时频繁回读归档。
+        """
+        current_human_index = cls._current_human_input_index(messages)
+        if current_human_index is None:
+            return set(), set()
+        current_rounds = [
+            round_
+            for round_ in projectable_rounds(messages, scope_end=len(messages))
+            if round_.start >= current_human_index
+        ]
+        protected_rounds = current_rounds[-2:]
+        projection_rounds = current_rounds[:-2]
+        return (
+            {index for round_ in projection_rounds for index in range(round_.start, round_.end)},
+            {index for round_ in protected_rounds for index in range(round_.start, round_.end)},
+        )
 
     def _externalize_current_input(
         self,
@@ -888,7 +924,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         state = request.state
         summary = str(state.get("context_summary") or "").strip()
         survivors, input_externalized = self._externalize_current_input(request, budget=budget)
-        current_turn_indexes = self._current_turn_message_indexes(survivors)
+        current_projection_indexes, current_turn_indexes = self._current_projection_message_indexes(survivors)
         survivors, tool_results_shrunk = self._shrink_tool_results(
             request,
             messages=survivors,
@@ -922,6 +958,22 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             allowed_message_indexes=historical_indexes,
             oldest_first=True,
         )
+        survivors, current_projection_results_shrunk = self._shrink_tool_results(
+            request,
+            messages=survivors,
+            summary=summary,
+            budget=budget,
+            allowed_message_indexes=current_projection_indexes,
+            oldest_first=True,
+        )
+        survivors, current_projection_arguments_shrunk = self._shrink_completed_tool_call_arguments(
+            request,
+            messages=survivors,
+            summary=summary,
+            budget=budget,
+            allowed_message_indexes=current_projection_indexes,
+            oldest_first=True,
+        )
         prepared = self._request_with_summary(request, messages=survivors, summary=summary)
         if self._request_tokens(prepared) <= budget.prompt_budget and not force_compaction:
             if not (
@@ -930,6 +982,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 or tool_arguments_shrunk
                 or historical_tool_results_shrunk
                 or historical_tool_arguments_shrunk
+                or current_projection_results_shrunk
+                or current_projection_arguments_shrunk
             ):
                 return None
             return {
@@ -944,16 +998,22 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             }
 
         compacted: list[AnyMessage] = []
-        remaining_segments = _message_segments(survivors)
-        # The latest segment contains the current user turn or an unfinished protocol;
-        # retain it intact and compact only completed earlier segments.
-        while len(remaining_segments) > 1:
+        compacted_rounds = []
+        source_messages = list(survivors)
+        remaining_rounds = compactable_api_rounds(survivors)
+        # L5 只能移除完整 API round。latest Human、跨越该消息的 round 和当前尾部
+        # 始终留在 survivors；这是单请求多工具调用仍能继续的协议安全边界。
+        while remaining_rounds:
             if compact_all_history:
-                compacted = [message for segment in remaining_segments[:-1] for message in segment]
-                remaining_segments = remaining_segments[-1:]
+                compacted_rounds.extend(remaining_rounds)
+                remaining_rounds = []
             else:
-                compacted.extend(remaining_segments.pop(0))
-            survivors = [message for segment in remaining_segments for message in segment]
+                compacted_rounds.append(remaining_rounds.pop(0))
+            compacted = [
+                message for round_ in compacted_rounds for message in source_messages[round_.start : round_.end]
+            ]
+            removed_indexes = {index for round_ in compacted_rounds for index in range(round_.start, round_.end)}
+            survivors = [message for index, message in enumerate(source_messages) if index not in removed_indexes]
             next_revision = int(state.get("context_revision") or 0) + 1
             archive_path = _archive_manifest_path(compacted, next_revision)
             archive_prefix = _archive_summary_prefix(archive_path)
@@ -970,32 +1030,14 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     revision=next_revision,
                 )
                 archive_prefix = _archive_summary_prefix(archive_path)
-                try:
-                    generated_summary, generated_degraded = self._create_summary(
-                        summary, compacted, target_tokens, budget
-                    )
-                    summary, summary_quality = self._fit_summary_to_budget(
-                        request,
-                        survivors=survivors,
-                        prefix=archive_prefix,
-                        generated=generated_summary,
-                        budget=budget,
-                    )
-                except ContextBudgetConfigurationError:
-                    raise
-                except Exception:
-                    # 归档已成功且前缀本身通过预算计算；摘要模型不可用时保留旧摘要的可容纳部分，
-                    # 使主模型仍可借助归档索引继续，而不是把一次压缩失败扩大成整轮对话失败。
-                    logger.exception("摘要模型失败，改用归档回执继续本次对话")
-                    summary, _ = self._fit_summary_to_budget(
-                        request,
-                        survivors=survivors,
-                        prefix=archive_prefix,
-                        generated=summary,
-                        budget=budget,
-                    )
-                    generated_degraded = True
-                    summary_quality = "degraded"
+                generated_summary, generated_degraded = self._create_summary(summary, compacted, target_tokens, budget)
+                summary, summary_quality = self._fit_summary_to_budget(
+                    request,
+                    survivors=survivors,
+                    prefix=archive_prefix,
+                    generated=generated_summary,
+                    budget=budget,
+                )
             finally:
                 request.runtime.stream_writer({"type": "context_compaction", "status": "finished"})
             prepared = self._request_with_summary(request, messages=survivors, summary=summary)
@@ -1028,7 +1070,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         state = request.state
         summary = str(state.get("context_summary") or "").strip()
         survivors, input_externalized = await self._aexternalize_current_input(request, budget=budget)
-        current_turn_indexes = self._current_turn_message_indexes(survivors)
+        current_projection_indexes, current_turn_indexes = self._current_projection_message_indexes(survivors)
         survivors, tool_results_shrunk = await self._ashrink_tool_results(
             request,
             messages=survivors,
@@ -1060,6 +1102,22 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             allowed_message_indexes=historical_indexes,
             oldest_first=True,
         )
+        survivors, current_projection_results_shrunk = await self._ashrink_tool_results(
+            request,
+            messages=survivors,
+            summary=summary,
+            budget=budget,
+            allowed_message_indexes=current_projection_indexes,
+            oldest_first=True,
+        )
+        survivors, current_projection_arguments_shrunk = await self._ashrink_completed_tool_call_arguments(
+            request,
+            messages=survivors,
+            summary=summary,
+            budget=budget,
+            allowed_message_indexes=current_projection_indexes,
+            oldest_first=True,
+        )
         prepared = self._request_with_summary(request, messages=survivors, summary=summary)
         if self._request_tokens(prepared) <= budget.prompt_budget and not force_compaction:
             if not (
@@ -1068,6 +1126,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 or tool_arguments_shrunk
                 or historical_tool_results_shrunk
                 or historical_tool_arguments_shrunk
+                or current_projection_results_shrunk
+                or current_projection_arguments_shrunk
             ):
                 return None
             return {
@@ -1082,14 +1142,20 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             }
 
         compacted: list[AnyMessage] = []
-        remaining_segments = _message_segments(survivors)
-        while len(remaining_segments) > 1:
+        compacted_rounds = []
+        source_messages = list(survivors)
+        remaining_rounds = compactable_api_rounds(survivors)
+        while remaining_rounds:
             if compact_all_history:
-                compacted = [message for segment in remaining_segments[:-1] for message in segment]
-                remaining_segments = remaining_segments[-1:]
+                compacted_rounds.extend(remaining_rounds)
+                remaining_rounds = []
             else:
-                compacted.extend(remaining_segments.pop(0))
-            survivors = [message for segment in remaining_segments for message in segment]
+                compacted_rounds.append(remaining_rounds.pop(0))
+            compacted = [
+                message for round_ in compacted_rounds for message in source_messages[round_.start : round_.end]
+            ]
+            removed_indexes = {index for round_ in compacted_rounds for index in range(round_.start, round_.end)}
+            survivors = [message for index, message in enumerate(source_messages) if index not in removed_indexes]
             next_revision = int(state.get("context_revision") or 0) + 1
             archive_path = _archive_manifest_path(compacted, next_revision)
             archive_prefix = _archive_summary_prefix(archive_path)
@@ -1105,34 +1171,19 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     revision=next_revision,
                 )
                 archive_prefix = _archive_summary_prefix(archive_path)
-                try:
-                    generated_summary, generated_degraded = await self._acreate_summary(
-                        summary,
-                        compacted,
-                        target_tokens,
-                        budget,
-                    )
-                    summary, summary_quality = self._fit_summary_to_budget(
-                        request,
-                        survivors=survivors,
-                        prefix=archive_prefix,
-                        generated=generated_summary,
-                        budget=budget,
-                    )
-                except ContextBudgetConfigurationError:
-                    raise
-                except Exception:
-                    # 同步路径相同：只有归档与预算收敛已成立，才允许不依赖摘要模型继续。
-                    logger.exception("摘要模型失败，改用归档回执继续本次对话")
-                    summary, _ = self._fit_summary_to_budget(
-                        request,
-                        survivors=survivors,
-                        prefix=archive_prefix,
-                        generated=summary,
-                        budget=budget,
-                    )
-                    generated_degraded = True
-                    summary_quality = "degraded"
+                generated_summary, generated_degraded = await self._acreate_summary(
+                    summary,
+                    compacted,
+                    target_tokens,
+                    budget,
+                )
+                summary, summary_quality = self._fit_summary_to_budget(
+                    request,
+                    survivors=survivors,
+                    prefix=archive_prefix,
+                    generated=generated_summary,
+                    budget=budget,
+                )
             finally:
                 request.runtime.stream_writer({"type": "context_compaction", "status": "finished"})
             prepared = self._request_with_summary(request, messages=survivors, summary=summary)
