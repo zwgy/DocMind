@@ -78,7 +78,14 @@ async def test_compaction_lifecycle_is_emitted_as_real_langgraph_custom_events(m
             events.append(event["params"]["data"])
 
     assert model.summary_calls > 0
-    assert events == [
-        {"type": "context_compaction", "status": "started"},
-        {"type": "context_compaction", "status": "finished"},
-    ]
+    assert events[0]["type"] == "context_compaction"
+    assert events[0]["status"] == "started"
+    assert events[0]["level"] == "L5"
+    assert events[0]["reason"] == "proactive_admission"
+    assert events[1]["type"] == "context_compaction"
+    assert events[1]["status"] == "finished"
+    assert events[1]["level"] == "L5"
+    assert events[1]["tokens_after"] < events[1]["tokens_before"]
+    assert events[1]["messages_removed"] > 0
+    assert events[1]["rounds_removed"] > 0
+    assert events[1]["archive_count"] == 1

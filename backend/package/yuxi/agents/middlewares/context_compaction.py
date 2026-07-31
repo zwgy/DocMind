@@ -330,6 +330,11 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             state.pop(BASE_SYSTEM_MESSAGE_STATE_KEY, None)
         return request.override(messages=messages, system_message=system_message, state=state)
 
+    @staticmethod
+    def _compaction_event(status: str, **metrics: Any) -> dict[str, Any]:
+        """Emit only counters and classification; conversation/tool payloads stay private."""
+        return {"type": "context_compaction", "status": status, **metrics}
+
     def _render_summary_prompt(self, previous_summary: str, messages: list[AnyMessage], target_tokens: int) -> str:
         history = get_buffer_string(_messages_safe_for_summary(messages))
         return (
@@ -1022,7 +1027,17 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 continue
             # 归档也是压缩过程的一部分。状态必须先于归档发布，否则归档较慢或失败时，
             # 用户只会一直看到“正在生成回复”，无法理解当前实际阶段。
-            request.runtime.stream_writer({"type": "context_compaction", "status": "started"})
+            tokens_before = self._request_tokens(
+                self._request_with_summary(request, messages=source_messages, summary=summary)
+            )
+            request.runtime.stream_writer(
+                self._compaction_event(
+                    "started",
+                    level="L5",
+                    reason="provider_overflow" if force_compaction else "proactive_admission",
+                    tokens_before=tokens_before,
+                )
+            )
             try:
                 archive_path = self._archive_compacted_messages(
                     request,
@@ -1039,7 +1054,19 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     budget=budget,
                 )
             finally:
-                request.runtime.stream_writer({"type": "context_compaction", "status": "finished"})
+                request.runtime.stream_writer(
+                    self._compaction_event(
+                        "finished",
+                        level="L5",
+                        tokens_before=tokens_before,
+                        tokens_after=self._request_tokens(
+                            self._request_with_summary(request, messages=survivors, summary=summary)
+                        ),
+                        messages_removed=len(compacted),
+                        rounds_removed=len(compacted_rounds),
+                        archive_count=1,
+                    )
+                )
             prepared = self._request_with_summary(request, messages=survivors, summary=summary)
             if self._request_tokens(prepared) <= budget.prompt_budget:
                 last_compacted = compacted[-1]
@@ -1163,7 +1190,17 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             if target_tokens <= 0:
                 continue
             # 异步路径保持与同步路径相同的公开状态契约，并覆盖归档与摘要两个阶段。
-            request.runtime.stream_writer({"type": "context_compaction", "status": "started"})
+            tokens_before = self._request_tokens(
+                self._request_with_summary(request, messages=source_messages, summary=summary)
+            )
+            request.runtime.stream_writer(
+                self._compaction_event(
+                    "started",
+                    level="L5",
+                    reason="provider_overflow" if force_compaction else "proactive_admission",
+                    tokens_before=tokens_before,
+                )
+            )
             try:
                 archive_path = await self._aarchive_compacted_messages(
                     request,
@@ -1185,7 +1222,19 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     budget=budget,
                 )
             finally:
-                request.runtime.stream_writer({"type": "context_compaction", "status": "finished"})
+                request.runtime.stream_writer(
+                    self._compaction_event(
+                        "finished",
+                        level="L5",
+                        tokens_before=tokens_before,
+                        tokens_after=self._request_tokens(
+                            self._request_with_summary(request, messages=survivors, summary=summary)
+                        ),
+                        messages_removed=len(compacted),
+                        rounds_removed=len(compacted_rounds),
+                        archive_count=1,
+                    )
+                )
             prepared = self._request_with_summary(request, messages=survivors, summary=summary)
             if self._request_tokens(prepared) <= budget.prompt_budget:
                 last_compacted = compacted[-1]

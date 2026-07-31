@@ -177,10 +177,9 @@ def test_compaction_counts_final_request_and_commits_private_summary_after_succe
     assert isinstance(update["messages"], Overwrite)
     assert len(archive_backend.writes) == 1
     assert '"message_id":"user-old"' in archive_backend.writes[0][1]
-    assert request.runtime.stream_events == [
-        {"type": "context_compaction", "status": "started"},
-        {"type": "context_compaction", "status": "finished"},
-    ]
+    assert [event["status"] for event in request.runtime.stream_events] == ["started", "finished"]
+    assert request.runtime.stream_events[0]["level"] == "L5"
+    assert request.runtime.stream_events[1]["archive_count"] == 1
 
 
 @pytest.mark.unit
@@ -264,10 +263,8 @@ async def test_archive_failure_is_reported_as_compaction_lifecycle(
                 lambda _prepared: pytest.fail("archive failure must precede the main model call"),
             )
 
-    assert request.runtime.stream_events == [
-        {"type": "context_compaction", "status": "started"},
-        {"type": "context_compaction", "status": "finished"},
-    ]
+    assert [event["status"] for event in request.runtime.stream_events] == ["started", "finished"]
+    assert request.runtime.stream_events[0]["level"] == "L5"
 
 
 @pytest.mark.unit
