@@ -75,6 +75,24 @@ def _request(messages):
     )
 
 
+def _single_human_tool_chain(rounds: int) -> list:
+    """构造载荷很小但协议骨架很多的单用户工具链，复现旧分段边界无法释放空间的问题。"""
+    messages = [HumanMessage(content="请连续检查项目状态", id="current-user")]
+    for index in range(rounds):
+        call_id = f"call-{index}"
+        messages.extend(
+            [
+                AIMessage(
+                    content=f"执行第 {index} 步检查",
+                    tool_calls=[{"id": call_id, "name": "query_kb", "args": {}}],
+                    id=f"assistant-{index}",
+                ),
+                ToolMessage(content="ok", tool_call_id=call_id, name="query_kb", id=f"tool-{index}"),
+            ]
+        )
+    return messages
+
+
 @pytest.mark.unit
 def test_factory_uses_project_owned_budget_middleware() -> None:
     model = _SummaryModel()
@@ -215,6 +233,83 @@ async def test_archive_failure_is_reported_as_compaction_lifecycle(
         {"type": "context_compaction", "status": "started"},
         {"type": "context_compaction", "status": "finished"},
     ]
+
+
+@pytest.mark.unit
+def test_current_single_human_tool_chain_has_no_safe_historical_segment(
+    archive_backend: _ArchiveBackend,
+) -> None:
+    """P0 基线：旧实现按 HumanMessage 分段，无法压缩同一请求中的早期 closed round。"""
+    messages = _single_human_tool_chain(30)
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    with pytest.raises(ContextBudgetConfigurationError, match="不存在可安全压缩的完整历史交互段"):
+        middleware.wrap_model_call(
+            request,
+            lambda _prepared: pytest.fail("容量错误必须发生在主模型调用前"),
+        )
+
+    assert model.prompts == []
+    assert archive_backend.writes == []
+
+
+@pytest.mark.unit
+def test_current_incomplete_parallel_tool_round_is_not_compacted(
+    archive_backend: _ArchiveBackend,
+) -> None:
+    """P0 基线：未闭合并行调用不能为腾出预算被摘要或伪造配对。"""
+    messages = [
+        HumanMessage(content="请检查并行任务", id="current-user"),
+        AIMessage(
+            content="x" * 3_000,
+            tool_calls=[
+                {"id": "call-a", "name": "query_kb", "args": {}},
+                {"id": "call-b", "name": "query_kb", "args": {}},
+            ],
+            id="assistant-parallel",
+        ),
+        ToolMessage(content="已完成 A", tool_call_id="call-a", name="query_kb", id="tool-a"),
+    ]
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    with pytest.raises(ContextBudgetConfigurationError, match="不存在可安全压缩的完整历史交互段"):
+        middleware.wrap_model_call(
+            request,
+            lambda _prepared: pytest.fail("未闭合工具协议不能发送给主模型"),
+        )
+
+    assert model.prompts == []
+    assert archive_backend.writes == []
+
+
+@pytest.mark.unit
+def test_current_fixed_overhead_reports_generic_capacity_error_without_diagnosis(
+    archive_backend: _ArchiveBackend,
+) -> None:
+    """P0 基线：旧实现未先隔离固定开销，只会返回与历史不足相同的通用错误。"""
+    messages = [
+        HumanMessage(content="old user", id="user-old"),
+        AIMessage(content="old answer", id="assistant-old"),
+        HumanMessage(content="current user", id="user-current"),
+    ]
+    model, request = _request(messages)
+    request = request.override(
+        system_message=SystemMessage(content="system " * 2_000),
+        tools=[{"name": "oversized_tool", "description": "schema " * 2_000}],
+    )
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    with pytest.raises(ContextBudgetConfigurationError, match="不存在可安全压缩的完整历史交互段") as raised:
+        middleware.wrap_model_call(
+            request,
+            lambda _prepared: pytest.fail("固定开销已超预算时不能调用主模型"),
+        )
+
+    assert "工具" not in str(raised.value)
+    assert model.prompts == []
+    assert archive_backend.writes == []
 
 
 @pytest.mark.unit

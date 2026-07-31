@@ -228,6 +228,29 @@ async def test_empty_length_response_preserves_usage_on_context_overflow() -> No
     assert raised.value.token_usage["calibration_samples"] == 1
 
 
+@pytest.mark.asyncio
+async def test_current_length_response_with_visible_content_is_not_input_overflow() -> None:
+    """P0 基线：旧 Token 中间件只将空正文 length 视为容量异常。"""
+    middleware = TokenUsageMiddleware()
+    request = _request()
+
+    async def handler(_request):
+        return ModelResponse(
+            result=[
+                AIMessage(
+                    content="回答在输出上限处截断",
+                    response_metadata={"finish_reason": "length"},
+                    usage_metadata={"input_tokens": 100, "output_tokens": 500, "total_tokens": 600},
+                )
+            ]
+        )
+
+    result = await middleware.awrap_model_call(request, handler)
+
+    assert isinstance(result, ExtendedModelResponse)
+    assert result.command.update["token_usage"]["provider_input_tokens"] == 100
+
+
 def test_resolve_context_budget_preserves_minimum_reserve_for_smaller_explicit_output_limit() -> None:
     request = SimpleNamespace(
         model=SimpleNamespace(
