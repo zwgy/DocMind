@@ -1,0 +1,28 @@
+{
+  "name": "L1当前输入外置验收",
+  "threads": [
+    {
+      "name": "l1-current-input",
+      "title": "L1当前输入外置验收-{tag}",
+      "turns": [
+        {
+          "name": "externalize-and-recover",
+          "query": "本轮验收标记是 L1-{tag}。若本条消息因预算被保存到线程文件，必须先使用 read_file 从归档路径读取开头内容，再只回答 L1-{tag}。\n{payload}\n本轮验收标记仍是 L1-{tag}。",
+          "expect": {
+            "assistant_contains": ["L1-{tag}"],
+            "tools_include": ["read_file"],
+            "compaction": {
+              "level": "L1",
+              "status": "finished",
+              "min_values": {
+                "input_externalized": 1,
+                "tokens_saved": 1
+              }
+            },
+            "compaction_order": ["L1", "L2", "L3", "L5"]
+          }
+        }
+      ]
+    }
+  ]
+}

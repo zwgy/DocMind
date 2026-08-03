@@ -9,7 +9,7 @@
 ### 上下文预算（重构 P1.1）
 
 - 继续多级压缩重构：当前单用户请求按 API round 划分，L3 只外置较早 round 的大工具载荷并原样保护最近两个闭合 round；L5 改用完整 API round 生成 checkpoint，保护最新用户原文及其所在 round，避免单请求连续工具调用回退到“无安全历史段”。默认摘要模板与固定协议统一为九维 checkpoint；一个 Human turn 因大量工具调用被滚动分块时，每个摘要块只在摘要调用内重复原始用户消息作为优先锚点，避免小模型在后续工具正文中遗忘早期硬约束、路径和错误码，锚点不会进入最终 checkpoint 或主模型上下文。摘要输入预算和真实输出 cap 在同一部署窗口内分别计算；32K～256K 使用同一公式，不按模型名分支。provider PTL 只按完整 API round 移除最旧约 20% 输入并收紧预算重试一次；输出截断、超限或普通失败均不提交候选摘要。压缩后保留活跃 Skill 的权威 `SKILL.md` 路径，且不覆盖 Todo、附件、artifact 和工具/MCP 等独立状态。
-- 上下文压缩流事件新增不含正文的诊断字段：`level`、`reason`、`tokens_before/after`、`messages_removed`、`rounds_removed` 和 `archive_count`。事件支持 `started/finished/failed` 生命周期，并区分主动准入、provider overflow、归档失败、摘要 PTL、摘要输出截断/超限和普通摘要失败；失败事件按未提交状态记录零移除计数，而不会泄露私有摘要、工具结果、Skill 内容或 provider 异常正文。
+- 上下文压缩流事件扩展为可验收的完整 L1→L2→L3→L5 周期：同一 `cycle_id` 按固定 sequence 输出每级 `finished/skipped` 状态、Token 与消息前后值、输入外置数、工具结果/参数投影数、候选/保护消息数以及 L5 归档、round、摘要 revision/质量；L5 继续保留 `started/failed` 生命周期，并区分主动准入、provider overflow、归档失败、摘要 PTL、摘要输出截断/超限和普通摘要失败。事件不泄露用户正文、私有摘要、工具载荷、Skill 内容或 provider 异常正文。新增四个真实 Agent Run/API 场景和数值/顺序断言；LangSmith 由标准环境变量自动记录 Agent、模型、摘要和工具调用树，SSE 事件作为各级数据变化的确定性验收来源。
 - 新增 P3 工具历史投影：按 Claude Code 的 API round 边界校验已持久化工具协议，要求所有 `tool_call_id` 非空且全局唯一、每个 `ToolMessage` 在同一 round 内恰好匹配一次。L2 只处理最新用户请求之前已经闭合、非错误且非 `ask_user_question` 的历史 round；原 AI/Tool 消息和调用 ID 保持不变，仅将已写入线程隔离文件的大结果或大参数替换为短回执和可读取路径。未闭合、重复或跨 round 的工具结果会在主模型调用前以明确的协议错误终止，不再把损坏 checkpoint 发送给本地兼容模型。
 - 将项目上下文压缩入口重命名为 `ContextCompactionMiddleware` 和 `context_compaction.py`；主 Agent、SubAgent 与流事件测试统一使用新工厂，保留既有 checkpoint 状态键和压缩行为，为后续 L1/L2/L3/L5 控制器分阶段落地建立单一入口。
 - 调整 Agent 上下文准入校准：稳定校准键不再包含动态工具 schema，按请求规模桶保存 provider 相对保守 fallback 的最大正误差；schema 与 system hash 仅用于诊断，避免多 Skill/MCP 工具变化时丢失已验证的预算保护。

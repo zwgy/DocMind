@@ -1,0 +1,29 @@
+{
+  "name": "L3单用户轮次早期工具投影验收",
+  "threads": [
+    {
+      "name": "l3-current-turn-rounds",
+      "title": "L3单用户轮次早期工具投影验收-{tag}",
+      "turns": [
+        {
+          "name": "serial-tool-rounds",
+          "query": "执行 L3-{tag} 验收。严格一次只调用一个工具，收到上一个结果后才能继续下一个：依次使用 read_file 读取 /skills/visualization/SKILL.md、/skills/mindmap/SKILL.md、/skills/office-export/SKILL.md、/skills/knowledge-base/SKILL.md 和 /skills/image-gen/SKILL.md。不得并行调用。全部完成后只回答 L3-{tag}。",
+          "expect": {
+            "assistant_contains": ["L3-{tag}"],
+            "tools_include": ["read_file"],
+            "compaction": {
+              "level": "L3",
+              "status": "finished",
+              "min_values": {
+                "tool_results_projected": 1,
+                "protected_messages": 1,
+                "tokens_saved": 1
+              }
+            },
+            "compaction_order": ["L1", "L2", "L3", "L5"]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -99,7 +99,23 @@ L3 处理当前单条用户请求内的早期闭合 API round，仍只投影安�
 
 摘要 `finish_reason=length`、不遵守输出上限、普通生成失败或第二次 PTL 都不会提交退化 checkpoint，也不会调用主模型。九维标签不齐只记录 `format_unverified` 质量状态，不触发格式修复调用。L5 私有恢复段还会保留 `activated_skills` 对应的权威 `SKILL.md` 路径，要求模型继续相关步骤前重读；`SkillsMiddleware` 维护的激活状态和工具/MCP 绑定，以及 Todo、附件、artifact 等独立 state，不会被 `Overwrite(messages)` 覆盖。
 
-压缩期间会发布 `context_compaction` custom event。事件只包含层级、触发/失败分类、Token 计数和归档/round 数量，不包含摘要、工具结果或 Skill 正文；界面只需把 `started` 视为压缩中，并在 `finished` 或 `failed` 时结束等待状态，不应展示私有 checkpoint 内容。
+只有请求超过准入预算或进入 provider overflow 恢复时，压缩器才会发布一个完整的 `context_compaction` 事件周期。L1、L2、L3 各发布一条 `finished` 或 `skipped` 结果，L5 的归档与摘要耗时较长，因此发布 `started` 后再以 `finished` 或 `failed` 结束；若前三级已经满足预算，L5 发布 `skipped`。同一周期通过 `cycle_id` 关联，并固定按 `sequence=1/2/3/5` 排序。
+
+事件只包含层级、触发/失败分类、Token 前后值、消息数量、候选/保护消息数量、工具结果/参数投影数、归档/round 数量、摘要 revision 和安全的线程归档路径，不包含用户正文、摘要正文、工具参数、工具结果或 Skill 正文。`tokens_saved` 表示本级保守估算的释放量；L1 的 `input_externalized`、L2/L3 的 `tool_results_projected` 与 `tool_arguments_projected` 用于判断实际采用了哪类投影。界面只需把 `started` 视为压缩中，任何非 `started` 状态都结束等待提示，不应展示私有 checkpoint 内容。
+
+### LangSmith 与压缩验收
+
+项目没有维护一套专用 LangSmith callback；依赖中的 LangChain/LangGraph 与 LangSmith SDK 会在部署环境设置下自动记录 Agent、模型、摘要模型和工具调用树。内网部署按需在受保护的 `.env` 配置下列变量，并重建 `api`、`worker` 容器：
+
+```dotenv
+LANGSMITH_TRACING=true
+LANGSMITH_PROJECT=docmind
+LANGSMITH_API_KEY=<deployment-secret>
+```
+
+LangSmith 负责查看完整调用树和模型输入输出，`context_compaction` SSE 事件负责给出 L1/L2/L3/L5 的确定性前后差值；不能只凭 LangSmith 中是否出现摘要模型调用判断前三级是否执行。Agent Run 的 `run_id`、`request_id` 和 `thread_id` 会进入 LangGraph metadata，可用脚本输出的这些标识在 LangSmith 项目中关联同一次运行。
+
+真实 API 验收使用 `backend/scripts/validate_context_compaction_api.py --scenario-file <json>`。脚本创建可在 chat-iframe 回看的隔离会话，串行发送各轮问题，并支持 `expect.compaction.min_values` 与 `expect.compaction_order` 校验。版本库中的 L1/L2/L3/L5 场景位于 `backend/scripts/scenarios`；脚本日志只输出有界输入/回答和上述诊断字段，大正文仍留在线程文件与 LangSmith 权限边界内。
 
 ## 自定义中间件
 

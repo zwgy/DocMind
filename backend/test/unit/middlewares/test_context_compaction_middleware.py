@@ -353,9 +353,9 @@ def test_compaction_counts_final_request_and_commits_private_summary_after_succe
     assert isinstance(update["messages"], Overwrite)
     assert len(archive_backend.writes) == 1
     assert '"message_id":"user-old"' in archive_backend.writes[0][1]
-    assert [event["status"] for event in request.runtime.stream_events] == ["started", "finished"]
-    assert request.runtime.stream_events[0]["level"] == "L5"
-    assert request.runtime.stream_events[1]["archive_count"] == 1
+    l5_events = [event for event in request.runtime.stream_events if event["level"] == "L5"]
+    assert [event["status"] for event in l5_events] == ["started", "finished"]
+    assert l5_events[1]["archive_count"] == 1
 
 
 @pytest.mark.unit
@@ -439,9 +439,9 @@ async def test_archive_failure_is_reported_as_compaction_lifecycle(
                 lambda _prepared: pytest.fail("archive failure must precede the main model call"),
             )
 
-    assert [event["status"] for event in request.runtime.stream_events] == ["started", "failed"]
-    assert request.runtime.stream_events[0]["level"] == "L5"
-    failure = request.runtime.stream_events[1]
+    l5_events = [event for event in request.runtime.stream_events if event["level"] == "L5"]
+    assert [event["status"] for event in l5_events] == ["started", "failed"]
+    failure = l5_events[1]
     assert failure["reason"] == "archive_failure"
     assert failure["tokens_after"] == failure["tokens_before"]
     assert failure["messages_removed"] == 0
@@ -602,8 +602,9 @@ async def test_summary_generation_failure_does_not_commit_or_call_main_model(
     assert len(archive_backend.writes) == 1
     assert not invoked
     assert len(model.prompts) == 1
-    assert [event["status"] for event in request.runtime.stream_events] == ["started", "failed"]
-    failure = request.runtime.stream_events[1]
+    l5_events = [event for event in request.runtime.stream_events if event["level"] == "L5"]
+    assert [event["status"] for event in l5_events] == ["started", "failed"]
+    failure = l5_events[1]
     assert failure["reason"] == "summary_failure"
     assert failure["tokens_after"] == failure["tokens_before"]
     assert failure["messages_removed"] == 0
@@ -714,8 +715,9 @@ def test_summary_prompt_too_long_emits_a_classified_failure_event() -> None:
         )
 
     assert len(model.prompts) == 1
-    assert [event["status"] for event in request.runtime.stream_events] == ["started", "failed"]
-    assert request.runtime.stream_events[1]["reason"] == "summary_prompt_too_long"
+    l5_events = [event for event in request.runtime.stream_events if event["level"] == "L5"]
+    assert [event["status"] for event in l5_events] == ["started", "failed"]
+    assert l5_events[1]["reason"] == "summary_prompt_too_long"
 
 
 @pytest.mark.unit
@@ -756,8 +758,9 @@ async def test_truncated_summary_output_does_not_commit_checkpoint(
 
     assert len(archive_backend.writes) == 1
     assert not main_model_called
-    assert [event["status"] for event in request.runtime.stream_events] == ["started", "failed"]
-    assert request.runtime.stream_events[1]["reason"] == "summary_output_truncated"
+    l5_events = [event for event in request.runtime.stream_events if event["level"] == "L5"]
+    assert [event["status"] for event in l5_events] == ["started", "failed"]
+    assert l5_events[1]["reason"] == "summary_output_truncated"
 
 
 @pytest.mark.unit
@@ -1122,6 +1125,11 @@ def test_final_request_replaces_large_source_window_without_second_offload(monke
     assert '"path":"/outputs/a.txt"' in captured["messages"][-1].content
     assert raw_result not in captured["messages"][-1].content
     assert raw_result not in result.command.update["messages"].value[-2].content
+    l1_event = next(event for event in request.runtime.stream_events if event["level"] == "L1")
+    assert l1_event["status"] == "finished"
+    assert l1_event["tool_results_projected"] == 1
+    assert l1_event["tokens_saved"] > 0
+    assert raw_result not in str(request.runtime.stream_events)
 
 
 @pytest.mark.unit
@@ -1155,6 +1163,13 @@ def test_l2_projects_old_completed_tool_result_and_keeps_tool_round(archive_back
     assert raw_result not in old_round[2].content
     assert archive_backend.writes[0][1] == raw_result
     assert raw_result not in result.command.update["messages"].value[2].content
+    assert [event["level"] for event in request.runtime.stream_events] == ["L1", "L2", "L3", "L5"]
+    l2_event = request.runtime.stream_events[1]
+    assert l2_event["status"] == "finished"
+    assert l2_event["tool_results_projected"] == 1
+    assert l2_event["tokens_after"] < l2_event["tokens_before"]
+    assert request.runtime.stream_events[-1]["status"] == "skipped"
+    assert raw_result not in str(request.runtime.stream_events)
 
 
 @pytest.mark.unit
@@ -1191,6 +1206,42 @@ def test_l2_projects_old_completed_tool_arguments_and_keeps_readable_receipt(arc
     assert saved_args["_yuxi_saved_arguments_path"].endswith(".txt")
     assert raw_definition not in str(captured["messages"][1].tool_calls)
     assert any('"content":"step definition\\n' in content for _, content in archive_backend.writes)
+    l2_event = next(event for event in request.runtime.stream_events if event["level"] == "L2")
+    assert l2_event["status"] == "finished"
+    assert l2_event["tool_arguments_projected"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_projection_events_are_identical_for_sync_and_async_paths() -> None:
+    raw_result = "historical result\n" * 1_000
+    messages = [
+        HumanMessage(content="old request", id="old-user"),
+        AIMessage(
+            content="",
+            id="old-tool-call",
+            tool_calls=[{"id": "old-call", "name": "query_kb", "args": {"query": "architecture"}}],
+        ),
+        ToolMessage(content=raw_result, tool_call_id="old-call", name="query_kb", id="old-tool-result"),
+        AIMessage(content="old answer", id="old-final-answer"),
+        HumanMessage(content="current request", id="current-user"),
+    ]
+    sync_model, sync_request = _request(messages)
+    async_model, async_request = _request(messages)
+
+    async def async_handler(_prepared: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    create_summary_middleware(model=sync_model, summary_prompt="summary\n{messages}").wrap_model_call(
+        sync_request,
+        lambda _prepared: ModelResponse(result=[AIMessage(content="answer")]),
+    )
+    await create_summary_middleware(model=async_model, summary_prompt="summary\n{messages}").awrap_model_call(
+        async_request,
+        async_handler,
+    )
+
+    assert sync_request.runtime.stream_events == async_request.runtime.stream_events
 
 
 @pytest.mark.unit
@@ -1226,6 +1277,10 @@ def test_l3_projects_early_rounds_of_a_single_human_request_and_protects_tail(
     assert captured["messages"][-2].tool_calls[0]["args"] == {"content": "small"}
     assert captured["messages"][-1].tool_call_id == "call-29"
     assert archive_backend.writes
+    l3_event = next(event for event in request.runtime.stream_events if event["level"] == "L3")
+    assert l3_event["status"] == "finished"
+    assert l3_event["tool_arguments_projected"] > 0
+    assert l3_event["protected_messages"] == 4
 
 
 @pytest.mark.unit
@@ -1316,6 +1371,10 @@ def test_current_oversized_user_input_is_persisted_before_model_call(monkeypatch
     assert "/outputs/conversation_history/user-current-" in backend.writes[0][0]
     assert "stored outside the active context" in captured["messages"][0].content
     assert raw_input not in result.command.update["messages"].value[0].content
+    l1_event = next(event for event in request.runtime.stream_events if event["level"] == "L1")
+    assert l1_event["status"] == "finished"
+    assert l1_event["input_externalized"] == 1
+    assert l1_event["tokens_saved"] > 0
 
 
 @pytest.mark.unit

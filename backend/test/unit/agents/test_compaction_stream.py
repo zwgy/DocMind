@@ -78,14 +78,18 @@ async def test_compaction_lifecycle_is_emitted_as_real_langgraph_custom_events(m
             events.append(event["params"]["data"])
 
     assert model.summary_calls > 0
-    assert events[0]["type"] == "context_compaction"
-    assert events[0]["status"] == "started"
-    assert events[0]["level"] == "L5"
-    assert events[0]["reason"] == "proactive_admission"
-    assert events[1]["type"] == "context_compaction"
-    assert events[1]["status"] == "finished"
-    assert events[1]["level"] == "L5"
-    assert events[1]["tokens_after"] < events[1]["tokens_before"]
-    assert events[1]["messages_removed"] > 0
-    assert events[1]["rounds_removed"] > 0
-    assert events[1]["archive_count"] == 1
+    assert [event["level"] for event in events] == ["L1", "L2", "L3", "L5", "L5"]
+    assert [event["sequence"] for event in events] == [1, 2, 3, 5, 5]
+    assert [event["status"] for event in events[:3]] == ["skipped", "skipped", "skipped"]
+    assert events[3]["status"] == "started"
+    assert events[3]["reason"] == "proactive_admission"
+    assert events[4]["type"] == "context_compaction"
+    assert events[4]["status"] == "finished"
+    assert events[4]["tokens_after"] < events[4]["tokens_before"]
+    assert events[4]["tokens_saved"] == events[4]["tokens_before"] - events[4]["tokens_after"]
+    assert events[4]["messages_removed"] > 0
+    assert events[4]["rounds_removed"] > 0
+    assert events[4]["archive_count"] == 1
+    # 自定义事件只允许携带诊断字段，不能把旧问题或旧回答正文复制到 SSE。
+    assert "旧问题" not in str(events)
+    assert "旧回答" not in str(events)

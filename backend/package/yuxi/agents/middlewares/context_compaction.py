@@ -430,6 +430,79 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         return {"type": "context_compaction", "status": status, **metrics}
 
     @staticmethod
+    def _projected_payload_counts(
+        before: list[AnyMessage],
+        after: list[AnyMessage],
+    ) -> tuple[int, int]:
+        """统计本级实际替换的载荷数量，不把被替换正文复制进诊断事件。"""
+        tool_results = sum(
+            isinstance(old, ToolMessage)
+            and isinstance(new, ToolMessage)
+            and not old.additional_kwargs.get(_TOOL_RESULT_SAVED_MARKER)
+            and bool(new.additional_kwargs.get(_TOOL_RESULT_SAVED_MARKER))
+            for old, new in zip(before, after)
+        )
+        old_saved_arguments = {
+            str(call.get("id"))
+            for message in before
+            if isinstance(message, AIMessage)
+            for call in message.tool_calls or []
+            if isinstance(call, dict)
+            and isinstance(call.get("args"), dict)
+            and _TOOL_CALL_ARGUMENTS_SAVED_KEY in call["args"]
+        }
+        new_saved_arguments = {
+            str(call.get("id"))
+            for message in after
+            if isinstance(message, AIMessage)
+            for call in message.tool_calls or []
+            if isinstance(call, dict)
+            and isinstance(call.get("args"), dict)
+            and _TOOL_CALL_ARGUMENTS_SAVED_KEY in call["args"]
+        }
+        return tool_results, len(new_saved_arguments - old_saved_arguments)
+
+    def _emit_projection_result(
+        self,
+        request: ModelRequest,
+        *,
+        level: str,
+        sequence: int,
+        cycle_id: str,
+        reason: str,
+        summary: str,
+        before: list[AnyMessage],
+        after: list[AnyMessage],
+        candidate_messages: int,
+        protected_messages: int = 0,
+        input_externalized: bool = False,
+    ) -> None:
+        """发布 L1/L2/L3 的确定性前后差值，供 SSE 验收和链路追踪关联。"""
+        tokens_before = self._request_tokens(self._request_with_summary(request, messages=before, summary=summary))
+        tokens_after = self._request_tokens(self._request_with_summary(request, messages=after, summary=summary))
+        tool_results, tool_arguments = self._projected_payload_counts(before, after)
+        changed = input_externalized or tool_results > 0 or tool_arguments > 0
+        request.runtime.stream_writer(
+            self._compaction_event(
+                "finished" if changed else "skipped",
+                level=level,
+                sequence=sequence,
+                cycle_id=cycle_id,
+                reason=reason,
+                tokens_before=tokens_before,
+                tokens_after=tokens_after,
+                tokens_saved=max(0, tokens_before - tokens_after),
+                messages_before=len(before),
+                messages_after=len(after),
+                candidate_messages=candidate_messages,
+                protected_messages=protected_messages,
+                input_externalized=int(input_externalized),
+                tool_results_projected=tool_results,
+                tool_arguments_projected=tool_arguments,
+            )
+        )
+
+    @staticmethod
     def _compaction_failure_reason(error: Exception, *, archive_completed: bool) -> str:
         """只暴露粗粒度失败分类，不泄露 provider 异常正文或会话内容。"""
         if not archive_completed:
@@ -1184,6 +1257,22 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         ensure_fixed_context_fits(request)
         state = request.state
         summary = str(state.get("context_summary") or "").strip()
+        reason = "provider_overflow" if force_compaction else "proactive_admission"
+        initial_messages = list(request.messages)
+        initial_tokens = self._request_tokens(
+            self._request_with_summary(request, messages=initial_messages, summary=summary)
+        )
+        compaction_cycle_active = force_compaction or initial_tokens > budget.prompt_budget
+        latest_identifier = (
+            _message_identifier(initial_messages[-1], len(initial_messages) - 1) if initial_messages else "empty"
+        )
+        cycle_key = (
+            f"{state.get('context_revision', 0)}:{latest_identifier}:"
+            f"{len(initial_messages)}:{initial_tokens}:{reason}"
+        )
+        cycle_id = hashlib.sha256(cycle_key.encode()).hexdigest()[:12]
+
+        l1_before = initial_messages
         survivors, input_externalized = self._externalize_current_input(request, budget=budget)
         current_projection_indexes, current_turn_indexes = self._current_projection_message_indexes(survivors)
         survivors, tool_results_shrunk = self._shrink_tool_results(
@@ -1200,8 +1289,24 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             budget=budget,
             allowed_message_indexes=current_turn_indexes,
         )
+        if compaction_cycle_active:
+            self._emit_projection_result(
+                request,
+                level="L1",
+                sequence=1,
+                cycle_id=cycle_id,
+                reason=reason,
+                summary=summary,
+                before=l1_before,
+                after=survivors,
+                candidate_messages=len(current_turn_indexes),
+                protected_messages=len(current_turn_indexes),
+                input_externalized=input_externalized,
+            )
+
         # L2 不能按 Human turn 整段删除：每个历史 API round 都保留，只把已归档的
         # 大载荷替换成短回执。这样单轮工具协议仍是完整的，必要时模型也有路径回读。
+        l2_before = list(survivors)
         historical_indexes = self._historical_projectable_message_indexes(survivors)
         survivors, historical_tool_results_shrunk = self._shrink_tool_results(
             request,
@@ -1219,6 +1324,20 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             allowed_message_indexes=historical_indexes,
             oldest_first=True,
         )
+        if compaction_cycle_active:
+            self._emit_projection_result(
+                request,
+                level="L2",
+                sequence=2,
+                cycle_id=cycle_id,
+                reason=reason,
+                summary=summary,
+                before=l2_before,
+                after=survivors,
+                candidate_messages=len(historical_indexes),
+            )
+
+        l3_before = list(survivors)
         survivors, current_projection_results_shrunk = self._shrink_tool_results(
             request,
             messages=survivors,
@@ -1235,8 +1354,42 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             allowed_message_indexes=current_projection_indexes,
             oldest_first=True,
         )
+        if compaction_cycle_active:
+            self._emit_projection_result(
+                request,
+                level="L3",
+                sequence=3,
+                cycle_id=cycle_id,
+                reason=reason,
+                summary=summary,
+                before=l3_before,
+                after=survivors,
+                candidate_messages=len(current_projection_indexes),
+                protected_messages=len(current_turn_indexes),
+            )
+
         prepared = self._request_with_summary(request, messages=survivors, summary=summary)
         if self._request_tokens(prepared) <= budget.prompt_budget and not force_compaction:
+            if compaction_cycle_active:
+                tokens_after = self._request_tokens(prepared)
+                request.runtime.stream_writer(
+                    self._compaction_event(
+                        "skipped",
+                        level="L5",
+                        sequence=5,
+                        cycle_id=cycle_id,
+                        reason="earlier_level_satisfied_budget",
+                        tokens_before=tokens_after,
+                        tokens_after=tokens_after,
+                        tokens_saved=0,
+                        messages_before=len(survivors),
+                        messages_after=len(survivors),
+                        messages_removed=0,
+                        rounds_removed=0,
+                        archive_count=0,
+                        summary_revision=int(state.get("context_revision") or 0),
+                    )
+                )
             if not (
                 input_externalized
                 or tool_results_shrunk
@@ -1296,8 +1449,11 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 self._compaction_event(
                     "started",
                     level="L5",
-                    reason="provider_overflow" if force_compaction else "proactive_admission",
+                    sequence=5,
+                    cycle_id=cycle_id,
+                    reason=reason,
                     tokens_before=tokens_before,
+                    messages_before=len(source_messages),
                 )
             )
             archive_completed = False
@@ -1322,27 +1478,42 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     self._compaction_event(
                         "failed",
                         level="L5",
+                        sequence=5,
+                        cycle_id=cycle_id,
                         reason=self._compaction_failure_reason(error, archive_completed=archive_completed),
                         tokens_before=tokens_before,
                         tokens_after=tokens_before,
+                        tokens_saved=0,
+                        messages_before=len(source_messages),
+                        messages_after=len(source_messages),
                         messages_removed=0,
                         rounds_removed=0,
                         archive_count=int(archive_completed),
+                        summary_revision=int(state.get("context_revision") or 0),
                     )
                 )
                 raise
             else:
+                tokens_after = self._request_tokens(
+                    self._request_with_summary(request, messages=survivors, summary=summary)
+                )
                 request.runtime.stream_writer(
                     self._compaction_event(
                         "finished",
                         level="L5",
+                        sequence=5,
+                        cycle_id=cycle_id,
                         tokens_before=tokens_before,
-                        tokens_after=self._request_tokens(
-                            self._request_with_summary(request, messages=survivors, summary=summary)
-                        ),
+                        tokens_after=tokens_after,
+                        tokens_saved=max(0, tokens_before - tokens_after),
+                        messages_before=len(source_messages),
+                        messages_after=len(survivors),
                         messages_removed=len(compacted),
                         rounds_removed=len(compacted_rounds),
                         archive_count=1,
+                        archive_path=archive_path,
+                        summary_revision=next_revision,
+                        summary_quality=summary_quality,
                     )
                 )
             prepared = self._request_with_summary(request, messages=survivors, summary=summary)
@@ -1374,6 +1545,22 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         ensure_fixed_context_fits(request)
         state = request.state
         summary = str(state.get("context_summary") or "").strip()
+        reason = "provider_overflow" if force_compaction else "proactive_admission"
+        initial_messages = list(request.messages)
+        initial_tokens = self._request_tokens(
+            self._request_with_summary(request, messages=initial_messages, summary=summary)
+        )
+        compaction_cycle_active = force_compaction or initial_tokens > budget.prompt_budget
+        latest_identifier = (
+            _message_identifier(initial_messages[-1], len(initial_messages) - 1) if initial_messages else "empty"
+        )
+        cycle_key = (
+            f"{state.get('context_revision', 0)}:{latest_identifier}:"
+            f"{len(initial_messages)}:{initial_tokens}:{reason}"
+        )
+        cycle_id = hashlib.sha256(cycle_key.encode()).hexdigest()[:12]
+
+        l1_before = initial_messages
         survivors, input_externalized = await self._aexternalize_current_input(request, budget=budget)
         current_projection_indexes, current_turn_indexes = self._current_projection_message_indexes(survivors)
         survivors, tool_results_shrunk = await self._ashrink_tool_results(
@@ -1390,6 +1577,22 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             budget=budget,
             allowed_message_indexes=current_turn_indexes,
         )
+        if compaction_cycle_active:
+            self._emit_projection_result(
+                request,
+                level="L1",
+                sequence=1,
+                cycle_id=cycle_id,
+                reason=reason,
+                summary=summary,
+                before=l1_before,
+                after=survivors,
+                candidate_messages=len(current_turn_indexes),
+                protected_messages=len(current_turn_indexes),
+                input_externalized=input_externalized,
+            )
+
+        l2_before = list(survivors)
         historical_indexes = self._historical_projectable_message_indexes(survivors)
         survivors, historical_tool_results_shrunk = await self._ashrink_tool_results(
             request,
@@ -1407,6 +1610,20 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             allowed_message_indexes=historical_indexes,
             oldest_first=True,
         )
+        if compaction_cycle_active:
+            self._emit_projection_result(
+                request,
+                level="L2",
+                sequence=2,
+                cycle_id=cycle_id,
+                reason=reason,
+                summary=summary,
+                before=l2_before,
+                after=survivors,
+                candidate_messages=len(historical_indexes),
+            )
+
+        l3_before = list(survivors)
         survivors, current_projection_results_shrunk = await self._ashrink_tool_results(
             request,
             messages=survivors,
@@ -1423,8 +1640,42 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             allowed_message_indexes=current_projection_indexes,
             oldest_first=True,
         )
+        if compaction_cycle_active:
+            self._emit_projection_result(
+                request,
+                level="L3",
+                sequence=3,
+                cycle_id=cycle_id,
+                reason=reason,
+                summary=summary,
+                before=l3_before,
+                after=survivors,
+                candidate_messages=len(current_projection_indexes),
+                protected_messages=len(current_turn_indexes),
+            )
+
         prepared = self._request_with_summary(request, messages=survivors, summary=summary)
         if self._request_tokens(prepared) <= budget.prompt_budget and not force_compaction:
+            if compaction_cycle_active:
+                tokens_after = self._request_tokens(prepared)
+                request.runtime.stream_writer(
+                    self._compaction_event(
+                        "skipped",
+                        level="L5",
+                        sequence=5,
+                        cycle_id=cycle_id,
+                        reason="earlier_level_satisfied_budget",
+                        tokens_before=tokens_after,
+                        tokens_after=tokens_after,
+                        tokens_saved=0,
+                        messages_before=len(survivors),
+                        messages_after=len(survivors),
+                        messages_removed=0,
+                        rounds_removed=0,
+                        archive_count=0,
+                        summary_revision=int(state.get("context_revision") or 0),
+                    )
+                )
             if not (
                 input_externalized
                 or tool_results_shrunk
@@ -1479,8 +1730,11 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 self._compaction_event(
                     "started",
                     level="L5",
-                    reason="provider_overflow" if force_compaction else "proactive_admission",
+                    sequence=5,
+                    cycle_id=cycle_id,
+                    reason=reason,
                     tokens_before=tokens_before,
+                    messages_before=len(source_messages),
                 )
             )
             archive_completed = False
@@ -1510,27 +1764,42 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     self._compaction_event(
                         "failed",
                         level="L5",
+                        sequence=5,
+                        cycle_id=cycle_id,
                         reason=self._compaction_failure_reason(error, archive_completed=archive_completed),
                         tokens_before=tokens_before,
                         tokens_after=tokens_before,
+                        tokens_saved=0,
+                        messages_before=len(source_messages),
+                        messages_after=len(source_messages),
                         messages_removed=0,
                         rounds_removed=0,
                         archive_count=int(archive_completed),
+                        summary_revision=int(state.get("context_revision") or 0),
                     )
                 )
                 raise
             else:
+                tokens_after = self._request_tokens(
+                    self._request_with_summary(request, messages=survivors, summary=summary)
+                )
                 request.runtime.stream_writer(
                     self._compaction_event(
                         "finished",
                         level="L5",
+                        sequence=5,
+                        cycle_id=cycle_id,
                         tokens_before=tokens_before,
-                        tokens_after=self._request_tokens(
-                            self._request_with_summary(request, messages=survivors, summary=summary)
-                        ),
+                        tokens_after=tokens_after,
+                        tokens_saved=max(0, tokens_before - tokens_after),
+                        messages_before=len(source_messages),
+                        messages_after=len(survivors),
                         messages_removed=len(compacted),
                         rounds_removed=len(compacted_rounds),
                         archive_count=1,
+                        archive_path=archive_path,
+                        summary_revision=next_revision,
+                        summary_quality=summary_quality,
                     )
                 )
             prepared = self._request_with_summary(request, messages=survivors, summary=summary)

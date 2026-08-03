@@ -84,12 +84,25 @@ def _collect_event_evidence(payload: dict[str, Any], evidence: RunEvidence) -> N
                 for key in (
                     "status",
                     "level",
+                    "sequence",
+                    "cycle_id",
                     "reason",
                     "tokens_before",
                     "tokens_after",
+                    "tokens_saved",
+                    "messages_before",
+                    "messages_after",
+                    "candidate_messages",
+                    "protected_messages",
+                    "input_externalized",
+                    "tool_results_projected",
+                    "tool_arguments_projected",
                     "messages_removed",
                     "rounds_removed",
                     "archive_count",
+                    "archive_path",
+                    "summary_revision",
+                    "summary_quality",
                 )
                 if item.get(key) is not None
             }
@@ -338,6 +351,7 @@ async def _validate_scenario_turn(
         "tools_include",
         "tools_exclude",
         "compaction",
+        "compaction_order",
         "files",
     }
     unknown_fields = set(expect) - allowed_fields
@@ -385,14 +399,44 @@ async def _validate_scenario_turn(
         min_count = item.get("min_count", 1)
         if not isinstance(min_count, int) or min_count < 1:
             raise ValueError("expect.compaction.min_count 必须是大于 0 的整数")
-        criteria = {key: value for key, value in item.items() if key != "min_count"}
+        min_values = item.get("min_values", {})
+        if not isinstance(min_values, dict) or not all(
+            isinstance(key, str) and isinstance(value, (int, float)) and not isinstance(value, bool)
+            for key, value in min_values.items()
+        ):
+            raise ValueError("expect.compaction.min_values 必须是数值字段 object")
+        criteria = {key: value for key, value in item.items() if key not in {"min_count", "min_values"}}
         if not criteria:
             raise ValueError("expect.compaction 至少需要一个匹配字段")
-        actual_count = sum(
-            all(event.get(key) == value for key, value in criteria.items()) for event in evidence.compaction_events
-        )
+        matching_events = [
+            event
+            for event in evidence.compaction_events
+            if all(event.get(key) == value for key, value in criteria.items())
+            and all(
+                isinstance(event.get(key), (int, float))
+                and not isinstance(event.get(key), bool)
+                and event[key] >= minimum
+                for key, minimum in min_values.items()
+            )
+        ]
+        actual_count = len(matching_events)
         if actual_count < min_count:
-            failures.append(f"压缩事件 {criteria} 只出现 {actual_count} 次，期望至少 {min_count} 次")
+            failures.append(
+                f"压缩事件 {criteria} 且最小值 {min_values} 只出现 {actual_count} 次，期望至少 {min_count} 次"
+            )
+
+    expected_order = _string_list(expect.get("compaction_order"), "expect.compaction_order")
+    if expected_order:
+        events_by_cycle: dict[str, list[str]] = {}
+        for event in evidence.compaction_events:
+            cycle_id = event.get("cycle_id")
+            level = event.get("level")
+            if isinstance(cycle_id, str) and isinstance(level, str):
+                levels = events_by_cycle.setdefault(cycle_id, [])
+                if not levels or levels[-1] != level:
+                    levels.append(level)
+        if expected_order not in events_by_cycle.values():
+            failures.append(f"没有压缩周期满足层级顺序 {expected_order}: {events_by_cycle}")
 
     file_expectations = expect.get("files", [])
     if not isinstance(file_expectations, list):
@@ -436,7 +480,9 @@ async def _run_configured_scenario(args: argparse.Namespace) -> None:
 
         for thread_index, definition in enumerate(scenario["threads"], start=1):
             thread_name = definition["name"].strip()
-            bindings = {"tag": tag, "thread_name": thread_name}
+            filler_unit = "上下文压力材料仅用于触发预算准入，不改变本轮明确约束。"
+            payload = (filler_unit * (args.payload_chars // len(filler_unit) + 1))[: args.payload_chars]
+            bindings = {"tag": tag, "thread_name": thread_name, "payload": payload}
             metadata = _render_scenario_value(definition.get("metadata", {}), bindings)
             if not isinstance(metadata, dict):
                 raise ValueError(f"threads[{thread_index}].metadata 必须是 object")
