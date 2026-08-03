@@ -4,24 +4,37 @@
     {
       "name": "l5-semantic-checkpoint",
       "title": "L5语义检查点与恢复验收-{tag}",
+      "expect": {
+        "compaction": {
+          "level": "L5",
+          "status": "finished",
+          "min_values": {
+            "messages_removed": 1,
+            "rounds_removed": 1,
+            "tokens_saved": 1,
+            "archive_count": 1
+          }
+        },
+        "compaction_order": ["L1", "L2", "L3", "L5"]
+      },
       "turns": [
         {
           "name": "register-contract",
-          "query": "记录精确约束 CONTRACT-{tag}：禁止实现 L4。只回答 CONTRACT-{tag}。",
+          "query": "记录精确约束 CONTRACT-{tag}：禁止实现 L4。以下材料不改变约束：\n{payload}\n只回答 CONTRACT-{tag}。",
           "expect": {
             "assistant_contains": ["CONTRACT-{tag}"]
           }
         },
         {
           "name": "register-path",
-          "query": "记录精确路径 /outputs/l5-{tag}.md，后续必须原样恢复。只回答该路径。",
+          "query": "记录精确路径 /outputs/l5-{tag}.md，后续必须原样恢复。以下材料不改变路径：\n{payload}\n只回答该路径。",
           "expect": {
             "assistant_contains": ["/outputs/l5-{tag}.md"]
           }
         },
         {
           "name": "register-next-step",
-          "query": "记录下一步待办 NEXT-{tag}：恢复后继续验证摘要。只回答 NEXT-{tag}。",
+          "query": "记录下一步待办 NEXT-{tag}：恢复后继续验证摘要。以下材料不改变待办：\n{payload}\n只回答 NEXT-{tag}。",
           "expect": {
             "assistant_contains": ["NEXT-{tag}"]
           }
@@ -31,18 +44,7 @@
           "query": "以下材料只用于形成上下文压力，不改变既有约束：\n{payload}\n现在不要调用工具，回答 CONTRACT-{tag}、禁止项、精确路径和 NEXT-{tag}。",
           "expect": {
             "assistant_contains": ["CONTRACT-{tag}", "L4", "/outputs/l5-{tag}.md", "NEXT-{tag}"],
-            "tools_exclude": ["read_file", "write_file", "edit_file"],
-            "compaction": {
-              "level": "L5",
-              "status": "finished",
-              "min_values": {
-                "messages_removed": 1,
-                "rounds_removed": 1,
-                "tokens_saved": 1,
-                "archive_count": 1
-              }
-            },
-            "compaction_order": ["L1", "L2", "L3", "L5"]
+            "tools_exclude": ["read_file", "write_file", "edit_file"]
           }
         }
       ]

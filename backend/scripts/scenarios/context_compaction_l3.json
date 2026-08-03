@@ -4,19 +4,13 @@
     {
       "name": "l3-current-turn-rounds",
       "title": "L3单用户轮次早期工具投影验收-{tag}",
-      "attachments": [
-        {
-          "file_name": "l3-rounds-{tag}.txt",
-          "content": "L3-{tag}\n{payload}"
-        }
-      ],
       "turns": [
         {
           "name": "serial-tool-rounds",
-          "query": "执行 L3-{tag} 验收。严格一次只调用一个工具，收到上一个结果后才能继续：依次使用 read_file 读取 {attachment_path} 的 offset/limit 窗口 0/100、100/100、200/100、300/100、400/100；不得并行调用。全部完成后只回答 L3-{tag}。",
+          "query": "执行 L3-{tag} 验收。严格一次只调用一个工具并等待结果，不得并行。先依次使用 execute 执行四条大结果命令 python -c \"print('L3-{tag}-STEP-01' + 'X' * 6000)\"，后续三条只把 STEP-01 改为 STEP-02 至 STEP-04；再依次执行十条小结果命令 python -c \"print('L3-{tag}-STEP-05')\"，后续九条只把 STEP-05 改为 STEP-06 至 STEP-14。十四次全部完成后只回答 L3-{tag}。",
           "expect": {
             "assistant_contains": ["L3-{tag}"],
-            "tools_include": ["read_file"],
+            "tools_include": ["execute"],
             "compaction": {
               "level": "L3",
               "status": "finished",

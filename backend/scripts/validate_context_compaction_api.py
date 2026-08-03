@@ -21,6 +21,7 @@ class RunEvidence:
     """只保存验收所需诊断，不把大段模型正文复制到脚本输出。"""
 
     run_id: str
+    request_id: str = ""
     status: str = ""
     elapsed_seconds: float = 0.0
     compaction_events: list[dict[str, Any]] = field(default_factory=list)
@@ -163,6 +164,7 @@ async def _create_run(
     tag: str,
 ) -> RunEvidence:
     started = time.monotonic()
+    request_id = f"ctx-{tag}-{uuid.uuid4().hex[:12]}"
     run_payload = await _request_json(
         client,
         "POST",
@@ -174,7 +176,7 @@ async def _create_run(
             "thread_id": thread_id,
             "meta": {
                 # 运行记录列限制为 VARCHAR(64)，验收 ID 保留场景前缀和随机段即可保证可追踪且唯一。
-                "request_id": f"ctx-{tag}-{uuid.uuid4().hex[:12]}",
+                "request_id": request_id,
                 "source": "chat-iframe",
                 "iframe_context": {
                     "page": {
@@ -192,7 +194,8 @@ async def _create_run(
     if not run_id:
         raise RuntimeError(f"创建 Agent Run 后没有 run_id: {run_payload}")
 
-    evidence = RunEvidence(run_id=run_id)
+    # 以服务端回显为准，确保脚本报告能直接对应 LangSmith metadata 和后端日志。
+    evidence = RunEvidence(run_id=run_id, request_id=str(run_payload.get("request_id") or request_id))
     try:
         async with asyncio.timeout(client.timeout.read or 300.0):
             async with client.stream(
@@ -290,6 +293,8 @@ def _load_scenario(path: Path) -> dict[str, Any]:
                 or not isinstance(attachment.get("content"), str)
             ):
                 raise ValueError(f"threads[{thread_index}].attachments 必须提供 file_name 和 content")
+        if "expect" in thread and not isinstance(thread["expect"], dict):
+            raise ValueError(f"threads[{thread_index}].expect 必须是 object")
         for turn_index, turn in enumerate(turns, start=1):
             if not isinstance(turn, dict) or not isinstance(turn.get("query"), str) or not turn["query"].strip():
                 raise ValueError(f"threads[{thread_index}].turns[{turn_index}] 必须提供非空 query")
@@ -522,6 +527,8 @@ async def _run_configured_scenario(args: argparse.Namespace) -> None:
                 "title": title,
                 "turns": [],
             }
+            thread_evidences: list[RunEvidence] = []
+            latest_assistant_text = ""
             reports.append(thread_report)
             print(
                 json.dumps(
@@ -580,6 +587,8 @@ async def _run_configured_scenario(args: argparse.Namespace) -> None:
                         tag=tag,
                     )
                     assistant_text = await _latest_assistant_text(client, headers, thread_id)
+                    latest_assistant_text = assistant_text
+                    thread_evidences.append(evidence)
                     turn_failures = await _validate_scenario_turn(
                         client,
                         headers,
@@ -591,6 +600,7 @@ async def _run_configured_scenario(args: argparse.Namespace) -> None:
                     turn_report = {
                         "turn": turn_name,
                         "run_id": evidence.run_id,
+                        "request_id": evidence.request_id,
                         "status": evidence.status,
                         "seconds": evidence.elapsed_seconds,
                         "tools": sorted(evidence.tool_names),
@@ -617,6 +627,30 @@ async def _run_configured_scenario(args: argparse.Namespace) -> None:
                     flush=True,
                 )
                 failures.extend(f"{thread_name}/{turn_name}: {message}" for message in turn_failures)
+
+            thread_expect = _render_scenario_value(definition.get("expect", {}), bindings)
+            if not isinstance(thread_expect, dict):
+                raise ValueError(f"threads[{thread_index}].expect 必须是 object")
+            if thread_expect:
+                aggregate_evidence = RunEvidence(
+                    run_id=f"thread:{thread_id}",
+                    status="completed",
+                    compaction_events=[
+                        event for evidence in thread_evidences for event in evidence.compaction_events
+                    ],
+                    tool_names=set().union(*(evidence.tool_names for evidence in thread_evidences)),
+                )
+                thread_failures = await _validate_scenario_turn(
+                    client,
+                    headers,
+                    thread_id=thread_id,
+                    assistant_text=latest_assistant_text,
+                    evidence=aggregate_evidence,
+                    expect=thread_expect,
+                )
+                thread_report["expectation_passed"] = not thread_failures
+                thread_report["expectation_failures"] = thread_failures
+                failures.extend(f"{thread_name}/thread: {message}" for message in thread_failures)
 
         visible_threads = await client.get(
             "/api/chat/threads",
@@ -711,6 +745,7 @@ async def _main(args: argparse.Namespace) -> None:
                 {
                     "phase": "bootstrap",
                     "run_id": bootstrap_evidence.run_id,
+                    "request_id": bootstrap_evidence.request_id,
                     "seconds": bootstrap_evidence.elapsed_seconds,
                     "tools": sorted(bootstrap_evidence.tool_names),
                     "compaction": bootstrap_evidence.compaction_events,
@@ -749,6 +784,7 @@ async def _main(args: argparse.Namespace) -> None:
                         "phase": "growth",
                         "round": round_index,
                         "run_id": evidence.run_id,
+                        "request_id": evidence.request_id,
                         "seconds": evidence.elapsed_seconds,
                         "compaction": evidence.compaction_events,
                     },

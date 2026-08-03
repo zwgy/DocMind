@@ -113,7 +113,7 @@ LANGSMITH_PROJECT=docmind
 LANGSMITH_API_KEY=<deployment-secret>
 ```
 
-LangSmith 负责查看完整调用树和模型输入输出，`context_compaction` SSE 事件负责给出 L1/L2/L3/L5 的确定性前后差值；不能只凭 LangSmith 中是否出现摘要模型调用判断前三级是否执行。Agent Run 的 `run_id`、`request_id` 和 `thread_id` 会进入 LangGraph metadata，可用脚本输出的这些标识在 LangSmith 项目中关联同一次运行。
+LangSmith 负责查看完整调用树和模型输入输出，`context_compaction` SSE 事件负责给出 L1/L2/L3/L5 的确定性前后差值；不能只凭 LangSmith 中是否出现摘要模型调用判断前三级是否执行。当前部署已实测 LangGraph metadata 包含 `request_id` 和 `thread_id`；脚本同时输出这两个标识与 Agent `run_id`，前两者用于检索 LangSmith，后者用于查询 DocMind 运行记录和 SSE。
 
 真实 API 验收使用 `backend/scripts/validate_context_compaction_api.py --scenario-file <json>`。脚本创建可在 chat-iframe 回看的隔离会话，串行发送各轮问题，并支持 `expect.compaction.min_values` 与 `expect.compaction_order` 校验。版本库中的 L1/L2/L3/L5 场景位于 `backend/scripts/scenarios`；脚本日志只输出有界输入/回答和上述诊断字段，大正文仍留在线程文件与 LangSmith 权限边界内。
 
