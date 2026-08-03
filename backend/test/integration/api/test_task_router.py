@@ -77,11 +77,27 @@ async def test_enqueue_document_creates_task(
     kb_id = create_response.json()["kb_id"]
 
     try:
+        filename = f"task-router-{uuid.uuid4().hex[:8]}.md"
+        upload_response = await test_client.post(
+            f"/api/knowledge/files/upload?kb_id={kb_id}",
+            files={"file": (filename, b"# Task router\n\nVerify asynchronous ingestion.\n", "text/markdown")},
+            headers=admin_headers,
+        )
+        assert upload_response.status_code == 200, upload_response.text
+        uploaded = upload_response.json()
+        file_path = uploaded["file_path"]
+
         enqueue_response = await test_client.post(
             f"/api/knowledge/databases/{kb_id}/documents",
             json={
-                "items": [],
-                "params": {"content_type": "file"},
+                # 入库接口只接受已上传文件，显式传入哈希可证明任务消费的是本次测试创建的对象，
+                # 而不是依赖环境中遗留的文件或绕过空 items 的输入边界。
+                "items": [file_path],
+                "params": {
+                    "content_type": "file",
+                    "content_hashes": {file_path: uploaded["content_hash"]},
+                    "file_sizes": {file_path: uploaded["size"]},
+                },
             },
             headers=admin_headers,
         )
