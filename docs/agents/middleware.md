@@ -95,7 +95,7 @@ OpenAI 兼容服务的 `finish_reason=length` 不等同于输入溢出。带正�
 
 L3 处理当前单条用户请求内的早期闭合 API round，仍只投影安全工具载荷；最近两个闭合 round、错误和人工确认保持完整。若 L1-L3 后仍超预算，L5 才以完整 API round 为单位生成私有 checkpoint：latest HumanMessage 及其所在 round 永远不裁剪，主模型成功后才原子替换活动 `messages` 和私有摘要。
 
-摘要请求不接收 Agent 工具，固定带九维任务/事实/文件/错误/待办/当前工作约束。输出上限按部署窗口动态计算：取部署最低输出预留、窗口八分之一与 20K 上限形成摘要 cap，因此 32K、64K、128K、256K 分别可自然扩展到约 4K、8K、16K、20K，而不依赖模型名称。摘要输入再从完整窗口中扣除该输出 cap 和安全缓冲。若 provider 仍明确返回 prompt too long，只移除最旧 20% 的完整 API round、收紧输入估算并重试一次；原消息已经归档，重试不会删除不可恢复原文。
+摘要请求不接收 Agent 工具，默认模板与不可覆盖的短协议使用同一组九维任务/事实/文件/错误/待办/当前工作标签。一个 Human turn 包含大量工具调用、需要滚动分块摘要时，每个分块只在摘要模型输入内重复该段原始 HumanMessage 作为优先锚点，防止小模型在后续大工具块中丢失最早的用户硬约束、路径和标识；锚点不写入 checkpoint 或主模型消息，也不复制图片和工具正文。输出上限按部署窗口动态计算：取部署最低输出预留、窗口八分之一与 20K 上限形成摘要 cap，因此 32K、64K、128K、256K 分别可自然扩展到约 4K、8K、16K、20K，而不依赖模型名称。摘要输入再从完整窗口中扣除该输出 cap 和安全缓冲。若 provider 仍明确返回 prompt too long，只移除最旧 20% 的完整 API round、收紧输入估算并重试一次；原消息已经归档，重试不会删除不可恢复原文。
 
 摘要 `finish_reason=length`、不遵守输出上限、普通生成失败或第二次 PTL 都不会提交退化 checkpoint，也不会调用主模型。九维标签不齐只记录 `format_unverified` 质量状态，不触发格式修复调用。L5 私有恢复段还会保留 `activated_skills` 对应的权威 `SKILL.md` 路径，要求模型继续相关步骤前重读；`SkillsMiddleware` 维护的激活状态和工具/MCP 绑定，以及 Todo、附件、artifact 等独立 state，不会被 `Overwrite(messages)` 覆盖。
 

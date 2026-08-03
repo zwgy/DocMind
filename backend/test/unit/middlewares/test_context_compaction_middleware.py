@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.types import Command, Overwrite
 
+from yuxi.agents.context import DEFAULT_YUXI_SUMMARY_PROMPT
 from yuxi.agents.middlewares import context_compaction as context_compaction_module
 from yuxi.agents.middlewares.context_compaction import (
     ContextCompactionMiddleware,
@@ -241,6 +242,77 @@ def test_summary_quality_only_checks_labels_without_repair_call() -> None:
     assert ContextCompactionMiddleware._summary_quality("intent: continue") == "format_unverified"
 
 
+def test_default_summary_prompt_and_fixed_protocol_use_the_same_nine_fields() -> None:
+    """默认模板与不可覆盖协议必须一致，避免小模型优先服从旧的六段结构。"""
+    model = _SummaryModel()
+    middleware = create_context_compaction_middleware(
+        model=model,
+        summary_prompt=DEFAULT_YUXI_SUMMARY_PROMPT,
+    )
+
+    rendered = middleware._render_summary_prompt(
+        "## files/code\n/outputs/keep.py\n## errors/fixes\nERR-417",
+        [HumanMessage(content="新消息没有重复旧路径和错误码")],
+        4_096,
+    )
+
+    for label in (
+        "intent",
+        "concepts",
+        "files/code",
+        "errors/fixes",
+        "progress",
+        "user messages",
+        "pending tasks",
+        "current work",
+        "next step",
+    ):
+        assert f"## {label}" in DEFAULT_YUXI_SUMMARY_PROMPT
+        assert label in rendered
+    assert "SESSION INTENT" not in DEFAULT_YUXI_SUMMARY_PROMPT
+    assert "Complete replacement" in rendered
+    assert "unless explicitly corrected" in rendered
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_oversized_single_user_turn_repeats_only_the_user_anchor_for_each_summary_piece(
+    asynchronous: bool,
+) -> None:
+    """大工具链滚动摘要时，后续分块仍能看到同一条原始用户硬约束。"""
+    model = _SummaryModel()
+    model.profile = {
+        "max_input_tokens": 2_000,
+        "min_output_reserve_tokens": 300,
+        "context_safety_tokens": 100,
+    }
+    _, request = _request([])
+    request = request.override(model=model)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    user_message = HumanMessage(
+        content="不得实现 L4；关键路径 /outputs/context_projection.py；错误码 ERR-CONTEXT-417。",
+    )
+    messages = [
+        user_message,
+        AIMessage(
+            content="读取大文档",
+            tool_calls=[{"id": "call-1", "name": "read_file", "args": {"path": "/outputs/large.md"}}],
+        ),
+        ToolMessage(content="large tool observation\n" * 2_000, tool_call_id="call-1"),
+    ]
+
+    arguments = ("", messages, 300, resolve_context_budget(request))
+    if asynchronous:
+        await middleware._acreate_summary(*arguments)
+    else:
+        middleware._create_summary(*arguments)
+
+    assert len(model.prompts) > 1
+    for prompt in model.prompts:
+        assert "<segment_user_anchor>" in prompt
+        assert user_message.content in prompt
+    assert model.prompts[-1].count("large tool observation") < 2_000
+
+
 @pytest.mark.unit
 def test_compaction_counts_final_request_and_commits_private_summary_after_success(
     archive_backend: _ArchiveBackend,
@@ -265,8 +337,8 @@ def test_compaction_counts_final_request_and_commits_private_summary_after_succe
 
     assert isinstance(result, ExtendedModelResponse)
     assert model.prompts
-    assert "Replace and merge previous_summary" in model.prompts[0]
-    assert "keep verified exact facts" in model.prompts[0]
+    assert "Complete replacement: merge previous_summary" in model.prompts[0]
+    assert "Keep every still-valid exact item" in model.prompts[0]
     assert captured["request"].messages == [messages[-1]]
     assert "private_conversation_context" in captured["request"].system_message.text
     assert "/outputs/conversation_history/" in captured["request"].system_message.text

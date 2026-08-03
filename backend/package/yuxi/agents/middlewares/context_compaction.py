@@ -57,13 +57,13 @@ _TOOL_CALL_ARGUMENTS_ARCHIVE_EXCLUDED_TOOL_NAMES = frozenset({"ask_user_question
 # 管理端可能已经保存旧版或自定义摘要提示词，因此持久事实合并不能只写进默认模板。
 # 固定协议刻意保持很短，避免为了提升摘要质量反而挤占小上下文模型的摘要输入预算。
 _SUMMARY_UPDATE_PROTOCOL = (
-    "<summary_update>Replace and merge previous_summary; keep verified exact facts unless corrected; "
-    "discard narration first.</summary_update>"
+    "<summary_update>Complete replacement: merge previous_summary and new messages. Keep every still-valid "
+    "exact item unless explicitly corrected; discard narration first.</summary_update>"
 )
 _NINE_DIMENSION_SUMMARY_PROTOCOL = (
-    "<checkpoint>Use nine labeled fields: intent; concepts; files/code; errors/fixes; "
-    "progress; user messages; pending tasks; current work; next step. Preserve facts, constraints, paths, "
-    "identifiers and decisions; never invent.</checkpoint>"
+    "<checkpoint>Use nine literal labels: intent; concepts; files/code; errors/fixes; progress; user messages; "
+    "pending tasks; current work; next step. Preserve exact constraints, paths, IDs, errors, decisions and tasks; "
+    "never invent.</checkpoint>"
 )
 _SUMMARY_REQUIRED_LABELS = (
     "intent",
@@ -596,25 +596,52 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         segment: list[AnyMessage],
         target_tokens: int,
         input_budget: int,
+        user_anchor: str = "",
     ) -> tuple[str, str]:
         text = get_buffer_string(_messages_safe_for_summary(segment))
-        low, high = 1, len(text)
-        best = 0
-        while low <= high:
-            middle = (low + high) // 2
-            prompt = self._render_summary_prompt(
-                previous_summary,
-                [SystemMessage(content=text[:middle])],
-                target_tokens,
-            )
-            if estimate_messages_tokens([SystemMessage(content=prompt)]) <= input_budget:
-                best = middle
-                low = middle + 1
-            else:
-                high = middle - 1
+        anchor_prefix = (
+            "<segment_user_anchor>\n"
+            "Keep the still-valid requirements and exact facts from this original user message:\n"
+            f"{user_anchor}\n"
+            "</segment_user_anchor>\n"
+            if user_anchor
+            else ""
+        )
+
+        def largest_prefix(prefix: str) -> int:
+            low, high = 1, len(text)
+            best = 0
+            while low <= high:
+                middle = (low + high) // 2
+                prompt = self._render_summary_prompt(
+                    previous_summary,
+                    [SystemMessage(content=f"{prefix}{text[:middle]}")],
+                    target_tokens,
+                )
+                if estimate_messages_tokens([SystemMessage(content=prompt)]) <= input_budget:
+                    best = middle
+                    low = middle + 1
+                else:
+                    high = middle - 1
+            return best
+
+        best = largest_prefix(anchor_prefix)
+        if best == 0 and anchor_prefix:
+            # 极端长的用户输入本身可能占满摘要窗口；此时原消息仍会作为待分块正文处理。
+            # 不截断或伪造锚点，避免为了重复提示而让本来可摘要的段落变成配置错误。
+            anchor_prefix = ""
+            best = largest_prefix("")
         if best == 0:
             raise ContextBudgetConfigurationError("摘要提示词和私有摘要已耗尽摘要模型输入预算")
-        return text[:best], text[best:]
+        return f"{anchor_prefix}{text[:best]}", text[best:]
+
+    @staticmethod
+    def _summary_user_anchor(segment: list[AnyMessage]) -> str:
+        """保留超大单轮分块共同所属的原始用户请求，不复制图片或工具正文。"""
+        if not segment or getattr(segment[0], "type", None) != "human":
+            return ""
+        safe_message = _messages_safe_for_summary([segment[0]])[0]
+        return get_buffer_string([safe_message])
 
     def _create_summary_once(
         self,
@@ -650,8 +677,18 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     pending = list(segment)
                     continue
             remaining = list(segment)
+            # 一个 Human turn 可能包含几十次工具调用并远超摘要输入窗口。若后续块只依赖
+            # 小模型复述上一块，最早的用户硬约束很容易被大工具正文淹没；仅在摘要调用内
+            # 重复该段原始 HumanMessage，最终 checkpoint 和主模型请求都不会出现副本。
+            user_anchor = self._summary_user_anchor(segment)
             while remaining:
-                piece, rest = self._largest_summary_piece(summary, remaining, target_tokens, input_budget)
+                piece, rest = self._largest_summary_piece(
+                    summary,
+                    remaining,
+                    target_tokens,
+                    input_budget,
+                    user_anchor,
+                )
                 response = summary_model.invoke(
                     self._render_summary_prompt(summary, [SystemMessage(content=piece)], target_tokens)
                 )
@@ -738,8 +775,15 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     pending = list(segment)
                     continue
             remaining = list(segment)
+            user_anchor = self._summary_user_anchor(segment)
             while remaining:
-                piece, rest = self._largest_summary_piece(summary, remaining, target_tokens, input_budget)
+                piece, rest = self._largest_summary_piece(
+                    summary,
+                    remaining,
+                    target_tokens,
+                    input_budget,
+                    user_anchor,
+                )
                 response = await summary_model.ainvoke(
                     self._render_summary_prompt(summary, [SystemMessage(content=piece)], target_tokens)
                 )
