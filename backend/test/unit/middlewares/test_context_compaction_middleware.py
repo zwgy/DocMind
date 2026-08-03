@@ -1343,6 +1343,33 @@ def test_incomplete_tool_protocol_fails_before_model_call() -> None:
 
 
 @pytest.mark.unit
+def test_l1_externalizes_current_input_when_fixed_context_makes_it_unadmittable(monkeypatch) -> None:
+    class _Backend:
+        def write(self, _path: str, _content: str):
+            return SimpleNamespace(error=None)
+
+    monkeypatch.setattr(summary_module, "create_agent_composite_backend", lambda _runtime: _Backend())
+    message = HumanMessage(content="current input " * 80, id="user-current")
+    model, request = _request([message])
+    request = request.override(system_message=SystemMessage(content="fixed system " * 30))
+    budget = resolve_context_budget(request)
+    assert count_tokens_approximately([message]) < budget.prompt_budget
+    assert estimate_model_request(request).admission > budget.prompt_budget
+    captured = {}
+
+    def handler(prepared: ModelRequest):
+        captured["message"] = prepared.messages[0]
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    create_summary_middleware(model=model, summary_prompt="summary\n{messages}").wrap_model_call(request, handler)
+
+    assert "stored outside the active context" in captured["message"].content
+    l1_event = next(event for event in request.runtime.stream_events if event["level"] == "L1")
+    assert l1_event["input_externalized"] == 1
+    assert l1_event["tokens_after"] <= budget.prompt_budget
+
+
+@pytest.mark.unit
 def test_current_oversized_user_input_is_persisted_before_model_call(monkeypatch) -> None:
     class _Backend:
         def __init__(self) -> None:

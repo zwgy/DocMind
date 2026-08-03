@@ -962,6 +962,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         request: ModelRequest,
         *,
         budget: ResolvedContextBudget,
+        summary: str,
     ) -> tuple[list[AnyMessage], bool]:
         messages = list(request.messages)
         index = self._current_human_input_index(messages)
@@ -969,7 +970,10 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             return messages, False
         message = messages[index]
         tokens = estimate_messages_tokens([message])
-        if tokens <= budget.prompt_budget:
+        # L1 判断的是“固定 system/tools + 最新用户原文”能否准入，不能只比较用户消息自身。
+        # 否则小于 prompt_budget 的大消息仍可能和不可压缩固定开销一起形成无安全历史段。
+        isolated_request = self._request_with_summary(request, messages=[message], summary=summary)
+        if self._request_tokens(isolated_request) <= budget.prompt_budget:
             return messages, False
 
         content = _message_content_text(message)
@@ -984,6 +988,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         request: ModelRequest,
         *,
         budget: ResolvedContextBudget,
+        summary: str,
     ) -> tuple[list[AnyMessage], bool]:
         messages = list(request.messages)
         index = self._current_human_input_index(messages)
@@ -991,7 +996,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             return messages, False
         message = messages[index]
         tokens = estimate_messages_tokens([message])
-        if tokens <= budget.prompt_budget:
+        isolated_request = self._request_with_summary(request, messages=[message], summary=summary)
+        if self._request_tokens(isolated_request) <= budget.prompt_budget:
             return messages, False
 
         content = _message_content_text(message)
@@ -1273,7 +1279,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         cycle_id = hashlib.sha256(cycle_key.encode()).hexdigest()[:12]
 
         l1_before = initial_messages
-        survivors, input_externalized = self._externalize_current_input(request, budget=budget)
+        survivors, input_externalized = self._externalize_current_input(request, budget=budget, summary=summary)
         current_projection_indexes, current_turn_indexes = self._current_projection_message_indexes(survivors)
         survivors, tool_results_shrunk = self._shrink_tool_results(
             request,
@@ -1561,7 +1567,11 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         cycle_id = hashlib.sha256(cycle_key.encode()).hexdigest()[:12]
 
         l1_before = initial_messages
-        survivors, input_externalized = await self._aexternalize_current_input(request, budget=budget)
+        survivors, input_externalized = await self._aexternalize_current_input(
+            request,
+            budget=budget,
+            summary=summary,
+        )
         current_projection_indexes, current_turn_indexes = self._current_projection_message_indexes(survivors)
         survivors, tool_results_shrunk = await self._ashrink_tool_results(
             request,
