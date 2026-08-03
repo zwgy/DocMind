@@ -50,7 +50,7 @@ torchvision = { index = "pytorch-cpu" }
 
 
 [tool.pytest.ini_options]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --import-mode=importlib"
 testpaths = ["test/unit", "test/integration", "test/e2e"]
 pythonpath = [".", "package"]
 markers = [
