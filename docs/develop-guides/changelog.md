@@ -8,8 +8,8 @@
 
 ### 上下文预算（重构 P1.1）
 
-- 继续多级压缩重构：当前单用户请求按 API round 划分，L3 只外置较早 round 的大工具载荷并原样保护最近两个闭合 round；L5 改用完整 API round 生成 checkpoint，保护最新用户原文及其所在 round，避免单请求连续工具调用回退到“无安全历史段”。摘要请求固定带九维 checkpoint 约束，并按实际可用 checkpoint 空间绑定 `max_tokens`；摘要失败时不再提交降级摘要或裁剪消息，确保 LangGraph state 的原子性。
-- 上下文压缩流事件新增不含正文的诊断字段：`level`、`reason`、`tokens_before/after`、`messages_removed`、`rounds_removed` 和 `archive_count`。前端仍可按 `started/finished` 显示过程，运维可区分主动准入与 provider overflow 恢复，而不会取得私有摘要、工具结果或 Skill 内容。
+- 继续多级压缩重构：当前单用户请求按 API round 划分，L3 只外置较早 round 的大工具载荷并原样保护最近两个闭合 round；L5 改用完整 API round 生成 checkpoint，保护最新用户原文及其所在 round，避免单请求连续工具调用回退到“无安全历史段”。摘要请求固定带九维 checkpoint 约束，并在同一部署窗口内分别计算摘要输入预算和真实输出 cap；32K～256K 使用同一公式，不按模型名分支。provider PTL 只按完整 API round 移除最旧约 20% 输入并收紧预算重试一次；输出截断、超限或普通失败均不提交候选摘要。压缩后保留活跃 Skill 的权威 `SKILL.md` 路径，且不覆盖 Todo、附件、artifact 和工具/MCP 等独立状态。
+- 上下文压缩流事件新增不含正文的诊断字段：`level`、`reason`、`tokens_before/after`、`messages_removed`、`rounds_removed` 和 `archive_count`。事件支持 `started/finished/failed` 生命周期，并区分主动准入、provider overflow、归档失败、摘要 PTL、摘要输出截断/超限和普通摘要失败；失败事件按未提交状态记录零移除计数，而不会泄露私有摘要、工具结果、Skill 内容或 provider 异常正文。
 - 新增 P3 工具历史投影：按 Claude Code 的 API round 边界校验已持久化工具协议，要求所有 `tool_call_id` 非空且全局唯一、每个 `ToolMessage` 在同一 round 内恰好匹配一次。L2 只处理最新用户请求之前已经闭合、非错误且非 `ask_user_question` 的历史 round；原 AI/Tool 消息和调用 ID 保持不变，仅将已写入线程隔离文件的大结果或大参数替换为短回执和可读取路径。未闭合、重复或跨 round 的工具结果会在主模型调用前以明确的协议错误终止，不再把损坏 checkpoint 发送给本地兼容模型。
 - 将项目上下文压缩入口重命名为 `ContextCompactionMiddleware` 和 `context_compaction.py`；主 Agent、SubAgent 与流事件测试统一使用新工厂，保留既有 checkpoint 状态键和压缩行为，为后续 L1/L2/L3/L5 控制器分阶段落地建立单一入口。
 - 调整 Agent 上下文准入校准：稳定校准键不再包含动态工具 schema，按请求规模桶保存 provider 相对保守 fallback 的最大正误差；schema 与 system hash 仅用于诊断，避免多 Skill/MCP 工具变化时丢失已验证的预算保护。
@@ -38,7 +38,7 @@
 ### 上下文管理
 
 - iframe 页面、附件摘要和结构化结果改为共享单一的 4000 字符总预算：分区配额在渲染入口统一计算，先保留附件定位与结构化信息，再用剩余空间内联网页；网页无法完整放入剩余预算时会落盘并提供 `read_file` 路径，不再通过最终整段截断丢失页面正文或尾部附件信息。最终请求仍超预算时，已完成工具调用的大参数会收纳到线程隔离文件，仅保留调用 ID、名称和可追溯路径，避免破坏工具调用协议；同步和异步收纳入口统一复用同一套候选计算与收益排序，只保留各自必要的文件写入方式。
-- 完善预算驱动的上下文恢复：被裁剪的完整交互段会先写入线程隔离的不可变 JSONL 归档清单，并把最新路径随私有摘要原子提交；摘要模型超出目标或暂时不可用时，均按最终请求预算退化为归档回执并标记 `degraded`。模型重试不再吞掉 `ContextOverflowError` 或把它伪装为助手回复，而是交由摘要恢复后仅重试一次。
+- 完善预算驱动的上下文恢复：被裁剪的完整交互段会先写入线程隔离的不可变 JSONL 归档清单，并把最新路径随私有摘要原子提交；摘要模型超出目标、输出截断或暂时不可用时明确失败并保留旧 checkpoint，不再用字符截断或归档回执伪造 `degraded` 摘要。模型重试不再吞掉 `ContextOverflowError` 或把它伪装为助手回复，而是交由摘要恢复后仅重试一次。
 - 修复本地近似计数严重低估真实模型输入的问题：调用前对最终 system/messages/tools 做 Unicode/JSON 感知的保守估算，不请求 `/tokenize`，也不增加首 Token 网络等待；模型响应后用供应商 usage 累积当前会话的最大正误差和倍率，后续调用按校准值准入和持续压缩。空正文 `length` 会先保留实测 usage 再恢复，无 usage 的明确溢出只执行一次最大安全压缩与重试。Web 与 chat-iframe 将用量入口改为普通用户可理解的“本轮上下文用量”，明确区分实际用量与估算分类，为所有数值补充 Token 单位，并完整展示安全输入上限、可用余量和模型格式等额外开销；发生过摘要时会明确说明较早对话已压缩为“历史摘要”。
 - 修复私有摘要泄露到聊天流：摘要模型调用显式标记为 `summarization`，统一流出口据此过滤内部摘要事件，避免其被误渲染为用户可见回复。
 - 增加上下文压缩过程提示：摘要中间件仅发布不含摘要正文的开始/结束状态，Web 与 chat-iframe 在实际压缩期间把“正在生成回复”切换为“正在压缩历史对话”，完成后自动恢复生成提示。压缩状态覆盖归档与摘要两个阶段；修复 JSONL 归档已写入但 checkpoint 尚未提交时，下一轮幂等重试被扩展名误判为失败、导致对话无法继续的问题。

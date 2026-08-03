@@ -75,7 +75,7 @@
 
 模型缓存中的完整窗口、最低输出预留和安全缓冲会写入 LangChain model profile。每次调用均对最终系统提示词、消息和工具定义做 Unicode/JSON 感知的本地保守估算，以“完整窗口 − 输出预留 − 安全缓冲”得到可用输入预算；超预算时才压缩最早的完整交互段。最低输出预留只决定压缩阈值，不会限制模型生成。
 
-Token 计数不会调用 `/tokenize` 或其他远程预检接口，因此不会额外延迟首 Token。新会话先使用本地保守估算；模型成功响应后，`TokenUsageMiddleware` 用供应商返回的输入 usage 记录当前估算的最大正误差和最大倍率，后续相同模型、部署地址、请求协议与工具 Schema 使用校准后的保守值。模型或工具 Schema 改变会重置校准，消息、附件和私有摘要正文变化只会重新计算本地基线。缺少 usage 的模型仍可使用，但只能保持本地估算口径。
+Token 计数不会调用 `/tokenize` 或其他远程预检接口，因此不会额外延迟首 Token。新会话先使用本地保守估算；模型成功响应后，`TokenUsageMiddleware` 用供应商返回的输入 usage 记录当前请求规模桶的最大正误差。校准键绑定模型部署、地址、请求协议和模板版本；Skill/MCP 造成的工具 Schema 变化会重新计算本地基线和诊断 hash，但不会清空同一部署已经观测到的正误差包络。缺少或不自洽的 usage 不写入校准样本，仍按本地保守估算准入。
 
 OpenAI 兼容服务若返回空正文且 `finish_reason=length`，TokenUsage 会先保留本次 usage，再把携带校准快照的上下文异常交给 Summary；Summary 持续压缩完整历史交互段，低于输入预算后只重试一次。明确溢出但没有 usage 时会一次性压缩所有可安全压缩的旧历史再重试；固定系统提示词、工具 Schema 和当前输入仍无法容纳时直接返回容量错误。带正文的 `length` 只有在实测输入与输出已接近完整窗口时才记为上下文触顶，否则按普通输出截断处理。
 
@@ -93,9 +93,13 @@ OpenAI 兼容服务若返回空正文且 `finish_reason=length`，TokenUsage 会
 
 投影前会验证完整持久化消息序列：工具调用 ID 必须非空且跨 round 唯一，每个结果必须在同一 round 中恰好匹配一次；错误结果和 `ask_user_question` round 受保护，不参与投影。缺失、重复、未知或跨 round 结果会在模型调用前抛出明确的工具协议错误，避免将无效 OpenAI 工具消息发送给本地模型。当前用户请求内的早期 round 和最近两轮保护策略由后续 L3 负责，因此 P3 不会提前改变当前请求的交互内容。
 
-L3 处理当前单条用户请求内的早期闭合 API round，仍只投影安全工具载荷；最近两个闭合 round、错误和人工确认保持完整。若 L1-L3 后仍超预算，L5 才以完整 API round 为单位生成私有 checkpoint：latest HumanMessage 及其所在 round 永远不裁剪，主模型成功后才原子替换活动 `messages` 和私有摘要。摘要请求不接收 Agent 工具，带九维任务/事实/文件/错误/待办/当前工作约束，并在适配器支持时绑定本次 checkpoint 的 `max_tokens`；摘要失败不会提交退化 checkpoint。
+L3 处理当前单条用户请求内的早期闭合 API round，仍只投影安全工具载荷；最近两个闭合 round、错误和人工确认保持完整。若 L1-L3 后仍超预算，L5 才以完整 API round 为单位生成私有 checkpoint：latest HumanMessage 及其所在 round 永远不裁剪，主模型成功后才原子替换活动 `messages` 和私有摘要。
 
-压缩期间会发布 `context_compaction` custom event。事件只包含层级、触发原因、Token 计数和归档/round 数量，不包含摘要、工具结果或 Skill 正文；界面只需消费 `started`/`finished` 状态，不应展示私有 checkpoint 内容。
+摘要请求不接收 Agent 工具，固定带九维任务/事实/文件/错误/待办/当前工作约束。输出上限按部署窗口动态计算：取部署最低输出预留、窗口八分之一与 20K 上限形成摘要 cap，因此 32K、64K、128K、256K 分别可自然扩展到约 4K、8K、16K、20K，而不依赖模型名称。摘要输入再从完整窗口中扣除该输出 cap 和安全缓冲。若 provider 仍明确返回 prompt too long，只移除最旧 20% 的完整 API round、收紧输入估算并重试一次；原消息已经归档，重试不会删除不可恢复原文。
+
+摘要 `finish_reason=length`、不遵守输出上限、普通生成失败或第二次 PTL 都不会提交退化 checkpoint，也不会调用主模型。九维标签不齐只记录 `format_unverified` 质量状态，不触发格式修复调用。L5 私有恢复段还会保留 `activated_skills` 对应的权威 `SKILL.md` 路径，要求模型继续相关步骤前重读；`SkillsMiddleware` 维护的激活状态和工具/MCP 绑定，以及 Todo、附件、artifact 等独立 state，不会被 `Overwrite(messages)` 覆盖。
+
+压缩期间会发布 `context_compaction` custom event。事件只包含层级、触发/失败分类、Token 计数和归档/round 数量，不包含摘要、工具结果或 Skill 正文；界面只需把 `started` 视为压缩中，并在 `finished` 或 `failed` 时结束等待状态，不应展示私有 checkpoint 内容。
 
 ## 自定义中间件
 

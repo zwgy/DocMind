@@ -12,6 +12,8 @@ from langgraph.types import Command, Overwrite
 from yuxi.agents.middlewares import context_compaction as context_compaction_module
 from yuxi.agents.middlewares.context_compaction import (
     ContextCompactionMiddleware,
+    SummaryOutputTooLargeError,
+    SummaryOutputTruncatedError,
     create_context_compaction_middleware,
 )
 from yuxi.agents.middlewares.context_projection import ToolProtocolError
@@ -127,7 +129,7 @@ def test_summary_request_binds_its_actual_output_budget() -> None:
     request = request.override(model=model)
     middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
 
-    summary, _ = middleware._create_summary(
+    summary = middleware._create_summary(
         "",
         [HumanMessage(content="old request")],
         37,
@@ -136,6 +138,107 @@ def test_summary_request_binds_its_actual_output_budget() -> None:
 
     assert summary
     assert model.output_limits == [37]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("context_window", "expected_output_limit"),
+    [
+        (32_768, 4_096),
+        (65_536, 8_192),
+        (131_072, 16_384),
+        (262_144, 20_000),
+    ],
+)
+def test_summary_call_limits_scale_across_supported_context_windows(
+    context_window: int,
+    expected_output_limit: int,
+) -> None:
+    model, request = _request([])
+    model.profile = {
+        "max_input_tokens": context_window,
+        "min_output_reserve_tokens": 4_096,
+        "context_safety_tokens": 1_024,
+    }
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    output_limit, input_budget = middleware._summary_call_limits(
+        resolve_context_budget(request.override(model=model)),
+        context_window,
+    )
+
+    # 同一公式覆盖 32K～256K：升级部署只改变 profile，不引入模型名或窗口档位分支。
+    assert output_limit == expected_output_limit
+    assert input_budget + output_limit + 1_024 == context_window
+
+
+@pytest.mark.unit
+def test_summary_output_validation_prefers_provider_usage() -> None:
+    class ProviderMeasuredSummaryModel(_SummaryModel):
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            return SimpleNamespace(
+                text="x" * 100,
+                usage_metadata={"input_tokens": 200, "output_tokens": 20, "total_tokens": 220},
+            )
+
+    model = ProviderMeasuredSummaryModel()
+    _, request = _request([])
+    request = request.override(model=model)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    summary = middleware._create_summary(
+        "",
+        [HumanMessage(content="old request")],
+        37,
+        resolve_context_budget(request),
+    )
+
+    assert summary == "x" * 100
+
+
+@pytest.mark.unit
+def test_summary_output_validation_ignores_zero_provider_usage() -> None:
+    class MissingMeasuredSummaryModel(_SummaryModel):
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            return SimpleNamespace(
+                text="x" * 1_000,
+                usage_metadata={"input_tokens": 200, "output_tokens": 0, "total_tokens": 200},
+            )
+
+    model = MissingMeasuredSummaryModel()
+    _, request = _request([])
+    request = request.override(model=model)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    with pytest.raises(SummaryOutputTooLargeError, match="未遵守输出上限"):
+        middleware._create_summary(
+            "",
+            [HumanMessage(content="old request")],
+            37,
+            resolve_context_budget(request),
+        )
+
+
+@pytest.mark.unit
+def test_summary_quality_only_checks_labels_without_repair_call() -> None:
+    complete = "\n".join(
+        [
+            "intent: continue implementation",
+            "concepts: context compaction",
+            "files/code: context_compaction.py",
+            "errors/fixes: none",
+            "progress: P5",
+            "user messages: preserve constraints",
+            "pending tasks: remote acceptance",
+            "current work: tests",
+            "next step: run Docker tests",
+        ]
+    )
+
+    assert ContextCompactionMiddleware._summary_quality(complete) == "semantic"
+    assert ContextCompactionMiddleware._summary_quality("intent: continue") == "format_unverified"
 
 
 @pytest.mark.unit
@@ -171,6 +274,7 @@ def test_compaction_counts_final_request_and_commits_private_summary_after_succe
     update = result.command.update
     assert update["token_usage"] == {"prompt_tokens": 123}
     assert "已归档旧对话：用户要完成项目文档。" in update["context_summary"]
+    assert update["context_summary_quality"] == "format_unverified"
     assert update["context_compacted_through"] == "assistant-old"
     assert update["context_archive_path"].endswith(".jsonl")
     assert update["context_revision"] == 4
@@ -263,8 +367,14 @@ async def test_archive_failure_is_reported_as_compaction_lifecycle(
                 lambda _prepared: pytest.fail("archive failure must precede the main model call"),
             )
 
-    assert [event["status"] for event in request.runtime.stream_events] == ["started", "finished"]
+    assert [event["status"] for event in request.runtime.stream_events] == ["started", "failed"]
     assert request.runtime.stream_events[0]["level"] == "L5"
+    failure = request.runtime.stream_events[1]
+    assert failure["reason"] == "archive_failure"
+    assert failure["tokens_after"] == failure["tokens_before"]
+    assert failure["messages_removed"] == 0
+    assert failure["rounds_removed"] == 0
+    assert failure["archive_count"] == 0
 
 
 @pytest.mark.unit
@@ -347,7 +457,7 @@ def test_fixed_overhead_fails_before_compaction_with_actionable_diagnostics(
 
 
 @pytest.mark.unit
-def test_oversized_summary_is_bounded_and_marked_degraded() -> None:
+def test_oversized_summary_does_not_commit_a_truncated_checkpoint() -> None:
     class OversizedSummaryModel(_SummaryModel):
         def invoke(self, prompt: str):
             self.prompts.append(prompt)
@@ -368,16 +478,17 @@ def test_oversized_summary_is_bounded_and_marked_degraded() -> None:
         state={"messages": messages, "context_revision": 0},
     )
     middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
-    captured = {}
+    main_model_called = False
 
-    def handler(prepared: ModelRequest):
-        captured["request"] = prepared
+    def handler(_prepared: ModelRequest):
+        nonlocal main_model_called
+        main_model_called = True
         return ModelResponse(result=[AIMessage(content="answer")])
 
-    result = middleware.wrap_model_call(request, handler)
+    with pytest.raises(SummaryOutputTooLargeError, match="未遵守输出上限"):
+        middleware.wrap_model_call(request, handler)
 
-    assert middleware._request_tokens(captured["request"]) <= 420
-    assert result.command.update["context_summary_quality"] == "degraded"
+    assert not main_model_called
 
 
 @pytest.mark.unit
@@ -418,6 +529,205 @@ async def test_summary_generation_failure_does_not_commit_or_call_main_model(
 
     assert len(archive_backend.writes) == 1
     assert not invoked
+    assert len(model.prompts) == 1
+    assert [event["status"] for event in request.runtime.stream_events] == ["started", "failed"]
+    failure = request.runtime.stream_events[1]
+    assert failure["reason"] == "summary_failure"
+    assert failure["tokens_after"] == failure["tokens_before"]
+    assert failure["messages_removed"] == 0
+    assert failure["rounds_removed"] == 0
+    assert failure["archive_count"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_summary_prompt_too_long_retries_once_with_a_tighter_budget(asynchronous: bool) -> None:
+    class PromptTooLongOnceModel(_SummaryModel):
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            if len(self.prompts) == 1:
+                raise ContextOverflowError("summary prompt too long")
+            return SimpleNamespace(text="已收敛的检查点")
+
+    model = PromptTooLongOnceModel()
+    _, request = _request([])
+    request = request.override(model=model)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    messages = [
+        HumanMessage(content="first request"),
+        AIMessage(content="first answer", id="answer-1"),
+        HumanMessage(content="second request"),
+        AIMessage(content="second answer", id="answer-2"),
+    ]
+    arguments = ("", messages, 37, resolve_context_budget(request))
+
+    if asynchronous:
+        summary = await middleware._acreate_summary(*arguments)
+    else:
+        summary = middleware._create_summary(*arguments)
+
+    assert summary == "已收敛的检查点"
+    assert len(model.prompts) == 2
+    assert "first request" in model.prompts[0]
+    assert "first request" not in model.prompts[1]
+    assert "second answer" in model.prompts[1]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_summary_prompt_too_long_stops_after_one_retry(
+    asynchronous: bool,
+) -> None:
+    class PromptTooLongModel(_SummaryModel):
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            raise ContextOverflowError("summary prompt too long")
+
+    model = PromptTooLongModel()
+    _, request = _request([])
+    request = request.override(model=model)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    messages = [
+        HumanMessage(content="first request"),
+        AIMessage(content="first answer", id="answer-1"),
+        HumanMessage(content="second request"),
+        AIMessage(content="second answer", id="answer-2"),
+    ]
+    arguments = ("", messages, 37, resolve_context_budget(request))
+
+    with pytest.raises(ContextOverflowError, match="summary prompt too long"):
+        if asynchronous:
+            await middleware._acreate_summary(*arguments)
+        else:
+            middleware._create_summary(*arguments)
+
+    assert len(model.prompts) == 2
+
+
+@pytest.mark.unit
+def test_summary_prompt_too_long_drops_floor_twenty_percent_complete_rounds() -> None:
+    messages = _single_human_tool_chain(6)
+
+    retry_messages = ContextCompactionMiddleware._summary_ptl_retry_messages(messages)
+
+    # Claude Code 的 fallback 使用 floor(分组数 * 20%)，并至少移除一组；6 组
+    # 因此只删除最旧 1 组，而不是向上取整后多丢失一组摘要输入。
+    assert retry_messages == messages[3:]
+
+
+@pytest.mark.unit
+def test_summary_prompt_too_long_emits_a_classified_failure_event() -> None:
+    class PromptTooLongModel(_SummaryModel):
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            raise ContextOverflowError("summary prompt too long")
+
+    messages = [
+        HumanMessage(content="old user " + "x" * 2_400, id="user-old"),
+        AIMessage(content="old assistant", id="assistant-old"),
+        HumanMessage(content="current user", id="user-current"),
+    ]
+    model = PromptTooLongModel()
+    model.profile = {"max_input_tokens": 1_000, "min_output_reserve_tokens": 100, "context_safety_tokens": 80}
+    _, request = _request(messages)
+    request = request.override(model=model)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+
+    with pytest.raises(ContextOverflowError, match="summary prompt too long"):
+        middleware.wrap_model_call(
+            request,
+            lambda _prepared: pytest.fail("summary PTL must precede the main model call"),
+        )
+
+    assert len(model.prompts) == 1
+    assert [event["status"] for event in request.runtime.stream_events] == ["started", "failed"]
+    assert request.runtime.stream_events[1]["reason"] == "summary_prompt_too_long"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_truncated_summary_output_does_not_commit_checkpoint(
+    asynchronous: bool, archive_backend: _ArchiveBackend
+) -> None:
+    class TruncatedSummaryModel(_SummaryModel):
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            return SimpleNamespace(text="不完整摘要", response_metadata={"finish_reason": "length"})
+
+    messages = [
+        HumanMessage(content="old user " + "x" * 2_400, id="user-old"),
+        AIMessage(content="old assistant", id="assistant-old"),
+        HumanMessage(content="current user", id="user-current"),
+    ]
+    model = TruncatedSummaryModel()
+    _, request = _request(messages)
+    request = request.override(model=model)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    main_model_called = False
+
+    def handler(_prepared: ModelRequest):
+        nonlocal main_model_called
+        main_model_called = True
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    async def async_handler(prepared: ModelRequest):
+        return handler(prepared)
+
+    with pytest.raises(SummaryOutputTruncatedError, match="输出上限处截断"):
+        if asynchronous:
+            await middleware.awrap_model_call(request, async_handler)
+        else:
+            middleware.wrap_model_call(request, handler)
+
+    assert len(archive_backend.writes) == 1
+    assert not main_model_called
+    assert [event["status"] for event in request.runtime.stream_events] == ["started", "failed"]
+    assert request.runtime.stream_events[1]["reason"] == "summary_output_truncated"
+
+
+@pytest.mark.unit
+def test_l5_does_not_overwrite_activated_skill_state() -> None:
+    messages = [
+        HumanMessage(content="old user " + "x" * 2_400, id="user-old"),
+        AIMessage(content="old assistant", id="assistant-old"),
+        HumanMessage(content="current user", id="user-current"),
+    ]
+    model, request = _request(messages)
+    model.profile = {"max_input_tokens": 1_000, "min_output_reserve_tokens": 100, "context_safety_tokens": 80}
+    request.runtime.context["_runtime_skill_metadata"] = {
+        "flowchart": {
+            "name": "Flowchart",
+            "description": "Render a flowchart",
+            "path": "/home/gem/skills/flowchart/SKILL.md",
+        }
+    }
+    request = request.override(
+        state={
+            **request.state,
+            "activated_skills": ["flowchart"],
+            "todos": [{"content": "finish diagram", "status": "in_progress"}],
+            "artifacts": [{"path": "/outputs/flow.svg"}],
+        }
+    )
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    captured = {}
+
+    def handler(prepared: ModelRequest):
+        captured["system_message"] = prepared.system_message.text
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    result = middleware.wrap_model_call(request, handler)
+
+    # L5 只 Overwrite messages；LangGraph 会保留 SkillsMiddleware 管理的独立状态键，
+    # 因此 checkpoint 后的下一次工具循环仍可使用已经激活的 Skill。
+    assert "activated_skills" not in result.command.update
+    assert "todos" not in result.command.update
+    assert "artifacts" not in result.command.update
+    assert "<active_skill_recovery>" in captured["system_message"]
+    assert "/home/gem/skills/flowchart/SKILL.md" in captured["system_message"]
 
 
 @pytest.mark.unit
@@ -428,7 +738,7 @@ async def test_summary_rechecks_segment_after_previous_batch_expands(asynchronou
         def invoke(self, prompt: str):
             self.prompts.append(prompt)
             assert int(count_tokens_approximately([SystemMessage(content=prompt)])) <= 420
-            return SimpleNamespace(text="摘要" * 500)
+            return SimpleNamespace(text="摘要" * 20)
 
     _, request = _request([])
     model = BudgetBoundedSummaryModel()
@@ -442,12 +752,11 @@ async def test_summary_rechecks_segment_after_previous_batch_expands(asynchronou
         resolve_context_budget(request),
     )
     if asynchronous:
-        summary, degraded = await middleware._acreate_summary(*arguments)
+        summary = await middleware._acreate_summary(*arguments)
     else:
-        summary, degraded = middleware._create_summary(*arguments)
+        summary = middleware._create_summary(*arguments)
 
     assert summary
-    assert degraded
     assert len(model.prompts) > 2
 
 
@@ -463,6 +772,9 @@ def test_thousand_turn_history_commits_a_bounded_checkpoint(archive_backend: _Ar
     ]
     messages.append(HumanMessage(content="current question", id="current-user"))
     model, request = _request(messages)
+    # 600-token fixture 只能容纳归档回执，无法保留最小九维 checkpoint；这里使用仍然很小
+    # 的独立窗口验证长历史稳定收敛，而不是重新引入字符截断来迁就测试替身。
+    model.profile = {"max_input_tokens": 1_000, "min_output_reserve_tokens": 100, "context_safety_tokens": 80}
     middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
 
     result = middleware.wrap_model_call(request, lambda _prepared: ModelResponse(result=[AIMessage(content="answer")]))

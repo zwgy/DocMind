@@ -32,7 +32,11 @@ from yuxi.agents.middlewares.token_usage import (
     estimate_model_request,
     resolve_context_budget,
 )
-from yuxi.agents.middlewares.context_projection import compactable_api_rounds, projectable_rounds
+from yuxi.agents.middlewares.context_projection import (
+    compactable_api_rounds,
+    group_messages_by_api_round,
+    projectable_rounds,
+)
 from yuxi.agents.backends.composite import (
     _TOOL_RESULT_SAVED_MARKER,
     _tool_result_path,
@@ -61,10 +65,34 @@ _NINE_DIMENSION_SUMMARY_PROTOCOL = (
     "progress; user messages; pending tasks; current work; next step. Preserve facts, constraints, paths, "
     "identifiers and decisions; never invent.</checkpoint>"
 )
+_SUMMARY_REQUIRED_LABELS = (
+    "intent",
+    "concepts",
+    "files/code",
+    "errors/fixes",
+    "progress",
+    "user messages",
+    "pending tasks",
+    "current work",
+    "next step",
+)
+_SUMMARY_MINIMUM_NEXT_INPUT_TOKENS = 128
+_SUMMARY_MINIMUM_OUTPUT_TOKENS = 64
+# Claude Code 将 compact 输出封顶 20K。Yuxi 同时按窗口比例缩放，避免 32K 部署
+# 被固定大预留挤压，也避免升级到 128K/256K 后把绝大多数窗口误留给摘要输出。
+_SUMMARY_MAX_OUTPUT_TOKENS = 20_000
 # 有限摘要无法永久容纳无限历史的每个细节；缺失时回查不可变归档，才能避免模型按相似条目猜测。
 _ARCHIVE_RECOVERY_INSTRUCTION = (
     "For missing facts, inspect /outputs/conversation_history/ with ls/read_file; never guess."
 )
+
+
+class SummaryOutputTruncatedError(RuntimeError):
+    """拒绝把已知不完整的摘要提交为下一轮任务事实。"""
+
+
+class SummaryOutputTooLargeError(RuntimeError):
+    """拒绝本地部署未遵守输出上限时产生的不可验证 checkpoint。"""
 
 
 class ContextCompactionState(AgentState):
@@ -126,6 +154,11 @@ def _message_segments(messages: list[AnyMessage]) -> list[list[AnyMessage]]:
 
 
 def _summary_text(response: Any) -> str:
+    metadata = getattr(response, "response_metadata", None)
+    if isinstance(metadata, dict) and metadata.get("finish_reason") == "length":
+        # 摘要不是面向用户的流式回答。长度停止意味着九维 checkpoint 已被截断，继续
+        # 使用会把不完整的任务状态当作事实写入后续轮次，因此必须让本次 L5 原子失败。
+        raise SummaryOutputTruncatedError("摘要模型在输出上限处截断，未提交上下文压缩")
     text = getattr(response, "text", None)
     if isinstance(text, str) and text.strip():
         return text.strip()
@@ -133,6 +166,18 @@ def _summary_text(response: Any) -> str:
     if isinstance(content, str) and content.strip():
         return content.strip()
     return str(response).strip()
+
+
+def _summary_output_tokens(response: Any, summary: str) -> int:
+    """优先采用 provider 实测输出用量；缺失时才使用保守的本地估算。"""
+    usage = getattr(response, "usage_metadata", None)
+    if isinstance(usage, dict):
+        value = usage.get("output_tokens")
+        # 非空摘要却报告 0 token 通常意味着兼容层没有填充 usage。若信任该值，会让
+        # 未遵守输出上限的本地部署绕过 checkpoint 校验，因此只接受正数实测值。
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+    return estimate_messages_tokens([SystemMessage(content=summary)])
 
 
 def _messages_safe_for_summary(messages: list[AnyMessage]) -> list[AnyMessage]:
@@ -297,13 +342,61 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         return estimate_model_request(request).admission
 
     @staticmethod
-    def _summary_system_message(system_message: SystemMessage | None, summary: str) -> SystemMessage | None:
+    def _active_skill_recovery(request: ModelRequest) -> str:
+        """从 SkillsMiddleware 已维护的状态构造有界恢复指针。"""
+        state = request.state if isinstance(request.state, dict) else {}
+        activated = state.get("activated_skills")
+        if not isinstance(activated, list):
+            return ""
+
+        runtime_context = request.runtime.context
+        metadata = (
+            runtime_context.get("_runtime_skill_metadata", {})
+            if isinstance(runtime_context, dict)
+            else getattr(runtime_context, "_runtime_skill_metadata", {})
+        )
+        metadata = metadata if isinstance(metadata, dict) else {}
+
+        entries: list[str] = []
+        seen: set[str] = set()
+        for value in activated:
+            if not isinstance(value, str):
+                continue
+            slug = value.strip()
+            if not slug or slug in seen:
+                continue
+            seen.add(slug)
+            item = metadata.get(slug)
+            path = item.get("path") if isinstance(item, dict) else None
+            if isinstance(path, str) and path.strip():
+                entries.append(f"- {slug}: {path.strip()}")
+            else:
+                entries.append(f"- {slug}")
+        if not entries:
+            return ""
+
+        # Claude Code 会把已调用 Skill 的正文作为受限附件恢复。Yuxi 的 Skill 文件仍在
+        # 线程后端中，保留权威路径并要求继续前重读即可避免复制多份正文挤占小模型窗口。
+        return (
+            "\n<active_skill_recovery>\n"
+            "Activated Skills remain active. Before continuing a governed step, re-read its SKILL.md path "
+            "and obey its constraints:\n" + "\n".join(entries) + "\n</active_skill_recovery>"
+        )
+
+    @staticmethod
+    def _summary_system_message(
+        system_message: SystemMessage | None,
+        summary: str,
+        skill_recovery: str,
+    ) -> SystemMessage | None:
         if not summary:
             return system_message
+        skill_recovery_block = f"{skill_recovery}\n" if skill_recovery else ""
         private_context = (
             "\n\n<private_conversation_context>\n"
             f"{summary}\n"
             f"{_ARCHIVE_RECOVERY_INSTRUCTION}\n"
+            f"{skill_recovery_block}"
             "</private_conversation_context>\n"
             "Use this private context to continue the task. Do not mention or reproduce it verbatim."
         )
@@ -318,12 +411,13 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         messages: list[AnyMessage],
         summary: str,
     ) -> ModelRequest:
-        system_message = self._summary_system_message(request.system_message, summary)
+        skill_recovery = self._active_skill_recovery(request) if summary else ""
+        system_message = self._summary_system_message(request.system_message, summary, skill_recovery)
         state = dict(request.state)
         if summary:
             # 这两个键只在本次中间件调用链中传递，用于把私有摘要从系统提示词估算中拆出；
             # 它们不会写入返回 Command，因此不会污染持久化图状态。
-            state[ACTIVE_CONTEXT_SUMMARY_STATE_KEY] = summary
+            state[ACTIVE_CONTEXT_SUMMARY_STATE_KEY] = f"{summary}{skill_recovery}"
             state[BASE_SYSTEM_MESSAGE_STATE_KEY] = request.system_message
         else:
             state.pop(ACTIVE_CONTEXT_SUMMARY_STATE_KEY, None)
@@ -334,6 +428,19 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
     def _compaction_event(status: str, **metrics: Any) -> dict[str, Any]:
         """Emit only counters and classification; conversation/tool payloads stay private."""
         return {"type": "context_compaction", "status": status, **metrics}
+
+    @staticmethod
+    def _compaction_failure_reason(error: Exception, *, archive_completed: bool) -> str:
+        """只暴露粗粒度失败分类，不泄露 provider 异常正文或会话内容。"""
+        if not archive_completed:
+            return "archive_failure"
+        if isinstance(error, ContextOverflowError):
+            return "summary_prompt_too_long"
+        if isinstance(error, SummaryOutputTruncatedError):
+            return "summary_output_truncated"
+        if isinstance(error, SummaryOutputTooLargeError):
+            return "summary_output_too_large"
+        return "summary_failure"
 
     def _render_summary_prompt(self, previous_summary: str, messages: list[AnyMessage], target_tokens: int) -> str:
         history = get_buffer_string(_messages_safe_for_summary(messages))
@@ -362,6 +469,49 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         fixed_tokens = self._request_tokens(fixed_request)
         return budget.prompt_budget - fixed_tokens
 
+    def _summary_call_limits(self, budget: ResolvedContextBudget, target_tokens: int) -> tuple[int, int]:
+        """根据摘要调用自身的输出上限计算独立输入预算。
+
+        L5 与主 Agent 使用同一部署，但会把 `max_tokens` 绑定到 checkpoint 目标。如果
+        直接复用主请求 prompt budget，只会预留主模型默认输出；即使最终请求可容纳，
+        摘要调用仍可能越过真实窗口。摘要请求不携带工具 schema，因此其输入上限应为
+        模型窗口扣除本次摘要输出上限和安全缓冲后的剩余空间。
+        """
+        protocol_tokens = estimate_messages_tokens(
+            [SystemMessage(content=self._render_summary_prompt("", [], target_tokens))]
+        )
+        maximum_output = (
+            budget.context_window - budget.context_safety_tokens - protocol_tokens - _SUMMARY_MINIMUM_NEXT_INPUT_TOKENS
+        )
+        if maximum_output <= 0:
+            raise ContextBudgetConfigurationError("摘要提示词、输出预留和最小历史分块已耗尽模型窗口")
+        deployment_output_cap = min(
+            _SUMMARY_MAX_OUTPUT_TOKENS,
+            max(budget.min_output_reserve_tokens, budget.context_window // 8),
+        )
+        output_limit = min(target_tokens, maximum_output, deployment_output_cap)
+        input_budget = budget.context_window - budget.context_safety_tokens - output_limit
+        return output_limit, input_budget
+
+    @staticmethod
+    def _retry_summary_input_budget(input_budget: int) -> int:
+        """为唯一一次 provider PTL 重试预留确定性的 tokenizer 误差空间。"""
+        # 本地部署常无法取得真实 tokenizer；按 API round 移除最旧输入后仍需收紧估算
+        # 上限，防止第二次请求再次填满同一个被低估的 provider 边界。
+        return max(1, input_budget * 3 // 4)
+
+    @staticmethod
+    def _summary_ptl_retry_messages(messages: list[AnyMessage]) -> list[AnyMessage] | None:
+        """唯一一次 PTL 重试仅移除最旧 20% 的完整 API round。"""
+        rounds = group_messages_by_api_round(messages)
+        if len(rounds) <= 1:
+            return None
+        # Claude Code 在无法从 provider 错误解析 token gap 时按 20% API round 回退。
+        # 原消息已经先写入不可变归档，因此这里只缩小摘要模型视图，不删除可恢复原文。
+        drop_count = min(max(1, len(rounds) // 5), len(rounds) - 1)
+        cutoff = rounds[drop_count - 1].end
+        return list(messages[cutoff:])
+
     def _summary_model(self, target_tokens: int) -> Any:
         """Bind a real output cap when the local provider adapter supports it.
 
@@ -384,27 +534,20 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         generated: str,
         budget: ResolvedContextBudget,
     ) -> tuple[str, str]:
-        """Keep a non-cooperative summary model from expanding the working checkpoint."""
+        """在不受控摘要扩大主模型工作集之前明确拒绝它。"""
         summary = f"{prefix}{generated}".strip()
         prepared = self._request_with_summary(request, messages=survivors, summary=summary)
         if self._request_tokens(prepared) <= budget.prompt_budget:
-            return summary, "semantic"
+            return summary, self._summary_quality(generated)
+        # 不能用字符前缀把九维 checkpoint 截断后继续执行：这样会静默丢失字段、路径或
+        # 下一步。输出上限已绑定；若部署仍返回超限正文，明确中止并保留旧 checkpoint。
+        raise SummaryOutputTooLargeError("摘要模型输出超过最终上下文预算，未提交上下文压缩")
 
-        low, high = 0, len(generated)
-        best = ""
-        while low <= high:
-            middle = (low + high) // 2
-            candidate = generated[:middle].rstrip()
-            candidate_summary = f"{prefix}{candidate}".strip()
-            candidate_request = self._request_with_summary(request, messages=survivors, summary=candidate_summary)
-            if self._request_tokens(candidate_request) <= budget.prompt_budget:
-                best = candidate
-                low = middle + 1
-            else:
-                high = middle - 1
-        if not best:
-            raise ContextBudgetConfigurationError("上下文归档回执本身已超出可用输入预算")
-        return f"{prefix}{best}".strip(), "degraded"
+    @staticmethod
+    def _summary_quality(summary: str) -> str:
+        """只记录九维标签是否齐全，不解析字段顺序，也不触发格式修复模型调用。"""
+        normalized = summary.casefold()
+        return "semantic" if all(label in normalized for label in _SUMMARY_REQUIRED_LABELS) else "format_unverified"
 
     @staticmethod
     def _archive_compacted_messages(
@@ -432,28 +575,27 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             raise ContextBudgetConfigurationError("历史上下文无法安全归档到线程文件")
         return path
 
-    @staticmethod
-    def _trim_summary_text(summary: str, target_tokens: int) -> tuple[str, bool]:
-        if target_tokens <= 0:
-            raise ContextBudgetConfigurationError("没有可用于滚动摘要的输入预算")
-        if estimate_messages_tokens([SystemMessage(content=summary)]) <= target_tokens:
-            return summary, False
-
-        low, high = 0, len(summary)
-        while low < high:
-            middle = (low + high + 1) // 2
-            if estimate_messages_tokens([SystemMessage(content=summary[:middle])]) <= target_tokens:
-                low = middle
-            else:
-                high = middle - 1
-        return summary[:low].rstrip(), True
+    def _validate_summary_for_next_prompt(
+        self,
+        summary: str,
+        *,
+        output_tokens: int,
+        target_tokens: int,
+        input_budget: int,
+    ) -> None:
+        """确保当前 checkpoint 无需截断即可继续合并下一段归档历史。"""
+        if output_tokens > target_tokens:
+            raise SummaryOutputTooLargeError("摘要模型未遵守输出上限，未提交上下文压缩")
+        prompt = self._render_summary_prompt(summary, [], target_tokens)
+        if estimate_messages_tokens([SystemMessage(content=prompt)]) > input_budget:
+            raise SummaryOutputTooLargeError("摘要模型输出挤占后续历史分块预算，未提交上下文压缩")
 
     def _largest_summary_piece(
         self,
         previous_summary: str,
         segment: list[AnyMessage],
         target_tokens: int,
-        budget: ResolvedContextBudget,
+        input_budget: int,
     ) -> tuple[str, str]:
         text = get_buffer_string(_messages_safe_for_summary(segment))
         low, high = 1, len(text)
@@ -465,7 +607,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 [SystemMessage(content=text[:middle])],
                 target_tokens,
             )
-            if estimate_messages_tokens([SystemMessage(content=prompt)]) <= budget.prompt_budget:
+            if estimate_messages_tokens([SystemMessage(content=prompt)]) <= input_budget:
                 best = middle
                 low = middle + 1
             else:
@@ -474,22 +616,21 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             raise ContextBudgetConfigurationError("摘要提示词和私有摘要已耗尽摘要模型输入预算")
         return text[:best], text[best:]
 
-    def _create_summary(
+    def _create_summary_once(
         self,
         previous_summary: str,
         messages: list[AnyMessage],
         target_tokens: int,
-        budget: ResolvedContextBudget,
-    ) -> tuple[str, bool]:
+        input_budget: int,
+    ) -> str:
         """Merge protocol-safe segments without letting the summary request exceed its own budget."""
         summary = previous_summary
-        degraded = False
         pending: list[AnyMessage] = []
         summary_model = self._summary_model(target_tokens)
         for segment in _message_segments(messages):
             candidate = [*pending, *segment]
             prompt = self._render_summary_prompt(summary, candidate, target_tokens)
-            if estimate_messages_tokens([SystemMessage(content=prompt)]) <= budget.prompt_budget:
+            if estimate_messages_tokens([SystemMessage(content=prompt)]) <= input_budget:
                 pending = candidate
                 continue
             if pending:
@@ -497,24 +638,32 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 summary = _summary_text(response)
                 if not summary:
                     raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
-                summary, shortened = self._trim_summary_text(summary, target_tokens)
-                degraded = degraded or shortened
+                self._validate_summary_for_next_prompt(
+                    summary,
+                    output_tokens=_summary_output_tokens(response, summary),
+                    target_tokens=target_tokens,
+                    input_budget=input_budget,
+                )
                 pending = []
                 prompt = self._render_summary_prompt(summary, segment, target_tokens)
-                if estimate_messages_tokens([SystemMessage(content=prompt)]) <= budget.prompt_budget:
+                if estimate_messages_tokens([SystemMessage(content=prompt)]) <= input_budget:
                     pending = list(segment)
                     continue
             remaining = list(segment)
             while remaining:
-                piece, rest = self._largest_summary_piece(summary, remaining, target_tokens, budget)
+                piece, rest = self._largest_summary_piece(summary, remaining, target_tokens, input_budget)
                 response = summary_model.invoke(
                     self._render_summary_prompt(summary, [SystemMessage(content=piece)], target_tokens)
                 )
                 summary = _summary_text(response)
                 if not summary:
                     raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
-                summary, shortened = self._trim_summary_text(summary, target_tokens)
-                degraded = degraded or shortened
+                self._validate_summary_for_next_prompt(
+                    summary,
+                    output_tokens=_summary_output_tokens(response, summary),
+                    target_tokens=target_tokens,
+                    input_budget=input_budget,
+                )
                 if not rest:
                     remaining = []
                 else:
@@ -524,25 +673,52 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             summary = _summary_text(response)
             if not summary:
                 raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
-            summary, shortened = self._trim_summary_text(summary, target_tokens)
-            degraded = degraded or shortened
-        return summary, degraded
+            self._validate_summary_for_next_prompt(
+                summary,
+                output_tokens=_summary_output_tokens(response, summary),
+                target_tokens=target_tokens,
+                input_budget=input_budget,
+            )
+        return summary
 
-    async def _acreate_summary(
+    def _create_summary(
         self,
         previous_summary: str,
         messages: list[AnyMessage],
         target_tokens: int,
         budget: ResolvedContextBudget,
-    ) -> tuple[str, bool]:
+    ) -> str:
+        output_limit, input_budget = self._summary_call_limits(budget, target_tokens)
+        try:
+            return self._create_summary_once(previous_summary, messages, output_limit, input_budget)
+        except ContextOverflowError:
+            retry_messages = self._summary_ptl_retry_messages(messages)
+            if not retry_messages:
+                raise
+            retry_input_budget = self._retry_summary_input_budget(input_budget)
+            if retry_input_budget >= input_budget:
+                raise
+            return self._create_summary_once(
+                previous_summary,
+                retry_messages,
+                output_limit,
+                retry_input_budget,
+            )
+
+    async def _acreate_summary_once(
+        self,
+        previous_summary: str,
+        messages: list[AnyMessage],
+        target_tokens: int,
+        input_budget: int,
+    ) -> str:
         summary = previous_summary
-        degraded = False
         pending: list[AnyMessage] = []
         summary_model = self._summary_model(target_tokens)
         for segment in _message_segments(messages):
             candidate = [*pending, *segment]
             prompt = self._render_summary_prompt(summary, candidate, target_tokens)
-            if estimate_messages_tokens([SystemMessage(content=prompt)]) <= budget.prompt_budget:
+            if estimate_messages_tokens([SystemMessage(content=prompt)]) <= input_budget:
                 pending = candidate
                 continue
             if pending:
@@ -550,24 +726,32 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 summary = _summary_text(response)
                 if not summary:
                     raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
-                summary, shortened = self._trim_summary_text(summary, target_tokens)
-                degraded = degraded or shortened
+                self._validate_summary_for_next_prompt(
+                    summary,
+                    output_tokens=_summary_output_tokens(response, summary),
+                    target_tokens=target_tokens,
+                    input_budget=input_budget,
+                )
                 pending = []
                 prompt = self._render_summary_prompt(summary, segment, target_tokens)
-                if estimate_messages_tokens([SystemMessage(content=prompt)]) <= budget.prompt_budget:
+                if estimate_messages_tokens([SystemMessage(content=prompt)]) <= input_budget:
                     pending = list(segment)
                     continue
             remaining = list(segment)
             while remaining:
-                piece, rest = self._largest_summary_piece(summary, remaining, target_tokens, budget)
+                piece, rest = self._largest_summary_piece(summary, remaining, target_tokens, input_budget)
                 response = await summary_model.ainvoke(
                     self._render_summary_prompt(summary, [SystemMessage(content=piece)], target_tokens)
                 )
                 summary = _summary_text(response)
                 if not summary:
                     raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
-                summary, shortened = self._trim_summary_text(summary, target_tokens)
-                degraded = degraded or shortened
+                self._validate_summary_for_next_prompt(
+                    summary,
+                    output_tokens=_summary_output_tokens(response, summary),
+                    target_tokens=target_tokens,
+                    input_budget=input_budget,
+                )
                 if not rest:
                     remaining = []
                 else:
@@ -577,9 +761,37 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             summary = _summary_text(response)
             if not summary:
                 raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
-            summary, shortened = self._trim_summary_text(summary, target_tokens)
-            degraded = degraded or shortened
-        return summary, degraded
+            self._validate_summary_for_next_prompt(
+                summary,
+                output_tokens=_summary_output_tokens(response, summary),
+                target_tokens=target_tokens,
+                input_budget=input_budget,
+            )
+        return summary
+
+    async def _acreate_summary(
+        self,
+        previous_summary: str,
+        messages: list[AnyMessage],
+        target_tokens: int,
+        budget: ResolvedContextBudget,
+    ) -> str:
+        output_limit, input_budget = self._summary_call_limits(budget, target_tokens)
+        try:
+            return await self._acreate_summary_once(previous_summary, messages, output_limit, input_budget)
+        except ContextOverflowError:
+            retry_messages = self._summary_ptl_retry_messages(messages)
+            if not retry_messages:
+                raise
+            retry_input_budget = self._retry_summary_input_budget(input_budget)
+            if retry_input_budget >= input_budget:
+                raise
+            return await self._acreate_summary_once(
+                previous_summary,
+                retry_messages,
+                output_limit,
+                retry_input_budget,
+            )
 
     @staticmethod
     def _current_human_input_index(messages: list[AnyMessage]) -> int | None:
@@ -1023,7 +1235,13 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             archive_path = _archive_manifest_path(compacted, next_revision)
             archive_prefix = _archive_summary_prefix(archive_path)
             target_tokens = self._summary_target_tokens(request, budget, survivors, archive_prefix)
-            if target_tokens <= 0:
+            # 过早开始 checkpoint 会把所有可用空间留给最新消息，只允许摘要输出几个 token，
+            # 最终只能依赖字符截断。继续按完整 round 扩大归档边界，直到能生成最小语义摘要。
+            minimum_output_tokens = min(
+                _SUMMARY_MINIMUM_OUTPUT_TOKENS,
+                max(1, budget.context_window // 16),
+            )
+            if target_tokens < minimum_output_tokens:
                 continue
             # 归档也是压缩过程的一部分。状态必须先于归档发布，否则归档较慢或失败时，
             # 用户只会一直看到“正在生成回复”，无法理解当前实际阶段。
@@ -1038,14 +1256,16 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     tokens_before=tokens_before,
                 )
             )
+            archive_completed = False
             try:
                 archive_path = self._archive_compacted_messages(
                     request,
                     messages=compacted,
                     revision=next_revision,
                 )
+                archive_completed = True
                 archive_prefix = _archive_summary_prefix(archive_path)
-                generated_summary, generated_degraded = self._create_summary(summary, compacted, target_tokens, budget)
+                generated_summary = self._create_summary(summary, compacted, target_tokens, budget)
                 summary, summary_quality = self._fit_summary_to_budget(
                     request,
                     survivors=survivors,
@@ -1053,7 +1273,21 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     generated=generated_summary,
                     budget=budget,
                 )
-            finally:
+            except Exception as error:
+                request.runtime.stream_writer(
+                    self._compaction_event(
+                        "failed",
+                        level="L5",
+                        reason=self._compaction_failure_reason(error, archive_completed=archive_completed),
+                        tokens_before=tokens_before,
+                        tokens_after=tokens_before,
+                        messages_removed=0,
+                        rounds_removed=0,
+                        archive_count=int(archive_completed),
+                    )
+                )
+                raise
+            else:
                 request.runtime.stream_writer(
                     self._compaction_event(
                         "finished",
@@ -1078,7 +1312,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     "archive_path": archive_path,
                     "previous_revision": int(state.get("context_revision") or 0),
                     "summary_updated": True,
-                    "summary_quality": "degraded" if generated_degraded else summary_quality,
+                    "summary_quality": summary_quality,
                 }
             if compact_all_history:
                 break
@@ -1187,7 +1421,11 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             archive_path = _archive_manifest_path(compacted, next_revision)
             archive_prefix = _archive_summary_prefix(archive_path)
             target_tokens = self._summary_target_tokens(request, budget, survivors, archive_prefix)
-            if target_tokens <= 0:
+            minimum_output_tokens = min(
+                _SUMMARY_MINIMUM_OUTPUT_TOKENS,
+                max(1, budget.context_window // 16),
+            )
+            if target_tokens < minimum_output_tokens:
                 continue
             # 异步路径保持与同步路径相同的公开状态契约，并覆盖归档与摘要两个阶段。
             tokens_before = self._request_tokens(
@@ -1201,14 +1439,16 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     tokens_before=tokens_before,
                 )
             )
+            archive_completed = False
             try:
                 archive_path = await self._aarchive_compacted_messages(
                     request,
                     messages=compacted,
                     revision=next_revision,
                 )
+                archive_completed = True
                 archive_prefix = _archive_summary_prefix(archive_path)
-                generated_summary, generated_degraded = await self._acreate_summary(
+                generated_summary = await self._acreate_summary(
                     summary,
                     compacted,
                     target_tokens,
@@ -1221,7 +1461,21 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     generated=generated_summary,
                     budget=budget,
                 )
-            finally:
+            except Exception as error:
+                request.runtime.stream_writer(
+                    self._compaction_event(
+                        "failed",
+                        level="L5",
+                        reason=self._compaction_failure_reason(error, archive_completed=archive_completed),
+                        tokens_before=tokens_before,
+                        tokens_after=tokens_before,
+                        messages_removed=0,
+                        rounds_removed=0,
+                        archive_count=int(archive_completed),
+                    )
+                )
+                raise
+            else:
                 request.runtime.stream_writer(
                     self._compaction_event(
                         "finished",
@@ -1246,7 +1500,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     "archive_path": archive_path,
                     "previous_revision": int(state.get("context_revision") or 0),
                     "summary_updated": True,
-                    "summary_quality": "degraded" if generated_degraded else summary_quality,
+                    "summary_quality": summary_quality,
                 }
             if compact_all_history:
                 break
