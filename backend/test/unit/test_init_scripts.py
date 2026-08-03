@@ -1,7 +1,10 @@
+import os
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[3]
+# API 容器只挂载 backend 源码；仓库级静态契约测试需由一次性测试容器以只读卷显式提供根目录。
+# 常规本地执行不设置该变量，仍按测试文件位置定位仓库，避免把容器路径耦合到生产运行时。
+ROOT = Path(os.environ.get("YUXI_TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[3]))
 
 
 def test_init_scripts_keep_auto_generated_env_placeholders():

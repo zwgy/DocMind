@@ -1,11 +1,14 @@
 import json
+import os
 import runpy
 from pathlib import Path
 
 import requests
 
 
-SCRIPT = Path(__file__).resolve().parents[4] / "scripts" / "upload_incoming_document.py.py"
+# 与仓库级 Compose/脚本断言保持一致：Docker API 运行时只挂载 backend，测试时才从只读卷注入仓库根目录。
+ROOT = Path(os.environ.get("YUXI_TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[4]))
+SCRIPT = ROOT / "scripts" / "upload_incoming_document.py.py"
 
 
 def _load_script():

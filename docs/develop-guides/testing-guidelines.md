@@ -145,6 +145,18 @@ docker logs api-dev --tail 100
 docker compose exec api uv run --group test pytest test/unit -m "not slow"
 ```
 
+其中 `backend/test/unit/test_init_scripts.py` 和 `backend/test/unit/scripts/test_upload_incoming_document.py`
+会校验仓库根目录的 Compose、Docker 与运维脚本。API 容器运行时只挂载 `backend`，执行包含这两类用例的全量 unit 时，使用一次性的只读仓库卷：
+
+```bash
+docker compose run --rm --no-deps \
+  -v <仓库绝对路径>:/workspace:ro \
+  -e YUXI_TEST_REPOSITORY_ROOT=/workspace \
+  api uv run --group test pytest test/unit -m "not slow"
+```
+
+该挂载只属于测试容器，不修改常驻 API 容器的运行时文件可见范围。
+
 运行集成测试：
 
 ```bash
