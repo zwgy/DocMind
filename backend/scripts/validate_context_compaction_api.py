@@ -279,6 +279,17 @@ def _load_scenario(path: Path) -> dict[str, Any]:
         turns = thread.get("turns")
         if not isinstance(turns, list) or not turns:
             raise ValueError(f"threads[{thread_index}] 必须提供至少一个 turns 项")
+        attachments = thread.get("attachments", [])
+        if not isinstance(attachments, list) or len(attachments) > 1:
+            raise ValueError(f"threads[{thread_index}].attachments 必须是最多一项的数组")
+        for attachment in attachments:
+            if (
+                not isinstance(attachment, dict)
+                or not isinstance(attachment.get("file_name"), str)
+                or not attachment["file_name"].strip()
+                or not isinstance(attachment.get("content"), str)
+            ):
+                raise ValueError(f"threads[{thread_index}].attachments 必须提供 file_name 和 content")
         for turn_index, turn in enumerate(turns, start=1):
             if not isinstance(turn, dict) or not isinstance(turn.get("query"), str) or not turn["query"].strip():
                 raise ValueError(f"threads[{thread_index}].turns[{turn_index}] 必须提供非空 query")
@@ -480,7 +491,7 @@ async def _run_configured_scenario(args: argparse.Namespace) -> None:
 
         for thread_index, definition in enumerate(scenario["threads"], start=1):
             thread_name = definition["name"].strip()
-            filler_unit = "上下文压力材料仅用于触发预算准入，不改变本轮明确约束。"
+            filler_unit = "上下文压力材料仅用于触发预算准入，不改变本轮明确约束。\n"
             payload = (filler_unit * (args.payload_chars // len(filler_unit) + 1))[: args.payload_chars]
             bindings = {"tag": tag, "thread_name": thread_name, "payload": payload}
             metadata = _render_scenario_value(definition.get("metadata", {}), bindings)
@@ -519,6 +530,39 @@ async def _run_configured_scenario(args: argparse.Namespace) -> None:
                 ),
                 flush=True,
             )
+
+            attachments = _render_scenario_value(definition.get("attachments", []), bindings)
+            if attachments:
+                attachment = attachments[0]
+                attachment_payload = await _request_json(
+                    client,
+                    "POST",
+                    f"/api/chat/thread/{thread_id}/attachments",
+                    headers=headers,
+                    files={
+                        "file": (
+                            attachment["file_name"],
+                            attachment["content"].encode("utf-8"),
+                            "text/plain",
+                        )
+                    },
+                )
+                attachment_path = str(attachment_payload.get("path") or "")
+                if not attachment_path:
+                    raise RuntimeError(f"线程附件上传后缺少 path: {attachment_payload}")
+                bindings["attachment_path"] = attachment_path
+                thread_report["attachment"] = {
+                    "file_name": attachment_payload.get("file_name"),
+                    "path": attachment_path,
+                    "size": attachment_payload.get("file_size"),
+                }
+                print(
+                    json.dumps(
+                        {"event": "attachment_uploaded", "thread": thread_name, **thread_report["attachment"]},
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
 
             for turn_index, turn in enumerate(definition["turns"], start=1):
                 turn_name = str(turn.get("name") or f"turn-{turn_index}")
