@@ -50,6 +50,7 @@ async def test_cancel_unknown_task_returns_client_error(test_client, admin_heade
 async def test_enqueue_document_creates_task(
     test_client,
     admin_headers,
+    enabled_embedding_model_spec,
 ):
     """Trigger knowledge ingestion to ensure a task record is materialised."""
     if _LITE_MODE:
@@ -66,7 +67,7 @@ async def test_enqueue_document_creates_task(
         json={
             "database_name": f"pytest_task_router_{uuid.uuid4().hex[:8]}",
             "description": "Task router integration test",
-            "embedding_model_spec": "siliconflow-cn:Pro/BAAI/bge-m3",
+            "embedding_model_spec": enabled_embedding_model_spec,
             "kb_type": "milvus",
             "additional_params": {},
         },

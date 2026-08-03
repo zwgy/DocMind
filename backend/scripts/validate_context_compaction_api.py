@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -38,6 +40,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--payload-chars", type=int, default=5000)
     parser.add_argument("--run-timeout", type=float, default=300.0)
     parser.add_argument(
+        "--scenario-file",
+        type=Path,
+        help="JSON 场景文件；每个场景可创建多个隔离线程并串行执行多轮真实提问",
+    )
+    parser.add_argument(
+        "--log-content-limit",
+        type=int,
+        default=1200,
+        help="每轮打印的输入和输出最大字符数；设为 0 时不打印正文",
+    )
+    parser.add_argument(
         "--allow-no-l5",
         action="store_true",
         help="仅用于排查环境；正式验收不得使用，否则没有证明真实线程触发 L5。",
@@ -47,6 +60,8 @@ def _parse_args() -> argparse.Namespace:
         parser.error("--max-growth-rounds 必须大于 0")
     if args.payload_chars < 1000:
         parser.error("--payload-chars 至少为 1000，过小无法形成有效压力")
+    if args.log_content_limit < 0:
+        parser.error("--log-content-limit 不能小于 0")
     return args
 
 
@@ -227,7 +242,325 @@ def _has_finished_l5(evidence: RunEvidence) -> bool:
     return any(event.get("level") == "L5" and event.get("status") == "finished" for event in evidence.compaction_events)
 
 
+def _load_scenario(path: Path) -> dict[str, Any]:
+    """加载小而明确的 JSON 场景，避免验收口径散落在临时命令行参数中。"""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError(f"场景文件不存在: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"场景文件不是合法 JSON: {path}: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("场景根节点必须是 JSON object")
+    if not isinstance(payload.get("name"), str) or not payload["name"].strip():
+        raise ValueError("场景必须提供非空 name")
+    threads = payload.get("threads")
+    if not isinstance(threads, list) or not threads:
+        raise ValueError("场景必须提供至少一个 threads 项")
+    for thread_index, thread in enumerate(threads, start=1):
+        if not isinstance(thread, dict):
+            raise ValueError(f"threads[{thread_index}] 必须是 object")
+        if not isinstance(thread.get("name"), str) or not thread["name"].strip():
+            raise ValueError(f"threads[{thread_index}] 必须提供非空 name")
+        turns = thread.get("turns")
+        if not isinstance(turns, list) or not turns:
+            raise ValueError(f"threads[{thread_index}] 必须提供至少一个 turns 项")
+        for turn_index, turn in enumerate(turns, start=1):
+            if not isinstance(turn, dict) or not isinstance(turn.get("query"), str) or not turn["query"].strip():
+                raise ValueError(f"threads[{thread_index}].turns[{turn_index}] 必须提供非空 query")
+            if "expect" in turn and not isinstance(turn["expect"], dict):
+                raise ValueError(f"threads[{thread_index}].turns[{turn_index}].expect 必须是 object")
+    return payload
+
+
+def _render_scenario_value(value: Any, bindings: dict[str, str]) -> Any:
+    """只替换已声明占位符，保留用户问题中的其他花括号和代码片段。"""
+    if isinstance(value, str):
+        for key, replacement in bindings.items():
+            value = value.replace(f"{{{key}}}", replacement)
+        return value
+    if isinstance(value, list):
+        return [_render_scenario_value(item, bindings) for item in value]
+    if isinstance(value, dict):
+        return {key: _render_scenario_value(item, bindings) for key, item in value.items()}
+    return value
+
+
+def _string_list(value: Any, field: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{field} 必须是字符串数组")
+    return value
+
+
+def _compact_log_text(value: str, limit: int) -> str:
+    if limit == 0:
+        return ""
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}... [已截断，共 {len(value)} 字符]"
+
+
+async def _read_thread_file(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    *,
+    thread_id: str,
+    path: str,
+) -> str:
+    payload = await _request_json(
+        client,
+        "GET",
+        f"/api/chat/thread/{thread_id}/files/content",
+        headers=headers,
+        params={"path": path},
+    )
+    return "\n".join(str(line) for line in payload.get("content") or [])
+
+
+async def _validate_scenario_turn(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    *,
+    thread_id: str,
+    assistant_text: str,
+    evidence: RunEvidence,
+    expect: dict[str, Any],
+) -> list[str]:
+    """优先校验可重复的协议事实，避免让本地小模型成为唯一裁判。"""
+    allowed_fields = {
+        "status",
+        "assistant_contains",
+        "assistant_not_contains",
+        "assistant_matches",
+        "tools_include",
+        "tools_exclude",
+        "compaction",
+        "files",
+    }
+    unknown_fields = set(expect) - allowed_fields
+    if unknown_fields:
+        raise ValueError(f"不支持的 expect 字段: {sorted(unknown_fields)}")
+
+    failures: list[str] = []
+    expected_status = expect.get("status", "completed")
+    if not isinstance(expected_status, str):
+        raise ValueError("expect.status 必须是字符串")
+    if evidence.status != expected_status:
+        failures.append(f"运行状态为 {evidence.status!r}，期望 {expected_status!r}")
+
+    for required in _string_list(expect.get("assistant_contains"), "expect.assistant_contains"):
+        if required not in assistant_text:
+            failures.append(f"回复缺少文本: {required!r}")
+    for forbidden in _string_list(expect.get("assistant_not_contains"), "expect.assistant_not_contains"):
+        if forbidden in assistant_text:
+            failures.append(f"回复包含禁止文本: {forbidden!r}")
+    for pattern in _string_list(expect.get("assistant_matches"), "expect.assistant_matches"):
+        try:
+            matched = re.search(pattern, assistant_text, flags=re.DOTALL) is not None
+        except re.error as exc:
+            raise ValueError(f"expect.assistant_matches 包含非法正则 {pattern!r}: {exc}") from exc
+        if not matched:
+            failures.append(f"回复未匹配正则: {pattern!r}")
+
+    tools_include = set(_string_list(expect.get("tools_include"), "expect.tools_include"))
+    tools_exclude = set(_string_list(expect.get("tools_exclude"), "expect.tools_exclude"))
+    missing_tools = tools_include - evidence.tool_names
+    unexpected_tools = tools_exclude & evidence.tool_names
+    if missing_tools:
+        failures.append(f"缺少工具调用: {sorted(missing_tools)}")
+    if unexpected_tools:
+        failures.append(f"出现禁止工具调用: {sorted(unexpected_tools)}")
+
+    compaction_expectations = expect.get("compaction", [])
+    if isinstance(compaction_expectations, dict):
+        compaction_expectations = [compaction_expectations]
+    if not isinstance(compaction_expectations, list):
+        raise ValueError("expect.compaction 必须是 object 或 object 数组")
+    for item in compaction_expectations:
+        if not isinstance(item, dict):
+            raise ValueError("expect.compaction 的每项必须是 object")
+        min_count = item.get("min_count", 1)
+        if not isinstance(min_count, int) or min_count < 1:
+            raise ValueError("expect.compaction.min_count 必须是大于 0 的整数")
+        criteria = {key: value for key, value in item.items() if key != "min_count"}
+        if not criteria:
+            raise ValueError("expect.compaction 至少需要一个匹配字段")
+        actual_count = sum(
+            all(event.get(key) == value for key, value in criteria.items()) for event in evidence.compaction_events
+        )
+        if actual_count < min_count:
+            failures.append(f"压缩事件 {criteria} 只出现 {actual_count} 次，期望至少 {min_count} 次")
+
+    file_expectations = expect.get("files", [])
+    if not isinstance(file_expectations, list):
+        raise ValueError("expect.files 必须是数组")
+    for item in file_expectations:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            raise ValueError("expect.files 的每项必须提供字符串 path")
+        file_text = await _read_thread_file(client, headers, thread_id=thread_id, path=item["path"])
+        for required in _string_list(item.get("contains"), f"expect.files[{item['path']}].contains"):
+            if required not in file_text:
+                failures.append(f"文件 {item['path']} 缺少文本: {required!r}")
+        for forbidden in _string_list(item.get("not_contains"), f"expect.files[{item['path']}].not_contains"):
+            if forbidden in file_text:
+                failures.append(f"文件 {item['path']} 包含禁止文本: {forbidden!r}")
+    return failures
+
+
+async def _run_configured_scenario(args: argparse.Namespace) -> None:
+    scenario = _load_scenario(args.scenario_file)
+    tag = time.strftime("%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
+    scope = f"{args.source_system}:{args.function_id}:{args.business_id}"
+    timeout = httpx.Timeout(args.run_timeout, connect=10.0)
+    reports: list[dict[str, Any]] = []
+    failures: list[str] = []
+
+    async with httpx.AsyncClient(base_url=args.base_url.rstrip("/"), timeout=timeout) as client:
+        token_payload = await _request_json(
+            client,
+            "POST",
+            "/api/chat-iframe/token",
+            json={
+                "source_system": args.source_system,
+                "external_user_id": args.external_user_id,
+                "external_user_name": args.external_user_name,
+            },
+        )
+        token = str(token_payload.get("access_token") or "")
+        if not token:
+            raise RuntimeError("chat-iframe 换票响应缺少 access_token")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        for thread_index, definition in enumerate(scenario["threads"], start=1):
+            thread_name = definition["name"].strip()
+            bindings = {"tag": tag, "thread_name": thread_name}
+            metadata = _render_scenario_value(definition.get("metadata", {}), bindings)
+            if not isinstance(metadata, dict):
+                raise ValueError(f"threads[{thread_index}].metadata 必须是 object")
+            metadata["source"] = "chat-iframe"
+            metadata["conversation_scope_key"] = scope
+            title = _render_scenario_value(definition.get("title", f"{scenario['name']}-{thread_name}-{tag}"), bindings)
+            if not isinstance(title, str) or not title.strip():
+                raise ValueError(f"threads[{thread_index}].title 必须是非空字符串")
+            agent_id = definition.get("agent_id", args.agent_id)
+            if not isinstance(agent_id, str) or not agent_id.strip():
+                raise ValueError(f"threads[{thread_index}].agent_id 必须是非空字符串")
+            thread = await _request_json(
+                client,
+                "POST",
+                "/api/chat/thread",
+                headers=headers,
+                json={"agent_id": agent_id, "title": title, "metadata": metadata},
+            )
+            thread_id = str(thread.get("id") or thread.get("thread_id") or "")
+            if not thread_id:
+                raise RuntimeError(f"创建场景线程后没有 thread_id: {thread}")
+            bindings["thread_id"] = thread_id
+            thread_report: dict[str, Any] = {
+                "thread": thread_name,
+                "thread_id": thread_id,
+                "title": title,
+                "turns": [],
+            }
+            reports.append(thread_report)
+            print(
+                json.dumps(
+                    {"event": "thread_created", "scenario": scenario["name"], **thread_report},
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+
+            for turn_index, turn in enumerate(definition["turns"], start=1):
+                turn_name = str(turn.get("name") or f"turn-{turn_index}")
+                query = _render_scenario_value(turn["query"], bindings)
+                expect = _render_scenario_value(turn.get("expect", {}), bindings)
+                if not isinstance(query, str) or not isinstance(expect, dict):
+                    raise ValueError(f"threads[{thread_index}].turns[{turn_index}] 配置类型错误")
+                try:
+                    evidence = await _create_run(
+                        client,
+                        headers,
+                        thread_id=thread_id,
+                        agent_id=agent_id,
+                        query=query,
+                        tag=tag,
+                    )
+                    assistant_text = await _latest_assistant_text(client, headers, thread_id)
+                    turn_failures = await _validate_scenario_turn(
+                        client,
+                        headers,
+                        thread_id=thread_id,
+                        assistant_text=assistant_text,
+                        evidence=evidence,
+                        expect=expect,
+                    )
+                    turn_report = {
+                        "turn": turn_name,
+                        "run_id": evidence.run_id,
+                        "status": evidence.status,
+                        "seconds": evidence.elapsed_seconds,
+                        "tools": sorted(evidence.tool_names),
+                        "compaction": evidence.compaction_events,
+                        "input": _compact_log_text(query, args.log_content_limit),
+                        "output": _compact_log_text(assistant_text, args.log_content_limit),
+                        "passed": not turn_failures,
+                        "failures": turn_failures,
+                    }
+                except (RuntimeError, ValueError) as exc:
+                    turn_failures = [str(exc)]
+                    turn_report = {
+                        "turn": turn_name,
+                        "status": "error",
+                        "passed": False,
+                        "failures": turn_failures,
+                    }
+                thread_report["turns"].append(turn_report)
+                print(
+                    json.dumps(
+                        {"event": "turn_finished", "thread": thread_name, **turn_report},
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                failures.extend(f"{thread_name}/{turn_name}: {message}" for message in turn_failures)
+
+        visible_threads = await client.get(
+            "/api/chat/threads",
+            headers=headers,
+            params={"agent_id": args.agent_id, "conversation_scope_key": scope, "limit": 100, "offset": 0},
+        )
+        visible_threads.raise_for_status()
+        visible_payload = visible_threads.json()
+        visible_items = visible_payload if isinstance(visible_payload, list) else visible_payload.get("threads", [])
+        visible_ids = {str(item.get("id")) for item in visible_items if isinstance(item, dict)}
+        for report in reports:
+            report["visible_in_scope"] = report["thread_id"] in visible_ids
+            if not report["visible_in_scope"]:
+                failures.append(f"{report['thread']}: 未出现在 chat-iframe 对应业务 scope 的会话列表")
+
+    summary = {
+        "status": "passed" if not failures else "failed",
+        "scenario": scenario["name"],
+        "tag": tag,
+        "conversation_scope_key": scope,
+        "threads": reports,
+        "failure_count": len(failures),
+        "failures": failures,
+    }
+    print(json.dumps({"event": "scenario_finished", **summary}, ensure_ascii=False, indent=2))
+    if failures:
+        raise RuntimeError(f"场景 {scenario['name']} 未通过，共 {len(failures)} 项失败")
+
+
 async def _main(args: argparse.Namespace) -> None:
+    if args.scenario_file:
+        await _run_configured_scenario(args)
+        return
+
     tag = time.strftime("%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
     scope = f"{args.source_system}:{args.function_id}:{args.business_id}"
     early_marker = f"EARLY-CONTEXT-{tag}"

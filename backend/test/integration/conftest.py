@@ -249,18 +249,11 @@ async def standard_user(test_client: httpx.AsyncClient, admin_headers: dict[str,
             )
 
 
-@pytest_asyncio.fixture(scope="function")
-async def knowledge_database(
+async def _get_enabled_embedding_model_spec(
     test_client: httpx.AsyncClient,
     admin_headers: dict[str, str],
-) -> AsyncGenerator[dict, None]:
-    import time
-
-    unique_id = uuid.uuid4().hex
-    timestamp = int(time.time() * 1000000)
-    db_name = f"pytest_kb_{timestamp}_{unique_id}"
-    kb_id = None
-
+) -> str:
+    """以部署实际启用的 embedding 模型创建测试资源，避免测试绑定已下线供应商。"""
     embedding_models_response = await test_client.get(
         "/api/system/model-providers/models/v2",
         params={"model_type": "embedding"},
@@ -270,16 +263,34 @@ async def knowledge_database(
         pytest.fail(f"Failed to list embedding models: {embedding_models_response.text}")
     providers = (embedding_models_response.json().get("data") or {}).values()
     embedding_model_spec = next(
-        (
-            str(model["spec"])
-            for provider in providers
-            for model in provider.get("models") or []
-            if model.get("spec")
-        ),
+        (str(model["spec"]) for provider in providers for model in provider.get("models") or [] if model.get("spec")),
         None,
     )
     if not embedding_model_spec:
         pytest.fail("No enabled embedding model is available for knowledge integration tests.")
+    return embedding_model_spec
+
+
+@pytest_asyncio.fixture(scope="function")
+async def enabled_embedding_model_spec(
+    test_client: httpx.AsyncClient,
+    admin_headers: dict[str, str],
+) -> str:
+    return await _get_enabled_embedding_model_spec(test_client, admin_headers)
+
+
+@pytest_asyncio.fixture(scope="function")
+async def knowledge_database(
+    test_client: httpx.AsyncClient,
+    admin_headers: dict[str, str],
+    enabled_embedding_model_spec: str,
+) -> AsyncGenerator[dict, None]:
+    import time
+
+    unique_id = uuid.uuid4().hex
+    timestamp = int(time.time() * 1000000)
+    db_name = f"pytest_kb_{timestamp}_{unique_id}"
+    kb_id = None
 
     try:
         create_response = await test_client.post(
@@ -288,7 +299,7 @@ async def knowledge_database(
                 "database_name": db_name,
                 "description": "Pytest managed knowledge base",
                 # 集成环境的模型供应商由部署配置决定，不能把已废弃供应商名称固化到真实 API fixture。
-                "embedding_model_spec": embedding_model_spec,
+                "embedding_model_spec": enabled_embedding_model_spec,
                 "kb_type": "milvus",
                 "additional_params": {},
             },

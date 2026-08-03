@@ -86,13 +86,13 @@ async def _delete_department_with_admin(test_client, admin_headers, department):
     assert response.status_code in (200, 404), response.text
 
 
-async def _create_test_database(test_client, admin_headers, share_config=None):
+async def _create_test_database(test_client, admin_headers, embedding_model_spec: str, share_config=None):
     response = await test_client.post(
         "/api/knowledge/databases",
         json={
             "database_name": f"pytest_acl_{uuid.uuid4().hex[:8]}",
             "description": "Knowledge permission test",
-            "embedding_model_spec": "siliconflow-cn:Pro/BAAI/bge-m3",
+            "embedding_model_spec": embedding_model_spec,
             "kb_type": "milvus",
             "additional_params": {},
             "share_config": share_config,
@@ -144,12 +144,12 @@ async def test_document_exists_returns_false_for_missing_relative_path(test_clie
     assert response.json() == {"kb_id": kb_id, "filename": filename, "exists": False}
 
 
-async def test_create_database_with_chunk_preset(test_client, admin_headers):
+async def test_create_database_with_chunk_preset(test_client, admin_headers, enabled_embedding_model_spec):
     db_name = f"pytest_chunk_preset_{uuid.uuid4().hex[:6]}"
     payload = {
         "database_name": db_name,
         "description": "Chunk preset create test",
-        "embedding_model_spec": "siliconflow-cn:Pro/BAAI/bge-m3",
+        "embedding_model_spec": enabled_embedding_model_spec,
         "kb_type": "milvus",
         "additional_params": {"chunk_preset_id": "book"},
     }
@@ -209,7 +209,9 @@ async def test_update_database_additional_params_merge_keeps_chunk_preset(
     assert info_response.json()["additional_params"]["chunk_preset_id"] == "qa"
 
 
-async def test_knowledge_routes_enforce_permissions(test_client, standard_user, knowledge_database):
+async def test_knowledge_routes_enforce_permissions(
+    test_client, standard_user, knowledge_database, enabled_embedding_model_spec
+):
     kb_id = knowledge_database["kb_id"]
 
     forbidden_create = await test_client.post(
@@ -217,7 +219,7 @@ async def test_knowledge_routes_enforce_permissions(test_client, standard_user, 
         json={
             "database_name": "unauthorized_db",
             "description": "Should not succeed",
-            "embedding_model_spec": "siliconflow-cn:Pro/BAAI/bge-m3",
+            "embedding_model_spec": enabled_embedding_model_spec,
         },
         headers=standard_user["headers"],
     )
@@ -240,7 +242,7 @@ async def test_knowledge_routes_enforce_permissions(test_client, standard_user, 
     _assert_forbidden_response(forbidden_exists)
 
 
-async def test_admin_can_create_vector_db_with_reranker(test_client, admin_headers):
+async def test_admin_can_create_vector_db_with_reranker(test_client, admin_headers, enabled_embedding_model_spec):
     """测试创建向量库并配置 reranker 参数（通过 query_params.options）
 
     注意：数据库清理由 conftest.py 中的 session fixture 自动处理。
@@ -249,7 +251,7 @@ async def test_admin_can_create_vector_db_with_reranker(test_client, admin_heade
     payload = {
         "database_name": db_name,
         "description": "Vector DB with reranker",
-        "embedding_model_spec": "siliconflow-cn:Pro/BAAI/bge-m3",
+        "embedding_model_spec": enabled_embedding_model_spec,
         "kb_type": "milvus",
         "additional_params": {},
     }
@@ -545,8 +547,10 @@ async def test_get_accessible_databases(test_client, admin_headers, knowledge_da
     assert knowledge_database["kb_id"] in kb_ids
 
 
-async def test_create_database_defaults_to_global_share_config(test_client, admin_headers):
-    database = await _create_test_database(test_client, admin_headers)
+async def test_create_database_defaults_to_global_share_config(
+    test_client, admin_headers, enabled_embedding_model_spec
+):
+    database = await _create_test_database(test_client, admin_headers, enabled_embedding_model_spec)
     kb_id = database["kb_id"]
     try:
         assert database["share_config"] == {"access_level": "global", "department_ids": [], "user_uids": []}
@@ -554,7 +558,9 @@ async def test_create_database_defaults_to_global_share_config(test_client, admi
         await test_client.delete(f"/api/knowledge/databases/{kb_id}", headers=admin_headers)
 
 
-async def test_department_share_config_filters_accessible_databases(test_client, admin_headers):
+async def test_department_share_config_filters_accessible_databases(
+    test_client, admin_headers, enabled_embedding_model_spec
+):
     department_a = await _create_test_department(test_client, admin_headers, "pytest_dept_a")
     department_b = await _create_test_department(test_client, admin_headers, "pytest_dept_b")
     user_a = user_b = None
@@ -566,6 +572,7 @@ async def test_department_share_config_filters_accessible_databases(test_client,
         database = await _create_test_database(
             test_client,
             admin_headers,
+            enabled_embedding_model_spec,
             {"access_level": "department", "department_ids": [department_a["id"]], "user_uids": []},
         )
 
@@ -586,7 +593,7 @@ async def test_department_share_config_filters_accessible_databases(test_client,
         await _delete_department_with_admin(test_client, admin_headers, department_b)
 
 
-async def test_user_share_config_filters_accessible_databases(test_client, admin_headers):
+async def test_user_share_config_filters_accessible_databases(test_client, admin_headers, enabled_embedding_model_spec):
     department_a = await _create_test_department(test_client, admin_headers, "pytest_dept_a")
     department_b = await _create_test_department(test_client, admin_headers, "pytest_dept_b")
     user_a = user_b = None
@@ -598,6 +605,7 @@ async def test_user_share_config_filters_accessible_databases(test_client, admin
         database = await _create_test_database(
             test_client,
             admin_headers,
+            enabled_embedding_model_spec,
             {"access_level": "user", "department_ids": [], "user_uids": [user_a["user"]["uid"]]},
         )
 
@@ -707,7 +715,7 @@ async def test_markdown_endpoint_parses_uploaded_text_file(test_client, admin_he
     assert payload["markdown_content"].strip()
 
 
-async def test_duplicate_database_name(test_client, admin_headers, knowledge_database):
+async def test_duplicate_database_name(test_client, admin_headers, knowledge_database, enabled_embedding_model_spec):
     """测试重复创建同名知识库"""
     db_name = knowledge_database["name"]
     response = await test_client.post(
@@ -715,7 +723,7 @@ async def test_duplicate_database_name(test_client, admin_headers, knowledge_dat
         json={
             "database_name": db_name,
             "description": "Duplicate name test",
-            "embedding_model_spec": "siliconflow-cn:Pro/BAAI/bge-m3",
+            "embedding_model_spec": enabled_embedding_model_spec,
             "kb_type": "milvus",
             "additional_params": {},
         },
@@ -725,14 +733,14 @@ async def test_duplicate_database_name(test_client, admin_headers, knowledge_dat
     assert "已存在" in response.json()["detail"]
 
 
-async def test_create_lightrag_knowledge_base_is_unsupported(test_client, admin_headers):
+async def test_create_lightrag_knowledge_base_is_unsupported(test_client, admin_headers, enabled_embedding_model_spec):
     db_name = f"pytest_lightrag_{uuid.uuid4().hex[:6]}"
     response = await test_client.post(
         "/api/knowledge/databases",
         json={
             "database_name": db_name,
             "description": "Unsupported LightRAG knowledge base",
-            "embedding_model_spec": "siliconflow-cn:Pro/BAAI/bge-m3",
+            "embedding_model_spec": enabled_embedding_model_spec,
             "kb_type": "lightrag",
             "additional_params": {},
         },
@@ -742,7 +750,7 @@ async def test_create_lightrag_knowledge_base_is_unsupported(test_client, admin_
     assert "Unsupported knowledge base type: lightrag" in response.json()["detail"]
 
 
-async def test_create_milvus_knowledge_base(test_client, admin_headers):
+async def test_create_milvus_knowledge_base(test_client, admin_headers, enabled_embedding_model_spec):
     """测试创建 Milvus 知识库
 
     注意：数据库清理由 conftest.py 中的 session fixture 自动处理。
@@ -751,7 +759,7 @@ async def test_create_milvus_knowledge_base(test_client, admin_headers):
     payload = {
         "database_name": db_name,
         "description": "Pytest Milvus knowledge base",
-        "embedding_model_spec": "siliconflow-cn:Pro/BAAI/bge-m3",
+        "embedding_model_spec": enabled_embedding_model_spec,
         "kb_type": "milvus",
         "additional_params": {},
     }

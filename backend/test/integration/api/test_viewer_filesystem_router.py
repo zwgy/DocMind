@@ -277,10 +277,9 @@ async def test_viewer_file_returns_image_preview_metadata(test_client, standard_
     )
 
     assert response.status_code == 200, response.text
-    payload = response.json()
-    assert payload["content"] is None
-    assert payload["preview_type"] == "image"
-    assert payload["supported"] is True
+    assert response.headers["x-yuxi-preview-type"] == "image"
+    assert response.headers["content-type"].startswith("image/png")
+    assert response.content == actual_path.read_bytes()
 
 
 async def test_viewer_file_returns_pdf_preview_metadata(test_client, standard_user):
@@ -300,10 +299,9 @@ async def test_viewer_file_returns_pdf_preview_metadata(test_client, standard_us
     )
 
     assert response.status_code == 200, response.text
-    payload = response.json()
-    assert payload["content"] is None
-    assert payload["preview_type"] == "pdf"
-    assert payload["supported"] is True
+    assert response.headers["x-yuxi-preview-type"] == "pdf"
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert response.content == actual_path.read_bytes()
 
 
 async def test_viewer_download_returns_attachment_response(test_client, standard_user):
