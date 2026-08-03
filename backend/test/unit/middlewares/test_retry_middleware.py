@@ -4,6 +4,7 @@ import pytest
 from langchain_core.exceptions import ContextOverflowError
 
 from yuxi.agents.middlewares.retry import create_model_retry_middleware
+from yuxi.agents.middlewares.token_usage import ModelOutputIncompleteError
 
 
 @pytest.mark.unit
@@ -14,4 +15,5 @@ def test_model_retry_leaves_context_overflow_for_summary_recovery() -> None:
     assert middleware.on_failure == "error"
     assert callable(middleware.retry_on)
     assert middleware.retry_on(ContextOverflowError("input too long")) is False
+    assert middleware.retry_on(ModelOutputIncompleteError("truncated", {})) is False
     assert middleware.retry_on(ConnectionError("temporary")) is True

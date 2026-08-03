@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from yuxi.agents.middlewares.token_usage import (
     ContextWindowExceededError,
+    ModelOutputIncompleteError,
     TokenUsageMiddleware,
     estimate_model_request,
     resolve_context_budget,
@@ -257,7 +258,7 @@ async def test_current_length_response_with_visible_content_is_not_input_overflo
 
 
 @pytest.mark.asyncio
-async def test_empty_length_within_prompt_budget_is_output_exhaustion_not_history_overflow() -> None:
+async def test_empty_length_with_output_usage_is_explicit_output_exhaustion() -> None:
     middleware = TokenUsageMiddleware()
     request = _request()
 
@@ -272,13 +273,14 @@ async def test_empty_length_within_prompt_budget_is_output_exhaustion_not_histor
             ]
         )
 
-    result = await middleware.awrap_model_call(request, handler)
+    with pytest.raises(ModelOutputIncompleteError, match="耗尽输出预算") as raised:
+        await middleware.awrap_model_call(request, handler)
 
-    assert result.command.update["token_usage"]["response_outcome"] == "output_exhausted"
+    assert raised.value.token_usage["response_outcome"] == "output_exhausted"
 
 
 @pytest.mark.asyncio
-async def test_length_with_tool_call_is_recorded_as_truncated_without_compaction_retry() -> None:
+async def test_length_with_tool_call_is_rejected_before_tool_node() -> None:
     middleware = TokenUsageMiddleware()
     request = _request()
 
@@ -294,9 +296,33 @@ async def test_length_with_tool_call_is_recorded_as_truncated_without_compaction
             ]
         )
 
-    result = await middleware.awrap_model_call(request, handler)
+    with pytest.raises(ModelOutputIncompleteError, match="未执行工具") as raised:
+        await middleware.awrap_model_call(request, handler)
 
-    assert result.command.update["token_usage"]["response_outcome"] == "tool_call_truncated"
+    assert raised.value.token_usage["response_outcome"] == "tool_call_truncated"
+
+
+@pytest.mark.asyncio
+async def test_empty_length_without_usage_is_explicitly_unverified() -> None:
+    middleware = TokenUsageMiddleware()
+    request = _request()
+
+    async def handler(_request):
+        return ModelResponse(
+            result=[
+                AIMessage(
+                    content="",
+                    response_metadata={"finish_reason": "length"},
+                )
+            ]
+        )
+
+    with pytest.raises(ModelOutputIncompleteError, match="未返回可校验的 usage") as raised:
+        await middleware.awrap_model_call(request, handler)
+
+    assert raised.value.token_usage["response_outcome"] == "length_unverified"
+    assert raised.value.token_usage["provider_input_tokens"] is None
+    assert raised.value.token_usage["provider_output_tokens"] is None
 
 
 def test_bucketed_gap_does_not_cross_request_size_boundaries() -> None:

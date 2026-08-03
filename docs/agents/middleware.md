@@ -77,7 +77,7 @@
 
 Token 计数不会调用 `/tokenize` 或其他远程预检接口，因此不会额外延迟首 Token。新会话先使用本地保守估算；模型成功响应后，`TokenUsageMiddleware` 用供应商返回的输入 usage 记录当前请求规模桶的最大正误差。校准键绑定模型部署、地址、请求协议和模板版本；Skill/MCP 造成的工具 Schema 变化会重新计算本地基线和诊断 hash，但不会清空同一部署已经观测到的正误差包络。缺少或不自洽的 usage 不写入校准样本，仍按本地保守估算准入。
 
-OpenAI 兼容服务若返回空正文且 `finish_reason=length`，TokenUsage 会先保留本次 usage，再把携带校准快照的上下文异常交给 Summary；Summary 持续压缩完整历史交互段，低于输入预算后只重试一次。明确溢出但没有 usage 时会一次性压缩所有可安全压缩的旧历史再重试；固定系统提示词、工具 Schema 和当前输入仍无法容纳时直接返回容量错误。带正文的 `length` 只有在实测输入与输出已接近完整窗口时才记为上下文触顶，否则按普通输出截断处理。
+OpenAI 兼容服务的 `finish_reason=length` 不等同于输入溢出。带正文时分类为 `output_exhausted`，保留部分回答但不压缩历史重试；带工具调用时分类为 `tool_call_truncated`，在进入 ToolNode 前明确失败，禁止执行可能不完整的参数。空正文且实测 provider input 超过 `prompt_budget` 时，TokenUsage 会把携带校准快照的容量异常交给 ContextCompaction，全级重算后只重试主模型一次；正数 output/reasoning usage 证明输出耗尽但没有可见正文时返回可操作错误。空正文又缺少可校验 usage 时分类为 `length_unverified`，不猜测为输入溢出，也不自动压缩或重试。provider 明确抛出 prompt/context too long 但没有 usage 时，压缩器会一次性处理全部安全历史后重试一次。
 
 触发后，中间件先把将要裁剪的完整交互段写入当前线程 `outputs/conversation_history` 下的不可变 JSONL 清单，再把私有滚动摘要、最新归档路径和最近原始消息通过一次 `Overwrite` 原子提交。普通大型工具结果会写入 `outputs/large_tool_results` 并以回执替换；已有权威来源的 `read_file` 和 `open_kb_document` 窗口只会缩小为来源回执，不会产生第二份副本。
 

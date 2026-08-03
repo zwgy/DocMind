@@ -51,6 +51,14 @@ class ContextWindowExceededError(ContextOverflowError):
         self.token_usage = token_usage
 
 
+class ModelOutputIncompleteError(RuntimeError):
+    """阻止截断或不可验证的模型输出作为正常 AIMessage 提交。"""
+
+    def __init__(self, message: str, token_usage: TokenUsagePayload) -> None:
+        super().__init__(message)
+        self.token_usage = token_usage
+
+
 @dataclass(frozen=True)
 class ResolvedContextBudget:
     """一次模型调用使用的标准化上下文预算。"""
@@ -104,7 +112,13 @@ class TokenUsagePayload(TypedDict, total=False):
     tool_results_externalized: int
     summary_active: bool
     near_context_limit: bool
-    response_outcome: Literal["completed", "input_overflow", "output_exhausted", "tool_call_truncated"]
+    response_outcome: Literal[
+        "completed",
+        "input_overflow",
+        "output_exhausted",
+        "tool_call_truncated",
+        "length_unverified",
+    ]
     measured_at: str
 
 
@@ -345,9 +359,7 @@ def fixed_context_overhead(request: ModelRequest) -> FixedContextOverhead:
     minimum_receipt_tokens = estimate_messages_tokens([SystemMessage(content=_MINIMUM_CURRENT_INPUT_RECEIPT)])
     estimate = estimate_model_request(request)
     fixed_request_size = system_tokens + tool_tokens + minimum_receipt_tokens
-    protocol_correction_envelope = estimate.max_positive_gap_by_bucket.get(
-        _request_size_bucket(fixed_request_size), 0
-    )
+    protocol_correction_envelope = estimate.max_positive_gap_by_bucket.get(_request_size_bucket(fixed_request_size), 0)
     _, converted_tools = _serialized_request([], tools)
     largest_name, largest_tokens = _largest_tool_schema(converted_tools)
     return FixedContextOverhead(
@@ -473,13 +485,45 @@ def _length_response_outcome(response: ModelResponse, snapshot: TokenUsagePayloa
         if message.content:
             return "output_exhausted"
         provider_input = snapshot.get("provider_input_tokens")
+        provider_output = snapshot.get("provider_output_tokens")
         prompt_budget = snapshot.get("prompt_budget")
         if isinstance(provider_input, int) and isinstance(prompt_budget, int) and provider_input > prompt_budget:
             return "input_overflow"
-        # Empty visible text can still mean reasoning/output budget was exhausted.  Without a provider
-        # rejection or measured input excess, retrying after compaction only repeats the interruption.
-        return "output_exhausted"
+        if isinstance(provider_output, int) and provider_output > 0:
+            # 本地 Qwen 可能把额度消耗在 reasoning token；provider 的正数输出 usage
+            # 足以证明输出耗尽，但空正文仍不能作为一次正常回答提交。
+            return "output_exhausted"
+        # 没有可见正文和输出 usage 时无法区分兼容层丢字段、输出耗尽或其他服务异常。
+        # 明确标记不可验证，避免把它伪装成输入溢出后无意义地压缩历史。
+        return "length_unverified"
     return None
+
+
+def _raise_for_noncommittable_output(response: ModelResponse, snapshot: TokenUsagePayload) -> None:
+    """在 LangGraph 看到模型结果前阻止不完整输出进入消息或 ToolNode。"""
+    outcome = snapshot["response_outcome"]
+    if outcome == "input_overflow":
+        raise ContextWindowExceededError(
+            "模型在生成可见正文前已达到上下文上限",
+            snapshot,
+        )
+    if outcome == "tool_call_truncated":
+        raise ModelOutputIncompleteError(
+            "模型工具调用在输出上限处截断，未执行工具；请提高模型输出上限后重试",
+            snapshot,
+        )
+    if outcome == "length_unverified":
+        raise ModelOutputIncompleteError(
+            "模型在输出上限处停止且未返回可校验的 usage，未自动压缩或重试",
+            snapshot,
+        )
+    if outcome == "output_exhausted" and not any(
+        isinstance(message, AIMessage) and bool(message.content) for message in response.result
+    ):
+        raise ModelOutputIncompleteError(
+            "模型已耗尽输出预算但未生成可见内容；请提高模型输出上限后重试",
+            snapshot,
+        )
 
 
 class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
@@ -570,11 +614,7 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
         response = handler(request)
         # 必须先生成快照再判断空正文 length，否则本次真实 usage 会随异常一起丢失。
         snapshot = self._build_snapshot(request, response)
-        if snapshot["response_outcome"] == "input_overflow":
-            raise ContextWindowExceededError(
-                "模型在生成可见正文前已达到上下文上限",
-                snapshot,
-            )
+        _raise_for_noncommittable_output(response, snapshot)
         return ExtendedModelResponse(
             model_response=response,
             command=Command(update={"token_usage": snapshot}),
@@ -589,11 +629,7 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
         response = await handler(request)
         # 异步链路与同步链路保持相同顺序，恢复逻辑才能使用同一份实测校准。
         snapshot = self._build_snapshot(request, response)
-        if snapshot["response_outcome"] == "input_overflow":
-            raise ContextWindowExceededError(
-                "模型在生成可见正文前已达到上下文上限",
-                snapshot,
-            )
+        _raise_for_noncommittable_output(response, snapshot)
         return ExtendedModelResponse(
             model_response=response,
             command=Command(update={"token_usage": snapshot}),
