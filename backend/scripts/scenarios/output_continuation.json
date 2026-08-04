@@ -10,9 +10,9 @@
       "turns": [
         {
           "name": "continue-visible-output",
-          "query": "不要调用工具。请从 1 开始逐行输出到 160，每行格式必须是“条目 N：输出续写验收”。完成第 160 行后，另起一行只输出标记 OUTPUT-CONTINUATION-COMPLETE-{tag}。不得省略条目，不得提前给出标记。",
+          "query": "这是纯文本流式输出校验。禁止调用工具、禁止读取或写入文件。请只连续输出 1200 个大写字母 A，不要加序号、空格或解释；第 1200 个 A 后另起一行，只输出标记 OUTPUT-CONTINUATION-COMPLETE-{tag}。不得提前输出标记。",
           "expect": {
-            "assistant_contains": ["条目 1", "条目 160", "OUTPUT-CONTINUATION-COMPLETE-{tag}"],
+            "assistant_contains": ["AAAAAAAAAA", "OUTPUT-CONTINUATION-COMPLETE-{tag}"],
             "assistant_not_contains": ["继续上一条回复，从截断处直接续写"],
             "tools_exclude": ["read_file", "write_file", "edit_file"],
             "output_recovery": [
