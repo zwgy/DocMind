@@ -25,6 +25,7 @@ class RunEvidence:
     status: str = ""
     elapsed_seconds: float = 0.0
     compaction_events: list[dict[str, Any]] = field(default_factory=list)
+    output_recovery_events: list[dict[str, Any]] = field(default_factory=list)
     tool_names: set[str] = field(default_factory=set)
 
 
@@ -37,6 +38,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--external-user-id", default="1001")
     parser.add_argument("--external-user-name", default="张三")
     parser.add_argument("--agent-id", default="default-chatbot")
+    parser.add_argument(
+        "--model-spec",
+        help="仅用于隔离验收会话的 model_spec；不传则沿用智能体默认模型",
+    )
     parser.add_argument("--max-growth-rounds", type=int, default=10)
     parser.add_argument("--payload-chars", type=int, default=5000)
     parser.add_argument("--run-timeout", type=float, default=300.0)
@@ -109,6 +114,22 @@ def _collect_event_evidence(payload: dict[str, Any], evidence: RunEvidence) -> N
             }
             if compact and compact not in evidence.compaction_events:
                 evidence.compaction_events.append(compact)
+
+        if item.get("type") == "output_recovery":
+            recovery = {
+                key: item[key]
+                for key in (
+                    "status",
+                    "mode",
+                    "attempt",
+                    "previous_output_tokens",
+                    "target_output_tokens",
+                    "prompt_budget",
+                )
+                if item.get(key) is not None
+            }
+            if recovery and recovery not in evidence.output_recovery_events:
+                evidence.output_recovery_events.append(recovery)
 
         tool_name = item.get("tool_name")
         if isinstance(tool_name, str) and tool_name:
@@ -368,6 +389,7 @@ async def _validate_scenario_turn(
         "tools_exclude",
         "compaction",
         "compaction_order",
+        "output_recovery",
         "files",
     }
     unknown_fields = set(expect) - allowed_fields
@@ -454,6 +476,42 @@ async def _validate_scenario_turn(
         if expected_order not in events_by_cycle.values():
             failures.append(f"没有压缩周期满足层级顺序 {expected_order}: {events_by_cycle}")
 
+    recovery_expectations = expect.get("output_recovery", [])
+    if isinstance(recovery_expectations, dict):
+        recovery_expectations = [recovery_expectations]
+    if not isinstance(recovery_expectations, list):
+        raise ValueError("expect.output_recovery 必须是 object 或 object 数组")
+    for item in recovery_expectations:
+        if not isinstance(item, dict):
+            raise ValueError("expect.output_recovery 的每项必须是 object")
+        min_count = item.get("min_count", 1)
+        if not isinstance(min_count, int) or min_count < 1:
+            raise ValueError("expect.output_recovery.min_count 必须是大于 0 的整数")
+        min_values = item.get("min_values", {})
+        if not isinstance(min_values, dict) or not all(
+            isinstance(key, str) and isinstance(value, (int, float)) and not isinstance(value, bool)
+            for key, value in min_values.items()
+        ):
+            raise ValueError("expect.output_recovery.min_values 必须是数值字段 object")
+        criteria = {key: value for key, value in item.items() if key not in {"min_count", "min_values"}}
+        if not criteria:
+            raise ValueError("expect.output_recovery 至少需要一个匹配字段")
+        matching_events = [
+            event
+            for event in evidence.output_recovery_events
+            if all(event.get(key) == value for key, value in criteria.items())
+            and all(
+                isinstance(event.get(key), (int, float))
+                and not isinstance(event.get(key), bool)
+                and event[key] >= minimum
+                for key, minimum in min_values.items()
+            )
+        ]
+        if len(matching_events) < min_count:
+            failures.append(
+                f"输出恢复事件 {criteria} 且最小值 {min_values} 只出现 {len(matching_events)} 次，期望至少 {min_count} 次"
+            )
+
     file_expectations = expect.get("files", [])
     if not isinstance(file_expectations, list):
         raise ValueError("expect.files 必须是数组")
@@ -499,6 +557,8 @@ async def _run_configured_scenario(args: argparse.Namespace) -> None:
             filler_unit = "上下文压力材料仅用于触发预算准入，不改变本轮明确约束。\n"
             payload = (filler_unit * (args.payload_chars // len(filler_unit) + 1))[: args.payload_chars]
             bindings = {"tag": tag, "thread_name": thread_name, "payload": payload}
+            if args.model_spec:
+                bindings["model_spec"] = args.model_spec
             metadata = _render_scenario_value(definition.get("metadata", {}), bindings)
             if not isinstance(metadata, dict):
                 raise ValueError(f"threads[{thread_index}].metadata 必须是 object")
@@ -605,6 +665,7 @@ async def _run_configured_scenario(args: argparse.Namespace) -> None:
                         "seconds": evidence.elapsed_seconds,
                         "tools": sorted(evidence.tool_names),
                         "compaction": evidence.compaction_events,
+                        "output_recovery": evidence.output_recovery_events,
                         "input": _compact_log_text(query, args.log_content_limit),
                         "output": _compact_log_text(assistant_text, args.log_content_limit),
                         "passed": not turn_failures,
@@ -637,6 +698,9 @@ async def _run_configured_scenario(args: argparse.Namespace) -> None:
                     status="completed",
                     compaction_events=[
                         event for evidence in thread_evidences for event in evidence.compaction_events
+                    ],
+                    output_recovery_events=[
+                        event for evidence in thread_evidences for event in evidence.output_recovery_events
                     ],
                     tool_names=set().union(*(evidence.tool_names for evidence in thread_evidences)),
                 )

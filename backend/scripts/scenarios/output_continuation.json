@@ -1,0 +1,36 @@
+{
+  "name": "响应式输出恢复真实验收",
+  "threads": [
+    {
+      "name": "visible-output-continuation",
+      "title": "输出截断续写验收-{tag}",
+      "metadata": {
+        "model_spec": "{model_spec}"
+      },
+      "turns": [
+        {
+          "name": "continue-visible-output",
+          "query": "不要调用工具。请从 1 开始逐行输出到 160，每行格式必须是“条目 N：输出续写验收”。完成第 160 行后，另起一行只输出标记 OUTPUT-CONTINUATION-COMPLETE-{tag}。不得省略条目，不得提前给出标记。",
+          "expect": {
+            "assistant_contains": ["条目 1", "条目 160", "OUTPUT-CONTINUATION-COMPLETE-{tag}"],
+            "assistant_not_contains": ["继续上一条回复，从截断处直接续写"],
+            "tools_exclude": ["read_file", "write_file", "edit_file"],
+            "output_recovery": [
+              {
+                "status": "started",
+                "mode": "continuation",
+                "min_values": {
+                  "target_output_tokens": 8192
+                }
+              },
+              {
+                "status": "finished",
+                "mode": "continuation"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

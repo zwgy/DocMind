@@ -16,6 +16,7 @@ from scripts import validate_context_compaction_api as scenario_api
         "context_compaction_l2.json",
         "context_compaction_l3.json",
         "context_compaction_l5.json",
+        "output_continuation.json",
     ],
 )
 def test_checked_in_scenarios_are_valid(filename: str) -> None:
@@ -87,6 +88,10 @@ async def test_validate_scenario_turn_checks_response_tools_compaction_and_files
             {"status": "skipped", "level": "L3", "sequence": 3, "cycle_id": "cycle-1"},
             {"status": "skipped", "level": "L5", "sequence": 5, "cycle_id": "cycle-1"},
         ],
+        output_recovery_events=[
+            {"status": "started", "mode": "continuation", "attempt": 1, "target_output_tokens": 8192},
+            {"status": "finished", "mode": "continuation", "attempt": 1},
+        ],
     )
 
     failures = await scenario_api._validate_scenario_turn(
@@ -102,6 +107,10 @@ async def test_validate_scenario_turn_checks_response_tools_compaction_and_files
             "tools_exclude": ["write_file"],
             "compaction": {"status": "finished", "level": "L2", "min_values": {"tokens_saved": 1}},
             "compaction_order": ["L1", "L2", "L3", "L5"],
+            "output_recovery": [
+                {"status": "started", "mode": "continuation", "min_values": {"target_output_tokens": 8192}},
+                {"status": "finished", "mode": "continuation"},
+            ],
             "files": [
                 {
                     "path": "/home/gem/user-data/outputs/result.md",
