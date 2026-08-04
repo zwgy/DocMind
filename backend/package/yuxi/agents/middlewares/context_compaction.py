@@ -30,6 +30,7 @@ from yuxi.agents.middlewares.token_usage import (
     ensure_fixed_context_fits,
     estimate_messages_tokens,
     estimate_model_request,
+    message_finish_reason,
     resolve_context_budget,
 )
 from yuxi.agents.middlewares.context_projection import (
@@ -155,8 +156,7 @@ def _message_segments(messages: list[AnyMessage]) -> list[list[AnyMessage]]:
 
 
 def _summary_text(response: Any) -> str:
-    metadata = getattr(response, "response_metadata", None)
-    if isinstance(metadata, dict) and metadata.get("finish_reason") == "length":
+    if isinstance(response, AIMessage) and message_finish_reason(response) == "length":
         # 摘要不是面向用户的流式回答。长度停止意味着九维 checkpoint 已被截断，继续
         # 使用会把不完整的任务状态当作事实写入后续轮次，因此必须让本次 L5 原子失败。
         raise SummaryOutputTruncatedError("摘要模型在输出上限处截断，未提交上下文压缩")

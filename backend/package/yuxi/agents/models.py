@@ -104,6 +104,20 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
             google_api_key=SecretStr(api_key),
             **model_kwargs,
         )
+    elif info.provider_type == "ollama":
+        from langchain_ollama import ChatOllama
+
+        # Ollama 原生 API 的输出上限字段是 num_predict。只在显式 Ollama Provider
+        # 内映射，避免把厂商私有参数泄漏给标准 OpenAI 兼容端点。
+        if "max_completion_tokens" in model_kwargs and "num_predict" not in model_kwargs:
+            model_kwargs["num_predict"] = model_kwargs.pop("max_completion_tokens")
+        if "max_tokens" in model_kwargs and "num_predict" not in model_kwargs:
+            model_kwargs["num_predict"] = model_kwargs.pop("max_tokens")
+        model = ChatOllama(
+            model=info.model_id,
+            base_url=base_url.removesuffix("/v1"),
+            **model_kwargs,
+        )
     else:
         model = _ToolCallChunkFixChatOpenAI(
             model=info.model_id,

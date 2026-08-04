@@ -185,7 +185,7 @@ def _profile_positive_int(model: Any, field_name: str) -> int | None:
 def _request_output_limit(model_settings: Any) -> int | None:
     if not isinstance(model_settings, Mapping):
         return None
-    for field_name in ("max_completion_tokens", "max_tokens"):
+    for field_name in ("max_completion_tokens", "max_tokens", "num_predict"):
         value = model_settings.get(field_name)
         if value is None:
             continue
@@ -489,11 +489,20 @@ def _model_usage_from_response(response: ModelResponse) -> tuple[int | None, int
     return None, None
 
 
+def message_finish_reason(message: AIMessage) -> str | None:
+    """标准化 OpenAI 与 Ollama 的完成原因，避免 Provider 差异泄漏到预算策略。"""
+    metadata = message.response_metadata
+    for field_name in ("finish_reason", "done_reason"):
+        value = metadata.get(field_name)
+        if isinstance(value, str):
+            return value
+    return None
+
+
 def _finish_reason(response: ModelResponse) -> str | None:
     for message in reversed(response.result):
         if isinstance(message, AIMessage):
-            value = message.response_metadata.get("finish_reason")
-            return value if isinstance(value, str) else None
+            return message_finish_reason(message)
     return None
 
 
@@ -508,7 +517,7 @@ def visible_output_exhaustion(response: ModelResponse) -> tuple[bool, int | None
         if not isinstance(message, AIMessage):
             continue
         exhausted = (
-            message.response_metadata.get("finish_reason") == "length"
+            message_finish_reason(message) == "length"
             and bool(message.content)
             and not message.tool_calls
             and not message.invalid_tool_calls
@@ -528,7 +537,7 @@ def _length_response_outcome(response: ModelResponse, snapshot: TokenUsagePayloa
     for message in reversed(response.result):
         if not isinstance(message, AIMessage):
             continue
-        if message.response_metadata.get("finish_reason") != "length":
+        if message_finish_reason(message) != "length":
             return None
         if message.tool_calls or message.invalid_tool_calls:
             # A length stop while emitting a tool call is unsafe to execute.  P3 will protect the

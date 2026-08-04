@@ -72,17 +72,17 @@ def _positive_int(value: Any) -> int | None:
 def _configured_output_limit(request: ModelRequest) -> int | None:
     """尽量读取部署当前上限；读取不到时由最小输出预留提供保守基线。"""
     settings = request.model_settings if isinstance(request.model_settings, Mapping) else {}
-    for field_name in ("max_completion_tokens", "max_tokens"):
+    for field_name in ("max_completion_tokens", "max_tokens", "num_predict"):
         if (value := _positive_int(settings.get(field_name))) is not None:
             return value
 
     model = request.model
-    for field_name in ("max_completion_tokens", "max_tokens", "max_output_tokens"):
+    for field_name in ("max_completion_tokens", "max_tokens", "max_output_tokens", "num_predict"):
         if (value := _positive_int(getattr(model, field_name, None))) is not None:
             return value
     model_kwargs = getattr(model, "model_kwargs", None)
     if isinstance(model_kwargs, Mapping):
-        for field_name in ("max_completion_tokens", "max_tokens", "max_output_tokens"):
+        for field_name in ("max_completion_tokens", "max_tokens", "max_output_tokens", "num_predict"):
             if (value := _positive_int(model_kwargs.get(field_name))) is not None:
                 return value
     return None
@@ -92,6 +92,8 @@ def _output_limit_field(request: ModelRequest) -> str:
     # 保留调用方已经选择的 OpenAI 参数名；本地兼容服务默认沿用项目现有的 max_tokens。
     if isinstance(request.model_settings, Mapping) and "max_completion_tokens" in request.model_settings:
         return "max_completion_tokens"
+    if request.model.__class__.__module__.startswith("langchain_ollama"):
+        return "num_predict"
     return "max_tokens"
 
 

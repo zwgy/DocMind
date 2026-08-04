@@ -13,6 +13,7 @@ from yuxi.agents.middlewares.token_usage import (
     estimate_model_request,
     resolve_context_budget,
     resolve_tool_token_limit,
+    visible_output_exhaustion,
 )
 from yuxi.agents.backends.composite import _TOOL_RESULT_SAVED_MARKER
 
@@ -439,6 +440,32 @@ def test_resolve_context_budget_expands_reserve_for_larger_explicit_output_limit
 
     assert budget.effective_output_reserve == 8_192
     assert budget.prompt_budget == 24_064
+
+
+def test_ollama_num_predict_expands_output_reserve_and_recognizes_done_reason() -> None:
+    request = SimpleNamespace(
+        model=SimpleNamespace(
+            profile={"max_input_tokens": 32_768, "min_output_reserve_tokens": 4_096, "context_safety_tokens": 512}
+        ),
+        model_settings={"num_predict": 8_192},
+    )
+
+    budget = resolve_context_budget(request)
+    exhausted, output_tokens = visible_output_exhaustion(
+        ModelResponse(
+            result=[
+                AIMessage(
+                    content="已截断正文",
+                    response_metadata={"done_reason": "length"},
+                    usage_metadata={"input_tokens": 100, "output_tokens": 16, "total_tokens": 116},
+                )
+            ]
+        )
+    )
+
+    assert budget.effective_output_reserve == 8_192
+    assert exhausted is True
+    assert output_tokens == 16
 
 
 def test_resolve_context_budget_uses_deployment_default_output_reserve() -> None:

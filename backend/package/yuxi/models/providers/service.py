@@ -20,7 +20,7 @@ from yuxi.storage.postgres.models_business import ModelProvider
 
 VALID_MODEL_TYPES = {"chat", "embedding", "rerank"}
 VALID_MODEL_SOURCES = {"manual", "remote"}
-VALID_PROVIDER_TYPES = {"openai", "anthropic", "gemini", "openrouter"}
+VALID_PROVIDER_TYPES = {"openai", "anthropic", "gemini", "ollama", "openrouter"}
 _PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{1,99}$")
 
 

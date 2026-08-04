@@ -9,6 +9,7 @@ from langgraph.types import Command, Overwrite
 
 from yuxi.agents.middlewares.output_continuation import (
     OutputContinuationMiddleware,
+    _output_limit_field,
     is_internal_output_continuation,
 )
 from yuxi.agents.middlewares.token_usage import ModelOutputIncompleteError
@@ -76,6 +77,15 @@ def test_completed_response_does_not_set_normal_output_limit() -> None:
 
     assert seen_settings == [{}]
     assert result.command.update == {"token_usage": _snapshot("completed")}
+
+
+@pytest.mark.unit
+def test_ollama_uses_num_predict_for_recovery_limit() -> None:
+    request = _request()
+    ollama_model_type = type("OllamaProbe", (), {"__module__": "langchain_ollama.chat_models"})
+    request = request.override(model=ollama_model_type())
+
+    assert _output_limit_field(request) == "num_predict"
 
 
 @pytest.mark.unit
