@@ -511,7 +511,9 @@ async def _validate_scenario_turn(
         ]
         if len(matching_events) < min_count:
             failures.append(
-                f"输出恢复事件 {criteria} 且最小值 {min_values} 只出现 {len(matching_events)} 次，期望至少 {min_count} 次"
+                "输出恢复事件 "
+                f"{criteria} 且最小值 {min_values} 只出现 {len(matching_events)} 次，"
+                f"期望至少 {min_count} 次"
             )
 
     file_expectations = expect.get("files", [])

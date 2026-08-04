@@ -156,7 +156,8 @@ def _message_segments(messages: list[AnyMessage]) -> list[list[AnyMessage]]:
 
 
 def _summary_text(response: Any) -> str:
-    if isinstance(response, AIMessage) and message_finish_reason(response) == "length":
+    metadata = getattr(response, "response_metadata", None)
+    if isinstance(metadata, dict) and message_finish_reason(response) == "length":
         # 摘要不是面向用户的流式回答。长度停止意味着九维 checkpoint 已被截断，继续
         # 使用会把不完整的任务状态当作事实写入后续轮次，因此必须让本次 L5 原子失败。
         raise SummaryOutputTruncatedError("摘要模型在输出上限处截断，未提交上下文压缩")
