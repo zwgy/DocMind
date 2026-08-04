@@ -128,17 +128,29 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
         class _CompletionMetadataChatOllama(ChatOllama):
             """补齐当前 langchain-ollama 未透传的原生完成元数据。"""
 
+            @staticmethod
+            def _native_options(kwargs):
+                normalized = dict(kwargs)
+                num_predict = normalized.pop("num_predict", None)
+                if num_predict is not None:
+                    options = dict(normalized.pop("options", {}) or {})
+                    options["num_predict"] = num_predict
+                    normalized["options"] = options
+                return normalized
+
             def _chat_params(self, messages, stop=None, **kwargs):
                 # ChatOllama 构造参数可直接使用 num_predict，但单次调用会把未知顶层
                 # 参数原样传给 ollama.AsyncClient.chat。恢复中间件必须动态提高额度，
                 # 因而在这里改写为 Ollama 原生 options，避免污染其他 Provider 的通用
                 # model_settings 协议。
-                num_predict = kwargs.pop("num_predict", None)
-                if num_predict is not None:
-                    options = dict(kwargs.pop("options", {}) or {})
-                    options["num_predict"] = num_predict
-                    kwargs["options"] = options
-                return super()._chat_params(messages, stop=stop, **kwargs)
+                return super()._chat_params(messages, stop=stop, **self._native_options(kwargs))
+
+            def _create_chat_stream(self, messages, stop=None, **kwargs):
+                return super()._create_chat_stream(messages, stop=stop, **self._native_options(kwargs))
+
+            async def _acreate_chat_stream(self, messages, stop=None, **kwargs):
+                async for response in super()._acreate_chat_stream(messages, stop=stop, **self._native_options(kwargs)):
+                    yield response
 
             def _generate(self, *args, **kwargs):
                 result = super()._generate(*args, **kwargs)
