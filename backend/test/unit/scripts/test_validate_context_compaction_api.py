@@ -39,10 +39,11 @@ def test_l2_scenario_builds_pressure_after_the_historical_tool_round() -> None:
         "create-historical-tool-result",
         "add-first-background-round",
         "add-second-background-round",
+        "add-third-background-round",
         "project-history-under-pressure",
     ]
-    assert turns[2]["expect"]["compaction"]["level"] == "L2"
-    assert "compaction" not in turns[3]["expect"]
+    assert turns[-1]["expect"]["compaction"]["level"] == "L2"
+    assert turns[-1]["expect"]["compaction"]["min_values"]["tool_results_projected"] == 1
 
 
 def test_load_scenario_requires_threads_and_queries(tmp_path):
