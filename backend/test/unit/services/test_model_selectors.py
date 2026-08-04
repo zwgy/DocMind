@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 import requests
+from langchain_core.messages import HumanMessage
 
 from yuxi.agents.models import _copy_ollama_generation_metadata, load_chat_model, resolve_chat_model_spec
 from yuxi.models.chat import LangChainChatAdapter, select_model
@@ -267,6 +268,22 @@ def test_ollama_completion_metadata_ignores_partial_stream_chunks():
     _copy_ollama_generation_metadata(generation)
 
     assert message.response_metadata == {}
+
+
+def test_load_chat_model_maps_per_call_ollama_limit_to_native_options(monkeypatch):
+    monkeypatch.setattr(
+        "yuxi.agents.models.model_cache.get_model_info",
+        lambda spec: (
+            _chat_model_info("ollama-local", "qwen3.6:27b", provider_type="ollama")
+            if spec == "ollama-local:qwen3.6:27b"
+            else None
+        ),
+    )
+
+    model = load_chat_model("ollama-local:qwen3.6:27b")
+    params = model._chat_params([HumanMessage(content="只输出数字")], num_predict=8192)
+
+    assert params["options"]["num_predict"] == 8192
 
 
 @pytest.mark.asyncio

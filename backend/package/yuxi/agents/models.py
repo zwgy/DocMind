@@ -128,6 +128,18 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
         class _CompletionMetadataChatOllama(ChatOllama):
             """补齐当前 langchain-ollama 未透传的原生完成元数据。"""
 
+            def _chat_params(self, messages, stop=None, **kwargs):
+                # ChatOllama 构造参数可直接使用 num_predict，但单次调用会把未知顶层
+                # 参数原样传给 ollama.AsyncClient.chat。恢复中间件必须动态提高额度，
+                # 因而在这里改写为 Ollama 原生 options，避免污染其他 Provider 的通用
+                # model_settings 协议。
+                num_predict = kwargs.pop("num_predict", None)
+                if num_predict is not None:
+                    options = dict(kwargs.pop("options", {}) or {})
+                    options["num_predict"] = num_predict
+                    kwargs["options"] = options
+                return super()._chat_params(messages, stop=stop, **kwargs)
+
             def _generate(self, *args, **kwargs):
                 result = super()._generate(*args, **kwargs)
                 for generation in result.generations:
