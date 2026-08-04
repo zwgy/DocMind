@@ -26,6 +26,22 @@ def test_checked_in_scenarios_are_valid(filename: str) -> None:
     assert scenario["threads"]
 
 
+def test_l2_scenario_builds_pressure_after_the_historical_tool_round() -> None:
+    backend_root = Path(__file__).resolve().parents[3]
+    scenario = scenario_api._load_scenario(
+        backend_root / "scripts" / "scenarios" / "context_compaction_l2.json"
+    )
+
+    turns = scenario["threads"][0]["turns"]
+
+    assert [turn["name"] for turn in turns] == [
+        "create-historical-tool-result",
+        "add-first-background-round",
+        "add-second-background-round",
+        "project-history-under-pressure",
+    ]
+
+
 def test_load_scenario_requires_threads_and_queries(tmp_path):
     scenario_path = tmp_path / "invalid.json"
     scenario_path.write_text(
