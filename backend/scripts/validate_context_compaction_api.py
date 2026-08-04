@@ -183,6 +183,7 @@ async def _create_run(
     agent_id: str,
     query: str,
     tag: str,
+    model_spec: str | None = None,
 ) -> RunEvidence:
     started = time.monotonic()
     request_id = f"ctx-{tag}-{uuid.uuid4().hex[:12]}"
@@ -195,6 +196,7 @@ async def _create_run(
             "query": query,
             "agent_id": agent_id,
             "thread_id": thread_id,
+            "model_spec": model_spec,
             "meta": {
                 # 运行记录列限制为 VARCHAR(64)，验收 ID 保留场景前缀和随机段即可保证可追踪且唯一。
                 "request_id": request_id,
@@ -645,6 +647,7 @@ async def _run_configured_scenario(args: argparse.Namespace) -> None:
                         agent_id=agent_id,
                         query=query,
                         tag=tag,
+                        model_spec=args.model_spec,
                     )
                     assistant_text = await _latest_assistant_text(client, headers, thread_id)
                     latest_assistant_text = assistant_text
