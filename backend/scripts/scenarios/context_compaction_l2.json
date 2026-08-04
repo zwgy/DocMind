@@ -32,14 +32,6 @@
           "query": "登记 L2-ROUND-TWO-{tag}。以下材料只增加上下文压力，不改变上一轮文件和标记；不要调用工具，只回答 L2-ROUND-TWO-{tag}。\n{payload}",
           "expect": {
             "assistant_contains": ["L2-ROUND-TWO-{tag}"],
-            "tools_exclude": ["read_file", "write_file", "edit_file"]
-          }
-        },
-        {
-          "name": "project-history-under-pressure",
-          "query": "请记住上一轮标记 HISTORY-{tag}，不要调用工具，只回答 HISTORY-{tag} 和 L2-{tag}。以下材料只增加上下文压力，不改变任务：\n{payload}",
-          "expect": {
-            "assistant_contains": ["HISTORY-{tag}", "L2-{tag}"],
             "tools_exclude": ["read_file", "write_file", "edit_file"],
             "compaction": {
               "level": "L2",
@@ -50,6 +42,14 @@
               }
             },
             "compaction_order": ["L1", "L2", "L3", "L5"]
+          }
+        },
+        {
+          "name": "project-history-under-pressure",
+          "query": "请记住上一轮标记 HISTORY-{tag}，不要调用工具，只回答 HISTORY-{tag} 和 L2-{tag}。以下材料只增加上下文压力，不改变任务：\n{payload}",
+          "expect": {
+            "assistant_contains": ["HISTORY-{tag}", "L2-{tag}"],
+            "tools_exclude": ["read_file", "write_file", "edit_file"]
           }
         }
       ]
