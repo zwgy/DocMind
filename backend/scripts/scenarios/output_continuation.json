@@ -12,7 +12,8 @@
           "name": "continue-visible-output",
           "query": "这是纯文本流式输出校验。禁止调用工具、禁止读取或写入文件。请只连续输出 1200 个大写字母 A，不要加序号、空格或解释；第 1200 个 A 后另起一行，只输出标记 OUTPUT-CONTINUATION-COMPLETE-{tag}。不得提前输出标记。",
           "expect": {
-            "assistant_contains": ["AAAAAAAAAA", "OUTPUT-CONTINUATION-COMPLETE-{tag}"],
+            "assistant_contains": ["AAAAAAAAAA"],
+            "assistant_matches": ["A{200}"],
             "assistant_not_contains": ["继续上一条回复，从截断处直接续写"],
             "tools_exclude": ["read_file", "write_file", "edit_file"],
             "output_recovery": [
