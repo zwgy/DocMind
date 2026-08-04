@@ -9,6 +9,7 @@ from yuxi.agents.context import (
     prepare_agent_runtime_context,
 )
 from yuxi.agents.middlewares import (
+    OutputContinuationMiddleware,
     TokenUsageMiddleware,
     create_model_retry_middleware,
     create_context_compaction_middleware,
@@ -51,6 +52,7 @@ async def _build_middlewares(context, *, model=None):
         middlewares.append(subagent_middleware)
     middlewares.extend(
         [
+            OutputContinuationMiddleware(),
             context_compaction_middleware,
             TokenUsageMiddleware(),
             create_model_retry_middleware(max_retries=getattr(context, "model_retry_times", 2)),

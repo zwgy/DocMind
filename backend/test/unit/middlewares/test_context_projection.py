@@ -9,6 +9,7 @@ from yuxi.agents.middlewares.context_projection import (
     group_messages_by_api_round,
     projectable_rounds,
 )
+from yuxi.agents.internal_messages import INTERNAL_OUTPUT_CONTINUATION_KEY
 
 
 def _tool_round(index: int) -> list:
@@ -138,3 +139,20 @@ def test_l5_candidates_keep_latest_human_and_current_protected_tail() -> None:
     )
     assert messages[-4].id not in {messages[index].id for index in removed_indexes}
     assert messages[-2].id not in {messages[index].id for index in removed_indexes}
+
+
+@pytest.mark.unit
+def test_l5_candidates_ignore_internal_continuation_human_boundary() -> None:
+    messages = [
+        HumanMessage(content="真实请求"),
+        AIMessage(content="第一段回答"),
+        HumanMessage(
+            content="内部续写",
+            additional_kwargs={INTERNAL_OUTPUT_CONTINUATION_KEY: True},
+        ),
+    ]
+
+    candidates = compactable_api_rounds(messages, protected_tail_rounds=0)
+
+    # 私有 Human 不能把前一段回答伪造成已经结束的旧用户轮次。
+    assert all(round_.end != 2 for round_ in candidates)

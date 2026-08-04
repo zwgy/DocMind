@@ -136,9 +136,24 @@ def _compact_tool_stream_event(event: dict) -> dict:
     compact = {key: event[key] for key in ("method",) if event.get(key)}
     data = event.get("data")
     if isinstance(data, dict):
-        if event.get("method") == "custom" and data.get("type") == "context_compaction":
-            # 精简 SSE 仍需保留这一公开 UI 状态；否则前端无法显示压缩中的等待文案。
-            compact_data = {key: data[key] for key in ("type", "status") if data.get(key) is not None}
+        if event.get("method") == "custom" and data.get("type") in {
+            "context_compaction",
+            "output_recovery",
+        }:
+            # 压缩状态供 UI 展示；输出恢复额外保留有界预算诊断，但绝不透传正文。
+            compact_data = {
+                key: data[key]
+                for key in (
+                    "type",
+                    "status",
+                    "mode",
+                    "attempt",
+                    "previous_output_tokens",
+                    "target_output_tokens",
+                    "prompt_budget",
+                )
+                if data.get(key) is not None
+            }
         else:
             compact_data = {
                 key: data[key]

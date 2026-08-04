@@ -14,6 +14,7 @@ from yuxi.agents.context import (
     prepare_agent_runtime_context,
 )
 from yuxi.agents.middlewares import (
+    OutputContinuationMiddleware,
     TokenUsageMiddleware,
     create_model_retry_middleware,
     create_context_compaction_middleware,
@@ -67,6 +68,7 @@ async def _build_middlewares(context, *, model=None):
         TodoListMiddleware(system_prompt=TODO_MID_PROMPT),
         PatchToolCallsMiddleware(),
         _SubAgentToolFilterMiddleware(),
+        OutputContinuationMiddleware(),
         context_compaction_middleware,
         TokenUsageMiddleware(),
         create_model_retry_middleware(),

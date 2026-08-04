@@ -37,6 +37,7 @@ from yuxi.agents.middlewares.context_projection import (
     group_messages_by_api_round,
     projectable_rounds,
 )
+from yuxi.agents.internal_messages import is_internal_output_continuation
 from yuxi.agents.backends.composite import (
     _TOOL_RESULT_SAVED_MARKER,
     _tool_result_path,
@@ -144,7 +145,7 @@ def _message_segments(messages: list[AnyMessage]) -> list[list[AnyMessage]]:
     for message in messages:
         # A new human message starts a new turn.  Everything after it, including
         # tool calls and their results, must move as a unit to avoid broken protocol pairs.
-        if getattr(message, "type", None) == "human" and current:
+        if getattr(message, "type", None) == "human" and not is_internal_output_continuation(message) and current:
             segments.append(current)
             current = []
         current.append(message)
@@ -184,6 +185,9 @@ def _messages_safe_for_summary(messages: list[AnyMessage]) -> list[AnyMessage]:
     """Do not stringify image/Base64 blocks into a text-only summary request."""
     sanitized: list[AnyMessage] = []
     for message in messages:
+        # 续写指令只控制紧接着的一次模型调用，不属于用户事实，也不能进入九维摘要。
+        if is_internal_output_continuation(message):
+            continue
         if not isinstance(message.content, list):
             sanitized.append(message)
             continue
@@ -711,7 +715,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
     @staticmethod
     def _summary_user_anchor(segment: list[AnyMessage]) -> str:
         """保留超大单轮分块共同所属的原始用户请求，不复制图片或工具正文。"""
-        if not segment or getattr(segment[0], "type", None) != "human":
+        if not segment or getattr(segment[0], "type", None) != "human" or is_internal_output_continuation(segment[0]):
             return ""
         safe_message = _messages_safe_for_summary([segment[0]])[0]
         return get_buffer_string([safe_message])
@@ -913,7 +917,9 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
     @staticmethod
     def _current_human_input_index(messages: list[AnyMessage]) -> int | None:
         for index in range(len(messages) - 1, -1, -1):
-            if getattr(messages[index], "type", None) == "human":
+            if getattr(messages[index], "type", None) == "human" and not is_internal_output_continuation(
+                messages[index]
+            ):
                 return index
         return None
 
@@ -1273,8 +1279,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             _message_identifier(initial_messages[-1], len(initial_messages) - 1) if initial_messages else "empty"
         )
         cycle_key = (
-            f"{state.get('context_revision', 0)}:{latest_identifier}:"
-            f"{len(initial_messages)}:{initial_tokens}:{reason}"
+            f"{state.get('context_revision', 0)}:{latest_identifier}:{len(initial_messages)}:{initial_tokens}:{reason}"
         )
         cycle_id = hashlib.sha256(cycle_key.encode()).hexdigest()[:12]
 
@@ -1561,8 +1566,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             _message_identifier(initial_messages[-1], len(initial_messages) - 1) if initial_messages else "empty"
         )
         cycle_key = (
-            f"{state.get('context_revision', 0)}:{latest_identifier}:"
-            f"{len(initial_messages)}:{initial_tokens}:{reason}"
+            f"{state.get('context_revision', 0)}:{latest_identifier}:{len(initial_messages)}:{initial_tokens}:{reason}"
         )
         cycle_id = hashlib.sha256(cycle_key.encode()).hexdigest()[:12]
 
@@ -1858,7 +1862,10 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         # The model result is appended before this command is applied.  Overwrite
         # therefore commits one coherent bounded checkpoint instead of keeping
         # discarded messages or superseded tool outputs alongside the new answer.
-        update["messages"] = Overwrite([*plan["survivors"], *model_response.result])
+        # 私有续写消息来自外层请求副本。若本次恰好触发压缩，plan 会看到它，但最终
+        # checkpoint 仍必须只提交真实会话消息。
+        survivors = [message for message in plan["survivors"] if not is_internal_output_continuation(message)]
+        update["messages"] = Overwrite([*survivors, *model_response.result])
         if plan["summary_updated"]:
             update.update(
                 {

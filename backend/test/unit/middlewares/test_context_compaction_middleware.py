@@ -18,6 +18,7 @@ from yuxi.agents.middlewares.context_compaction import (
     create_context_compaction_middleware,
 )
 from yuxi.agents.middlewares.context_projection import ToolProtocolError
+from yuxi.agents.internal_messages import INTERNAL_OUTPUT_CONTINUATION_KEY
 from yuxi.agents.middlewares.token_usage import (
     ContextBudgetConfigurationError,
     ContextWindowExceededError,
@@ -102,6 +103,51 @@ def _single_human_tool_chain(rounds: int) -> list:
             ]
         )
     return messages
+
+
+@pytest.mark.unit
+def test_internal_continuation_is_not_a_user_boundary_or_summary_fact() -> None:
+    internal = HumanMessage(
+        content="内部续写指令",
+        additional_kwargs={INTERNAL_OUTPUT_CONTINUATION_KEY: True},
+    )
+    messages = [
+        HumanMessage(content="真实用户请求", id="real-user"),
+        AIMessage(content="已输出的第一段"),
+        internal,
+    ]
+
+    assert ContextCompactionMiddleware._current_human_input_index(messages) == 0
+    assert summary_module._message_segments(messages) == [messages]
+    safe = summary_module._messages_safe_for_summary(messages)
+    assert [message.content for message in safe] == ["真实用户请求", "已输出的第一段"]
+
+
+@pytest.mark.unit
+def test_compaction_commit_drops_request_only_internal_continuation() -> None:
+    model = _SummaryModel()
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    real_user = HumanMessage(content="真实请求", id="real-user")
+    internal = HumanMessage(
+        content="内部续写指令",
+        id="internal-user",
+        additional_kwargs={INTERNAL_OUTPUT_CONTINUATION_KEY: True},
+    )
+    response = ModelResponse(result=[AIMessage(content="续写完成", id="assistant-final")])
+    plan = {
+        "survivors": [real_user, internal],
+        "summary": "",
+        "compacted_through": "",
+        "archive_path": "",
+        "previous_revision": 0,
+        "summary_updated": False,
+        "summary_quality": None,
+    }
+
+    result = middleware._commit_plan(response, plan)
+
+    committed = result.command.update["messages"].value
+    assert [message.id for message in committed] == ["real-user", "assistant-final"]
 
 
 @pytest.mark.unit

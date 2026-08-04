@@ -3,10 +3,12 @@ from .context import context_aware_prompt, context_based_model
 from .dynamic_tool import DynamicToolMiddleware
 from .retry import create_model_retry_middleware
 from .context_compaction import create_context_compaction_middleware
+from .output_continuation import OutputContinuationMiddleware
 from .token_usage import TokenUsageMiddleware
 
 __all__ = [
     "DynamicToolMiddleware",
+    "OutputContinuationMiddleware",
     "TokenUsageMiddleware",
     "context_aware_prompt",
     "context_based_model",

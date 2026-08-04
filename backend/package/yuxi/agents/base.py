@@ -16,6 +16,7 @@ from langgraph.types import Command
 
 from yuxi import config as sys_config
 from yuxi.agents.context import DEFAULT_MAX_EXECUTION_STEPS, BaseContext, resolve_agent_resource_options
+from yuxi.agents.internal_messages import is_internal_output_continuation
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.utils import logger
 from yuxi.utils.subagent_thread_utils import make_child_thread_id
@@ -80,6 +81,11 @@ def _is_internal_summary_event(*values: Any) -> bool:
         if _is_internal_summary_event(*(value.get(key) for key in ("metadata", "config", "configurable"))):
             return True
     return False
+
+
+def _is_internal_agent_message(message: Any) -> bool:
+    """请求级控制消息不属于聊天记录；流层保留最后一道隔离边界。"""
+    return is_internal_output_continuation(message)
 
 
 def _subagent_route_for_namespace(
@@ -226,7 +232,7 @@ class BaseAgent:
             context=context,
             config=input_config,
         ):
-            if _is_internal_summary_event(metadata):
+            if _is_internal_summary_event(metadata) or _is_internal_agent_message(msg):
                 continue
             yield msg, metadata
 
@@ -270,7 +276,7 @@ class BaseAgent:
                 if method == "messages":
                     msg, metadata = data
                     metadata = dict(metadata or {})
-                    if _is_internal_summary_event(metadata, params):
+                    if _is_internal_summary_event(metadata, params) or _is_internal_agent_message(msg):
                         continue
                     actual_thread_id = (
                         _metadata_thread_id(metadata) or _metadata_thread_id(params) or _metadata_thread_id(data)

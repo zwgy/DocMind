@@ -24,12 +24,13 @@
 | `create_agent_filesystem_middleware` | 接入沙盒文件系统、用户工作区、线程 uploads/outputs 与只读 Skills 路由，并在工具结果过大时把内容写入 `outputs/large_tool_results` |
 | `save_attachments_to_fs` / `AttachmentMiddleware` | 从 LangGraph state 的 `uploads` 读取附件路径，把可读路径注入系统提示，提示模型按需使用 `read_file` |
 | `SkillsMiddleware` | 注入可见 Skill 的提示段，监听读取 `SKILL.md` 后的 Skill 激活，并按依赖追加工具和 MCP 工具；知识库工具由内置 `knowledge-base` Skill 按需加载 |
-| `YuxiSubAgentMiddleware` | 仅主 Agent 在存在可见子智能体时挂载，提供 `task` 工具调用真实子 Agent graph |
-| `ContextCompactionMiddleware` | 按最终请求预算执行上下文压缩，归档原文并维护私有 checkpoint 状态 |
 | `TodoListMiddleware` | 提供待办状态，让前端状态面板可展示 Agent 运行进度 |
 | `PatchToolCallsMiddleware` | 修正部分工具调用消息形态，提升工具调用兼容性 |
-| `ModelRetryMiddleware` | 在暂态模型调用失败时按配置重试；上下文溢出直接交由摘要恢复 |
+| `YuxiSubAgentMiddleware` | 仅主 Agent 在存在可见子智能体时挂载，提供 `task` 工具调用真实子 Agent graph |
+| `OutputContinuationMiddleware` | 模型明确耗尽输出预算后执行有界的空正文重试或正文断点续写；普通请求不主动设置输出上限 |
+| `ContextCompactionMiddleware` | 按最终请求预算执行上下文压缩，归档原文并维护私有 checkpoint 状态 |
 | `TokenUsageMiddleware` | 写入供应商 usage 与本地估算误差包络，供下一轮准入和前端状态面板使用 |
+| `ModelRetryMiddleware` | 在暂态模型调用失败时按配置重试；上下文溢出和输出耗尽不由普通异常重试接管 |
 
 `SubAgentBackend` 使用同一组核心能力，但不会挂载 `YuxiSubAgentMiddleware`，并额外过滤 `present_artifacts`、`ask_user_question`、`install_skill` 等不适合子智能体直接使用的工具。
 
@@ -80,7 +81,17 @@
 
 Token 计数不会调用 `/tokenize` 或其他远程预检接口，因此不会额外延迟首 Token。新会话先使用本地保守估算；模型成功响应后，`TokenUsageMiddleware` 用供应商返回的输入 usage 记录当前请求规模桶的最大正误差。校准键绑定模型部署、地址、请求协议和模板版本；Skill/MCP 造成的工具 Schema 变化会重新计算本地基线和诊断 hash，但不会清空同一部署已经观测到的正误差包络。缺少或不自洽的 usage 不写入校准样本，仍按本地保守估算准入。
 
-OpenAI 兼容服务的 `finish_reason=length` 不等同于输入溢出。带正文时分类为 `output_exhausted`，保留部分回答但不压缩历史重试；带工具调用时分类为 `tool_call_truncated`，在进入 ToolNode 前明确失败，禁止执行可能不完整的参数。空正文且实测 provider input 超过 `prompt_budget` 时，TokenUsage 会把携带校准快照的容量异常交给 ContextCompaction，全级重算后只重试主模型一次；正数 output/reasoning usage 证明输出耗尽但没有可见正文时返回可操作错误。空正文又缺少可校验 usage 时分类为 `length_unverified`，不猜测为输入溢出，也不自动压缩或重试。provider 明确抛出 prompt/context too long 但没有 usage 时，压缩器会一次性处理全部安全历史后重试一次。
+OpenAI 兼容服务的 `finish_reason=length` 不等同于输入溢出。带正文时分类为 `output_exhausted`，先提交已生成正文，再由 `OutputContinuationMiddleware` 最多执行一次断点续写；带工具调用时分类为 `tool_call_truncated`，在进入 ToolNode 前明确失败，禁止执行或自动重试可能不完整的参数。空正文且实测 provider input 超过 `prompt_budget` 时，TokenUsage 会把携带校准快照的容量异常交给 ContextCompaction，全级重算后只重试主模型一次；正数 output/reasoning usage 证明输出耗尽但没有可见正文时，由输出恢复器提高上限并按原请求重试一次。空正文又缺少可校验 usage 时分类为 `length_unverified`，不猜测为输入溢出，也不自动压缩或重试。provider 明确抛出 prompt/context too long 但没有 usage 时，压缩器会一次性处理全部安全历史后重试一次。
+
+### 响应式输出恢复
+
+模型调用链的预算相关顺序固定为 `OutputContinuationMiddleware -> ContextCompactionMiddleware -> TokenUsageMiddleware -> ModelRetryMiddleware -> model`。恢复器位于压缩器外层，因此提高输出上限后的调用会按缩小后的 `prompt_budget` 重新经过 L1/L2/L3/L5；压缩后仍无法准入时不会发送注定失败的请求。
+
+普通完成响应不会被写入 `max_tokens` 或 `max_completion_tokens`。只有 Provider 明确返回 `length` 后才计算恢复上限：从调用显式上限、模型可识别默认上限、本次 provider output usage 和部署最低输出预留中取最大值并翻倍、按 1K 对齐，再受 `clamp(context_window / 4, 8K, 16K)` 和“完整窗口减安全缓冲、固定 system/tools、最小当前输入回执”的硬上限共同约束。该 8K～16K 护栏只约束第一阶段自动恢复，不是常态输出上限或管理员配置。
+
+单个用户请求最多执行两次恢复动作，其中正文断点续写最多一次、同一模型节点的空正文重试最多一次。续写指令使用带私有标记的临时 HumanMessage，只追加到下一次 `ModelRequest`；它不会写入业务消息 reducer。压缩分组、L5 用户锚点与摘要输入都会跳过该消息，压缩 plan 提交时再次剔除，客户端流也有独立过滤，因此会话回看、用户消息台账和最终 checkpoint 均不会出现内部指令。新真实 HumanMessage 会取消异常中断遗留的恢复状态。
+
+`output_recovery` custom event 使用 `started/finished/exhausted/failed` 状态，并仅携带恢复模式、次数、前后输出上限和新 `prompt_budget`，不包含用户正文、回答正文或工具载荷。当前前端可以忽略该事件；运行事件和 LangSmith 可用于验证恢复调用与压缩调用的先后顺序。
 
 触发后，中间件先把将要裁剪的完整交互段写入当前线程 `outputs/conversation_history` 下的不可变 JSONL 清单，再把私有滚动摘要、最新归档路径和最近原始消息通过一次 `Overwrite` 原子提交。普通大型工具结果会写入 `outputs/large_tool_results` 并以回执替换；已有权威来源的 `read_file` 和 `open_kb_document` 窗口只会缩小为来源回执，不会产生第二份副本。
 

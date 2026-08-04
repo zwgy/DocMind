@@ -17,6 +17,8 @@ from yuxi.agents.middlewares.context_compaction import (
     ContextCompactionMiddleware,
     create_context_compaction_middleware,
 )
+from yuxi.agents.middlewares.output_continuation import OutputContinuationMiddleware
+from yuxi.agents.internal_messages import is_internal_output_continuation
 from yuxi.agents.middlewares.retry import create_model_retry_middleware
 from yuxi.agents.middlewares.token_usage import ModelOutputIncompleteError, TokenUsageMiddleware
 
@@ -93,6 +95,65 @@ class _MeasuredOverflowModel(_StackModel):
         return AIMessage(
             content="恢复后的可见回答",
             usage_metadata={"input_tokens": 120, "output_tokens": 8, "total_tokens": 128},
+        )
+
+
+class _OutputContinuationModel(BaseChatModel):
+    profile: dict = {
+        "max_input_tokens": 32_768,
+        "min_output_reserve_tokens": 4_096,
+        "context_safety_tokens": 1_024,
+    }
+    main_calls: int = 0
+    output_limits: list[int | None] = []
+    received_messages: list[list] = []
+
+    @property
+    def _llm_type(self) -> str:
+        return "output-continuation-stack-test"
+
+    def bind_tools(self, tools, **kwargs):  # noqa: ARG002
+        return self
+
+    async def ainvoke(self, input, config=None, **kwargs):  # noqa: ARG002
+        self.main_calls += 1
+        self.output_limits.append(kwargs.get("max_tokens"))
+        self.received_messages.append(list(input))
+        if self.main_calls == 1:
+            return AIMessage(
+                content="第一段回答",
+                response_metadata={"finish_reason": "length"},
+                usage_metadata={"input_tokens": 1_000, "output_tokens": 4_096, "total_tokens": 5_096},
+            )
+        return AIMessage(
+            content="第二段回答",
+            response_metadata={"finish_reason": "stop"},
+            usage_metadata={"input_tokens": 1_200, "output_tokens": 500, "total_tokens": 1_700},
+        )
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):  # pragma: no cover
+        raise AssertionError("测试只使用异步模型路径")
+
+
+class _EmptyOutputRetryModel(_OutputContinuationModel):
+    @property
+    def _llm_type(self) -> str:
+        return "empty-output-retry-stack-test"
+
+    async def ainvoke(self, input, config=None, **kwargs):  # noqa: ARG002
+        self.main_calls += 1
+        self.output_limits.append(kwargs.get("max_tokens"))
+        self.received_messages.append(list(input))
+        if self.main_calls == 1:
+            return AIMessage(
+                content="",
+                response_metadata={"finish_reason": "length"},
+                usage_metadata={"input_tokens": 1_000, "output_tokens": 4_096, "total_tokens": 5_096},
+            )
+        return AIMessage(
+            content="重试后的完整回答",
+            response_metadata={"finish_reason": "stop"},
+            usage_metadata={"input_tokens": 1_000, "output_tokens": 500, "total_tokens": 1_500},
         )
 
 
@@ -182,6 +243,57 @@ async def test_real_stack_applies_measured_overflow_calibration_and_retries_once
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_real_stack_continues_visible_length_once_without_checkpointing_internal_human() -> None:
+    model = _OutputContinuationModel()
+    graph = create_agent(
+        model=model,
+        tools=[],
+        middleware=[
+            OutputContinuationMiddleware(),
+            create_context_compaction_middleware(model=model, summary_prompt="summary\n{messages}"),
+            TokenUsageMiddleware(),
+            create_model_retry_middleware(max_retries=2),
+        ],
+    )
+
+    state = await graph.ainvoke({"messages": [HumanMessage(content="请生成详细报告", id="user-1")]})
+
+    assert state["token_usage"]["response_outcome"] == "completed", state["token_usage"]
+    assert state.get("output_recovery") is None, state
+    assert model.main_calls == 2
+    assert model.output_limits == [None, 8_192]
+    assert is_internal_output_continuation(model.received_messages[1][-1])
+    assert [message.content for message in state["messages"]] == ["请生成详细报告", "第一段回答", "第二段回答"]
+    assert all(not is_internal_output_continuation(message) for message in state["messages"])
+    assert state.get("output_recovery") is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_real_stack_retries_empty_output_exhaustion_once_without_continuation_message() -> None:
+    model = _EmptyOutputRetryModel()
+    graph = create_agent(
+        model=model,
+        tools=[],
+        middleware=[
+            OutputContinuationMiddleware(),
+            create_context_compaction_middleware(model=model, summary_prompt="summary\n{messages}"),
+            TokenUsageMiddleware(),
+            create_model_retry_middleware(max_retries=2),
+        ],
+    )
+
+    state = await graph.ainvoke({"messages": [HumanMessage(content="请回答", id="user-1")]})
+
+    assert model.main_calls == 2
+    assert model.output_limits == [None, 8_192]
+    assert all(not is_internal_output_continuation(message) for message in model.received_messages[1])
+    assert [message.content for message in state["messages"]] == ["请回答", "重试后的完整回答"]
+    assert state["token_usage"]["response_outcome"] == "completed"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_truncated_tool_call_never_reaches_tool_node() -> None:
     executions: list[str] = []
 
@@ -195,7 +307,11 @@ async def test_truncated_tool_call_never_reaches_tool_node() -> None:
     graph = create_agent(
         model=model,
         tools=[side_effect_probe],
-        middleware=[TokenUsageMiddleware(), create_model_retry_middleware(max_retries=2)],
+        middleware=[
+            OutputContinuationMiddleware(),
+            TokenUsageMiddleware(),
+            create_model_retry_middleware(max_retries=2),
+        ],
     )
 
     with pytest.raises(ModelOutputIncompleteError, match="未执行工具") as raised:
@@ -240,6 +356,11 @@ async def test_main_and_subagent_use_the_same_compaction_stack_order(
     assert filesystem_limits == [3 * 1_024, 3 * 1_024]
 
     for middlewares in (main_middlewares, subagent_middlewares):
+        continuation_indexes = [
+            index
+            for index, middleware in enumerate(middlewares)
+            if isinstance(middleware, OutputContinuationMiddleware)
+        ]
         compaction_indexes = [
             index for index, middleware in enumerate(middlewares) if isinstance(middleware, ContextCompactionMiddleware)
         ]
@@ -249,5 +370,5 @@ async def test_main_and_subagent_use_the_same_compaction_stack_order(
         retry_indexes = [
             index for index, middleware in enumerate(middlewares) if isinstance(middleware, ModelRetryMiddleware)
         ]
-        assert len(compaction_indexes) == len(usage_indexes) == len(retry_indexes) == 1
-        assert compaction_indexes[0] < usage_indexes[0] < retry_indexes[0]
+        assert len(continuation_indexes) == len(compaction_indexes) == len(usage_indexes) == len(retry_indexes) == 1
+        assert continuation_indexes[0] < compaction_indexes[0] < usage_indexes[0] < retry_indexes[0]

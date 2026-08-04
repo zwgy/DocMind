@@ -497,8 +497,34 @@ def _finish_reason(response: ModelResponse) -> str | None:
     return None
 
 
+def visible_output_exhaustion(response: ModelResponse) -> tuple[bool, int | None]:
+    """识别可安全提交正文的明确输出耗尽，并返回 Provider 输出 usage。
+
+    LangChain 会在 wrap 中间件组合边界解包内层 ``ExtendedModelResponse``，因此外层
+    恢复控制器看不到 TokenUsage command。本函数让分类规则仍由 Token 模块统一拥有，
+    避免恢复层自行解释截断工具调用或空正文。
+    """
+    for message in reversed(response.result):
+        if not isinstance(message, AIMessage):
+            continue
+        exhausted = (
+            message.response_metadata.get("finish_reason") == "length"
+            and bool(message.content)
+            and not message.tool_calls
+            and not message.invalid_tool_calls
+        )
+        if not exhausted:
+            return False, None
+        _input_tokens, output_tokens = _model_usage_from_response(response)
+        return True, output_tokens
+    return False, None
+
+
 def _length_response_outcome(response: ModelResponse, snapshot: TokenUsagePayload) -> str | None:
     """Classify `finish_reason=length` without confusing output limits with prompt overflow."""
+    visible_exhausted, _output_tokens = visible_output_exhaustion(response)
+    if visible_exhausted:
+        return "output_exhausted"
     for message in reversed(response.result):
         if not isinstance(message, AIMessage):
             continue
@@ -508,8 +534,6 @@ def _length_response_outcome(response: ModelResponse, snapshot: TokenUsagePayloa
             # A length stop while emitting a tool call is unsafe to execute.  P3 will protect the
             # ToolNode boundary; P1 records the distinct outcome instead of trying history compaction.
             return "tool_call_truncated"
-        if message.content:
-            return "output_exhausted"
         provider_input = snapshot.get("provider_input_tokens")
         provider_output = snapshot.get("provider_output_tokens")
         prompt_budget = snapshot.get("prompt_budget")

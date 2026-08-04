@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
 
-from yuxi.agents.base import _json_safe, _normalize_tool_event_data
+from yuxi.agents.base import _is_internal_agent_message, _json_safe, _normalize_tool_event_data
+from yuxi.agents.internal_messages import INTERNAL_OUTPUT_CONTINUATION_KEY
 
 
 def _command_tool_finished(tool_call_id: str) -> dict:
@@ -58,3 +59,12 @@ def test_command_without_tool_message_is_left_untouched():
     command = Command(update={"todos": [{"content": "无消息", "status": "pending"}]})
     data = {"event": "tool-finished", "tool_call_id": "call_x", "output": command}
     assert _normalize_tool_event_data(data)["output"] is command
+
+
+def test_internal_output_continuation_is_hidden_by_agent_stream_boundary():
+    message = HumanMessage(
+        content="内部续写",
+        additional_kwargs={INTERNAL_OUTPUT_CONTINUATION_KEY: True},
+    )
+
+    assert _is_internal_agent_message(message) is True

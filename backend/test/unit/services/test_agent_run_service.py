@@ -34,6 +34,41 @@ def test_compact_stream_chunk_keeps_context_compaction_state():
     }
 
 
+def test_compact_stream_chunk_keeps_bounded_output_recovery_diagnostics_only():
+    compact = agent_run_service._compact_stream_chunk(
+        {
+            "status": "stream_event",
+            "event": {
+                "method": "custom",
+                "namespace": [],
+                "data": {
+                    "type": "output_recovery",
+                    "status": "started",
+                    "mode": "continuation",
+                    "attempt": 1,
+                    "previous_output_tokens": 4_096,
+                    "target_output_tokens": 8_192,
+                    "prompt_budget": 23_552,
+                    "content": "不得进入精简 SSE 的回答正文",
+                },
+            },
+        }
+    )
+
+    assert compact["event"] == {
+        "method": "custom",
+        "data": {
+            "type": "output_recovery",
+            "status": "started",
+            "mode": "continuation",
+            "attempt": 1,
+            "previous_output_tokens": 4_096,
+            "target_output_tokens": 8_192,
+            "prompt_budget": 23_552,
+        },
+    }
+
+
 class _FakeContext:
     def __init__(self):
         self.model = "agent-default-model"

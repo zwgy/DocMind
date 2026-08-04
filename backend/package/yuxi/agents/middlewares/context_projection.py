@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 
+from yuxi.agents.internal_messages import is_internal_output_continuation
+
 from yuxi.agents.middlewares.token_usage import ContextBudgetConfigurationError
 
 
@@ -187,7 +189,12 @@ def compactable_api_rounds(messages: list[AnyMessage], *, protected_tail_rounds:
 
     rounds = group_messages_by_api_round(messages)
     latest_human_index = next(
-        (index for index in range(len(messages) - 1, -1, -1) if getattr(messages[index], "type", None) == "human"),
+        (
+            index
+            for index in range(len(messages) - 1, -1, -1)
+            if getattr(messages[index], "type", None) == "human"
+            and not is_internal_output_continuation(messages[index])
+        ),
         None,
     )
     if latest_human_index is None:
