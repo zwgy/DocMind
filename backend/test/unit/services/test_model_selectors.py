@@ -4,7 +4,7 @@ import httpx
 import pytest
 import requests
 
-from yuxi.agents.models import load_chat_model, resolve_chat_model_spec
+from yuxi.agents.models import _copy_ollama_generation_metadata, load_chat_model, resolve_chat_model_spec
 from yuxi.models.chat import LangChainChatAdapter, select_model
 from yuxi.models.embed import OtherEmbedding, select_embedding_model
 from yuxi.models.rerank import OpenAIReranker, get_reranker
@@ -242,6 +242,31 @@ def test_load_chat_model_applies_model_parameters_and_allows_explicit_override(m
     assert configured.reasoning_effort == "none"
     assert configured.temperature == 0.2
     assert overridden.reasoning_effort == "medium"
+
+
+def test_ollama_completion_metadata_is_copied_from_generation_info():
+    message = SimpleNamespace(response_metadata={"model_name": "qwen"})
+    generation = SimpleNamespace(
+        generation_info={"done_reason": "length", "eval_count": 256},
+        message=message,
+    )
+
+    _copy_ollama_generation_metadata(generation)
+
+    assert message.response_metadata == {
+        "model_name": "qwen",
+        "done_reason": "length",
+        "eval_count": 256,
+    }
+
+
+def test_ollama_completion_metadata_ignores_partial_stream_chunks():
+    message = SimpleNamespace(response_metadata={})
+    generation = SimpleNamespace(generation_info=None, message=message)
+
+    _copy_ollama_generation_metadata(generation)
+
+    assert message.response_metadata == {}
 
 
 @pytest.mark.asyncio

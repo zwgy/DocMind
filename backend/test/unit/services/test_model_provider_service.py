@@ -254,16 +254,17 @@ async def test_fetch_remote_models_loads_embedding_only_when_capability_enabled(
     assert [model["type"] for model in models] == ["chat", "embedding"]
 
 
-def test_normalize_payload_rejects_ollama_provider_type():
-    with pytest.raises(ValueError, match="provider_type 必须是"):
-        _normalize_payload(
-            {
-                "provider_id": "ollama-local",
-                "display_name": "Ollama Local",
-                "provider_type": "ollama",
-                "base_url": "http://localhost:11434",
-            }
-        )
+def test_normalize_payload_accepts_ollama_provider_type():
+    payload = _normalize_payload(
+        {
+            "provider_id": "ollama-local",
+            "display_name": "Ollama Local",
+            "provider_type": "ollama",
+            "base_url": "http://localhost:11434",
+        }
+    )
+
+    assert payload["provider_type"] == "ollama"
 
 
 def test_builtin_provider_templates_default_to_openai_provider_type():

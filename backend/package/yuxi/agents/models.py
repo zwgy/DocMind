@@ -38,6 +38,24 @@ class _ToolCallChunkFixChatOpenAI(ChatOpenAI):
             yield chunk
 
 
+def _copy_ollama_generation_metadata(generation) -> None:
+    """将 Ollama 结束块的完成原因同步到消息元数据。
+
+    ``langchain-ollama`` 已从原生响应读取 ``done_reason``，但当前版本只把它
+    放在 ``generation_info``。Yuxi 的 TokenUsageMiddleware 按 LangChain 统一
+    约定读取 ``AIMessage.response_metadata``，不做这一步就无法区分正常完成和
+    ``length`` 截断，进而不能安全触发续写。只复制结束块已经提供的元数据，不猜测
+    或重写 Provider 的完成原因。
+    """
+    generation_info = getattr(generation, "generation_info", None)
+    message = getattr(generation, "message", None)
+    if not isinstance(generation_info, dict) or message is None:
+        return
+    response_metadata = getattr(message, "response_metadata", None)
+    if isinstance(response_metadata, dict):
+        response_metadata.update(generation_info)
+
+
 def resolve_chat_model_spec(model_spec: str | None, *, fallback: str | None = None) -> str:
     """解析空模型配置，不吞掉已经配置但无效的模型值。
 
@@ -107,13 +125,38 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
     elif info.provider_type == "ollama":
         from langchain_ollama import ChatOllama
 
+        class _CompletionMetadataChatOllama(ChatOllama):
+            """补齐当前 langchain-ollama 未透传的原生完成元数据。"""
+
+            def _generate(self, *args, **kwargs):
+                result = super()._generate(*args, **kwargs)
+                for generation in result.generations:
+                    _copy_ollama_generation_metadata(generation)
+                return result
+
+            async def _agenerate(self, *args, **kwargs):
+                result = await super()._agenerate(*args, **kwargs)
+                for generation in result.generations:
+                    _copy_ollama_generation_metadata(generation)
+                return result
+
+            def _stream(self, *args, **kwargs):
+                for generation in super()._stream(*args, **kwargs):
+                    _copy_ollama_generation_metadata(generation)
+                    yield generation
+
+            async def _astream(self, *args, **kwargs):
+                async for generation in super()._astream(*args, **kwargs):
+                    _copy_ollama_generation_metadata(generation)
+                    yield generation
+
         # Ollama 原生 API 的输出上限字段是 num_predict。只在显式 Ollama Provider
         # 内映射，避免把厂商私有参数泄漏给标准 OpenAI 兼容端点。
         if "max_completion_tokens" in model_kwargs and "num_predict" not in model_kwargs:
             model_kwargs["num_predict"] = model_kwargs.pop("max_completion_tokens")
         if "max_tokens" in model_kwargs and "num_predict" not in model_kwargs:
             model_kwargs["num_predict"] = model_kwargs.pop("max_tokens")
-        model = ChatOllama(
+        model = _CompletionMetadataChatOllama(
             model=info.model_id,
             base_url=base_url.removesuffix("/v1"),
             **model_kwargs,
