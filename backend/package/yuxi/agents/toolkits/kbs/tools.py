@@ -9,7 +9,7 @@ from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.prebuilt.tool_node import ToolRuntime
 from pydantic import BaseModel, Field
 
-from yuxi.agents.context import DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS
+from yuxi.agents.middlewares.token_usage import resolve_tool_token_limit
 from yuxi.agents.toolkits.registry import tool
 from yuxi.knowledge.base import KnowledgeBase
 from yuxi.knowledge.schemas import (
@@ -162,14 +162,9 @@ FindKBDocumentInput = FindInputSchema
 
 
 def _configured_tool_inline_limit(runtime: ToolRuntime | None) -> int:
-    """源文件窗口不做二次落盘，但必须遵守 Agent 配置的单项内联上限。"""
+    """源文件窗口不做二次落盘，但必须复用当前模型已经解析的单项内联上限。"""
     context = getattr(runtime, "context", None)
-    raw_limit = getattr(context, "tool_token_limit", DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS)
-    try:
-        limit_k = int(raw_limit)
-    except (TypeError, ValueError):
-        limit_k = DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS
-    return max(limit_k, 1) * 1024
+    return resolve_tool_token_limit(context)
 
 
 def _open_window_token_count(window: dict[str, Any]) -> int:

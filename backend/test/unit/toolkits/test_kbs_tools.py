@@ -314,7 +314,7 @@ async def test_open_kb_document_reads_markdown_content_by_default_window(monkeyp
 
     monkeypatch.setattr(tools.knowledge_base, "open_file_content", _fake_open_file_content)
 
-    runtime = SimpleNamespace(context=SimpleNamespace(tool_token_limit=100))
+    runtime = SimpleNamespace(context=SimpleNamespace(_resolved_tool_token_limit_tokens=100 * 1_024))
     result = await _run_open_kb_document(kb_id="db-1", file_id="file-1", runtime=runtime)
 
     assert result["kb_id"] == "db-1"
@@ -343,7 +343,7 @@ async def test_open_kb_document_keeps_largest_complete_lines_within_inline_limit
 
     monkeypatch.setattr(tools.knowledge_base, "open_file_content", _fake_open_file_content)
 
-    runtime = SimpleNamespace(context=SimpleNamespace(tool_token_limit=1))
+    runtime = SimpleNamespace(context=SimpleNamespace(_resolved_tool_token_limit_tokens=1_024))
     result = await _run_open_kb_document(kb_id="db-1", file_id="file-1", window_size=3, runtime=runtime)
 
     assert result["start_line"] == 1
@@ -352,6 +352,28 @@ async def test_open_kb_document_keeps_largest_complete_lines_within_inline_limit
     assert result["next_offset"] == 1
     assert "     1\t" in result["content"]
     assert "     2\t" not in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_open_kb_document_reuses_resolved_auto_inline_limit(monkeypatch) -> None:
+    content = "\n".join("x" * 600 for _ in range(3))
+
+    _patch_retrievers(monkeypatch)
+    monkeypatch.setattr(tools, "_resolve_visible_knowledge_bases_for_query", _fake_visible_kbs)
+    monkeypatch.setattr(tools, "count_tokens_approximately", lambda messages, **_kwargs: len(messages[0].content))
+
+    async def _fake_open_file_content(*_args, **_kwargs):
+        return _build_test_window(content, limit=3)
+
+    monkeypatch.setattr(tools.knowledge_base, "open_file_content", _fake_open_file_content)
+
+    runtime = SimpleNamespace(
+        context=SimpleNamespace(_resolved_tool_token_limit_tokens=1_024)
+    )
+    result = await _run_open_kb_document(kb_id="db-1", file_id="file-1", window_size=3, runtime=runtime)
+
+    assert result["window_size"] == 1
+    assert result["next_offset"] == 1
 
 
 @pytest.mark.asyncio
@@ -365,7 +387,7 @@ async def test_open_kb_document_returns_source_receipt_when_first_line_exceeds_l
 
     monkeypatch.setattr(tools.knowledge_base, "open_file_content", _fake_open_file_content)
 
-    runtime = SimpleNamespace(context=SimpleNamespace(tool_token_limit=1))
+    runtime = SimpleNamespace(context=SimpleNamespace(_resolved_tool_token_limit_tokens=1_024))
     result = await _run_open_kb_document(kb_id="db-1", file_id="file-1", runtime=runtime)
 
     assert result["start_line"] == 1
@@ -390,7 +412,7 @@ async def test_open_kb_document_prefers_line_over_offset(monkeypatch) -> None:
 
     monkeypatch.setattr(tools.knowledge_base, "open_file_content", _fake_open_file_content)
 
-    runtime = SimpleNamespace(context=SimpleNamespace())
+    runtime = SimpleNamespace(context=SimpleNamespace(_resolved_tool_token_limit_tokens=100 * 1_024))
     result = await _run_open_kb_document(
         kb_id="db-1",
         file_id="file-1",

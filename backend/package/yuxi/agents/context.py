@@ -9,9 +9,8 @@ from yuxi.agents.backends.sandbox.paths import sandbox_workspace_agents_prompt_f
 from yuxi.utils.logging_config import logger
 
 WORKSPACE_AGENTS_PROMPT_MAX_BYTES = 64 * 1024
-_REMOVED_CONTEXT_FIELDS = frozenset({"summary_threshold", "summary_tool_result_token_limit"})
+_REMOVED_CONTEXT_FIELDS = frozenset({"summary_threshold", "summary_tool_result_token_limit", "tool_token_limit"})
 DEFAULT_MAX_EXECUTION_STEPS = 300
-DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS = 3
 DEFAULT_YUXI_SUMMARY_PROMPT = """你是对话上下文压缩助手。
 你的任务是把下面的对话历史压缩成一份完整替代旧摘要的任务检查点，供后续智能体继续工作。
 
@@ -241,18 +240,6 @@ class BaseContext:
             "description": "触发上下文摘要时使用的提示词，必须能接收 {messages} 作为待摘要消息占位符。",
             "type": "string",
             "kind": "prompt",
-            "auth": "admin",
-        },
-    )
-
-    tool_token_limit: int = field(
-        default=DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS,
-        metadata={
-            "name": "单个工具结果内联上限(K)",
-            "description": (
-                "单个普通工具结果进入工作上下文前允许内联的最大 Token 数；最终请求仍会按模型输入预算再次收敛。"
-            ),
-            "type": "number",
             "auth": "admin",
         },
     )

@@ -8,6 +8,7 @@
 
 ### 上下文预算（重构 P1.1）
 
+- 单个工具结果内联上限不再由管理员按 Agent 手工配置，统一按当前模型 `prompt_budget` 使用 `clamp(prompt_budget / 16, 3K, 16K)` 自动解析；主 Agent、SubAgent、文件读取和知识文档窗口复用同一运行时值，旧 JSON 中残留字段直接忽略。32K 保留已验证的 3K 保守下限，64K/128K/256K 分别扩展到约 3.7K/7.8K/15.7K，减少大窗口部署中不必要的落盘和重读；完整请求仍由 L1～L5 预算门禁保证。
 - 继续多级压缩重构：当前单用户请求按 API round 划分，L3 只外置较早 round 的大工具载荷并原样保护最近两个闭合 round；L5 改用完整 API round 生成 checkpoint，保护最新用户原文及其所在 round，避免单请求连续工具调用回退到“无安全历史段”。默认摘要模板与固定协议统一为九维 checkpoint；一个 Human turn 因大量工具调用被滚动分块时，每个摘要块只在摘要调用内重复原始用户消息作为优先锚点，避免小模型在后续工具正文中遗忘早期硬约束、路径和错误码，锚点不会进入最终 checkpoint 或主模型上下文。摘要输入预算和真实输出 cap 在同一部署窗口内分别计算；32K～256K 使用同一公式，不按模型名分支。provider PTL 只按完整 API round 移除最旧约 20% 输入并收紧预算重试一次；输出截断、超限或普通失败均不提交候选摘要。压缩后保留活跃 Skill 的权威 `SKILL.md` 路径，且不覆盖 Todo、附件、artifact 和工具/MCP 等独立状态。
 - 修正 L1 当前输入准入：外置判断改为计算固定 system/tools、已有私有摘要与最新用户消息组成的最终请求，而不是只比较用户正文 Token；当正文自身低于 `prompt_budget`、但与不可压缩固定开销合并后已无法容纳时，会先保存原文并提供回读路径，不再错误进入“无安全交互段”。
 - 上下文压缩流事件扩展为可验收的完整 L1→L2→L3→L5 周期：同一 `cycle_id` 按固定 sequence 输出每级 `finished/skipped` 状态、Token 与消息前后值、输入外置数、工具结果/参数投影数、候选/保护消息数以及 L5 归档、round、摘要 revision/质量；L5 继续保留 `started/failed` 生命周期，并区分主动准入、provider overflow、归档失败、摘要 PTL、摘要输出截断/超限和普通摘要失败。事件不泄露用户正文、私有摘要、工具载荷、Skill 内容或 provider 异常正文。新增四个真实 Agent Run/API 场景和数值/顺序断言，报告输出 `request_id`、`thread_id` 和 Agent `run_id` 以关联 LangSmith、后端运行记录与 SSE；LangSmith 由标准环境变量自动记录 Agent、模型、摘要和工具调用树，SSE 事件作为各级数据变化的确定性验收来源。

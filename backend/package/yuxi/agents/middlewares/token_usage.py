@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 import hashlib
 import json
 import math
+from types import SimpleNamespace
 from typing import Any, Literal, NotRequired, TypedDict
 
 from langchain.agents.middleware.types import (
@@ -30,6 +31,10 @@ _REQUEST_PROTOCOL_VERSION = "langchain-openai-messages-v1"
 _REQUEST_TEMPLATE_VERSION = "yuxi-openai-compatible-template-v1"
 ACTIVE_CONTEXT_SUMMARY_STATE_KEY = "_active_context_summary"
 BASE_SYSTEM_MESSAGE_STATE_KEY = "_base_system_message"
+_RESOLVED_TOOL_TOKEN_LIMIT_ATTR = "_resolved_tool_token_limit_tokens"
+_TOOL_TOKEN_LIMIT_DIVISOR = 16
+_MIN_TOOL_TOKEN_LIMIT = 3 * 1_024
+_MAX_TOOL_TOKEN_LIMIT = 16 * 1_024
 _CALIBRATION_BUCKETS: tuple[tuple[str, int | None], ...] = (
     ("small", 8_000),
     ("medium", 32_000),
@@ -221,6 +226,27 @@ def resolve_context_budget(request: ModelRequest | Any) -> ResolvedContextBudget
         context_safety_tokens=context_safety_tokens,
         prompt_budget=prompt_budget,
     )
+
+
+def resolve_tool_token_limit(context: Any, *, model: Any | None = None) -> int:
+    """按模型提示预算解析单个工具结果的统一内联上限。"""
+    if model is None:
+        cached = _safe_int(getattr(context, _RESOLVED_TOOL_TOKEN_LIMIT_ATTR, None))
+        if cached is not None and cached > 0:
+            return cached
+        # 工具执行阶段不应再次加载模型；主代理和子代理建图时必须先解析并缓存阈值。
+        raise ContextBudgetConfigurationError("自动工具内联上限尚未按模型预算解析")
+
+    budget = resolve_context_budget(SimpleNamespace(model=model, model_settings={}))
+    # Claude Code 的 microcompact 仍以整体上下文压力和工具调用新旧边界为准，并没有可直接复用的
+    # “单结果占窗口比例”。这里保留 DocMind 已验证的 3K 下限，同时让常见的四个近期大结果最多
+    # 占约四分之一提示预算；最终请求仍由 L1/L2/L3/L5 的 prompt_budget 门禁兜底。
+    limit = min(
+        max(budget.prompt_budget // _TOOL_TOKEN_LIMIT_DIVISOR, _MIN_TOOL_TOKEN_LIMIT),
+        _MAX_TOOL_TOKEN_LIMIT,
+    )
+    setattr(context, _RESOLVED_TOOL_TOKEN_LIMIT_ATTR, limit)
+    return limit
 
 
 def _without_inline_images(value: Any) -> Any:

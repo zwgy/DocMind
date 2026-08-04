@@ -10,7 +10,6 @@ from yuxi.agents.backends import create_agent_filesystem_middleware
 from yuxi.agents.buildin.chatbot.prompt import TODO_MID_PROMPT, build_prompt_with_context
 from yuxi.agents.buildin.subagent.context import SubAgentContext
 from yuxi.agents.context import (
-    DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS,
     DEFAULT_YUXI_SUMMARY_PROMPT,
     prepare_agent_runtime_context,
 )
@@ -21,6 +20,7 @@ from yuxi.agents.middlewares import (
     save_attachments_to_fs,
 )
 from yuxi.agents.middlewares.skills import SkillsMiddleware
+from yuxi.agents.middlewares.token_usage import resolve_tool_token_limit
 from yuxi.agents.toolkits.service import resolve_configured_runtime_tools
 
 _SUBAGENT_DISABLED_TOOLS = frozenset({"present_artifacts", "ask_user_question", "install_skill"})
@@ -46,17 +46,20 @@ class _SubAgentToolFilterMiddleware(AgentMiddleware[Any, Any, Any]):
         return await handler(request.override(tools=_filter_disabled_tools(request.tools or [])))
 
 
-async def _build_middlewares(context):
+async def _build_middlewares(context, *, model=None):
     summary_prompt = getattr(context, "summary_prompt", None) or DEFAULT_YUXI_SUMMARY_PROMPT
-    model_spec = resolve_chat_model_spec(context.model)
+    if model is None:
+        model_spec = resolve_chat_model_spec(context.model)
+        model = load_chat_model(fully_specified_name=model_spec)
+    tool_token_limit = resolve_tool_token_limit(context, model=model)
     context_compaction_middleware = create_context_compaction_middleware(
-        model=load_chat_model(fully_specified_name=model_spec),
+        model=model,
         summary_prompt=summary_prompt,
     )
 
     return [
         create_agent_filesystem_middleware(
-            getattr(context, "tool_token_limit", DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS) * 1024,
+            tool_token_limit,
             context=context,
         ),
         save_attachments_to_fs,
@@ -104,12 +107,13 @@ class SubAgentBackend(BaseAgent):
             context_schema=self.context_schema,
         )
         model_spec = resolve_chat_model_spec(context.model)
+        model = load_chat_model(fully_specified_name=model_spec)
 
         return create_agent(
-            model=load_chat_model(fully_specified_name=model_spec),
+            model=model,
             tools=_filter_disabled_tools(await resolve_configured_runtime_tools(context)),
             system_prompt=build_prompt_with_context(context),
-            middleware=await _build_middlewares(context),
+            middleware=await _build_middlewares(context, model=model),
             state_schema=BaseState,
             checkpointer=await self._get_checkpointer(),
         )

@@ -83,7 +83,6 @@ class MyAgent(BaseAgent):
 | `mcps` | 启用的 MCP 服务器 |
 | `skills` | 关联 Skills |
 | `summary_prompt` | 摘要触发时使用的提示词 |
-| `tool_token_limit` | 单个普通工具结果的内联上限（K Token） |
 | `max_execution_steps` | 单次运行最大执行步数 |
 | `thread_id` / `uid` | 运行期标识，不作为页面配置项暴露 |
 
@@ -92,6 +91,9 @@ class MyAgent(BaseAgent):
 `ChatBotContext` 在 `BaseContext` 之上增加 `subagents` 字段，表示当前主 Agent 允许调用的子智能体。`subagents` 未显式配置或保存空列表时会默认启用当前用户可见的全部子智能体；显式选择后则作为允许列表过滤。
 
 `SubAgentContext` 在 `BaseContext` 之上增加 `parent_thread_id`、`file_thread_id`、`skills_thread_id` 与 `is_subagent_runtime` 等隐藏运行态字段，不包含 `subagents`，因此子智能体不能继续配置下一层子智能体。
+
+单个工具结果的内联上限不是 Agent 配置项。运行时会根据当前模型的提示词预算统一计算，主 Agent、
+SubAgent、文件读取和知识文档窗口使用同一个值；旧配置 JSON 中残留的 `tool_token_limit` 会被忽略。
 
 ### 3.2 前端配置项如何从 Context 生成
 

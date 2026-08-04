@@ -66,14 +66,17 @@
 
 长对话压缩由项目自有的 `ContextCompactionMiddleware` 负责。它以最终模型请求的预算为唯一边界，不使用窗口百分比或固定保留消息数。
 
-触发条件来自 Agent Context：
+可配置的摘要行为来自 Agent Context：
 
 | 字段 | 说明 |
 | --- | --- |
-| `tool_token_limit` | 单个普通工具结果进入工作上下文前的内联上限（K Token） |
 | `summary_prompt` | 摘要模型使用的提示词 |
 
 模型缓存中的完整窗口、最低输出预留和安全缓冲会写入 LangChain model profile。每次调用均对最终系统提示词、消息和工具定义做 Unicode/JSON 感知的本地保守估算，以“完整窗口 − 输出预留 − 安全缓冲”得到可用输入预算；超预算时才压缩最早的完整交互段。最低输出预留只决定压缩阈值，不会限制模型生成。
+
+普通工具结果的快速内联上限由模型提示预算自动计算：`clamp(prompt_budget / 16, 3K, 16K)`。
+它不对管理员或单个 Agent 开放，主 Agent、SubAgent、`read_file` 和 `open_kb_document` 复用同一
+运行时值。该单项上限只减少大结果进入工作集的概率，最终安全仍由完整请求预算和 L1～L5 保证。
 
 Token 计数不会调用 `/tokenize` 或其他远程预检接口，因此不会额外延迟首 Token。新会话先使用本地保守估算；模型成功响应后，`TokenUsageMiddleware` 用供应商返回的输入 usage 记录当前请求规模桶的最大正误差。校准键绑定模型部署、地址、请求协议和模板版本；Skill/MCP 造成的工具 Schema 变化会重新计算本地基线和诊断 hash，但不会清空同一部署已经观测到的正误差包络。缺少或不自洽的 usage 不写入校准样本，仍按本地保守估算准入。
 

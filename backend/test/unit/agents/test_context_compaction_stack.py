@@ -212,6 +212,7 @@ async def test_main_and_subagent_use_the_same_compaction_stack_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = _StackModel()
+    filesystem_limits: list[int] = []
 
     async def no_subagent(_context):
         return None
@@ -219,7 +220,11 @@ async def test_main_and_subagent_use_the_same_compaction_stack_order(
     for module in (chatbot_graph, subagent_graph):
         monkeypatch.setattr(module, "resolve_chat_model_spec", lambda _model: "test:model")
         monkeypatch.setattr(module, "load_chat_model", lambda **_kwargs: model)
-        monkeypatch.setattr(module, "create_agent_filesystem_middleware", lambda *_args, **_kwargs: object())
+        monkeypatch.setattr(
+            module,
+            "create_agent_filesystem_middleware",
+            lambda limit, **_kwargs: filesystem_limits.append(limit) or object(),
+        )
     monkeypatch.setattr(chatbot_graph, "create_subagent_task_middleware", no_subagent)
 
     context = SimpleNamespace(
@@ -230,6 +235,9 @@ async def test_main_and_subagent_use_the_same_compaction_stack_order(
     )
     main_middlewares = await chatbot_graph._build_middlewares(context)
     subagent_middlewares = await subagent_graph._build_middlewares(context)
+
+    # 旧 Agent JSON 中即使残留手工值也不再改变策略；两类 Agent 只使用模型提示预算解析同一阈值。
+    assert filesystem_limits == [3 * 1_024, 3 * 1_024]
 
     for middlewares in (main_middlewares, subagent_middlewares):
         compaction_indexes = [

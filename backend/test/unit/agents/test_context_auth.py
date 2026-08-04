@@ -23,6 +23,11 @@ def test_percent_based_summary_constants_are_removed():
     assert not hasattr(context_module, "DEFAULT_SUMMARY_KEEP_FRACTION")
 
 
+def test_tool_token_limit_is_not_an_agent_configuration():
+    assert not hasattr(BaseContext(), "tool_token_limit")
+    assert "tool_token_limit" not in BaseContext.get_configurable_items(user_role="admin")
+
+
 @dataclass(kw_only=True)
 class ChatBotContext(BaseContext):
     subagents: list[str] | None = field(default=None, metadata={"kind": "subagents"})
@@ -54,7 +59,7 @@ def test_get_configurable_items_allows_admin_and_superadmin_fields():
     assert "summary_keep_fraction" not in admin_items
     assert "summary_prompt" in admin_items
     assert "summary_tool_result_token_limit" not in admin_items
-    assert "tool_token_limit" in admin_items
+    assert "tool_token_limit" not in admin_items
     assert "max_execution_steps" in admin_items
     assert "secret_setting" in superadmin_items
 
@@ -66,6 +71,7 @@ def test_filter_config_by_role_removes_unauthorized_context_values():
             "summary_threshold": 10,
             "summary_prompt": "custom summary",
             "summary_tool_result_token_limit": 500,
+            "tool_token_limit": 8,
             "max_execution_steps": 50,
             "secret_setting": "nope",
         },
@@ -78,13 +84,14 @@ def test_filter_config_by_role_removes_unauthorized_context_values():
     assert config_json["context"]["summary_threshold"] == 10
 
 
-def test_filter_config_by_role_discards_removed_summary_context_values_for_admin():
+def test_filter_config_by_role_discards_removed_context_values_for_admin():
     filtered = filter_config_by_role(
         {
             "context": {
                 "summary_threshold": 10,
                 "summary_prompt": "custom summary",
                 "summary_tool_result_token_limit": 500,
+                "tool_token_limit": 8,
                 "max_execution_steps": 50,
                 "secret_setting": "nope",
             }

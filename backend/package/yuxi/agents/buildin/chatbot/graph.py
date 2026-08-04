@@ -5,7 +5,6 @@ from langchain.agents.middleware import TodoListMiddleware
 from yuxi.agents import BaseAgent, load_chat_model, resolve_chat_model_spec
 from yuxi.agents.backends import create_agent_filesystem_middleware
 from yuxi.agents.context import (
-    DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS,
     DEFAULT_YUXI_SUMMARY_PROMPT,
     prepare_agent_runtime_context,
 )
@@ -17,6 +16,7 @@ from yuxi.agents.middlewares import (
 )
 from yuxi.agents.middlewares.skills import SkillsMiddleware
 from yuxi.agents.middlewares.subagent_task import create_subagent_task_middleware
+from yuxi.agents.middlewares.token_usage import resolve_tool_token_limit
 from yuxi.agents.toolkits.service import resolve_configured_runtime_tools
 
 from .context import ChatBotContext
@@ -24,18 +24,21 @@ from .prompt import TODO_MID_PROMPT, build_prompt_with_context
 from .state import ChatBotState
 
 
-async def _build_middlewares(context):
+async def _build_middlewares(context, *, model=None):
     """构建中间件列表"""
     summary_prompt = getattr(context, "summary_prompt", None) or DEFAULT_YUXI_SUMMARY_PROMPT
-    model_spec = resolve_chat_model_spec(context.model)
+    if model is None:
+        model_spec = resolve_chat_model_spec(context.model)
+        model = load_chat_model(fully_specified_name=model_spec)
+    tool_token_limit = resolve_tool_token_limit(context, model=model)
     context_compaction_middleware = create_context_compaction_middleware(
-        model=load_chat_model(fully_specified_name=model_spec),
+        model=model,
         summary_prompt=summary_prompt,
     )
 
     middlewares = [
         create_agent_filesystem_middleware(
-            getattr(context, "tool_token_limit", DEFAULT_TOOL_RESULT_EVICTION_K_TOKENS) * 1024,
+            tool_token_limit,
             context=context,
         ),
         save_attachments_to_fs,
@@ -74,11 +77,12 @@ class ChatbotAgent(BaseAgent):
 
         # 使用 create_agent 创建智能体
         model_spec = resolve_chat_model_spec(context.model)
+        model = load_chat_model(fully_specified_name=model_spec)
         graph = create_agent(
-            model=load_chat_model(fully_specified_name=model_spec),
+            model=model,
             tools=await resolve_configured_runtime_tools(context),
             system_prompt=build_prompt_with_context(context),
-            middleware=await _build_middlewares(context),
+            middleware=await _build_middlewares(context, model=model),
             state_schema=ChatBotState,
             checkpointer=await self._get_checkpointer(),
         )

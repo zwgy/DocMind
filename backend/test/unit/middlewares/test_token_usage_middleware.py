@@ -12,6 +12,7 @@ from yuxi.agents.middlewares.token_usage import (
     TokenUsageMiddleware,
     estimate_model_request,
     resolve_context_budget,
+    resolve_tool_token_limit,
 )
 from yuxi.agents.backends.composite import _TOOL_RESULT_SAVED_MARKER
 
@@ -37,6 +38,46 @@ def _request(*, state: dict | None = None, tools: list | None = None) -> SimpleN
         tools=tools or [],
         runtime=SimpleNamespace(context=SimpleNamespace()),
     )
+
+
+@pytest.mark.parametrize(
+    ("context_window", "expected_limit"),
+    [
+        (32_768, 3_072),
+        (65_536, 3_776),
+        (131_072, 7_872),
+        (262_144, 16_064),
+        (1_048_576, 16_384),
+    ],
+)
+def test_auto_tool_token_limit_scales_with_prompt_budget(context_window: int, expected_limit: int) -> None:
+    model = SimpleNamespace(
+        model_name="test-model",
+        profile={
+            "max_input_tokens": context_window,
+            "min_output_reserve_tokens": 4_096,
+            "context_safety_tokens": 1_024,
+        },
+    )
+    context = SimpleNamespace()
+
+    limit = resolve_tool_token_limit(context, model=model)
+
+    assert limit == expected_limit
+    assert context._resolved_tool_token_limit_tokens == expected_limit
+
+
+def test_resolved_tool_token_limit_can_be_reused_without_loading_model_again() -> None:
+    context = SimpleNamespace(_resolved_tool_token_limit_tokens=7_872)
+
+    assert resolve_tool_token_limit(context) == 7_872
+
+
+def test_auto_tool_token_limit_requires_model_on_first_resolution() -> None:
+    context = SimpleNamespace()
+
+    with pytest.raises(ValueError, match="模型预算"):
+        resolve_tool_token_limit(context)
 
 
 @pytest.mark.asyncio
