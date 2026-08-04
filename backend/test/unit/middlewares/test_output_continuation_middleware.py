@@ -82,8 +82,9 @@ def test_completed_response_does_not_set_normal_output_limit() -> None:
 @pytest.mark.unit
 def test_ollama_uses_num_predict_for_recovery_limit() -> None:
     request = _request()
-    ollama_model_type = type("OllamaProbe", (), {"__module__": "langchain_ollama.chat_models"})
-    request = request.override(model=ollama_model_type())
+    ollama_base_type = type("OllamaBase", (), {"__module__": "langchain_ollama.chat_models"})
+    wrapped_ollama_type = type("YuxiOllamaWrapper", (ollama_base_type,), {})
+    request = request.override(model=wrapped_ollama_type())
 
     assert _output_limit_field(request) == "num_predict"
 

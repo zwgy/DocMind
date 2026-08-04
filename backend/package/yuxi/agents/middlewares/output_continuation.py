@@ -92,7 +92,7 @@ def _output_limit_field(request: ModelRequest) -> str:
     # 保留调用方已经选择的 OpenAI 参数名；本地兼容服务默认沿用项目现有的 max_tokens。
     if isinstance(request.model_settings, Mapping) and "max_completion_tokens" in request.model_settings:
         return "max_completion_tokens"
-    if request.model.__class__.__module__.startswith("langchain_ollama"):
+    if any(base.__module__.startswith("langchain_ollama") for base in type(request.model).__mro__):
         return "num_predict"
     return "max_tokens"
 
