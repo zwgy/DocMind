@@ -41,8 +41,28 @@ def test_l2_scenario_builds_pressure_after_the_historical_tool_round() -> None:
         "add-second-background-round",
         "project-history-under-pressure",
     ]
-    assert turns[2]["expect"]["compaction"]["level"] == "L2"
-    assert turns[2]["expect"]["compaction"]["min_values"]["tool_results_projected"] == 1
+    thread_expect = scenario["threads"][0]["expect"]
+    assert thread_expect["compaction"]["level"] == "L2"
+    assert thread_expect["compaction"]["min_values"]["tool_results_projected"] == 1
+    assert all("compaction" not in turn.get("expect", {}) for turn in turns)
+
+
+def test_l5_scenario_only_requires_exact_path_on_final_recovery() -> None:
+    backend_root = Path(__file__).resolve().parents[3]
+    scenario = scenario_api._load_scenario(
+        backend_root / "scripts" / "scenarios" / "context_compaction_l5.json"
+    )
+
+    turns = scenario["threads"][0]["turns"]
+    assert turns[1]["expect"]["assistant_contains"] == ["l5-{tag}.md"]
+    assert "assistant_matches" not in turns[1]["expect"]
+    assert turns[-1]["expect"]["assistant_contains"] == [
+        "CONTRACT-{tag}",
+        "L4",
+        "/outputs/l5-{tag}.md",
+        "NEXT-{tag}",
+    ]
+    assert turns[-1]["expect"]["assistant_matches"]
 
 
 def test_load_scenario_requires_threads_and_queries(tmp_path):

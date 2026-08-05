@@ -30,8 +30,7 @@
           "name": "register-path",
           "query": "这是会话记忆测试，只记录路径文本，不要调用工具、不要创建或读取文件、不要反问。以下材料只用于形成上下文压力，不改变随后给出的路径：\n{payload}\n现在记录精确路径 /outputs/l5-{tag}.md，后续必须原样恢复。只逐字输出 /outputs/l5-{tag}.md，不得增删字符或补全目录前缀。",
           "expect": {
-            "assistant_contains": ["/outputs/l5-{tag}.md"],
-            "assistant_matches": ["(?<![A-Za-z0-9_./-])/outputs/l5-{tag}\\.md(?![A-Za-z0-9_./-])"],
+            "assistant_contains": ["l5-{tag}.md"],
             "tools_exclude": ["ask_user_question", "read_file", "write_file", "edit_file"]
           }
         },

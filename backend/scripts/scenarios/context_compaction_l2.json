@@ -4,6 +4,17 @@
     {
       "name": "l2-historical-tool-result",
       "title": "L2历史工具结果投影验收-{tag}",
+      "expect": {
+        "compaction": {
+          "level": "L2",
+          "status": "finished",
+          "min_values": {
+            "tool_results_projected": 1,
+            "tokens_saved": 1
+          }
+        },
+        "compaction_order": ["L1", "L2", "L3", "L5"]
+      },
       "turns": [
         {
           "name": "create-historical-tool-result",
@@ -26,16 +37,7 @@
           "query": "登记 L2-ROUND-TWO-{tag}。以下材料只增加上下文压力，不改变已有工具结果；不要调用工具，只回答 L2-ROUND-TWO-{tag}。\n{payload}",
           "expect": {
             "assistant_contains": ["L2-ROUND-TWO-{tag}"],
-            "tools_exclude": ["read_file", "write_file", "edit_file"],
-            "compaction": {
-              "level": "L2",
-              "status": "finished",
-              "min_values": {
-                "tool_results_projected": 1,
-                "tokens_saved": 1
-              }
-            },
-            "compaction_order": ["L1", "L2", "L3", "L5"]
+            "tools_exclude": ["read_file", "write_file", "edit_file"]
           }
         },
         {
