@@ -19,6 +19,7 @@
             <a-tooltip
               placement="rightTop"
               :mouse-enter-delay="0.35"
+              :open="focusedChatId === chat.id ? isTitleTruncated(chat.id) : undefined"
               overlay-class-name="conversation-title-tooltip"
             >
               <template v-if="isTitleTruncated(chat.id)" #title>
@@ -32,7 +33,8 @@
                 class="conversation-title"
                 :aria-label="`打开对话：${getChatTitle(chat)}`"
                 @mouseenter="updateTitleOverflow(chat.id, $event)"
-                @focus="updateTitleOverflow(chat.id, $event)"
+                @focus="handleTitleFocus(chat.id, $event)"
+                @blur="focusedChatId = null"
                 @click.stop="$emit('select-chat', chat.id)"
               >
                 {{ getChatTitle(chat) }}
@@ -135,6 +137,7 @@ const emit = defineEmits([
 
 const listCollapsed = ref(false)
 const truncatedChatIds = ref(new Set())
+const focusedChatId = ref(null)
 
 const getChatTitle = (chat) => chat.title || '新的对话'
 
@@ -153,6 +156,12 @@ const updateTitleOverflow = (chatId, event) => {
     nextIds.delete(chatId)
   }
   truncatedChatIds.value = nextIds
+}
+
+const handleTitleFocus = (chatId, event) => {
+  updateTitleOverflow(chatId, event)
+  // 首次通过键盘聚焦时标题的溢出状态尚未缓存，因此显式控制浮层，避免 Tooltip 错过本次 focus 事件。
+  focusedChatId.value = chatId
 }
 
 const sortedChats = computed(() => {
