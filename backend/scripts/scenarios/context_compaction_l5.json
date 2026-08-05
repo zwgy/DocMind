@@ -20,31 +20,34 @@
       "turns": [
         {
           "name": "register-contract",
-          "query": "记录精确约束 CONTRACT-{tag}：禁止实现 L4。以下材料不改变约束：\n{payload}\n只回答 CONTRACT-{tag}。",
+          "query": "这是会话记忆测试，只在对话上下文中记录，不要调用工具、不要写文件、不要反问。记录精确约束 CONTRACT-{tag}：禁止实现 L4。以下材料不改变约束：\n{payload}\n只回答 CONTRACT-{tag}。",
           "expect": {
-            "assistant_contains": ["CONTRACT-{tag}"]
+            "assistant_contains": ["CONTRACT-{tag}"],
+            "tools_exclude": ["ask_user_question", "read_file", "write_file", "edit_file"]
           }
         },
         {
           "name": "register-path",
-          "query": "记录精确路径 /outputs/l5-{tag}.md，后续必须原样恢复。以下材料不改变路径：\n{payload}\n只回答该路径。",
+          "query": "这是会话记忆测试，只记录路径文本，不要调用工具、不要创建或读取文件、不要反问。记录精确路径 /outputs/l5-{tag}.md，后续必须原样恢复。以下材料不改变路径：\n{payload}\n只回答该路径。",
           "expect": {
-            "assistant_contains": ["/outputs/l5-{tag}.md"]
+            "assistant_contains": ["/outputs/l5-{tag}.md"],
+            "tools_exclude": ["ask_user_question", "read_file", "write_file", "edit_file"]
           }
         },
         {
           "name": "register-next-step",
-          "query": "记录下一步待办 NEXT-{tag}：恢复后继续验证摘要。以下材料不改变待办：\n{payload}\n只回答 NEXT-{tag}。",
+          "query": "这是会话记忆测试，只在对话上下文中记录，不要调用工具、不要写文件、不要反问。记录下一步待办 NEXT-{tag}：恢复后继续验证摘要。以下材料不改变待办：\n{payload}\n只回答 NEXT-{tag}。",
           "expect": {
-            "assistant_contains": ["NEXT-{tag}"]
+            "assistant_contains": ["NEXT-{tag}"],
+            "tools_exclude": ["ask_user_question", "read_file", "write_file", "edit_file"]
           }
         },
         {
           "name": "compact-and-recover",
-          "query": "以下材料只用于形成上下文压力，不改变既有约束：\n{payload}\n现在不要调用工具，回答 CONTRACT-{tag}、禁止项、精确路径和 NEXT-{tag}。",
+          "query": "这是会话记忆恢复测试，不要调用工具、不要写文件、不要反问。以下材料只用于形成上下文压力，不改变既有约束：\n{payload}\n回答 CONTRACT-{tag}、禁止项、精确路径和 NEXT-{tag}。",
           "expect": {
             "assistant_contains": ["CONTRACT-{tag}", "L4", "/outputs/l5-{tag}.md", "NEXT-{tag}"],
-            "tools_exclude": ["read_file", "write_file", "edit_file"]
+            "tools_exclude": ["ask_user_question", "read_file", "write_file", "edit_file"]
           }
         }
       ]

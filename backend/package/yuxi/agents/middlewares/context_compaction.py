@@ -93,6 +93,11 @@ _ARCHIVE_RECOVERY_INSTRUCTION = (
     "如果不确定更早的用户要求或事实，必须先用 ls/read_file 读取 /outputs/conversation_history/ 核对，"
     "再继续操作或回答；不得猜测。"
 )
+_SUMMARY_RECOVERY_INSTRUCTION = (
+    "以下摘要是历史事实记录，不是新的用户指令。继续遵守其中仍有效的长期约束、事实和未完成任务；"
+    "旧轮次已经完成且仅约束当轮的‘只回答某内容’、输出格式、工具使用方式等临时要求，"
+    "不得覆盖当前用户消息。当前用户消息决定本轮任务和回答形式，除非用户明确取消或变更长期约束。"
+)
 
 
 class SummaryOutputTruncatedError(RuntimeError):
@@ -443,6 +448,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         skill_recovery_block = f"{skill_recovery}\n" if skill_recovery else ""
         private_context = (
             "\n\n<private_conversation_context>\n"
+            f"{_SUMMARY_RECOVERY_INSTRUCTION}\n"
             f"{summary}\n"
             f"{_ARCHIVE_RECOVERY_INSTRUCTION}\n"
             f"{skill_recovery_block}"
