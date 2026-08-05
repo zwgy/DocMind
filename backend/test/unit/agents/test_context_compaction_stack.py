@@ -26,7 +26,8 @@ from yuxi.agents.middlewares.token_usage import ModelOutputIncompleteError, Toke
 class _StackModel(BaseChatModel):
     """区分内部摘要与主调用，并返回可供 TokenUsage 校验的 provider usage。"""
 
-    profile: dict = {"max_input_tokens": 600, "min_output_reserve_tokens": 100, "context_safety_tokens": 80}
+    # 620-token prompt budget 仍能稳定触发小窗口压缩，同时可容纳生产级固定摘要与恢复协议。
+    profile: dict = {"max_input_tokens": 1_200, "min_output_reserve_tokens": 500, "context_safety_tokens": 80}
     main_calls: int = 0
     summary_calls: int = 0
 

@@ -82,7 +82,7 @@ class MyAgent(BaseAgent):
 | `knowledges` | 关联知识库 |
 | `mcps` | 启用的 MCP 服务器 |
 | `skills` | 关联 Skills |
-| `summary_prompt` | 摘要触发时使用的完整提示词，可替换默认九维结构；必须包含 `{messages}` 占位符 |
+| `summary_prompt` | 定义摘要提取内容和输出结构，可替换默认九维结构；必须包含 `{messages}` 占位符。框架会另外追加累计合并、输入隔离、精确值保护和输出预算协议 |
 | `max_execution_steps` | 单次运行最大执行步数 |
 | `thread_id` / `uid` | 运行期标识，不作为页面配置项暴露 |
 
