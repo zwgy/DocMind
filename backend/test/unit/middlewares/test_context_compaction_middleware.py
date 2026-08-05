@@ -13,6 +13,7 @@ from yuxi.agents.context import DEFAULT_YUXI_SUMMARY_PROMPT
 from yuxi.agents.middlewares import context_compaction as context_compaction_module
 from yuxi.agents.middlewares.context_compaction import (
     ContextCompactionMiddleware,
+    SummaryInvariantLossError,
     SummaryOutputTooLargeError,
     SummaryOutputTruncatedError,
     create_context_compaction_middleware,
@@ -293,6 +294,109 @@ def test_summary_quality_only_checks_labels_without_repair_call() -> None:
     assert custom_middleware._summary_quality("任意自定义结构") == "custom"
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_summary_repairs_missing_exact_anchors_once(asynchronous: bool) -> None:
+    class RepairingSummaryModel(_SummaryModel):
+        def __init__(self) -> None:
+            super().__init__()
+            self.responses = [
+                "## files/code\nNEXT-2026-0805：继续验收",
+                (
+                    "## files/code\nCONTRACT-2026-0805：禁止实现 L4\n"
+                    "/outputs/context-check.md\nNEXT-2026-0805：继续验收"
+                ),
+            ]
+
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            return SimpleNamespace(text=self.responses.pop(0))
+
+    previous = "## files/code\nCONTRACT-2026-0805：禁止实现 L4\n/outputs/context-check.md"
+    model = RepairingSummaryModel()
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    arguments = (previous, [HumanMessage(content="记录 NEXT-2026-0805")], 512, 3_000)
+
+    if asynchronous:
+        summary = await middleware._acreate_summary_once(*arguments)
+    else:
+        summary = middleware._create_summary_once(*arguments)
+
+    assert len(model.prompts) == 2
+    assert "<required_exact_values>" in model.prompts[1]
+    for anchor in ("CONTRACT-2026-0805", "L4", "/outputs/context-check.md", "NEXT-2026-0805"):
+        assert anchor in summary
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_summary_rejects_checkpoint_when_one_repair_still_loses_anchor(asynchronous: bool) -> None:
+    class LosingSummaryModel(_SummaryModel):
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            return SimpleNamespace(text="## files/code\nNEXT-2026-0805：继续验收")
+
+    model = LosingSummaryModel()
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    arguments = (
+        "## files/code\nCONTRACT-2026-0805：禁止实现 L4\n/outputs/context-check.md",
+        [HumanMessage(content="记录 NEXT-2026-0805")],
+        512,
+        3_000,
+    )
+
+    with pytest.raises(SummaryInvariantLossError, match="修复后仍遗漏"):
+        if asynchronous:
+            await middleware._acreate_summary_once(*arguments)
+        else:
+            middleware._create_summary_once(*arguments)
+
+    assert len(model.prompts) == 2
+
+
+@pytest.mark.unit
+def test_summary_does_not_repair_when_exact_anchors_are_preserved() -> None:
+    class PreservingSummaryModel(_SummaryModel):
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            return SimpleNamespace(
+                text=(
+                    "## files/code\nCONTRACT-2026-0805：禁止实现 L4\n"
+                    "/outputs/context-check.md\nNEXT-2026-0805：继续验收"
+                )
+            )
+
+    model = PreservingSummaryModel()
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    summary = middleware._create_summary_once(
+        "## files/code\nCONTRACT-2026-0805：禁止实现 L4\n/outputs/context-check.md",
+        [HumanMessage(content="记录 NEXT-2026-0805")],
+        512,
+        3_000,
+    )
+
+    assert "NEXT-2026-0805" in summary
+    assert len(model.prompts) == 1
+
+
+@pytest.mark.unit
+def test_summary_exact_anchors_ignore_archive_metadata_and_xml_tags() -> None:
+    summary = (
+        "<private_context_archive>\n"
+        "最新清单：/home/gem/user-data/outputs/conversation_history/archive-r3-a-b.jsonl\n"
+        "更早清单位于 /outputs/conversation_history/。\n"
+        "</private_context_archive>\n"
+        "保留 CONTRACT-2026-0805 和 /outputs/final-report.md"
+    )
+
+    assert context_compaction_module._summary_exact_anchors(summary) == [
+        "CONTRACT-2026-0805",
+        "/outputs/final-report.md",
+    ]
+
+
 def test_default_summary_prompt_owns_nine_fields_and_framework_protocol_is_structure_neutral() -> None:
     """九维字段属于默认策略；框架只追加与字段结构无关的累计合并约束。"""
     model = _SummaryModel()
@@ -460,7 +564,12 @@ def test_compaction_keeps_tool_call_and_result_in_the_same_archived_turn() -> No
 @pytest.mark.unit
 def test_three_l5_revisions_feed_previous_checkpoint_into_the_next_summary() -> None:
     """滚动 L5 依赖累计检查点；每一版摘要必须成为下一版摘要的显式输入。"""
-    model = _SummaryModel()
+    class CumulativeSummaryModel(_SummaryModel):
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            return SimpleNamespace(text="已归档旧对话：用户要完成项目文档，并遵守 REQUIREMENT-001。")
+
+    model = CumulativeSummaryModel()
     model.profile = {
         "max_input_tokens": 8_000,
         "min_output_reserve_tokens": 1_000,
@@ -500,7 +609,7 @@ def test_three_l5_revisions_feed_previous_checkpoint_into_the_next_summary() -> 
         assert update["context_archive_path"].endswith(".jsonl")
         assert "<previous_summary>" in model.prompts[-1]
         if revision > 1:
-            assert "已归档旧对话：用户要完成项目文档。" in model.prompts[-1]
+            assert "已归档旧对话：用户要完成项目文档，并遵守 REQUIREMENT-001。" in model.prompts[-1]
 
         messages = list(update["messages"].value)
         state = {**state, **update, "messages": messages}
@@ -508,7 +617,7 @@ def test_three_l5_revisions_feed_previous_checkpoint_into_the_next_summary() -> 
         state["messages"] = messages
 
     assert len(model.prompts) >= 3
-    assert "已归档旧对话：用户要完成项目文档。" in model.prompts[-1]
+    assert "已归档旧对话：用户要完成项目文档，并遵守 REQUIREMENT-001。" in model.prompts[-1]
 
 
 @pytest.mark.unit
