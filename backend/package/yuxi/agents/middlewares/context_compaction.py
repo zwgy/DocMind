@@ -202,7 +202,7 @@ def _messages_safe_for_summary(messages: list[AnyMessage]) -> list[AnyMessage]:
             else:
                 removed_media = True
         if removed_media:
-            parts.append("[Multimodal content is preserved in the private archive, not in this summary prompt.]")
+            parts.append("[多模态内容已保存在私有归档中，不会放入本次摘要提示词。]")
         sanitized.append(message.model_copy(update={"content": "\n".join(parts)}))
     return sanitized
 
@@ -222,13 +222,13 @@ def _source_window_receipt(messages: list[AnyMessage], message: ToolMessage) -> 
         if args:
             break
 
-    request_hint = json.dumps(args, ensure_ascii=False, separators=(",", ":")) if args else "the original arguments"
+    request_hint = json.dumps(args, ensure_ascii=False, separators=(",", ":")) if args else "原始参数"
     return message.model_copy(
         update={
             "content": (
-                f"The {message.name or 'source'} window was removed from the active context to fit the model "
-                f"input budget. Re-run {message.name or 'the source tool'} with a narrower offset/limit window. "
-                f"Original arguments: {request_hint}"
+                f"为满足模型输入预算，已从活动上下文移除 {message.name or 'source'} 的读取窗口。"
+                f"请使用更小的 offset/limit 窗口重新调用 {message.name or '原始工具'}。"
+                f"原始参数：{request_hint}"
             ),
             "additional_kwargs": {**message.additional_kwargs, _TOOL_RESULT_SAVED_MARKER: True},
         }
@@ -307,8 +307,8 @@ def _archive_manifest_content(messages: list[AnyMessage], revision: int) -> str:
 def _archive_summary_prefix(path: str) -> str:
     return (
         "<private_context_archive>\n"
-        f"Latest compacted-history manifest: {path}\n"
-        "Older manifests: /outputs/conversation_history/. Use ls/read_file; never guess.\n"
+        f"最新的压缩历史清单：{path}\n"
+        "更早的清单位于 /outputs/conversation_history/。请使用 ls/read_file 核对，不得猜测。\n"
         "</private_context_archive>\n"
     )
 
@@ -317,8 +317,8 @@ def _input_receipt(message: AnyMessage, path: str, tokens: int) -> AnyMessage:
     return message.model_copy(
         update={
             "content": (
-                "The current user input is stored outside the active context because it exceeds the model input "
-                f"budget (about {tokens} tokens). Read {path} with offset and limit before answering."
+                f"当前用户输入约为 {tokens} tokens，因超出模型输入预算，已保存到活动上下文之外。"
+                f"回答前请使用 offset 和 limit 分段读取 {path}。"
             )
         }
     )
@@ -409,7 +409,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             f"{_ARCHIVE_RECOVERY_INSTRUCTION}\n"
             f"{skill_recovery_block}"
             "</private_conversation_context>\n"
-            "Use this private context to continue the task. Do not mention or reproduce it verbatim."
+            "请使用这份私有上下文继续任务，不要提及或逐字复述它。"
         )
         if system_message is None:
             return SystemMessage(content=private_context.strip())
@@ -535,7 +535,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             + "\n</previous_summary>\n"
             + _SUMMARY_UPDATE_PROTOCOL
             + "\n"
-            + f"Keep the replacement summary within {max(target_tokens, 1)} tokens."
+            + f"替换后的摘要不得超过 {max(target_tokens, 1)} tokens。"
         )
 
     def _summary_target_tokens(

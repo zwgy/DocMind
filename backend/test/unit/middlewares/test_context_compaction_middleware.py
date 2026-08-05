@@ -1012,7 +1012,7 @@ def test_old_multimodal_content_is_archived_without_entering_summary_prompt(arch
 
     summary_prompts = "\n".join(model.prompts)
     assert image_data not in summary_prompts
-    assert "Multimodal content is preserved" in summary_prompts
+    assert "多模态内容已保存在私有归档中" in summary_prompts
     assert image_data in archive_backend.writes[0][1]
 
 
@@ -1251,7 +1251,7 @@ def test_final_request_replaces_large_source_window_without_second_offload(monke
 
     result = middleware.wrap_model_call(request, handler)
 
-    assert "narrower offset/limit window" in captured["messages"][-1].content
+    assert "更小的 offset/limit 窗口" in captured["messages"][-1].content
     assert '"path":"/outputs/a.txt"' in captured["messages"][-1].content
     assert raw_result not in captured["messages"][-1].content
     assert raw_result not in result.command.update["messages"].value[-2].content
@@ -1494,7 +1494,7 @@ def test_l1_externalizes_current_input_when_fixed_context_makes_it_unadmittable(
 
     create_summary_middleware(model=model, summary_prompt="summary\n{messages}").wrap_model_call(request, handler)
 
-    assert "stored outside the active context" in captured["message"].content
+    assert "已保存到活动上下文之外" in captured["message"].content
     l1_event = next(event for event in request.runtime.stream_events if event["level"] == "L1")
     assert l1_event["input_externalized"] == 1
     assert l1_event["tokens_after"] <= budget.prompt_budget
@@ -1527,7 +1527,7 @@ def test_current_oversized_user_input_is_persisted_before_model_call(monkeypatch
     assert len(backend.writes) == 1
     assert backend.writes[0][1] == raw_input
     assert "/outputs/conversation_history/user-current-" in backend.writes[0][0]
-    assert "stored outside the active context" in captured["messages"][0].content
+    assert "已保存到活动上下文之外" in captured["messages"][0].content
     assert raw_input not in result.command.update["messages"].value[0].content
     l1_event = next(event for event in request.runtime.stream_events if event["level"] == "L1")
     assert l1_event["status"] == "finished"
