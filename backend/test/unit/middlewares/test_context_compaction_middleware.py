@@ -320,11 +320,12 @@ def test_default_summary_prompt_owns_nine_fields_and_framework_protocol_is_struc
     ):
         assert f"## {label}" in DEFAULT_YUXI_SUMMARY_PROMPT
         assert label in rendered
-    assert "把 previous_summary 视为累计检查点" in rendered
-    assert "把新消息视为新增信息" in rendered
-    assert "不能仅因为最新消息更具体" in rendered
-    assert "明确表示取消、替换、更正、不再需要或已经完成" in rendered
-    assert "已完成事项应从待办转入进展" in rendered
+    assert "previous_summary 是累计检查点" in rendered
+    assert "新消息仅增量补充" in rendered
+    assert "只有用户明确取消、替换、更正或确认完成" in rendered
+    assert "助手称“已记录、已确认、已回复”" in rendered
+    assert "输出前逐项核对旧约束、禁止项、标识符、路径和待办" in rendered
+    assert "完成事项从待办转入进展" in rendered
 
 
 @pytest.mark.unit
@@ -342,8 +343,8 @@ def test_custom_summary_prompt_is_not_extended_with_nine_dimension_fields() -> N
     assert "SESSION INTENT" in rendered
     assert "USER REQUIREMENTS AND PREFERENCES" in rendered
     assert "summary_update_protocol" in rendered
-    assert "把新消息视为新增信息" in rendered
-    assert "不能仅因为最新消息更具体" in rendered
+    assert "新消息仅增量补充" in rendered
+    assert "消息更具体" in rendered
     assert "files/code" not in rendered
     assert "errors/fixes" not in rendered
 
@@ -411,8 +412,8 @@ def test_compaction_counts_final_request_and_commits_private_summary_after_succe
 
     assert isinstance(result, ExtendedModelResponse)
     assert model.prompts
-    assert "把 previous_summary 视为累计检查点" in model.prompts[0]
-    assert "必须先继承所有仍然有效的旧要求" in model.prompts[0]
+    assert "previous_summary 是累计检查点" in model.prompts[0]
+    assert "先继承仍有效的旧要求" in model.prompts[0]
     assert captured["request"].messages == [messages[-1]]
     assert "private_conversation_context" in captured["request"].system_message.text
     assert "/outputs/conversation_history/" in captured["request"].system_message.text
