@@ -70,6 +70,10 @@ _SUMMARY_EXACT_ANCHOR_PATTERN = re.compile(
     r"(?=[A-Za-z0-9_.\-]{2,96}(?![A-Za-z0-9_.\-]))"
     r"(?=[A-Za-z0-9_.\-]*[A-Za-z])(?=[A-Za-z0-9_.\-]*\d)[A-Za-z0-9_.\-]+)(?![\w])"
 )
+_SUMMARY_REPAIR_CONTROL_BLOCK_PATTERN = re.compile(
+    r"<required_exact_values>.*?</required_exact_values>\s*",
+    flags=re.DOTALL,
+)
 _SUMMARY_MAX_EXACT_ANCHORS = 64
 _SUMMARY_MAX_EXACT_ANCHOR_CHARS = 2_048
 _SUMMARY_REQUIRED_LABELS = (
@@ -711,7 +715,9 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         if estimate_messages_tokens([SystemMessage(content=repair_prompt)]) > input_budget:
             raise SummaryInvariantLossError("摘要遗漏精确事实，且修复请求超出摘要输入预算")
         repair_response = summary_model.invoke(repair_prompt)
-        repaired = _summary_text(repair_response)
+        # 本地小模型偶尔会把修复提示的控制块一并回显。控制块不是 checkpoint 内容；
+        # 先剥离再校验，避免内部协议进入主模型上下文或用户回复，同时不能靠控制块伪造锚点完整性。
+        repaired = _SUMMARY_REPAIR_CONTROL_BLOCK_PATTERN.sub("", _summary_text(repair_response)).strip()
         if not repaired:
             raise RuntimeError("摘要修复模型返回空内容，未提交上下文裁剪")
         self._validate_summary_for_next_prompt(
@@ -757,7 +763,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         if estimate_messages_tokens([SystemMessage(content=repair_prompt)]) > input_budget:
             raise SummaryInvariantLossError("摘要遗漏精确事实，且修复请求超出摘要输入预算")
         repair_response = await summary_model.ainvoke(repair_prompt)
-        repaired = _summary_text(repair_response)
+        repaired = _SUMMARY_REPAIR_CONTROL_BLOCK_PATTERN.sub("", _summary_text(repair_response)).strip()
         if not repaired:
             raise RuntimeError("摘要修复模型返回空内容，未提交上下文裁剪")
         self._validate_summary_for_next_prompt(

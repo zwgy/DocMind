@@ -304,6 +304,7 @@ async def test_summary_repairs_missing_exact_anchors_once(asynchronous: bool) ->
             self.responses = [
                 "## files/code\nNEXT-2026-0805：继续验收",
                 (
+                    '<required_exact_values>["CONTRACT-2026-0805"]</required_exact_values>\n'
                     "## files/code\nCONTRACT-2026-0805：禁止实现 L4\n"
                     "/outputs/context-check.md\nNEXT-2026-0805：继续验收"
                 ),
@@ -327,6 +328,7 @@ async def test_summary_repairs_missing_exact_anchors_once(asynchronous: bool) ->
     assert "<required_exact_values>" in model.prompts[1]
     for anchor in ("CONTRACT-2026-0805", "L4", "/outputs/context-check.md", "NEXT-2026-0805"):
         assert anchor in summary
+    assert "required_exact_values" not in summary
 
 
 @pytest.mark.unit
