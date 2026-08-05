@@ -63,7 +63,7 @@ previous_summary 是累计检查点；新消息仅增量补充，不得整体覆
 先继承仍有效的旧要求、决策、标识、路径、错误、待办与偏好，再吸收新事实。
 仅用户明确取消、替换、更正或确认完成时才变更旧项；消息更具体或助手称已记录、确认、回复不表示失效。
 输出前核对旧约束、禁止项、标识、路径和待办；未变更项必须原样保留。
-已完成旧轮的“只回答、仅输出、本轮不调用工具”等，除非用户明确要求后续继续，只保留事实或结果，不得列为目标、待办、当前工作或下一步。
+已完成旧轮的“只回答、仅输出、本轮不调用工具”等，除非用户明确要求后续继续，只保留事实或结果，不得列为待办、当前工作或下一步。
 完成事项转入进展；单轮格式不得覆盖整体目标。保留事实，删减过程，不得编造。
 </summary_update_protocol>"""
 _SUMMARY_EXACT_ANCHOR_PATTERN = re.compile(
@@ -350,6 +350,26 @@ def _archive_manifest_content(messages: list[AnyMessage], revision: int) -> str:
         }
         records.append(json.dumps(record, ensure_ascii=False, default=str, separators=(",", ":")))
     return "\n".join(records)
+
+
+def _required_summary_anchors(previous_summary: str, source_messages: list[AnyMessage]) -> list[str]:
+    """只信任旧 checkpoint 与用户原文，不把候选幻觉或工具调用 ID 固化为长期锚点。"""
+    sources: list[str] = []
+    for message in source_messages:
+        if getattr(message, "type", None) == "human" and not is_internal_output_continuation(message):
+            sources.append(_message_content_text(message))
+            continue
+        # 超大单轮会把原始 HumanMessage 放进只供摘要调用使用的优先锚点；只读取该
+        # 明确边界，不扫描同一 SystemMessage 中的工具载荷和调用 ID。
+        if getattr(message, "type", None) == "system":
+            match = re.search(
+                r"<segment_user_anchor>\s*(.*?)\s*</segment_user_anchor>",
+                _message_content_text(message),
+                flags=re.DOTALL,
+            )
+            if match:
+                sources.append(match.group(1))
+    return _summary_exact_anchors("\n".join([previous_summary, *sources]))
 
 
 def _archive_summary_prefix(path: str) -> str:
@@ -686,6 +706,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
     def _accept_summary_response(
         self,
         previous_summary: str,
+        source_messages: list[AnyMessage],
         response: Any,
         summary_model: Any,
         *,
@@ -702,11 +723,10 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             target_tokens=target_tokens,
             input_budget=input_budget,
         )
-        previous_anchors = _summary_exact_anchors(previous_summary)
-        if not any(anchor not in candidate for anchor in previous_anchors):
+        required_anchors = _required_summary_anchors(previous_summary, source_messages)
+        if not any(anchor not in candidate for anchor in required_anchors):
             return candidate
 
-        required_anchors = list(dict.fromkeys([*previous_anchors, *_summary_exact_anchors(candidate)]))
         repair_prompt = self._render_summary_repair_prompt(
             previous_summary,
             candidate,
@@ -735,6 +755,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
     async def _aaccept_summary_response(
         self,
         previous_summary: str,
+        source_messages: list[AnyMessage],
         response: Any,
         summary_model: Any,
         *,
@@ -750,11 +771,10 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             target_tokens=target_tokens,
             input_budget=input_budget,
         )
-        previous_anchors = _summary_exact_anchors(previous_summary)
-        if not any(anchor not in candidate for anchor in previous_anchors):
+        required_anchors = _required_summary_anchors(previous_summary, source_messages)
+        if not any(anchor not in candidate for anchor in required_anchors):
             return candidate
 
-        required_anchors = list(dict.fromkeys([*previous_anchors, *_summary_exact_anchors(candidate)]))
         repair_prompt = self._render_summary_repair_prompt(
             previous_summary,
             candidate,
@@ -918,6 +938,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 response = summary_model.invoke(self._render_summary_prompt(summary, pending, target_tokens))
                 summary = self._accept_summary_response(
                     summary,
+                    pending,
                     response,
                     summary_model,
                     target_tokens=target_tokens,
@@ -946,6 +967,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 )
                 summary = self._accept_summary_response(
                     summary,
+                    [SystemMessage(content=piece)],
                     response,
                     summary_model,
                     target_tokens=target_tokens,
@@ -959,6 +981,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             response = summary_model.invoke(self._render_summary_prompt(summary, pending, target_tokens))
             summary = self._accept_summary_response(
                 summary,
+                pending,
                 response,
                 summary_model,
                 target_tokens=target_tokens,
@@ -1010,6 +1033,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 response = await summary_model.ainvoke(self._render_summary_prompt(summary, pending, target_tokens))
                 summary = await self._aaccept_summary_response(
                     summary,
+                    pending,
                     response,
                     summary_model,
                     target_tokens=target_tokens,
@@ -1035,6 +1059,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 )
                 summary = await self._aaccept_summary_response(
                     summary,
+                    [SystemMessage(content=piece)],
                     response,
                     summary_model,
                     target_tokens=target_tokens,
@@ -1048,6 +1073,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             response = await summary_model.ainvoke(self._render_summary_prompt(summary, pending, target_tokens))
             summary = await self._aaccept_summary_response(
                 summary,
+                pending,
                 response,
                 summary_model,
                 target_tokens=target_tokens,

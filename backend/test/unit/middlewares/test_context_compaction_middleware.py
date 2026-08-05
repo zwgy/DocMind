@@ -302,7 +302,7 @@ async def test_summary_repairs_missing_exact_anchors_once(asynchronous: bool) ->
         def __init__(self) -> None:
             super().__init__()
             self.responses = [
-                "## files/code\nNEXT-2026-0805：继续验收",
+                "## files/code\nNEXT-2026-0805：继续验收\n/outputs/model-invented-9999.md",
                 (
                     '<required_exact_values>["CONTRACT-2026-0805"]</required_exact_values>\n'
                     "## files/code\nCONTRACT-2026-0805：禁止实现 L4\n"
@@ -326,7 +326,10 @@ async def test_summary_repairs_missing_exact_anchors_once(asynchronous: bool) ->
 
     assert len(model.prompts) == 2
     assert "<required_exact_values>" in model.prompts[1]
+    required_block = model.prompts[1].split("<required_exact_values>", 1)[1].split("</required_exact_values>", 1)[0]
+    assert "/outputs/model-invented-9999.md" not in required_block
     for anchor in ("CONTRACT-2026-0805", "L4", "/outputs/context-check.md", "NEXT-2026-0805"):
+        assert anchor in required_block
         assert anchor in summary
     assert "required_exact_values" not in summary
 
@@ -433,7 +436,7 @@ def test_default_summary_prompt_owns_nine_fields_and_framework_protocol_is_struc
     assert "输出前核对旧约束、禁止项、标识、路径和待办" in rendered
     assert "已完成旧轮" in rendered
     assert "只回答、仅输出、本轮不调用工具" in rendered
-    assert "不得列为目标、待办、当前工作或下一步" in rendered
+    assert "不得列为待办、当前工作或下一步" in rendered
     assert "用户明确要求后续继续" in rendered
     assert "完成事项转入进展" in rendered
 
@@ -464,7 +467,16 @@ async def test_oversized_single_user_turn_repeats_only_the_user_anchor_for_each_
     asynchronous: bool,
 ) -> None:
     """大工具链滚动摘要时，后续分块仍能看到同一条原始用户硬约束。"""
-    model = _SummaryModel()
+    user_message = HumanMessage(
+        content="不得实现 L4；关键路径 /outputs/context_projection.py；错误码 ERR-CONTEXT-417。",
+    )
+
+    class AnchorAwareSummaryModel(_SummaryModel):
+        def invoke(self, prompt: str):
+            self.prompts.append(prompt)
+            return SimpleNamespace(text=user_message.content)
+
+    model = AnchorAwareSummaryModel()
     model.profile = {
         "max_input_tokens": 2_000,
         "min_output_reserve_tokens": 300,
@@ -473,9 +485,6 @@ async def test_oversized_single_user_turn_repeats_only_the_user_anchor_for_each_
     _, request = _request([])
     request = request.override(model=model)
     middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
-    user_message = HumanMessage(
-        content="不得实现 L4；关键路径 /outputs/context_projection.py；错误码 ERR-CONTEXT-417。",
-    )
     messages = [
         user_message,
         AIMessage(
