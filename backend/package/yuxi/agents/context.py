@@ -17,22 +17,22 @@ DEFAULT_YUXI_SUMMARY_PROMPT = """你是对话上下文压缩助手。
 严格使用以下九个英文标签，每个标签只出现一次；没有内容时写 None，不得合并或省略标签：
 
 ## intent
-用户当前的主要目标、任务范围和最终交付物。
+用户整体的主要目标、任务范围和最终交付物。不要把某一轮临时要求的回复格式误判为整体目标。
 
 ## concepts
 后续工作仍需使用的技术概念、架构边界、约束条件和已经确认的设计原则。
 
 ## files/code
-已经创建、修改、读取或需要继续关注的文件、代码片段、命令、工具输出路径、线程或运行标识。路径、标识符和关键代码必须精确保留。
+已经创建、修改、读取或需要继续关注的文件、代码片段、命令、交付物、工具输出路径、线程或运行标识。路径、标识符和关键代码必须精确保留。
 
 ## errors/fixes
 遇到的错误、可复现条件、根因、已经尝试或确认的修复，以及仍未解决的风险。错误码和关键报错必须精确保留。
 
 ## progress
-已经完成的步骤、工具核验结果、关键结论、已确认的方案、被否定的方案及原因。
+已经完成的步骤、工具核验结果、关键结论、已确认的方案和决策、被否定的方案及原因。
 
 ## user messages
-按先后顺序保留所有仍会影响任务的用户请求、纠正、硬约束、偏好、禁忌和验收标准。精确事实除非被用户明确更正，否则不得在滚动合并时删除。
+按先后顺序保留所有仍会影响任务的用户请求、纠正、硬约束、偏好、禁忌、输出要求、技术取舍和验收标准，以及会影响任务理解的精确事实和原始标识。
 
 ## pending tasks
 尚未完成、被阻塞或等待验收的任务。
@@ -45,7 +45,6 @@ DEFAULT_YUXI_SUMMARY_PROMPT = """你是对话上下文压缩助手。
 
 要求：
 - 不要逐字复述冗长工具输出；保留结论、路径和必要证据。
-- 新消息是对旧检查点的增量；只有明确纠正才可替换旧事实，不得因本段没有再次提到而删除旧约束、路径、错误码或待办。
 - 不要编造没有出现在对话中的事实。
 - 如果存在未解决的问题或风险，明确记录。
 - 使用与用户主要对话一致的语言。
@@ -430,11 +429,17 @@ async def normalize_agent_context_config(
     db,
     user,
     context_schema: type[BaseContext] | None = None,
+    enforce_field_auth: bool = True,
 ) -> dict:
     schema = context_schema or BaseContext
     raw_context = dict(context) if isinstance(context, dict) else {}
-    filtered = filter_config_by_role({"context": raw_context}, getattr(user, "role", None), schema)
-    normalized = dict(filtered.get("context") or {})
+    if enforce_field_auth:
+        filtered = filter_config_by_role({"context": raw_context}, getattr(user, "role", None), schema)
+        normalized = dict(filtered.get("context") or {})
+    else:
+        # auth 控制谁能查看和编辑配置，不控制已保存配置是否在运行时生效。这里的 context
+        # 来自受信任的 Agent 记录；资源列表仍会在下方按实际提问用户的可见范围收敛。
+        normalized = {key: value for key, value in raw_context.items() if key not in _REMOVED_CONTEXT_FIELDS}
     field_names = {item.name for item in fields(schema)}
     resource_fields = _AGENT_RESOURCE_FIELDS & field_names
     if not resource_fields:

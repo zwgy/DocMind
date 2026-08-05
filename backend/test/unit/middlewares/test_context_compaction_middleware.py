@@ -284,12 +284,17 @@ def test_summary_quality_only_checks_labels_without_repair_call() -> None:
         ]
     )
 
-    assert ContextCompactionMiddleware._summary_quality(complete) == "semantic"
-    assert ContextCompactionMiddleware._summary_quality("intent: continue") == "format_unverified"
+    model = _SummaryModel()
+    default_middleware = create_summary_middleware(model=model, summary_prompt=DEFAULT_YUXI_SUMMARY_PROMPT)
+    custom_middleware = create_summary_middleware(model=model, summary_prompt="custom\n{messages}")
+
+    assert default_middleware._summary_quality(complete) == "semantic"
+    assert default_middleware._summary_quality("intent: continue") == "format_unverified"
+    assert custom_middleware._summary_quality("任意自定义结构") == "custom"
 
 
-def test_default_summary_prompt_and_fixed_protocol_use_the_same_nine_fields() -> None:
-    """默认模板与不可覆盖协议必须一致，避免小模型优先服从旧的六段结构。"""
+def test_default_summary_prompt_owns_nine_fields_and_framework_protocol_is_structure_neutral() -> None:
+    """九维字段属于默认策略；框架只追加与字段结构无关的累计合并约束。"""
     model = _SummaryModel()
     middleware = create_context_compaction_middleware(
         model=model,
@@ -315,9 +320,32 @@ def test_default_summary_prompt_and_fixed_protocol_use_the_same_nine_fields() ->
     ):
         assert f"## {label}" in DEFAULT_YUXI_SUMMARY_PROMPT
         assert label in rendered
-    assert "SESSION INTENT" not in DEFAULT_YUXI_SUMMARY_PROMPT
-    assert "Complete replacement" in rendered
-    assert "unless explicitly corrected" in rendered
+    assert "把 previous_summary 视为累计检查点" in rendered
+    assert "把新消息视为新增信息" in rendered
+    assert "不能仅因为最新消息更具体" in rendered
+    assert "明确表示取消、替换、更正、不再需要或已经完成" in rendered
+    assert "已完成事项应从待办转入进展" in rendered
+
+
+@pytest.mark.unit
+def test_custom_summary_prompt_is_not_extended_with_nine_dimension_fields() -> None:
+    model = _SummaryModel()
+    custom_prompt = """请按以下自定义结构输出：
+## SESSION INTENT
+## USER REQUIREMENTS AND PREFERENCES
+## NEXT STEPS
+<messages>{messages}</messages>"""
+    middleware = create_summary_middleware(model=model, summary_prompt=custom_prompt)
+
+    rendered = middleware._render_summary_prompt("旧摘要", [HumanMessage(content="新消息")], 512)
+
+    assert "SESSION INTENT" in rendered
+    assert "USER REQUIREMENTS AND PREFERENCES" in rendered
+    assert "summary_update_protocol" in rendered
+    assert "把新消息视为新增信息" in rendered
+    assert "不能仅因为最新消息更具体" in rendered
+    assert "files/code" not in rendered
+    assert "errors/fixes" not in rendered
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
@@ -383,16 +411,18 @@ def test_compaction_counts_final_request_and_commits_private_summary_after_succe
 
     assert isinstance(result, ExtendedModelResponse)
     assert model.prompts
-    assert "Complete replacement: merge previous_summary" in model.prompts[0]
-    assert "Keep every still-valid exact item" in model.prompts[0]
+    assert "把 previous_summary 视为累计检查点" in model.prompts[0]
+    assert "必须先继承所有仍然有效的旧要求" in model.prompts[0]
     assert captured["request"].messages == [messages[-1]]
     assert "private_conversation_context" in captured["request"].system_message.text
     assert "/outputs/conversation_history/" in captured["request"].system_message.text
-    assert "never guess" in captured["request"].system_message.text
+    assert "不确定更早的用户要求或事实" in captured["request"].system_message.text
+    assert "再继续操作或回答" in captured["request"].system_message.text
+    assert "不得猜测" in captured["request"].system_message.text
     update = result.command.update
     assert update["token_usage"] == {"prompt_tokens": 123}
     assert "已归档旧对话：用户要完成项目文档。" in update["context_summary"]
-    assert update["context_summary_quality"] == "format_unverified"
+    assert update["context_summary_quality"] == "custom"
     assert update["context_compacted_through"] == "assistant-old"
     assert update["context_archive_path"].endswith(".jsonl")
     assert update["context_revision"] == 4
@@ -424,6 +454,60 @@ def test_compaction_keeps_tool_call_and_result_in_the_same_archived_turn() -> No
 
     assert captured["messages"] == [messages[-1]]
     assert "tool result" in "\n".join(model.prompts)
+
+
+@pytest.mark.unit
+def test_three_l5_revisions_feed_previous_checkpoint_into_the_next_summary() -> None:
+    """滚动 L5 依赖累计检查点；每一版摘要必须成为下一版摘要的显式输入。"""
+    model = _SummaryModel()
+    model.profile = {
+        "max_input_tokens": 8_000,
+        "min_output_reserve_tokens": 1_000,
+        "context_safety_tokens": 200,
+    }
+    middleware = create_summary_middleware(model=model, summary_prompt="custom\n{messages}")
+    messages = [
+        HumanMessage(content="长期约束 REQUIREMENT-001：保持接口兼容。\n" + "x" * 16_000, id="user-0"),
+        AIMessage(content="旧回复", id="assistant-0"),
+        HumanMessage(content="开始第一阶段", id="user-1"),
+    ]
+    state = {"messages": messages, "context_revision": 0}
+
+    for revision in range(1, 4):
+        stream_events: list[dict] = []
+        request = ModelRequest(
+            model=model,
+            messages=messages,
+            system_message=SystemMessage(content="system instructions"),
+            tools=[{"name": "query_kb", "description": "x"}],
+            runtime=SimpleNamespace(
+                context={},
+                config={},
+                stream_events=stream_events,
+                stream_writer=stream_events.append,
+            ),
+            state=state,
+        )
+        result = middleware.wrap_model_call(
+            request,
+            lambda _prepared, current=revision: ModelResponse(
+                result=[AIMessage(content="large answer " * 1_200, id=f"assistant-{current}")]
+            ),
+        )
+        update = result.command.update
+        assert update["context_revision"] == revision
+        assert update["context_archive_path"].endswith(".jsonl")
+        assert "<previous_summary>" in model.prompts[-1]
+        if revision > 1:
+            assert "已归档旧对话：用户要完成项目文档。" in model.prompts[-1]
+
+        messages = list(update["messages"].value)
+        state = {**state, **update, "messages": messages}
+        messages.append(HumanMessage(content=f"开始第 {revision + 1} 阶段", id=f"user-{revision + 1}"))
+        state["messages"] = messages
+
+    assert len(model.prompts) >= 3
+    assert "已归档旧对话：用户要完成项目文档。" in model.prompts[-1]
 
 
 @pytest.mark.unit
@@ -1355,7 +1439,8 @@ def test_l5_compacts_early_rounds_of_a_single_human_request_after_l3() -> None:
 
     result = middleware.wrap_model_call(request, handler)
 
-    assert "<checkpoint>" in model.prompts[0]
+    assert "<summary_update_protocol>" in model.prompts[0]
+    assert "files/code" not in model.prompts[0]
     assert captured["request"].messages[0].id == "current-user"
     assert captured["request"].messages[-4].id == "assistant-28"
     assert captured["request"].messages[-2].id == "assistant-29"

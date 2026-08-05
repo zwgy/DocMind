@@ -718,6 +718,7 @@ async def _resolve_agent_runtime(
         db=db,
         user=user,
         context_schema=backend.context_schema,
+        enforce_field_auth=False,
     )
     return agent_item, backend, agent_config
 

@@ -31,6 +31,7 @@ async def resolve_agent_runtime_context(
         db=db,
         user=user,
         context_schema=context_schema,
+        enforce_field_auth=False,
     )
     context.update_from_dict(normalized_config)
     return context

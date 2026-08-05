@@ -93,7 +93,7 @@ OpenAI 兼容服务的 `finish_reason=length` 不等同于输入溢出。带正�
 
 `output_recovery` custom event 使用 `started/finished/exhausted/failed` 状态，并仅携带恢复模式、次数、前后输出上限和新 `prompt_budget`，不包含用户正文、回答正文或工具载荷。当前前端可以忽略该事件；运行事件和 LangSmith 可用于验证恢复调用与压缩调用的先后顺序。
 
-触发后，中间件先把将要裁剪的完整交互段写入当前线程 `outputs/conversation_history` 下的不可变 JSONL 清单，再把私有滚动摘要、最新归档路径和最近原始消息通过一次 `Overwrite` 原子提交。普通大型工具结果会写入 `outputs/large_tool_results` 并以回执替换；已有权威来源的 `read_file` 和 `open_kb_document` 窗口只会缩小为来源回执，不会产生第二份副本。
+触发后，中间件先把将要裁剪的完整交互段写入当前线程 `outputs/conversation_history` 下的不可变 JSONL 清单，再把私有滚动摘要、最新归档路径和近期真实 survivors 通过一次 `Overwrite` 原子提交。survivors 包含最新 HumanMessage 和最近两个受保护的完整 API round，不另建历史用户原文缓冲区。普通大型工具结果会写入 `outputs/large_tool_results` 并以回执替换；已有权威来源的 `read_file` 和 `open_kb_document` 窗口只会缩小为来源回执，不会产生第二份副本。
 
 这对知识库检索尤其重要：`query_kb`、`open_kb_document`、`find_kb_document` 等工具可能返回较长的片段、引用和文档内容。摘要保留任务结论、文件路径和待核验事项；需要原始细节时一律复用 `read_file(offset, limit)`，避免把检索原文反复卷入工作上下文。
 
@@ -109,9 +109,9 @@ OpenAI 兼容服务的 `finish_reason=length` 不等同于输入溢出。带正�
 
 L3 处理当前单条用户请求内的早期闭合 API round，仍只投影安全工具载荷；最近两个闭合 round、错误和人工确认保持完整。若 L1-L3 后仍超预算，L5 才以完整 API round 为单位生成私有 checkpoint：latest HumanMessage 及其所在 round 永远不裁剪，主模型成功后才原子替换活动 `messages` 和私有摘要。
 
-摘要请求不接收 Agent 工具，默认模板与不可覆盖的短协议使用同一组九维任务/事实/文件/错误/待办/当前工作标签。一个 Human turn 包含大量工具调用、需要滚动分块摘要时，每个分块只在摘要模型输入内重复该段原始 HumanMessage 作为优先锚点，防止小模型在后续大工具块中丢失最早的用户硬约束、路径和标识；锚点不写入 checkpoint 或主模型消息，也不复制图片和工具正文。输出上限按部署窗口动态计算：取部署最低输出预留、窗口八分之一与 20K 上限形成摘要 cap，因此 32K、64K、128K、256K 分别可自然扩展到约 4K、8K、16K、20K，而不依赖模型名称。摘要输入再从完整窗口中扣除该输出 cap 和安全缓冲。若 provider 仍明确返回 prompt too long，只移除最旧 20% 的完整 API round、收紧输入估算并重试一次；原消息已经归档，重试不会删除不可恢复原文。
+摘要请求不接收 Agent 工具。默认摘要提示词使用九维任务/事实/文件/错误/待办/当前工作标签；管理员配置的 `summary_prompt` 可以完整定义另一种输出结构，框架只追加与字段结构无关的累计合并协议和本次输出预算，不再强制追加九维标签。该协议规定新消息默认是对旧 checkpoint 的增量：先继承仍有效的旧约束、决策、精确标识和待办，再吸收新事实；最近消息更具体本身不构成覆盖或完成，只有明确取消、替换、更正、不再需要或完成的语义才可更新旧项，完成事项从待办转入进展而不是直接擦除结果。一个 Human turn 包含大量工具调用、需要滚动分块摘要时，每个分块只在摘要模型输入内重复该段原始 HumanMessage 作为优先锚点，防止小模型在后续大工具块中丢失最早的用户硬约束、路径和标识；锚点不写入 checkpoint 或主模型消息，也不复制图片和工具正文。输出上限按部署窗口动态计算：取部署最低输出预留、窗口八分之一与 20K 上限形成摘要 cap，因此 32K、64K、128K、256K 分别可自然扩展到约 4K、8K、16K、20K，而不依赖模型名称。摘要输入再从完整窗口中扣除该输出 cap 和安全缓冲。若 provider 仍明确返回 prompt too long，只移除最旧 20% 的完整 API round、收紧输入估算并重试一次；原消息已经归档，重试不会删除不可恢复原文。
 
-摘要 `finish_reason=length`、不遵守输出上限、普通生成失败或第二次 PTL 都不会提交退化 checkpoint，也不会调用主模型。九维标签不齐只记录 `format_unverified` 质量状态，不触发格式修复调用。L5 私有恢复段还会保留 `activated_skills` 对应的权威 `SKILL.md` 路径，要求模型继续相关步骤前重读；`SkillsMiddleware` 维护的激活状态和工具/MCP 绑定，以及 Todo、附件、artifact 等独立 state，不会被 `Overwrite(messages)` 覆盖。
+摘要 `finish_reason=length`、不遵守输出上限、普通生成失败或第二次 PTL 都不会提交退化 checkpoint，也不会调用主模型。默认九维策略标签不齐只记录 `format_unverified`，自定义策略记录为 `custom`，均不触发格式修复调用。L5 私有恢复段会要求模型在历史要求或事实不确定时先用 `ls/read_file` 检查 `/outputs/conversation_history/`，不得猜测；同时保留 `activated_skills` 对应的权威 `SKILL.md` 路径，要求模型继续相关步骤前重读。`SkillsMiddleware` 维护的激活状态和工具/MCP 绑定，以及 Todo、附件、artifact 等独立 state，不会被 `Overwrite(messages)` 覆盖。
 
 只有请求超过准入预算或进入 provider overflow 恢复时，压缩器才会发布一个完整的 `context_compaction` 事件周期。L1、L2、L3 各发布一条 `finished` 或 `skipped` 结果，L5 的归档与摘要耗时较长，因此发布 `started` 后再以 `finished` 或 `failed` 结束；若前三级已经满足预算，L5 发布 `skipped`。同一周期通过 `cycle_id` 关联，并固定按 `sequence=1/2/3/5` 排序。
 

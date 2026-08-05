@@ -216,6 +216,30 @@ async def test_normalize_agent_context_config_expands_null_and_filters_explicit_
 
 
 @pytest.mark.asyncio
+async def test_trusted_persisted_admin_config_applies_for_ordinary_runtime_user() -> None:
+    """字段 auth 限制配置查看和编辑，不应让普通提问用户丢失管理员保存的运行参数。"""
+    normalized = await normalize_agent_context_config(
+        {
+            "tools": [],
+            "knowledges": [],
+            "mcps": [],
+            "skills": [],
+            "summary_prompt": "管理员保存的自定义摘要策略：{messages}",
+            "max_execution_steps": 77,
+            "summary_threshold": 10,
+        },
+        db=object(),
+        user=types.SimpleNamespace(role="user", uid="u1", department_id=None),
+        context_schema=BaseContext,
+        enforce_field_auth=False,
+    )
+
+    assert normalized["summary_prompt"] == "管理员保存的自定义摘要策略：{messages}"
+    assert normalized["max_execution_steps"] == 77
+    assert "summary_threshold" not in normalized
+
+
+@pytest.mark.asyncio
 async def test_prepare_agent_runtime_context_filters_resources_and_derives_runtime_scope(monkeypatch):
     async def fake_get_databases_by_user(_user):
         return {"databases": [{"kb_id": "kb-a"}, {"kb_id": "kb-b"}]}

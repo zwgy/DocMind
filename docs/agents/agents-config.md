@@ -82,7 +82,7 @@ class MyAgent(BaseAgent):
 | `knowledges` | 关联知识库 |
 | `mcps` | 启用的 MCP 服务器 |
 | `skills` | 关联 Skills |
-| `summary_prompt` | 摘要触发时使用的提示词 |
+| `summary_prompt` | 摘要触发时使用的完整提示词，可替换默认九维结构；必须包含 `{messages}` 占位符 |
 | `max_execution_steps` | 单次运行最大执行步数 |
 | `thread_id` / `uid` | 运行期标识，不作为页面配置项暴露 |
 

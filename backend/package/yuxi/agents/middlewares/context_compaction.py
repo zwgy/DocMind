@@ -58,15 +58,14 @@ _TOOL_CALL_ARGUMENTS_MIN_REDUCTION_TOKENS = 128
 _TOOL_CALL_ARGUMENTS_ARCHIVE_EXCLUDED_TOOL_NAMES = frozenset({"ask_user_question"})
 # 管理端可能已经保存旧版或自定义摘要提示词，因此持久事实合并不能只写进默认模板。
 # 固定协议刻意保持很短，避免为了提升摘要质量反而挤占小上下文模型的摘要输入预算。
-_SUMMARY_UPDATE_PROTOCOL = (
-    "<summary_update>Complete replacement: merge previous_summary and new messages. Keep every still-valid "
-    "exact item unless explicitly corrected; discard narration first.</summary_update>"
-)
-_NINE_DIMENSION_SUMMARY_PROTOCOL = (
-    "<checkpoint>Use nine literal labels: intent; concepts; files/code; errors/fixes; progress; user messages; "
-    "pending tasks; current work; next step. Preserve exact constraints, paths, IDs, errors, decisions and tasks; "
-    "never invent.</checkpoint>"
-)
+_SUMMARY_UPDATE_PROTOCOL = """<summary_update_protocol>
+把 previous_summary 视为累计检查点，把新消息视为新增信息，不能用新消息整体覆盖旧摘要。
+必须先继承所有仍然有效的旧要求、决策、路径、标识符、错误、待办和偏好，再吸收新事实。
+不能仅因为最新消息更具体，就覆盖旧内容或把旧内容标记为已完成、已失效。
+只有新消息明确表示取消、替换、更正、不再需要或已经完成时，才能更新或移除对应旧内容。
+已完成事项应从待办转入进展；如果完成结果仍影响后续工作，必须继续保留，不能直接删除。
+单轮回复格式要求不能覆盖无关的整体目标。保留事实，删减过程叙述，不得编造。
+</summary_update_protocol>"""
 _SUMMARY_REQUIRED_LABELS = (
     "intent",
     "concepts",
@@ -85,7 +84,8 @@ _SUMMARY_MINIMUM_OUTPUT_TOKENS = 64
 _SUMMARY_MAX_OUTPUT_TOKENS = 20_000
 # 有限摘要无法永久容纳无限历史的每个细节；缺失时回查不可变归档，才能避免模型按相似条目猜测。
 _ARCHIVE_RECOVERY_INSTRUCTION = (
-    "For missing facts, inspect /outputs/conversation_history/ with ls/read_file; never guess."
+    "如果不确定更早的用户要求或事实，必须先用 ls/read_file 读取 /outputs/conversation_history/ 核对，"
+    "再继续操作或回答；不得猜测。"
 )
 
 
@@ -341,6 +341,12 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         # 才能过滤其内部文本，避免私有摘要被误当作用户可见回复发送到前端。
         self.model = model.with_config(metadata={"lc_source": "summarization"})
         self.summary_prompt = summary_prompt
+        normalized_prompt = summary_prompt.casefold()
+        # 默认策略要求固定九维格式；自定义策略可以自由定义字段，不应再被代码追加的
+        # 九维协议暗中改写。只有提示词本身声明了全部九个标签时才检查其格式质量。
+        self.summary_required_labels = (
+            _SUMMARY_REQUIRED_LABELS if all(label in normalized_prompt for label in _SUMMARY_REQUIRED_LABELS) else ()
+        )
 
     @staticmethod
     def _request_tokens(request: ModelRequest) -> int:
@@ -527,8 +533,6 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             + "\n\n<previous_summary>\n"
             + (previous_summary or "None")
             + "\n</previous_summary>\n"
-            + _NINE_DIMENSION_SUMMARY_PROTOCOL
-            + "\n"
             + _SUMMARY_UPDATE_PROTOCOL
             + "\n"
             + f"Keep the replacement summary within {max(target_tokens, 1)} tokens."
@@ -621,11 +625,12 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         # 下一步。输出上限已绑定；若部署仍返回超限正文，明确中止并保留旧 checkpoint。
         raise SummaryOutputTooLargeError("摘要模型输出超过最终上下文预算，未提交上下文压缩")
 
-    @staticmethod
-    def _summary_quality(summary: str) -> str:
-        """只记录九维标签是否齐全，不解析字段顺序，也不触发格式修复模型调用。"""
+    def _summary_quality(self, summary: str) -> str:
+        """默认九维策略检查标签；自定义策略不被硬编码字段协议判为缺失。"""
+        if not self.summary_required_labels:
+            return "custom"
         normalized = summary.casefold()
-        return "semantic" if all(label in normalized for label in _SUMMARY_REQUIRED_LABELS) else "format_unverified"
+        return "semantic" if all(label in normalized for label in self.summary_required_labels) else "format_unverified"
 
     @staticmethod
     def _archive_compacted_messages(
