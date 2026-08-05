@@ -16,7 +16,28 @@
             @click="$emit('select-chat', chat.id)"
             @click.middle="$emit('delete-chat', chat.id)"
           >
-            <span class="conversation-title">{{ chat.title || '新的对话' }}</span>
+            <a-tooltip
+              placement="rightTop"
+              :mouse-enter-delay="0.35"
+              overlay-class-name="conversation-title-tooltip"
+            >
+              <template v-if="isTitleTruncated(chat.id)" #title>
+                <div class="conversation-tooltip-title">{{ getChatTitle(chat) }}</div>
+                <div class="conversation-tooltip-time">
+                  更新于 {{ formatDateTime(chat.updated_at) }}
+                </div>
+              </template>
+              <button
+                type="button"
+                class="conversation-title"
+                :aria-label="`打开对话：${getChatTitle(chat)}`"
+                @mouseenter="updateTitleOverflow(chat.id, $event)"
+                @focus="updateTitleOverflow(chat.id, $event)"
+                @click.stop="$emit('select-chat', chat.id)"
+              >
+                {{ getChatTitle(chat) }}
+              </button>
+            </a-tooltip>
             <span class="actions-mask"></span>
             <span class="conversation-actions" @click.stop>
               <a-dropdown :trigger="['click']">
@@ -75,7 +96,7 @@
 import { computed, h, ref } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { ChevronDown, MoreVertical, Pin, PinOff, SquarePen, Trash2 } from 'lucide-vue-next'
-import { parseToShanghai } from '@/utils/time'
+import { formatDateTime, parseToShanghai } from '@/utils/time'
 
 const props = defineProps({
   currentChatId: {
@@ -113,6 +134,26 @@ const emit = defineEmits([
 ])
 
 const listCollapsed = ref(false)
+const truncatedChatIds = ref(new Set())
+
+const getChatTitle = (chat) => chat.title || '新的对话'
+
+const isTitleTruncated = (chatId) => truncatedChatIds.value.has(chatId)
+
+const updateTitleOverflow = (chatId, event) => {
+  const titleElement = event.currentTarget
+  const isTruncated = titleElement.scrollWidth > titleElement.clientWidth
+  if (isTitleTruncated(chatId) === isTruncated) return
+
+  // 只在用户实际触达标题时测量，既能覆盖重命名后的宽度变化，也避免为长列表常驻观察器。
+  const nextIds = new Set(truncatedChatIds.value)
+  if (isTruncated) {
+    nextIds.add(chatId)
+  } else {
+    nextIds.delete(chatId)
+  }
+  truncatedChatIds.value = nextIds
+}
 
 const sortedChats = computed(() => {
   return [...props.chatsList].sort((a, b) => {
@@ -172,10 +213,24 @@ const renameChat = async (chatId) => {
 }
 
 .conversation-title {
+  display: block;
   min-width: 0;
+  flex: 1;
+  padding: 0;
   overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
   text-overflow: ellipsis;
+  text-align: left;
   white-space: nowrap;
+
+  &:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--main-color) 45%, transparent);
+    outline-offset: 2px;
+  }
 }
 
 .history-panel {
@@ -225,7 +280,8 @@ const renameChat = async (chatId) => {
   align-items: center;
   width: 100%;
   height: 36px;
-  padding: 0 8px;
+  // 始终为右侧操作按钮预留空间，使视觉截断和 DOM 溢出判断保持一致。
+  padding: 0 40px 0 8px;
   overflow: hidden;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -290,7 +346,7 @@ const renameChat = async (chatId) => {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 56px;
+  width: 40px;
   background: linear-gradient(to right, transparent, var(--main-5) 20px);
   opacity: 0;
   pointer-events: none;
@@ -349,5 +405,31 @@ const renameChat = async (chatId) => {
 .load-more-btn {
   color: var(--main-color);
   font-size: 12px;
+}
+</style>
+
+<style lang="less">
+.conversation-title-tooltip {
+  max-width: 360px;
+
+  .ant-tooltip-inner {
+    padding: 10px 12px;
+  }
+
+  .conversation-tooltip-title {
+    overflow-wrap: anywhere;
+    color: inherit;
+    font-size: 13px;
+    line-height: 1.55;
+    white-space: normal;
+  }
+
+  .conversation-tooltip-time {
+    margin-top: 6px;
+    color: inherit;
+    font-size: 12px;
+    line-height: 1.4;
+    opacity: 0.72;
+  }
 }
 </style>
