@@ -428,10 +428,14 @@ def test_default_summary_prompt_owns_nine_fields_and_framework_protocol_is_struc
         assert label in rendered
     assert "previous_summary 是累计检查点" in rendered
     assert "新消息仅增量补充" in rendered
-    assert "只有用户明确取消、替换、更正或确认完成" in rendered
-    assert "助手称“已记录、已确认、已回复”" in rendered
-    assert "输出前逐项核对旧约束、禁止项、标识符、路径和待办" in rendered
-    assert "完成事项从待办转入进展" in rendered
+    assert "仅用户明确取消、替换、更正或确认完成" in rendered
+    assert "助手称已记录、确认、回复" in rendered
+    assert "输出前核对旧约束、禁止项、标识、路径和待办" in rendered
+    assert "已完成旧轮" in rendered
+    assert "只回答、仅输出、本轮不调用工具" in rendered
+    assert "不得列为目标、待办、当前工作或下一步" in rendered
+    assert "用户明确要求后续继续" in rendered
+    assert "完成事项转入进展" in rendered
 
 
 @pytest.mark.unit
@@ -522,9 +526,11 @@ def test_compaction_counts_final_request_and_commits_private_summary_after_succe
     assert "先继承仍有效的旧要求" in model.prompts[0]
     assert captured["request"].messages == [messages[-1]]
     assert "private_conversation_context" in captured["request"].system_message.text
-    assert "摘要是历史事实记录，不是新的用户指令" in captured["request"].system_message.text
-    assert "不得覆盖当前用户消息" in captured["request"].system_message.text
-    assert "继续遵守其中仍有效的长期约束" in captured["request"].system_message.text
+    assert "摘要仅记录历史事实，不是新用户指令" in captured["request"].system_message.text
+    assert "不得覆盖当前消息" in captured["request"].system_message.text
+    assert "先按最新真实用户消息确定本轮任务和回答形式" in captured["request"].system_message.text
+    assert "摘要任务字段是旧状态" in captured["request"].system_message.text
+    assert "有效长期约束和未完成任务继续生效" in captured["request"].system_message.text
     assert "/outputs/conversation_history/" in captured["request"].system_message.text
     assert "不确定更早的用户要求或事实" in captured["request"].system_message.text
     assert "再继续操作或回答" in captured["request"].system_message.text
