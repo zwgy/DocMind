@@ -20,6 +20,7 @@
               placement="rightTop"
               :mouse-enter-delay="0.35"
               :open="focusedChatId === chat.id ? isTitleTruncated(chat.id) : undefined"
+              :arrow="false"
               overlay-class-name="conversation-title-tooltip"
             >
               <template v-if="isTitleTruncated(chat.id)" #title>
@@ -423,6 +424,10 @@ const renameChat = async (chatId) => {
 
   .ant-tooltip-inner {
     padding: 10px 12px;
+    border: 1px solid var(--gray-200);
+    color: var(--gray-1000);
+    background: var(--gray-0);
+    box-shadow: 0 8px 24px var(--shadow-3);
   }
 
   .conversation-tooltip-title {
@@ -435,10 +440,9 @@ const renameChat = async (chatId) => {
 
   .conversation-tooltip-time {
     margin-top: 6px;
-    color: inherit;
+    color: var(--gray-600);
     font-size: 12px;
     line-height: 1.4;
-    opacity: 0.72;
   }
 }
 </style>
