@@ -50,7 +50,10 @@ def test_scheduled_jobs_migration_has_idempotent_upgrade_and_manual_downgrade_sq
         assert UPGRADE_STATEMENTS[drop_index + 1].startswith(add_statement_prefix)
 
     assert all(
-        "IF EXISTS" in statement or "DROP NOT NULL" in statement or "ADD CONSTRAINT" in statement
+        "IF EXISTS" in statement
+        or "IF NOT EXISTS" in statement
+        or "DROP NOT NULL" in statement
+        or "ADD CONSTRAINT" in statement
         for statement in UPGRADE_STATEMENTS
     )
     assert "DROP TABLE IF EXISTS scheduled_jobs" in DOWNGRADE_SQL
