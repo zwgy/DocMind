@@ -181,7 +181,8 @@ class ScheduledJobRun(Base):
     scheduled_for = Column(DateTime(timezone=True), nullable=False)
     status = Column(String(16), nullable=False, default="pending")
     attempt_count = Column(Integer, nullable=False, default=0)
-    next_attempt_at = Column(DateTime(timezone=True), nullable=False)
+    # 终态运行不再参与 Dispatcher 扫描，清空该字段避免把历史时间误作待重试时间。
+    next_attempt_at = Column(DateTime(timezone=True))
     lease_owner = Column(String(128))
     lease_expires_at = Column(DateTime(timezone=True))
     action_type = Column(String(16), nullable=False)

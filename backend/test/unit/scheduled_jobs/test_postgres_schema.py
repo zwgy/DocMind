@@ -28,11 +28,14 @@ def test_run_and_inbox_postgres_ddl_protect_lease_and_event_idempotency():
 
     assert "ck_sjr_dispatching_lease" in run_ddl
     assert "ck_sjr_terminal_finished_at" in run_ddl
+    assert "next_attempt_at TIMESTAMP WITH TIME ZONE" in run_ddl
+    assert "next_attempt_at TIMESTAMP WITH TIME ZONE NOT NULL" not in run_ddl
     assert "CREATE UNIQUE INDEX uq_ibi_recipient_event_key ON inbox_items (recipient_uid, event_key)" in inbox_indexes
 
 
 def test_scheduled_jobs_migration_has_idempotent_upgrade_and_manual_downgrade_sql():
-    assert all("IF NOT EXISTS" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("next_attempt_at DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
+    assert all("IF NOT EXISTS" in statement or "DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
     assert "DROP TABLE IF EXISTS scheduled_jobs" in DOWNGRADE_SQL
     assert "DROP COLUMN IF EXISTS archived_at" in DOWNGRADE_SQL
 
