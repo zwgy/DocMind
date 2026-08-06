@@ -102,10 +102,10 @@ async def test_scheduler_coalesces_missed_interval_and_dispatcher_delivers_once(
                 (await session.scalars(select(InboxItem).where(InboxItem.scheduled_job_run_id == run_ids[0]))).all()
             )
             assert run is not None and run.status == "partial" and run.next_attempt_at is None
-            assert [(item.recipient_uid, item.category, item.item_type) for item in inboxes] == [
+            assert {(item.recipient_uid, item.category, item.item_type) for item in inboxes} == {
                 (owner_uid, "task", "run_partial"),
                 (recipient_uid, "notification", "notification_delivered"),
-            ]
+            }
 
         async with pg_manager.get_async_session_context() as session:
             assert await ScheduledJobRepository(session).create_due_runs(batch_size=10) == []

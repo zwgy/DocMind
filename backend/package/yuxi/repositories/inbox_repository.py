@@ -55,27 +55,28 @@ class InboxRepository:
         cursor: tuple[bool, datetime, str] | None,
         limit: int,
     ) -> list[InboxItem]:
+        # Boolean 列不能直接与 Python bool 使用大小比较；显式优先级同时与排序和游标保持一致。
+        read_priority = case((InboxItem.is_read.is_(False), 0), else_=1)
         statement: Select = select(InboxItem).where(
             InboxItem.recipient_uid == recipient_uid,
             InboxItem.category == "notification",
         )
         if cursor is not None:
             is_read, created_at, item_id = cursor
+            cursor_priority = int(is_read)
             statement = statement.where(
                 or_(
-                    InboxItem.is_read > is_read,
-                    and_(InboxItem.is_read == is_read, InboxItem.created_at < created_at),
+                    read_priority > cursor_priority,
+                    and_(read_priority == cursor_priority, InboxItem.created_at < created_at),
                     and_(
-                        InboxItem.is_read == is_read,
+                        read_priority == cursor_priority,
                         InboxItem.created_at == created_at,
                         InboxItem.id < item_id,
                     ),
                 )
             )
         result = await self.db.execute(
-            statement.order_by(InboxItem.is_read.asc(), InboxItem.created_at.desc(), InboxItem.id.desc()).limit(
-                limit + 1
-            )
+            statement.order_by(read_priority.asc(), InboxItem.created_at.desc(), InboxItem.id.desc()).limit(limit + 1)
         )
         return list(result.scalars())
 
