@@ -36,26 +36,26 @@ def _job():
 
 
 def _request():
-    return tools.PersonalScheduledJobRequest.model_validate(
-        {
-            "name": "晨会提醒",
-            "schedule": {"kind": "at", "run_at": "2026-08-08T09:00:00+08:00"},
-            "action": {"type": "notification", "title": "晨会", "content": "请参加晨会"},
-            "timezone": "Asia/Shanghai",
-        }
-    )
+    return {
+        "name": "晨会提醒",
+        "schedule_kind": "at",
+        "run_at": "2026-08-08T09:00:00+08:00",
+        "action_type": "notification",
+        "title": "晨会",
+        "content": "请参加晨会",
+        "timezone": "Asia/Shanghai",
+    }
 
 
 def _agent_request():
     return {
         "name": "每日待办整理",
-        "schedule": {"kind": "at", "run_at": "2026-08-08T09:00:00+08:00"},
-        "action": {
-            "type": "agent",
-            "agent_slug": "daily-assistant",
-            "instruction": "整理今天待办并给出优先级。",
-            "timeout_seconds": 300,
-        },
+        "schedule_kind": "at",
+        "run_at": "2026-08-08T09:00:00+08:00",
+        "action_type": "agent",
+        "agent_slug": "daily-assistant",
+        "instruction": "整理今天待办并给出优先级。",
+        "timeout_seconds": 300,
         "timezone": "Asia/Shanghai",
     }
 
@@ -76,20 +76,13 @@ def test_scheduled_task_tool_schema_never_exposes_owner_or_recipient_uid():
 
 def test_personal_task_tool_schema_accepts_agent_action_without_capability_overrides():
     schema = tools.create_personal_scheduled_task.tool_call_schema
-    parsed = schema.model_validate({"request": _agent_request()})
+    parsed = schema.model_validate(_agent_request())
 
-    assert parsed.request.action.type == "agent"
-    assert parsed.request.action.agent_slug == "daily-assistant"
+    assert parsed.action_type == "agent"
+    assert parsed.agent_slug == "daily-assistant"
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        schema.model_validate(
-            {
-                "request": {
-                    **_agent_request(),
-                    "action": {**_agent_request()["action"], "skills": ["scheduled-task"]},
-                }
-            }
-        )
+        schema.model_validate({**_agent_request(), "skills": ["scheduled-task"]})
 
 
 def test_scheduled_task_tools_are_only_resolved_after_skill_is_readable():
@@ -117,10 +110,9 @@ def test_scheduled_task_skill_provides_canonical_local_model_create_payload():
     )
     content = skill_path.read_text(encoding="utf-8")
 
-    assert '"request": {' in content
-    assert '"kind": "at"' in content
+    assert '"schedule_kind": "at"' in content
     assert '"run_at": "2026-08-08T09:00:00+08:00"' in content
-    assert "不要嵌套 `at` 对象，也不要使用 `once`、`time_at`" in content
+    assert "不要使用 `once`、`time_at` 或嵌套 `schedule` 对象" in content
 
 
 @pytest.mark.asyncio
@@ -143,10 +135,10 @@ async def test_explicit_personal_task_creation_reuses_key_when_tool_call_replays
     monkeypatch.setattr(tools, "ScheduledJobService", FakeService)
 
     first = await _tool_callable(tools.create_personal_scheduled_task)(
-        request=_request(), tool_call_id="call-create-1", runtime=_runtime()
+        **_request(), tool_call_id="call-create-1", runtime=_runtime()
     )
     replay = await _tool_callable(tools.create_personal_scheduled_task)(
-        request=_request(), tool_call_id="call-create-1", runtime=_runtime()
+        **_request(), tool_call_id="call-create-1", runtime=_runtime()
     )
 
     assert first["job_id"] == replay["job_id"] == "sj-1"

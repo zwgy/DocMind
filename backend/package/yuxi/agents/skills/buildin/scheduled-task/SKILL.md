@@ -22,27 +22,21 @@ description: "管理当前用户自己的通知或 Agent 执行型定时任务�
 
 ### 工具载荷示例
 
-本工具只有一个顶层参数 `request`。创建单次通知时，直接使用下面的完整形状；`schedule` 不要嵌套 `at` 对象，也不要使用 `once`、`time_at` 等字段：
+创建工具使用扁平参数。创建单次通知时，直接使用下面的完整形状；`schedule_kind` 必须是 `at`，不要使用 `once`、`time_at` 或嵌套 `schedule` 对象：
 
 ```json
 {
-  "request": {
-    "name": "晨会提醒",
-    "timezone": "Asia/Shanghai",
-    "schedule": {
-      "kind": "at",
-      "run_at": "2026-08-08T09:00:00+08:00"
-    },
-    "action": {
-      "type": "notification",
-      "title": "晨会开始",
-      "content": "请准时参加晨会。"
-    }
-  }
+  "name": "晨会提醒",
+  "timezone": "Asia/Shanghai",
+  "schedule_kind": "at",
+  "run_at": "2026-08-08T09:00:00+08:00",
+  "action_type": "notification",
+  "title": "晨会开始",
+  "content": "请准时参加晨会。"
 }
 ```
 
-周期任务也保持相同的 `request` 外层：间隔任务使用 `{"kind":"interval","interval_seconds":3600,"anchor_at":"2026-08-08T09:00:00+08:00"}`，Cron 任务使用 `{"kind":"cron","cron_expression":"0 9 * * 1-5"}`。创建 Agent 执行型任务时，只替换 `action` 为 `{"type":"agent","agent_slug":"daily-assistant","instruction":"整理今天待办。","timeout_seconds":300}`。
+周期任务只把调度字段替换为 `"schedule_kind":"interval","interval_seconds":3600,"anchor_at":"2026-08-08T09:00:00+08:00"`，或 `"schedule_kind":"cron","cron_expression":"0 9 * * 1-5"`。创建 Agent 执行型任务时，使用 `"action_type":"agent","agent_slug":"daily-assistant","instruction":"整理今天待办。","timeout_seconds":300`。
 
 信息已经完整时不要试探性地重复调用创建工具；一次调用失败时先阅读错误并只修正错误字段，再决定是否重试。
 
