@@ -38,7 +38,7 @@ const draggingWindow = ref(false)
 const historyScrollRequest = ref(0)
 const ingestingFileIds = new Set<string>()
 let extractionRefreshTimer: ReturnType<typeof setTimeout> | null = null
-let inboxRefreshTimer: ReturnType<typeof setInterval> | null = null
+let inboxRefreshTimer: number | null = null
 
 const selectedFile = computed(() => context.selectedFile)
 const currentTokenUsage = computed(() => {
