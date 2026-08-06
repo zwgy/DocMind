@@ -19,6 +19,7 @@ from server.routers.user_router import user_router
 from server.routers.filesystem_router import filesystem_router
 from server.routers.workspace_router import workspace
 from server.routers.mention_router import mention_router
+from server.routers.inbox_router import inbox
 from server.routers.scheduled_job_router import scheduled_jobs
 
 _LITE_MODE = os.environ.get("LITE_MODE", "").lower() in ("true", "1")
@@ -47,6 +48,7 @@ router.include_router(filesystem_router)  # /api/viewer/filesystem/* 工作台�
 router.include_router(workspace)  # /api/workspace/* 用户个人工作区
 router.include_router(mention_router)  # /api/mention/* 提及文件搜索接口
 router.include_router(scheduled_jobs)  # /api/scheduled-jobs/* 个人定时任务
+router.include_router(inbox)  # /api/inbox/* 统一收件箱
 
 if not _LITE_MODE:
     from server.routers.graph_router import graph

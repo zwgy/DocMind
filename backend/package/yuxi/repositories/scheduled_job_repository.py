@@ -12,12 +12,12 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yuxi.repositories.inbox_repository import InboxRepository
 from yuxi.scheduled_jobs.ids import new_scheduled_job_id
 from yuxi.scheduled_jobs.schemas import AtSchedule, CronSchedule, IntervalSchedule, Schedule
 from yuxi.scheduled_jobs.timing import next_run_at
 from yuxi.storage.postgres.models_business import User
 from yuxi.storage.postgres.models_scheduled_jobs import (
-    InboxItem,
     ScheduledJob,
     ScheduledJobRecipient,
     ScheduledJobRun,
@@ -79,9 +79,7 @@ class ScheduledJobRepository:
         await self.db.flush()
         return runs
 
-    async def claim_runs(
-        self, *, instance_id: str, limit: int, lease_seconds: int
-    ) -> list[ScheduledJobRun]:
+    async def claim_runs(self, *, instance_id: str, limit: int, lease_seconds: int) -> list[ScheduledJobRun]:
         """认领可执行或租约超时的运行；调用方必须按空闲并发数传入 limit。"""
         now = await self.database_now()
         due_order = case(
@@ -123,6 +121,7 @@ class ScheduledJobRepository:
 
         action = run.action_snapshot
         recipients = list(run.recipient_snapshot)
+        inbox = InboxRepository(self.db)
         valid_uids = set(
             (
                 await self.db.scalars(
@@ -138,21 +137,15 @@ class ScheduledJobRepository:
             recipient_uid = recipient["uid"]
             if recipient_uid not in valid_uids:
                 continue
-            await self.db.execute(
-                insert(InboxItem)
-                .values(
-                    id=new_scheduled_job_id("ibi_"),
-                    recipient_uid=recipient_uid,
-                    scheduled_job_id=run.scheduled_job_id,
-                    scheduled_job_run_id=run.id,
-                    category="notification",
-                    item_type="notification_delivered",
-                    event_key=f"notification:{run.id}",
-                    title=action["title"],
-                    content_snapshot=action["content"],
-                    is_read=False,
-                )
-                .on_conflict_do_nothing(index_elements=[InboxItem.recipient_uid, InboxItem.event_key])
+            await inbox.insert_event_if_absent(
+                recipient_uid=recipient_uid,
+                scheduled_job_id=run.scheduled_job_id,
+                scheduled_job_run_id=run.id,
+                category="notification",
+                item_type="notification_delivered",
+                event_key=f"notification:{run.id}",
+                title=action["title"],
+                content_snapshot=action["content"],
             )
             delivered += 1
 
@@ -167,7 +160,11 @@ class ScheduledJobRepository:
             run,
             status=status,
             now=now,
-            result_data={"delivered_count": delivered, "recipient_count": len(recipients)},
+            result_data={
+                "delivered_count": delivered,
+                "recipient_count": len(recipients),
+                "unavailable_recipient_count": len(recipients) - delivered,
+            },
         )
         return status
 
@@ -192,9 +189,7 @@ class ScheduledJobRepository:
         await self.db.flush()
         return "pending"
 
-    async def fail_run(
-        self, *, run_id: str, instance_id: str, error_code: str, error_message: str
-    ) -> bool:
+    async def fail_run(self, *, run_id: str, instance_id: str, error_code: str, error_message: str) -> bool:
         now = await self.database_now()
         run = await self._lock_owned_run(run_id=run_id, instance_id=instance_id, now=now)
         if run is None:
@@ -267,7 +262,40 @@ class ScheduledJobRepository:
         if job is not None and job.schedule_kind == "at":
             job.status = "completed"
             job.updated_at = now
+        if job is not None and status in {"partial", "skipped", "failed"}:
+            await self._write_task_event(job=job, run=run, status=status, error_message=error_message)
         await self.db.flush()
+
+    async def _write_task_event(
+        self,
+        *,
+        job: ScheduledJob,
+        run: ScheduledJobRun,
+        status: Literal["partial", "skipped", "failed"],
+        error_message: str | None,
+    ) -> None:
+        """第一版只将异常运行写入任务页签，避免正常通知在两个页签重复出现。"""
+        delivered_count = (run.result_data or {}).get("delivered_count", 0)
+        recipient_count = (run.result_data or {}).get("recipient_count", 0)
+        if status == "partial":
+            title = "定时任务部分送达"
+            content = f"任务“{job.name}”已送达 {delivered_count}/{recipient_count} 名接收人。"
+        elif status == "skipped":
+            title = "定时任务未送达"
+            content = f"任务“{job.name}”没有可用接收人，未生成通知。"
+        else:
+            title = "定时任务执行失败"
+            content = error_message or f"任务“{job.name}”执行失败，请查看运行记录。"
+        await InboxRepository(self.db).insert_event_if_absent(
+            recipient_uid=job.owner_uid,
+            scheduled_job_id=job.id,
+            scheduled_job_run_id=run.id,
+            category="task",
+            item_type=f"run_{status}",
+            event_key=f"task:{run.id}:{status}",
+            title=title,
+            content_snapshot=content,
+        )
 
     @staticmethod
     def _schedule_from_job(job: ScheduledJob) -> Schedule:
