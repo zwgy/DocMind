@@ -8,7 +8,9 @@ import { authApi } from '@/apis/auth_api'
 
 const items = ref([])
 const loading = ref(false)
+const loadingMore = ref(false)
 const error = ref('')
+const cursor = ref(null)
 const acting = ref('')
 const editorOpen = ref(false)
 const rejectOpen = ref(false)
@@ -95,15 +97,25 @@ function scheduleSummary(item) {
   return '待补充调度规则'
 }
 
-async function load() {
-  loading.value = true
+async function load({ reset = true } = {}) {
+  if (loading.value || loadingMore.value) return
+  if (reset) loading.value = true
+  else loadingMore.value = true
   error.value = ''
   try {
-    items.value = (await scheduledJobCandidateApi.list({ status: 'pending_confirmation', limit: 20 }))?.items || []
+    const response = await scheduledJobCandidateApi.list({
+      status: 'pending_confirmation',
+      cursor: reset ? undefined : cursor.value,
+      limit: 20
+    })
+    const nextItems = response?.items || []
+    items.value = reset ? nextItems : [...items.value, ...nextItems]
+    cursor.value = response?.next_cursor || null
   } catch (value) {
     error.value = value?.message || '加载候选失败'
   } finally {
     loading.value = false
+    loadingMore.value = false
   }
 }
 
@@ -208,8 +220,8 @@ onMounted(load)
       <span>来文待确认任务</span>
       <a-button size="small" :loading="loading" @click="load"><RefreshCw :size="15" />刷新</a-button>
     </div>
-    <a-alert v-if="error" type="error" show-icon :message="error" />
-    <a-skeleton v-else-if="loading" active :paragraph="{ rows: 4 }" />
+    <a-alert v-if="error" class="load-error" type="error" show-icon :message="error" />
+    <a-skeleton v-if="loading && !items.length" active :paragraph="{ rows: 4 }" />
     <a-empty v-else-if="!items.length" description="暂无待确认任务" />
     <article v-for="item in items" v-else :key="item.id" class="candidate-row">
       <div class="candidate-main">
@@ -225,6 +237,7 @@ onMounted(load)
         <a-button danger type="text" size="small" :loading="acting === item.id" @click="openReject(item)"><X :size="15" />拒绝</a-button>
       </div>
     </article>
+    <div v-if="cursor" class="load-more"><a-button :loading="loadingMore" @click="load({ reset: false })">加载更多</a-button></div>
   </section>
 
   <a-drawer v-model:open="editorOpen" width="min(720px, 94vw)" title="编辑来文任务候选">
@@ -258,9 +271,9 @@ onMounted(load)
   </a-modal>
 </template>
 <style lang="less" scoped>
-.candidate-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.candidate-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }.load-error { margin-bottom: 12px; }
 .candidate-toolbar :deep(.ant-btn), .candidate-actions :deep(.ant-btn) { display: inline-flex; align-items: center; gap: 4px; }
 .candidate-row { display: flex; gap: 16px; justify-content: space-between; padding: 15px; margin-bottom: 8px; border: 1px solid var(--gray-150); border-radius: 8px; background: var(--gray-0); }
-.candidate-main { min-width: 0; }.candidate-title { display: flex; gap: 8px; align-items: center; }.candidate-row p { margin: 6px 0; color: var(--color-text-secondary); font-size: 13px; }.candidate-row .candidate-schedule { color: var(--gray-600); }.candidate-row .invalid { color: var(--color-error-700); }.candidate-row .warning { color: var(--color-warning-900); }.candidate-actions { display: flex; align-items: center; flex: 0 0 auto; }.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }.full-width { width: 100%; }.interval-value { width: calc(100% - 100px); }.interval-unit { width: 100px; }.preview-result, .validation-tip { margin-bottom: 16px; }.editor-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.candidate-main { min-width: 0; }.candidate-title { display: flex; gap: 8px; align-items: center; }.candidate-row p { margin: 6px 0; color: var(--color-text-secondary); font-size: 13px; }.candidate-row .candidate-schedule { color: var(--gray-600); }.candidate-row .invalid { color: var(--color-error-700); }.candidate-row .warning { color: var(--color-warning-900); }.candidate-actions { display: flex; align-items: center; flex: 0 0 auto; }.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }.full-width { width: 100%; }.interval-value { width: calc(100% - 100px); }.interval-unit { width: 100px; }.preview-result, .validation-tip { margin-bottom: 16px; }.editor-actions, .load-more { display: flex; justify-content: flex-end; gap: 8px; }.load-more { justify-content: center; padding: 12px 0; }
 @media (max-width: 640px) { .candidate-row { flex-direction: column; }.candidate-actions { justify-content: flex-end; }.form-grid { grid-template-columns: 1fr; gap: 0; } }
 </style>

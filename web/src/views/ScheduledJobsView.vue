@@ -165,10 +165,10 @@ onMounted(() => void store.refresh())
         <a-tab-pane v-for="tab in tabs" :key="tab.value" :tab="tab.label" />
       </a-tabs>
       <CandidateList v-if="store.activeView === 'pending_confirmation'" />
-      <a-alert v-else-if="page.error" class="load-error" type="error" show-icon :message="page.error.message || '加载任务失败'">
+      <a-alert v-if="page.error" class="load-error" type="error" show-icon :message="page.error.message || '加载任务失败'">
         <template #action><a-button size="small" @click="store.refresh()">重试</a-button></template>
       </a-alert>
-      <a-skeleton v-else-if="page.loading && !page.items.length" active :paragraph="{ rows: 6 }" />
+      <a-skeleton v-if="page.loading && !page.items.length" active :paragraph="{ rows: 6 }" />
       <a-empty v-else-if="!page.items.length" :description="currentTab.empty" />
       <section v-else class="job-list" aria-label="定时任务列表">
         <article v-for="job in page.items" :key="job.id" class="job-row">
