@@ -24,9 +24,11 @@ from yuxi.knowledge.chunking.ragflow_like.nlp import count_tokens
 from yuxi.knowledge.parser import Parser, is_supported_file_extension
 from yuxi.knowledge.utils import calculate_content_hash, parse_minio_url
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
+from yuxi.services.incoming_task_candidate_service import IncomingTaskCandidateService
 from yuxi.services.knowledge_document_ingest_service import KnowledgeDocumentIngestService
 from yuxi.services.task_service import TaskContext, tasker
 from yuxi.storage.minio import MinIOClient, aupload_file_to_minio, get_minio_client
+from yuxi.storage.postgres.manager import pg_manager
 from yuxi.utils import hashstr
 from yuxi.utils.datetime_utils import utc_now_naive
 from yuxi.utils.upload_utils import MAX_UPLOAD_SIZE_BYTES
@@ -36,8 +38,14 @@ ParseDocumentFn = Callable[[str, dict[str, Any]], Awaitable[str]]
 UploadMarkdownFn = Callable[..., Awaitable[str]]
 ClassifyDocumentFn = Callable[..., Awaitable[dict[str, Any]]]
 SummarizeAttachmentFn = Callable[..., Awaitable[str]]
+BuildCandidatesFn = Callable[..., Awaitable[None]]
+EnsureBatchRebuildableFn = Callable[[str], Awaitable[None]]
 INCOMING_DOCUMENT_PROCESS_TASK_TYPE = "incoming_document_process"
 MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.8
+
+
+async def _noop_batch_rebuild_check(_incoming_id: str) -> None:
+    """单元测试注入内存仓储时不隐式连接 PostgreSQL。"""
 
 
 def _interruption_error(context: TaskContext | None) -> str:
@@ -73,7 +81,10 @@ class IncomingDocumentIngestService:
         classify_document: ClassifyDocumentFn | None = None,
         summarize_attachment: SummarizeAttachmentFn | None = None,
         business_extraction_service: BusinessExtractionService | None = None,
+        build_candidates: BuildCandidatesFn | None = None,
+        ensure_candidate_batch_rebuildable: EnsureBatchRebuildableFn | None = None,
     ):
+        self._uses_database_candidate_workflows = incoming_repo is None
         self.incoming_repo = incoming_repo or IncomingDocumentRepository()
         self.tasker = tasker
         self.upload_file = upload_file or _upload_incoming_file
@@ -82,6 +93,11 @@ class IncomingDocumentIngestService:
         self.classify_document = classify_document or classify_incoming_document
         self.summarize_attachment = summarize_attachment or summarize_incoming_attachment
         self.business_extraction_service = business_extraction_service or BusinessExtractionService()
+        self.build_candidates = build_candidates or self._build_candidates
+        self.ensure_candidate_batch_rebuildable = (
+            ensure_candidate_batch_rebuildable
+            or (self._ensure_candidate_batch_rebuildable if self._uses_database_candidate_workflows else _noop_batch_rebuild_check)
+        )
 
     async def ingest_files(
         self,
@@ -273,6 +289,7 @@ class IncomingDocumentIngestService:
         document = await self.incoming_repo.get_by_incoming_id(incoming_id)
         if document is None:
             raise ValueError(f"Incoming document not found: {incoming_id}")
+        await self.ensure_candidate_batch_rebuildable(incoming_id)
         files = await self.incoming_repo.list_files(incoming_id)
         if not files:
             raise ValueError("Incoming document has no files")
@@ -324,27 +341,27 @@ class IncomingDocumentIngestService:
             classification = await self._classify_document_bundle(document, main_files)
             attachment_summaries = await self._summarize_supplementary_files(parsed_files)
             extraction_classifications = _trusted_extraction_classifications(classification)
-            await self._run_document_extraction(
+            extraction_result = await self._run_document_extraction(
                 incoming_id=incoming_id,
                 parsed_files=parsed_files,
                 classifications=extraction_classifications,
                 operator_id=operator_id,
                 attachment_summaries=attachment_summaries,
             )
-            await self.incoming_repo.update_document(
-                incoming_id,
-                {
-                    "status": "ready",
-                    "ai_classification": classification.classification,
-                    "classification_confidence": classification.classification_confidence,
-                    "classification_evidence": classification.classification_evidence,
-                    "additional_classifications": [
-                        item.model_dump() for item in classification.additional_classifications
-                    ],
-                    "summary": classification.summary,
-                    "processing_error": None,
-                    "updated_by": operator_id,
-                },
+            ready_updates = {
+                "status": "ready",
+                "ai_classification": classification.classification,
+                "classification_confidence": classification.classification_confidence,
+                "classification_evidence": classification.classification_evidence,
+                "additional_classifications": [item.model_dump() for item in classification.additional_classifications],
+                "summary": classification.summary,
+                "processing_error": None,
+                "updated_by": operator_id,
+            }
+            await self._finish_candidate_build(
+                incoming_id=incoming_id,
+                extraction_result=extraction_result,
+                ready_updates=ready_updates,
             )
             await _set_progress(context, 100, "来文处理完成")
             return {"incoming_id": incoming_id, "status": "ready"}
@@ -369,6 +386,7 @@ class IncomingDocumentIngestService:
             raise ValueError(f"Incoming document not found: {incoming_id}")
         if document.status != "ready":
             raise ValueError("Incoming document is not ready")
+        await self.ensure_candidate_batch_rebuildable(incoming_id)
         if getattr(document, "knowledge_import_status", None) in {"importing", "partial", "indexed"}:
             raise ValueError("Imported incoming document classification cannot be changed")
         files = await self.incoming_repo.list_files(incoming_id)
@@ -433,16 +451,17 @@ class IncomingDocumentIngestService:
             extraction_classifications = _valid_extraction_classifications(
                 [classification, *(item.classification for item in routing_additional)], classification
             )
-            await self._run_document_extraction(
+            extraction_result = await self._run_document_extraction(
                 incoming_id=incoming_id,
                 parsed_files=parsed_files,
                 classifications=extraction_classifications,
                 operator_id=operator_id,
                 attachment_summaries=attachment_summaries,
             )
-            await self.incoming_repo.update_document(
-                incoming_id,
-                {
+            await self._finish_candidate_build(
+                incoming_id=incoming_id,
+                extraction_result=extraction_result,
+                ready_updates={
                     "status": "ready",
                     "confirmed_classification": classification,
                     "additional_classifications": [item.model_dump() for item in routing_additional],
@@ -467,6 +486,20 @@ class IncomingDocumentIngestService:
             raise ValueError(f"Incoming document not found: {incoming_id}")
         if document.status != "ready":
             raise ValueError("Incoming document is not ready")
+        if self._uses_database_candidate_workflows:
+            async with pg_manager.get_async_session_context() as session:
+                result = await IncomingTaskCandidateService(session).confirm_incoming(
+                    incoming_id=incoming_id,
+                    actor_uid=operator_id,
+                )
+            return {
+                "incomingId": incoming_id,
+                "reviewStatus": "confirmed",
+                "enabled_count": result.enabled_count,
+                "skipped_count": result.skipped_count,
+                "invalid_count": result.invalid_count,
+                "invalid_candidate_ids": list(result.invalid_candidate_ids),
+            }
         await self.incoming_repo.update_document(
             incoming_id,
             {
@@ -858,10 +891,10 @@ class IncomingDocumentIngestService:
         classifications: list[str],
         operator_id: str | None,
         attachment_summaries: dict[str, str] | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         from yuxi.config.app import config
 
-        await self.business_extraction_service.run_incoming_document_extraction(
+        return await self.business_extraction_service.run_incoming_document_extraction(
             incoming_id=incoming_id,
             files=[
                 {
@@ -879,6 +912,53 @@ class IncomingDocumentIngestService:
             operator_id=operator_id,
             attachment_summaries=attachment_summaries,
         )
+
+    async def _finish_candidate_build(
+        self,
+        *,
+        incoming_id: str,
+        extraction_result: dict[str, Any] | None,
+        ready_updates: dict[str, Any],
+    ) -> None:
+        """真实抽取运行必须生成候选；仅为旧单元测试兼容无运行 ID 的替身返回值。"""
+        extraction_run_id = (extraction_result or {}).get("run_id")
+        if not extraction_run_id:
+            await self.incoming_repo.update_document(incoming_id, ready_updates)
+            return
+        try:
+            await self.build_candidates(
+                incoming_id=incoming_id,
+                extraction_run_id=extraction_run_id,
+                document_updates=ready_updates,
+            )
+        except Exception as error:
+            await self._mark_candidate_build_failed(incoming_id=incoming_id, error=error)
+            raise
+
+    async def _build_candidates(
+        self,
+        *,
+        incoming_id: str,
+        extraction_run_id: str,
+        document_updates: dict[str, Any],
+    ) -> None:
+        async with pg_manager.get_async_session_context() as session:
+            await IncomingTaskCandidateService(session).build_batch_from_extraction(
+                incoming_id=incoming_id,
+                extraction_run_id=extraction_run_id,
+                document_updates=document_updates,
+            )
+
+    async def _ensure_candidate_batch_rebuildable(self, incoming_id: str) -> None:
+        async with pg_manager.get_async_session_context() as session:
+            await IncomingTaskCandidateService(session).ensure_batch_rebuildable(incoming_id=incoming_id)
+
+    async def _mark_candidate_build_failed(self, *, incoming_id: str, error: Exception) -> None:
+        async with pg_manager.get_async_session_context() as session:
+            await IncomingTaskCandidateService(session).mark_build_failed(
+                incoming_id=incoming_id,
+                message=str(error),
+            )
 
     async def _summarize_supplementary_files(self, parsed_files: list[dict[str, Any]]) -> dict[str, str]:
         """副附件只生成定位摘要，避免混入主来文的分类和业务结构化结果。"""

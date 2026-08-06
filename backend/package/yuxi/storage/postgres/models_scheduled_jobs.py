@@ -46,7 +46,8 @@ class ScheduledJobCandidate(Base):
     extraction_item_id = Column(String(128), nullable=False)
     incoming_id = Column(String(64), ForeignKey("incoming_documents.incoming_id", ondelete="RESTRICT"), nullable=False)
     extraction_run_id = Column(String(64), nullable=False)
-    owner_uid = Column(String(64), ForeignKey("users.uid", ondelete="RESTRICT"), nullable=False)
+    # 历史来文可能缺少上传账号；仍保存候选并明确标记为不可启用，不能猜测所有者。
+    owner_uid = Column(String(64), ForeignKey("users.uid", ondelete="RESTRICT"))
     name = Column(String(100), nullable=False)
     # 抽取不完整时仍要保留候选供人工补全，不能因通知字段缺失而丢弃来源事实。
     notification_title = Column(String(100))
@@ -61,6 +62,7 @@ class ScheduledJobCandidate(Base):
     validation_errors = Column(JSON_VALUE, nullable=False, default=list)
     validation_warnings = Column(JSON_VALUE, nullable=False, default=list)
     status = Column(String(24), nullable=False, default="pending_confirmation")
+    version = Column(Integer, nullable=False, default=1)
     enabled_at = Column(DateTime(timezone=True))
     enabled_by_uid = Column(String(64), ForeignKey("users.uid", ondelete="RESTRICT"))
     rejected_at = Column(DateTime(timezone=True))
@@ -71,6 +73,7 @@ class ScheduledJobCandidate(Base):
     __table_args__ = (
         CheckConstraint("recipient_scope IN ('named', 'all', 'unknown')", name="ck_sjc_recipient_scope"),
         CheckConstraint("status IN ('pending_confirmation', 'enabled', 'rejected', 'stale')", name="ck_sjc_status"),
+        CheckConstraint("version > 0", name="ck_sjc_version"),
         Index("uq_sjc_batch_extraction_item", "batch_id", "extraction_item_id", unique=True),
         Index("ix_sjc_status_updated_at", "status", text("updated_at DESC")),
     )

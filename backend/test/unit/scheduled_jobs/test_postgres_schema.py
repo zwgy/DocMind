@@ -37,6 +37,8 @@ def test_scheduled_jobs_migration_has_idempotent_upgrade_and_manual_downgrade_sq
     assert any("next_attempt_at DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
     assert any("notification_title" in statement for statement in UPGRADE_STATEMENTS)
     assert any("notification_content DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("owner_uid DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("ADD COLUMN IF NOT EXISTS version" in statement for statement in UPGRADE_STATEMENTS)
     assert all("IF NOT EXISTS" in statement or "DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
     assert "DROP TABLE IF EXISTS scheduled_jobs" in DOWNGRADE_SQL
     assert "DROP COLUMN IF EXISTS archived_at" in DOWNGRADE_SQL
@@ -52,3 +54,5 @@ def test_candidate_ddl_keeps_incomplete_notification_draft_for_manual_confirmati
 
     assert "notification_title VARCHAR(100)" in ddl
     assert "notification_content TEXT NOT NULL" not in ddl
+    assert "owner_uid VARCHAR(64) NOT NULL" not in ddl
+    assert "ck_sjc_version" in ddl

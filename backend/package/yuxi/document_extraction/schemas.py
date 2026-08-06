@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
+
+from yuxi.scheduled_jobs.schemas import Schedule
 
 
 class AdditionalClassification(BaseModel):
@@ -146,7 +148,7 @@ class RiskItem(BaseModel):
 
 
 class TaskItem(BaseModel):
-    model_config = {"json_schema_extra": {"label": "任务要求"}}
+    model_config = {"extra": "forbid", "str_strip_whitespace": True, "json_schema_extra": {"label": "任务要求"}}
 
     task_name: str = Field(
         description="需要用户重点跟进的关键任务、整改要求或工作要求名称，必须有原文支持",
@@ -154,13 +156,32 @@ class TaskItem(BaseModel):
     )
     notification_title: str | None = Field(
         default=None,
+        max_length=100,
         description="需要发送的通知标题；原文未明确时为 null，不能自行编造",
         json_schema_extra={"label": "通知标题"},
     )
     notification_content: str | None = Field(
         default=None,
+        max_length=4000,
         description="需要发送的通知正文；原文未明确时为 null，不能自行编造",
         json_schema_extra={"label": "通知内容"},
+    )
+    raw_time_expression: str | None = Field(
+        default=None,
+        max_length=4000,
+        description="原文中的时间表达；无法规范化为调度规则时仍保留，供人工补全",
+        json_schema_extra={"label": "原始时间表达"},
+    )
+    schedule: Schedule | None = Field(
+        default=None,
+        description="可直接执行的触发规则；时间含糊或缺失时必须为 null",
+        json_schema_extra={"label": "调度规则"},
+    )
+    timezone: str | None = Field(
+        default=None,
+        max_length=64,
+        description="调度规则采用的 IANA 时区；未明确时由候选适配器采用系统默认时区",
+        json_schema_extra={"label": "任务时区"},
     )
     department: str | None = Field(
         default=None,
@@ -182,6 +203,12 @@ class TaskItem(BaseModel):
         description="原文中的接收人或范围表达；没有明确对象时为 null",
         json_schema_extra={"label": "接收人表达"},
     )
+    raw_recipient_expression: str | None = Field(
+        default=None,
+        max_length=4000,
+        description="原文中的接收人表达；与兼容字段 recipient_expression 保持相同语义",
+        json_schema_extra={"label": "原始接收人表达"},
+    )
     recipient_scope: Literal["named", "all", "unknown"] = Field(
         default="unknown",
         description="接收人是具名人员、全体范围或无法确定",
@@ -201,6 +228,27 @@ class TaskItem(BaseModel):
         description="帮助后续回读原文的参考片段，必须基于输入文本",
         json_schema_extra={"label": "参考片段"},
     )
+    source_file_id: str | None = Field(
+        default=None,
+        max_length=512,
+        description="引用原文所在的来源文件 ID；缺失时由抽取结果证据补全",
+        json_schema_extra={"label": "来源文件 ID"},
+    )
+    source_location: str | None = Field(
+        default=None,
+        max_length=500,
+        description="原文中的页码、段落或字符范围定位",
+        json_schema_extra={"label": "来源定位"},
+    )
+
+    @model_validator(mode="after")
+    def validate_recipient_scope(self) -> TaskItem:
+        """防止模型在未能确定人员范围时伪造姓名列表。"""
+        if self.recipient_scope == "named" and not self.recipient_names:
+            raise ValueError("recipient_scope 为 named 时 recipient_names 不能为空")
+        if self.recipient_scope != "named" and self.recipient_names:
+            raise ValueError("recipient_scope 为 all 或 unknown 时 recipient_names 必须为空")
+        return self
 
 
 class AssessmentItem(BaseModel):

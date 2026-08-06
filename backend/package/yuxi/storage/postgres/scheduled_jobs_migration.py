@@ -14,6 +14,8 @@ UPGRADE_STATEMENTS = (
     "ALTER TABLE IF EXISTS scheduled_job_runs ALTER COLUMN next_attempt_at DROP NOT NULL",
     "ALTER TABLE IF EXISTS scheduled_job_candidates ADD COLUMN IF NOT EXISTS notification_title VARCHAR(100)",
     "ALTER TABLE IF EXISTS scheduled_job_candidates ALTER COLUMN notification_content DROP NOT NULL",
+    "ALTER TABLE IF EXISTS scheduled_job_candidates ALTER COLUMN owner_uid DROP NOT NULL",
+    "ALTER TABLE IF EXISTS scheduled_job_candidates ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1",
 )
 
 # 发布回滚前先停止 Scheduler/Dispatcher，并确认没有依赖这些表的生产数据。
