@@ -205,7 +205,9 @@ class ScheduledJobRepository:
         run = await self._lock_owned_run(run_id=run_id, instance_id=instance_id, now=now)
         if run is None:
             return None, None, now
-        job = await self.db.scalar(select(ScheduledJob).where(ScheduledJob.id == run.scheduled_job_id).with_for_update())
+        job = await self.db.scalar(
+            select(ScheduledJob).where(ScheduledJob.id == run.scheduled_job_id).with_for_update()
+        )
         return run, job, now
 
     async def mark_agent_run_queued(
@@ -245,7 +247,9 @@ class ScheduledJobRepository:
         )
         if run is None or run.status in TERMINAL_RUN_STATUSES:
             return False
-        job = await self.db.scalar(select(ScheduledJob).where(ScheduledJob.id == run.scheduled_job_id).with_for_update())
+        job = await self.db.scalar(
+            select(ScheduledJob).where(ScheduledJob.id == run.scheduled_job_id).with_for_update()
+        )
         if job is None:
             return False
         if agent_status == "running":
@@ -255,7 +259,12 @@ class ScheduledJobRepository:
                 return True
             return False
 
-        status = "succeeded" if agent_status == "completed" else "cancelled" if agent_status == "cancelled" else "failed"
+        if agent_status == "completed":
+            status = "succeeded"
+        elif agent_status == "cancelled":
+            status = "cancelled"
+        else:
+            status = "failed"
         error_code = None if status == "succeeded" else f"agent_{agent_status}"
         await self._finish_run(
             run,

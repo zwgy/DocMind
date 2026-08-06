@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from yuxi.repositories.agent_repository import AgentRepository
 from yuxi.repositories.conversation_repository import ConversationRepository
@@ -25,7 +24,8 @@ class NotificationActionHandler:
     async def dispatch(
         self, *, repository: ScheduledJobRepository, run_id: str, instance_id: str
     ) -> ActionDispatchResult:
-        return ActionDispatchResult(status=await repository.deliver_notification(run_id=run_id, instance_id=instance_id))
+        status = await repository.deliver_notification(run_id=run_id, instance_id=instance_id)
+        return ActionDispatchResult(status=status)
 
 
 class AgentActionHandler:

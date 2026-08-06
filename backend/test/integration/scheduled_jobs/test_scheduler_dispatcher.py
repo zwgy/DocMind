@@ -372,7 +372,9 @@ async def test_agent_run_status_creates_terminal_unread_task_event():
         async with pg_manager.get_async_session_context() as session:
             repository = ScheduledJobRepository(session)
             now = await repository.database_now()
-            session.add(User(uid=owner_uid, username=f"agent_owner_{suffix[:12]}", password_hash="not-used", role="user"))
+            session.add(
+                User(uid=owner_uid, username=f"agent_owner_{suffix[:12]}", password_hash="not-used", role="user")
+            )
             session.add(
                 ScheduledJob(
                     id=job_id,
@@ -404,7 +406,12 @@ async def test_agent_run_status_creates_terminal_unread_task_event():
                     status="queued",
                     attempt_count=1,
                     action_type="agent",
-                    action_snapshot={"type": "agent", "agent_slug": "assistant", "instruction": "整理待办", "timeout_seconds": 300},
+                    action_snapshot={
+                        "type": "agent",
+                        "agent_slug": "assistant",
+                        "instruction": "整理待办",
+                        "timeout_seconds": 300,
+                    },
                     recipient_snapshot=[{"uid": owner_uid, "name": "agent owner"}],
                     agent_run_id=f"run_{suffix}",
                     conversation_id="1",
