@@ -20,6 +20,32 @@ description: "管理当前用户自己的通知或 Agent 执行型定时任务�
 
 通知动作必须有通知标题和正文。Agent 动作必须有目标顶层 Agent 的准确 `agent_slug`、执行指令和 60 到 3600 秒的超时；不得替用户猜测 Agent，也不得在载荷中指定工具、知识库、MCP 或 Skills。目标 Agent 的实际能力始终由管理员保存的当前 Agent 配置决定，创建时和执行时都会校验该 Agent 对当前用户可见且不是 SubAgent。缺少任何必要信息或存在歧义时，使用 `ask_user_question` 补齐后再创建。
 
+### 工具载荷示例
+
+本工具只有一个顶层参数 `request`。创建单次通知时，直接使用下面的完整形状；`schedule` 不要嵌套 `at` 对象，也不要使用 `once`、`time_at` 等字段：
+
+```json
+{
+  "request": {
+    "name": "晨会提醒",
+    "timezone": "Asia/Shanghai",
+    "schedule": {
+      "kind": "at",
+      "run_at": "2026-08-08T09:00:00+08:00"
+    },
+    "action": {
+      "type": "notification",
+      "title": "晨会开始",
+      "content": "请准时参加晨会。"
+    }
+  }
+}
+```
+
+周期任务也保持相同的 `request` 外层：间隔任务使用 `{"kind":"interval","interval_seconds":3600,"anchor_at":"2026-08-08T09:00:00+08:00"}`，Cron 任务使用 `{"kind":"cron","cron_expression":"0 9 * * 1-5"}`。创建 Agent 执行型任务时，只替换 `action` 为 `{"type":"agent","agent_slug":"daily-assistant","instruction":"整理今天待办。","timeout_seconds":300}`。
+
+信息已经完整时不要试探性地重复调用创建工具；一次调用失败时先阅读错误并只修正错误字段，再决定是否重试。
+
 ## 查询和变更
 
 先用 `list_personal_scheduled_tasks` 找到真实 `job_id` 和 `version`，再暂停、恢复或取消。没有真实 ID 时不得猜测；版本冲突时重新查询并说明任务已被更新。

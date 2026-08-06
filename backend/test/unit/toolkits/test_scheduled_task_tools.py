@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -107,6 +108,19 @@ def test_scheduled_task_tools_are_only_resolved_after_skill_is_readable():
 
     assert resolve_skill_gated_tools(before) == []
     assert {tool.name for tool in resolve_skill_gated_tools(after)} == set(dependency_map["scheduled-task"]["tools"])
+
+
+def test_scheduled_task_skill_provides_canonical_local_model_create_payload():
+    skill_path = (
+        Path(__file__).resolve().parents[3]
+        / "package/yuxi/agents/skills/buildin/scheduled-task/SKILL.md"
+    )
+    content = skill_path.read_text(encoding="utf-8")
+
+    assert '"request": {' in content
+    assert '"kind": "at"' in content
+    assert '"run_at": "2026-08-08T09:00:00+08:00"' in content
+    assert "不要嵌套 `at` 对象，也不要使用 `once`、`time_at`" in content
 
 
 @pytest.mark.asyncio
