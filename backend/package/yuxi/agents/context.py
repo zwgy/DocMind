@@ -11,7 +11,6 @@ from yuxi.utils.logging_config import logger
 WORKSPACE_AGENTS_PROMPT_MAX_BYTES = 64 * 1024
 _REMOVED_CONTEXT_FIELDS = frozenset({"summary_threshold", "summary_tool_result_token_limit", "tool_token_limit"})
 DEFAULT_MAX_EXECUTION_STEPS = 300
-_SCHEDULED_TASK_SKILL = "scheduled-task"
 DEFAULT_YUXI_SUMMARY_PROMPT = """你是对话上下文压缩助手。
 你的任务是把下面的对话历史整理成一份新的累计任务检查点，供后续智能体继续工作。
 
@@ -66,20 +65,6 @@ def _role_can_access(auth: str | None, role: str | None) -> bool:
     if auth == "superadmin":
         return role == "superadmin"
     return False
-
-
-def _apply_scheduled_task_skill_scope(context) -> None:
-    """仅给顶层对话补齐个人任务 Skill，避免子 Agent 产生长期副作用。"""
-    selected_skills = [
-        item.strip()
-        for item in getattr(context, "skills", []) or []
-        if isinstance(item, str) and item.strip()
-    ]
-    if getattr(context, "is_subagent_runtime", False):
-        selected_skills = [item for item in selected_skills if item != _SCHEDULED_TASK_SKILL]
-    elif _SCHEDULED_TASK_SKILL not in selected_skills:
-        selected_skills.append(_SCHEDULED_TASK_SKILL)
-    context.skills = selected_skills
 
 
 def _load_workspace_agents_prompt(thread_id: str, uid: str) -> str:
@@ -528,10 +513,6 @@ async def prepare_agent_runtime_context(
         for field_name in resource_fields:
             if hasattr(context, field_name):
                 setattr(context, field_name, normalized.get(field_name, []))
-
-        # 个人定时任务是所有已认证顶层对话的基础能力，不要求管理员逐个改写 Agent 配置。
-        # 子 Agent 没有用户可见的确认入口，不能替用户创建或变更长期任务。
-        _apply_scheduled_task_skill_scope(context)
 
         await resolve_visible_knowledge_bases_for_context(context)
         skill_scope = await resolve_runtime_skills_for_context(context, db=db, user=user)

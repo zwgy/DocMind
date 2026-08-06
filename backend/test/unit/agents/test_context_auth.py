@@ -261,11 +261,11 @@ async def test_prepare_agent_runtime_context_filters_resources_and_derives_runti
     async def fake_resolve_runtime_skills_for_context(context, *, db=None, user=None):
         del db
         assert user.uid == "u1"
-        assert context.skills == ["skill-a", "scheduled-task"]
+        assert context.skills == ["skill-a"]
         return {
-            "context_skills": ["skill-a", "scheduled-task"],
-            "prompt_skills": ["skill-a", "skill-b", "scheduled-task"],
-            "readable_skills": ["skill-a", "skill-b", "scheduled-task"],
+            "context_skills": ["skill-a"],
+            "prompt_skills": ["skill-a", "skill-b"],
+            "readable_skills": ["skill-a", "skill-b"],
             "runtime_skill_metadata": {"skill-a": {"name": "Skill A"}},
             "runtime_skill_dependency_map": {"skill-a": {"skills": ["skill-b"]}},
         }
@@ -353,25 +353,13 @@ async def test_prepare_agent_runtime_context_filters_resources_and_derives_runti
     assert prepared.tools == ["ask_user_question"]
     assert prepared.knowledges == ["kb-a"]
     assert prepared.mcps == ["mcp-a"]
-    assert prepared.skills == ["skill-a", "scheduled-task"]
+    assert prepared.skills == ["skill-a"]
     assert prepared.subagents == ["research-agent"]
     assert prepared._visible_knowledge_bases == [{"slug": "kb-a", "name": "Docs A"}]
-    assert prepared._prompt_skills == ["skill-a", "skill-b", "scheduled-task"]
-    assert prepared._readable_skills == ["skill-a", "skill-b", "scheduled-task"]
+    assert prepared._prompt_skills == ["skill-a", "skill-b"]
+    assert prepared._readable_skills == ["skill-a", "skill-b"]
     assert prepared._runtime_skill_metadata == {"skill-a": {"name": "Skill A"}}
     assert prepared._runtime_skill_dependency_map == {"skill-a": {"skills": ["skill-b"]}}
-
-
-def test_scheduled_task_skill_is_default_for_top_level_and_removed_from_subagents():
-    top_level = types.SimpleNamespace(skills=["skill-a"], is_subagent_runtime=False)
-    subagent = types.SimpleNamespace(skills=["skill-a", "scheduled-task"], is_subagent_runtime=True)
-
-    context_module._apply_scheduled_task_skill_scope(top_level)
-    context_module._apply_scheduled_task_skill_scope(subagent)
-
-    assert top_level.skills == ["skill-a", "scheduled-task"]
-    assert subagent.skills == ["skill-a"]
-
 
 @pytest.mark.asyncio
 async def test_prepare_agent_runtime_context_clears_resources_for_missing_user(monkeypatch):
