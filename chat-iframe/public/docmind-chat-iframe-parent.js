@@ -266,6 +266,7 @@
       '.docmind-chat-restore:hover{transform:translateY(-2px) scale(1.12)}' +
       '.docmind-chat-restore:active{transform:translateY(0) scale(.96)}' +
       '.docmind-chat-restore:focus-visible{box-shadow:0 14px 28px rgba(15,23,42,.1),inset 0 0 0 1px rgba(148,163,184,.14),inset 0 1px 0 rgba(255,255,255,.88)}' +
+      '.docmind-chat-restore[data-unread="true"]:after{content:"";position:absolute;right:5px;top:5px;width:9px;height:9px;border-radius:50%;background:#ff4d4f;border:2px solid #fff;z-index:2}' +
       '.docmind-chat-restore:before{content:"";position:absolute;inset:0;border-radius:50%;background:rgba(255,255,255,.12);pointer-events:none}' +
       '.docmind-chat-mark{position:relative;font:900 25px/1 Arial,sans-serif;letter-spacing:0;background:linear-gradient(135deg,#2563eb 0%,#06b6d4 56%,#14b8a6 100%);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 8px 18px rgba(37,99,235,.18)}' +
       '.docmind-chat-iframe.minimized .docmind-chat-shell,.docmind-chat-iframe.closed .docmind-chat-shell{display:none}' +

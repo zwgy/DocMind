@@ -350,6 +350,7 @@ watch(
       return
     }
     if (!context.config.token) return
+    void refreshInboxCount()
     void chat
       .bootstrap(context.config.token, context.config.agentId, context.config.conversationScopeKey)
       .then(() => {
