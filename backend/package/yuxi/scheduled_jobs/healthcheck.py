@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 
-from sqlalchemy import select
+import asyncpg
 
-from yuxi.repositories.scheduled_job_repository import ScheduledJobRepository
 from yuxi.scheduled_jobs.runtime import load_runtime_config
-from yuxi.storage.postgres.manager import pg_manager
-from yuxi.storage.postgres.models_scheduled_jobs import ScheduledServiceHeartbeat
+
+
+def _postgres_dsn() -> str:
+    """健康检查只需要一个原生连接，不能为短命探针初始化应用级连接池。"""
+    database_url = os.environ["POSTGRES_URL"]
+    return database_url.replace("+asyncpg", "").replace("+psycopg", "")
 
 
 async def is_healthy(service_type: str) -> bool:
@@ -18,17 +22,25 @@ async def is_healthy(service_type: str) -> bool:
     if service_type not in {"scheduler", "dispatcher"}:
         raise ValueError("service_type 必须是 scheduler 或 dispatcher")
     config = load_runtime_config()
-    pg_manager.initialize()
-    async with pg_manager.get_async_session_context() as session:
-        repository = ScheduledJobRepository(session)
-        now = await repository.database_now()
-        heartbeat = await session.scalar(
-            select(ScheduledServiceHeartbeat).where(
-                ScheduledServiceHeartbeat.service_type == service_type,
-                ScheduledServiceHeartbeat.instance_id == config.instance_id,
+    connection: asyncpg.Connection | None = None
+    try:
+        connection = await asyncpg.connect(_postgres_dsn(), timeout=2, command_timeout=2)
+        return bool(
+            await connection.fetchval(
+                """
+                SELECT last_seen_at >= NOW() - INTERVAL '30 seconds'
+                FROM scheduled_service_heartbeats
+                WHERE service_type = $1 AND instance_id = $2
+                """,
+                service_type,
+                config.instance_id,
             )
         )
-        return heartbeat is not None and (now - heartbeat.last_seen_at).total_seconds() <= 30
+    except (TimeoutError, asyncpg.PostgresError, OSError):
+        return False
+    finally:
+        if connection is not None:
+            await connection.close()
 
 
 def main() -> None:
