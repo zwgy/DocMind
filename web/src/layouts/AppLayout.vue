@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, provide, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, provide, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
   BarChart3,
@@ -28,6 +28,8 @@ import DebugComponent from '@/components/DebugComponent.vue'
 import TaskCenterDrawer from '@/components/TaskCenterDrawer.vue'
 import SettingsModal from '@/components/SettingsModal.vue'
 import ConversationNavSection from '@/components/ConversationNavSection.vue'
+import InboxDrawer from '@/components/inbox/InboxDrawer.vue'
+import { useInboxStore } from '@/stores/inbox'
 
 const configStore = useConfigStore()
 const agentStore = useAgentStore()
@@ -37,6 +39,7 @@ const databaseStore = useDatabaseStore()
 const infoStore = useInfoStore()
 const taskerStore = useTaskerStore()
 const userStore = useUserStore()
+const inboxStore = useInboxStore()
 const { activeCount: activeCountRef, isDrawerOpen } = storeToRefs(taskerStore)
 const { threads, currentThreadId, hasMoreThreads, isLoadingMoreThreads } =
   storeToRefs(chatThreadsStore)
@@ -82,6 +85,10 @@ onMounted(async () => {
   // 加载信息配置与知识库数据无依赖，可并行
   await Promise.all([infoStore.loadInfoConfig(), getRemoteDatabase()])
   await initAgentNavigation()
+  if (userStore.isLoggedIn) {
+    await inboxStore.refreshCounts().catch((error) => console.warn('加载未读数量失败:', error))
+    inboxStore.startPolling()
+  }
   // 仅管理员加载系统配置和任务中心数据
   if (userStore.isAdmin) {
     await getRemoteConfig()
@@ -95,6 +102,8 @@ onMounted(async () => {
     activeIcon: Clock3
   })
 })
+
+onUnmounted(() => inboxStore.stopPolling())
 
 const route = useRoute()
 const router = useRouter()
@@ -315,7 +324,13 @@ provide('settingsModal', {
       <!-- 用户信息组件 -->
       <div class="nav-item user-info" @click.stop>
         <UserInfoComponent :show-role="!sidebarCollapsed">
-          <template v-if="userStore.isAdmin" #actions>
+          <template #actions>
+            <a-tooltip placement="top" title="收件箱">
+              <button class="user-task-center" :class="{ active: inboxStore.open }" type="button" aria-label="收件箱" @click.stop="inboxStore.setOpen(true)">
+                <a-badge :dot="inboxStore.hasUnread" class="task-center-badge"><Inbox class="icon" size="16" /></a-badge>
+              </button>
+            </a-tooltip>
+            <template v-if="userStore.isAdmin">
             <a-tooltip placement="top" title="任务中心">
               <button
                 class="user-task-center"
@@ -334,6 +349,7 @@ provide('settingsModal', {
                 </a-badge>
               </button>
             </a-tooltip>
+            </template>
           </template>
         </UserInfoComponent>
       </div>
@@ -359,6 +375,7 @@ provide('settingsModal', {
       <DebugComponent />
     </a-modal>
     <TaskCenterDrawer v-if="userStore.isAdmin" />
+    <InboxDrawer />
     <SettingsModal
       v-model:visible="showSettingsModal"
       :initial-tab="settingsInitialTab"
