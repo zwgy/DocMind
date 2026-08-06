@@ -2,21 +2,23 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { Check, CheckCheck, Mail, X } from 'lucide-vue-next'
 import { inboxApi } from '@/apis/inbox'
+import type { InboxItem, TaskInboxItem } from '@/apis/inbox'
 
 const props = defineProps<{ token?: string; open: boolean }>()
 const emit = defineEmits<{ close: []; unreadChanged: [count: number] }>()
 const category = ref<'notification' | 'task'>('notification')
-const items = ref<any[]>([])
+const items = ref<InboxItem[]>([])
 const loading = ref(false)
 const loadingMore = ref(false)
 const error = ref('')
 const count = ref(0)
 const cursor = ref<string | null>(null)
 const title = computed(() => category.value === 'task' ? '任务' : '通知')
-function itemTitle(item: any) { return category.value === 'task' ? item.job?.name || '定时任务' : item.title }
-function itemContent(item: any) { return category.value === 'task' ? item.latest_update?.content || '暂无状态更新' : item.content }
-function itemId(item: any) { return category.value === 'task' ? item.job?.id : item.id }
-function unread(item: any) { return category.value === 'task' ? item.unread_update_count > 0 : !item.is_read }
+function isTaskItem(item: InboxItem): item is TaskInboxItem { return 'job' in item }
+function itemTitle(item: InboxItem) { return isTaskItem(item) ? item.job.name || '定时任务' : item.title }
+function itemContent(item: InboxItem) { return isTaskItem(item) ? item.latest_update?.content || '暂无状态更新' : item.content }
+function itemId(item: InboxItem) { return isTaskItem(item) ? item.job.id : item.id }
+function unread(item: InboxItem) { return isTaskItem(item) ? item.unread_update_count > 0 : !item.is_read }
 async function refresh({ reset = true }: { reset?: boolean } = {}) {
   if (!props.token) return
   if (loading.value || loadingMore.value) return
@@ -32,7 +34,7 @@ async function refresh({ reset = true }: { reset?: boolean } = {}) {
     emit('unreadChanged', count.value)
   } catch (value) { error.value = value instanceof Error ? value.message : '加载收件箱失败' } finally { loading.value = false; loadingMore.value = false }
 }
-async function mark(item: any) { if (!unread(item) || !props.token) return; await inboxApi.markRead(category.value, itemId(item), props.token); await refresh() }
+async function mark(item: InboxItem) { if (!unread(item) || !props.token) return; await inboxApi.markRead(category.value, itemId(item), props.token); await refresh() }
 async function markAll() { if (!props.token || !items.value.some(unread)) return; await inboxApi.markAllRead(category.value, props.token); await refresh() }
 watch(() => [props.open, category.value, props.token], ([open]) => { if (open) void refresh() })
 onMounted(() => { if (props.open) void refresh() })
