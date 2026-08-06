@@ -136,6 +136,68 @@ services:
       sandbox-provisioner:
         condition: service_healthy
 
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
+        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-mirrors.tuna.tsinghua.edu.cn/debian-security}
+    image: yuxi-api:${YUXI_VERSION:-0.7.1.dev0}
+    working_dir: /app
+    volumes:
+      - ./backend/package:/app/package
+      - ./.env:/app/.env
+    networks:
+      - app-network
+    env_file:
+      - .env
+    environment:
+      <<: *api-worker-env
+    command: uv run --no-sync --no-dev python -m yuxi.scheduled_jobs.scheduler
+    restart: unless-stopped
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD-SHELL", "uv run --no-sync --no-dev python -m yuxi.scheduled_jobs.healthcheck scheduler"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  dispatcher:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
+        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-mirrors.tuna.tsinghua.edu.cn/debian-security}
+    image: yuxi-api:${YUXI_VERSION:-0.7.1.dev0}
+    working_dir: /app
+    volumes:
+      - ./backend/package:/app/package
+      - ./.env:/app/.env
+    networks:
+      - app-network
+    env_file:
+      - .env
+    environment:
+      <<: *api-worker-env
+    command: uv run --no-sync --no-dev python -m yuxi.scheduled_jobs.dispatcher
+    restart: unless-stopped
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD-SHELL", "uv run --no-sync --no-dev python -m yuxi.scheduled_jobs.healthcheck dispatcher"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   sandbox-provisioner:
     build:
       context: ./docker/sandbox_provisioner

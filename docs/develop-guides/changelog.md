@@ -6,6 +6,10 @@
 
 ## v0.7.1 (current)
 
+### 定时任务（阶段 1）
+
+- 新增独立 Scheduler 与 Dispatcher 的 PostgreSQL 认领事务、租约恢复、有限补发和通知收件箱幂等投递；Compose 服务复用 API 镜像，仅依赖 PostgreSQL，并以数据库心跳作为健康检查事实来源。
+
 ### 定时任务（阶段 0）
 
 - 新增来文与个人定时任务的严格领域契约、PostgreSQL 实体、部分唯一索引和状态约束，为后续独立 Scheduler、Dispatcher、来文候选审核及统一收件箱提供同一事实来源。调度数据统一使用 `TIMESTAMPTZ` 和 PostgreSQL `JSONB`，并提供可重复执行的来文归档字段升级及人工降级 SQL。
