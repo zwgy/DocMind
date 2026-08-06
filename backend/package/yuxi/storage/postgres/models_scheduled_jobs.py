@@ -119,7 +119,7 @@ class ScheduledJob(Base):
             name="ck_sj_source_candidate_type",
         ),
         CheckConstraint("schedule_kind IN ('at', 'interval', 'cron')", name="ck_sj_schedule_kind"),
-        CheckConstraint("action_type IN ('notification')", name="ck_sj_action_type"),
+        CheckConstraint("action_type IN ('notification', 'agent')", name="ck_sj_action_type"),
         CheckConstraint("status IN ('active', 'paused', 'completed', 'cancelled')", name="ck_sj_status"),
         CheckConstraint("version > 0", name="ck_sj_version"),
         CheckConstraint(
@@ -203,7 +203,7 @@ class ScheduledJobRun(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending', 'dispatching', 'succeeded', 'partial', 'failed', 'skipped')",
+            "status IN ('pending', 'dispatching', 'queued', 'running', 'succeeded', 'partial', 'failed', 'cancelled', 'skipped')",
             name="ck_sjr_status",
         ),
         CheckConstraint("attempt_count >= 0", name="ck_sjr_attempt_count"),
@@ -213,8 +213,8 @@ class ScheduledJobRun(Base):
             name="ck_sjr_dispatching_lease",
         ),
         CheckConstraint(
-            "(status IN ('succeeded', 'partial', 'failed', 'skipped') AND finished_at IS NOT NULL) OR "
-            "(status NOT IN ('succeeded', 'partial', 'failed', 'skipped') AND finished_at IS NULL)",
+            "(status IN ('succeeded', 'partial', 'failed', 'cancelled', 'skipped') AND finished_at IS NOT NULL) OR "
+            "(status NOT IN ('succeeded', 'partial', 'failed', 'cancelled', 'skipped') AND finished_at IS NULL)",
             name="ck_sjr_terminal_finished_at",
         ),
         Index("uq_sjr_job_scheduled_for", "scheduled_job_id", "scheduled_for", unique=True),

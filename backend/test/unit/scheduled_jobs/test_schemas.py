@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from yuxi.scheduled_jobs.ids import new_scheduled_job_id
-from yuxi.scheduled_jobs.schemas import IncomingTaskDraft, PersonalScheduledJobRequest, ScheduledJobDraft
+from yuxi.scheduled_jobs.schemas import AgentAction, IncomingTaskDraft, PersonalScheduledJobRequest, ScheduledJobDraft
 
 
 def test_scheduled_job_draft_normalizes_naive_time_to_declared_timezone_and_minute():
@@ -74,6 +74,20 @@ def test_personal_request_rejects_client_supplied_owner_or_recipient():
                 "schedule": {"kind": "at", "run_at": "2026-08-07T10:00:00+08:00"},
                 "action": {"type": "notification", "title": "提醒", "content": "会议开始"},
                 "owner_uid": "forbidden",
+            }
+        )
+
+
+def test_agent_action_rejects_untrusted_runtime_configuration():
+    """工具、知识库和技能只能来自目标 Agent 的管理员配置，不能随动作载荷传入。"""
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AgentAction.model_validate(
+            {
+                "type": "agent",
+                "agent_slug": "assistant",
+                "instruction": "整理今日待办",
+                "timeout_seconds": 300,
+                "skills": ["scheduled-task"],
             }
         )
 

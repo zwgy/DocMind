@@ -51,6 +51,18 @@ class NotificationAction(_StrictModel):
     content: str = Field(min_length=1, max_length=4000)
 
 
+class AgentAction(_StrictModel):
+    """无人值守执行仅允许选择可见的顶层 Agent，能力由该 Agent 的持久化配置决定。"""
+
+    type: Literal["agent"] = "agent"
+    agent_slug: str = Field(min_length=1, max_length=80)
+    instruction: str = Field(min_length=1, max_length=8000)
+    timeout_seconds: int = Field(default=900, ge=60, le=3600)
+
+
+Action = Annotated[NotificationAction | AgentAction, Field(discriminator="type")]
+
+
 class IncomingSourceSnapshot(_StrictModel):
     incoming_id: str = Field(min_length=1, max_length=64)
     source_document_id: str = Field(min_length=1, max_length=512)
@@ -90,7 +102,7 @@ class TaskCreationContext(_StrictModel):
 class ScheduledJobDraft(_StrictModel):
     name: str = Field(min_length=1, max_length=100)
     schedule: Schedule
-    action: NotificationAction
+    action: Action
     recipient_uids: list[str] = Field(min_length=1, max_length=10_000)
     timezone: str = Field(min_length=1, max_length=64)
 
@@ -126,7 +138,7 @@ class PersonalScheduledJobRequest(_StrictModel):
 
     name: str = Field(min_length=1, max_length=100)
     schedule: Schedule
-    action: NotificationAction
+    action: Action
     timezone: str = Field(min_length=1, max_length=64)
 
     @field_validator("timezone")

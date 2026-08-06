@@ -4,6 +4,7 @@ import { Pause, Pencil, Play, RefreshCw, X } from 'lucide-vue-next'
 import { message } from 'ant-design-vue'
 import { useScheduledJobsStore } from '@/stores/scheduledJobs'
 import { scheduledJobApi } from '@/apis/scheduled_job_api'
+import { agentApi } from '@/apis/agent_api'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import CandidateList from '@/components/scheduled-jobs/CandidateList.vue'
 import { useUserStore } from '@/stores/user'
@@ -26,13 +27,18 @@ const editingJob = ref(null)
 const preview = ref(null)
 const previewLoading = ref(false)
 const saving = ref(false)
+const agents = ref([])
 const editForm = ref(createEditForm())
 
 function createEditForm() {
   return {
     name: '',
+    actionType: 'notification',
     title: '',
     content: '',
+    agentSlug: '',
+    instruction: '',
+    timeoutSeconds: 900,
     timezone: 'Asia/Shanghai',
     scheduleKind: 'at',
     runAt: '',
@@ -58,8 +64,12 @@ function resetEditForm(job) {
   editForm.value = {
     ...createEditForm(),
     name: job.name || '',
+    actionType: job.action_type || job.action_data?.type || 'notification',
     title: job.action_data?.title || '',
     content: job.action_data?.content || '',
+    agentSlug: job.action_data?.agent_slug || '',
+    instruction: job.action_data?.instruction || '',
+    timeoutSeconds: job.action_data?.timeout_seconds || 900,
     timezone: job.timezone || 'Asia/Shanghai',
     scheduleKind: job.schedule_kind || 'at',
     runAt: toLocalInput(job.run_at),
@@ -100,6 +110,14 @@ function statusText(status) {
   return { active: '进行中', paused: '已暂停', completed: '已完成', cancelled: '已取消' }[status] || status
 }
 
+function actionSummary(job) {
+  return job.action_type === 'agent' ? `Agent：${job.action_data?.agent_slug || '-'}` : '站内通知'
+}
+
+function runStatusText(status) {
+  return { queued: '排队中', running: '执行中', succeeded: '成功', failed: '失败', cancelled: '已取消', partial: '部分完成', skipped: '已跳过' }[status] || status
+}
+
 async function handleAction(job, action) {
   await store.changeStatus(job, action)
 }
@@ -136,7 +154,9 @@ async function saveEditor() {
     await store.update(editingJob.value.id, {
       version: editingJob.value.version,
       name: form.name,
-      action: { type: 'notification', title: form.title, content: form.content },
+      action: form.actionType === 'agent'
+        ? { type: 'agent', agent_slug: form.agentSlug, instruction: form.instruction, timeout_seconds: Number(form.timeoutSeconds) }
+        : { type: 'notification', title: form.title, content: form.content },
       schedule: buildSchedule(),
       timezone: form.timezone
     })
@@ -149,7 +169,15 @@ async function saveEditor() {
   }
 }
 
-onMounted(() => void store.refresh())
+onMounted(async () => {
+  void store.refresh()
+  try {
+    const response = await agentApi.getAgents()
+    agents.value = (response?.agents || []).filter((agent) => !agent.is_subagent)
+  } catch (error) {
+    message.error(error?.message || '加载 Agent 列表失败')
+  }
+})
 </script>
 
 <template>
@@ -174,7 +202,7 @@ onMounted(() => void store.refresh())
         <article v-for="job in page.items" :key="job.id" class="job-row">
           <div class="job-main">
             <div class="job-title"><strong>{{ job.name }}</strong><a-tag :class="`status-${job.status}`">{{ statusText(job.status) }}</a-tag></div>
-            <div class="job-meta"><span>{{ job.source_type === 'incoming' ? '来文任务' : '个人任务' }}</span><span>{{ scheduleSummary(job) }}</span><span>{{ job.timezone }}</span></div>
+            <div class="job-meta"><span>{{ job.source_type === 'incoming' ? '来文任务' : '个人任务' }}</span><span>{{ actionSummary(job) }}</span><span>{{ scheduleSummary(job) }}</span><span>{{ job.timezone }}</span></div>
             <div class="job-next">下一次：{{ formatTime(job.next_run_at) }}</div>
           </div>
           <div class="job-actions">
@@ -195,18 +223,20 @@ onMounted(() => void store.refresh())
         <a-descriptions-item label="状态">{{ statusText(detail.status) }}</a-descriptions-item>
         <a-descriptions-item label="调度">{{ scheduleSummary(detail) }}</a-descriptions-item>
         <a-descriptions-item label="时区">{{ detail.timezone }}</a-descriptions-item>
+        <a-descriptions-item label="动作">{{ actionSummary(detail) }}</a-descriptions-item>
         <a-descriptions-item label="下一次">{{ formatTime(detail.next_run_at) }}</a-descriptions-item>
       </a-descriptions>
       <h3 class="run-heading">运行历史</h3>
       <a-skeleton v-if="detailLoading" active :paragraph="{ rows: 3 }" />
       <a-empty v-else-if="!runs.length" description="暂无运行历史" />
-      <a-timeline v-else><a-timeline-item v-for="run in runs" :key="run.id"><strong>{{ run.status }}</strong><div>{{ formatTime(run.scheduled_for) }} · 第 {{ run.attempt_count }} 次尝试</div><small v-if="run.error_message">{{ run.error_message }}</small></a-timeline-item></a-timeline>
+      <a-timeline v-else><a-timeline-item v-for="run in runs" :key="run.id"><strong>{{ runStatusText(run.status) }}</strong><div>{{ formatTime(run.scheduled_for) }} · 第 {{ run.attempt_count }} 次尝试</div><small v-if="run.agent_run_id">Agent Run：{{ run.agent_run_id }}</small><small v-if="run.error_message">{{ run.error_message }}</small></a-timeline-item></a-timeline>
     </a-drawer>
     <a-drawer v-model:open="editorOpen" width="min(680px, 92vw)" title="编辑个人定时任务">
       <a-form layout="vertical">
         <a-form-item label="任务名称" required><a-input v-model:value="editForm.name" :maxlength="100" /></a-form-item>
-        <a-form-item label="通知标题" required><a-input v-model:value="editForm.title" :maxlength="100" /></a-form-item>
-        <a-form-item label="通知正文" required><a-textarea v-model:value="editForm.content" :rows="4" :maxlength="4000" /></a-form-item>
+        <a-form-item label="动作类型" required><a-radio-group v-model:value="editForm.actionType"><a-radio value="notification">站内通知</a-radio><a-radio value="agent">执行 Agent</a-radio></a-radio-group></a-form-item>
+        <template v-if="editForm.actionType === 'notification'"><a-form-item label="通知标题" required><a-input v-model:value="editForm.title" :maxlength="100" /></a-form-item><a-form-item label="通知正文" required><a-textarea v-model:value="editForm.content" :rows="4" :maxlength="4000" /></a-form-item></template>
+        <template v-else><a-form-item label="目标 Agent" required><a-select v-model:value="editForm.agentSlug" placeholder="选择可执行 Agent"><a-select-option v-for="agent in agents" :key="agent.slug" :value="agent.slug">{{ agent.name }}</a-select-option></a-select></a-form-item><a-form-item label="执行指令" required><a-textarea v-model:value="editForm.instruction" :rows="5" :maxlength="8000" /></a-form-item><a-form-item label="超时（秒）" required><a-input-number v-model:value="editForm.timeoutSeconds" :min="60" :max="3600" :precision="0" /></a-form-item></template>
         <div class="form-grid">
           <a-form-item label="时区" required><a-input v-model:value="editForm.timezone" /></a-form-item>
           <a-form-item label="调度类型" required><a-select v-model:value="editForm.scheduleKind"><a-select-option value="at">单次</a-select-option><a-select-option value="interval">间隔</a-select-option><a-select-option value="cron">Cron</a-select-option></a-select></a-form-item>

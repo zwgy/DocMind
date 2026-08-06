@@ -13,8 +13,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yuxi.repositories.scheduled_job_repository import ScheduledJobRepository
+from yuxi.repositories.agent_repository import AgentRepository
+from yuxi.repositories.agent_run_repository import AgentRunRepository
 from yuxi.scheduled_jobs.ids import new_scheduled_job_id
-from yuxi.scheduled_jobs.schemas import PersonalScheduledJobRequest
+from yuxi.scheduled_jobs.schemas import AgentAction, PersonalScheduledJobRequest
 from yuxi.scheduled_jobs.timing import next_run_at
 from yuxi.storage.postgres.models_business import User
 from yuxi.storage.postgres.models_scheduled_jobs import (
@@ -47,6 +49,7 @@ class ScheduledJobService:
     def __init__(self, db_session: AsyncSession):
         self.db = db_session
         self.repository = ScheduledJobRepository(db_session)
+        self.cancelled_agent_run_ids: list[str] = []
 
     async def create_personal_job(
         self, *, owner_uid: str, request: PersonalScheduledJobRequest, idempotency_key: str
@@ -61,6 +64,7 @@ class ScheduledJobService:
         owner = await self.db.scalar(select(User).where(User.uid == owner_uid, User.is_deleted == 0))
         if owner is None:
             raise ScheduledJobDomainError("当前用户不存在或已删除")
+        action_data = await self._resolve_action_data(request=request, owner=owner)
         now = await self.repository.database_now()
         next_at = next_run_at(request.schedule, request.timezone, now, inclusive=False)
         if request.schedule.kind == "at" and next_at <= now:
@@ -82,7 +86,7 @@ class ScheduledJobService:
             timezone=request.timezone,
             next_run_at=next_at,
             action_type=request.action.type,
-            action_data=request.action.model_dump(mode="json"),
+            action_data=action_data,
             status="active",
             created_by_uid=owner_uid,
         )
@@ -174,8 +178,14 @@ class ScheduledJobService:
         self, *, job_id: str, owner_uid: str, version: int, reason: str | None = None
     ) -> ScheduledJob:
         job = await self._lock_owned_job(job_id=job_id, owner_uid=owner_uid, version=version)
-        if job.schedule_kind == "at" and await self.db.scalar(
-            select(ScheduledJobRun.id).where(ScheduledJobRun.scheduled_job_id == job.id).limit(1)
+        existing_run = await self.db.scalar(
+            select(ScheduledJobRun)
+            .where(ScheduledJobRun.scheduled_job_id == job.id)
+            .order_by(ScheduledJobRun.created_at.desc())
+            .limit(1)
+        )
+        if job.schedule_kind == "at" and existing_run and (
+            existing_run.action_type != "agent" or existing_run.status not in {"queued", "running"}
         ):
             raise JobAlreadyTriggeredError("一次性任务已经生成运行，不能取消")
         if job.status not in {"active", "paused"}:
@@ -186,6 +196,23 @@ class ScheduledJobService:
         job.cancelled_reason = reason or "owner_cancelled"
         job.next_run_at = None
         job.version += 1
+        active_agent_runs = list(
+            (
+                await self.db.scalars(
+                    select(ScheduledJobRun).where(
+                        ScheduledJobRun.scheduled_job_id == job.id,
+                        ScheduledJobRun.action_type == "agent",
+                        ScheduledJobRun.status.in_(("queued", "running")),
+                        ScheduledJobRun.agent_run_id.is_not(None),
+                    )
+                )
+            ).all()
+        )
+        agent_run_repository = AgentRunRepository(self.db)
+        for run in active_agent_runs:
+            await agent_run_repository.request_cancel(run.agent_run_id)
+            await self.repository.sync_agent_run_status(agent_run_id=run.agent_run_id, agent_status="cancelled")
+            self.cancelled_agent_run_ids.append(run.agent_run_id)
         self._audit(
             job=job,
             actor_uid=owner_uid,
@@ -210,6 +237,10 @@ class ScheduledJobService:
         next_at = next_run_at(request.schedule, request.timezone, now, inclusive=False)
         if request.schedule.kind == "at" and next_at <= now:
             raise ScheduledJobDomainError("一次性任务触发时间必须晚于当前时间")
+        owner = await self.db.scalar(select(User).where(User.uid == owner_uid, User.is_deleted == 0))
+        if owner is None:
+            raise ScheduledJobDomainError("当前用户不存在或已删除")
+        action_data = await self._resolve_action_data(request=request, owner=owner)
         before = {"name": job.name, "schedule_kind": job.schedule_kind, "action_data": job.action_data}
         job.name = request.name
         job.schedule_kind = request.schedule.kind
@@ -218,7 +249,7 @@ class ScheduledJobService:
         job.interval_seconds = getattr(request.schedule, "interval_seconds", None)
         job.cron_expression = getattr(request.schedule, "cron_expression", None)
         job.timezone = request.timezone
-        job.action_data = request.action.model_dump(mode="json")
+        job.action_data = action_data
         job.next_run_at = next_at if job.status == "active" else None
         job.version += 1
         self._audit(
@@ -277,6 +308,29 @@ class ScheduledJobService:
         payload = request.model_dump(mode="json")
         serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(serialized.encode()).hexdigest()
+
+    async def _resolve_action_data(self, *, request: PersonalScheduledJobRequest, owner: User) -> dict:
+        """创建时只记录审计摘要；运行时必须重新读取管理员保存的 Agent 能力配置。"""
+        action_data = request.action.model_dump(mode="json")
+        if not isinstance(request.action, AgentAction):
+            return action_data
+
+        agent = await AgentRepository(self.db).get_visible_by_slug(
+            slug=request.action.agent_slug,
+            user=owner,
+        )
+        if agent is None or agent.is_subagent:
+            raise ScheduledJobDomainError("目标 Agent 不存在、不可见或不能作为定时任务执行")
+        config = agent.config_json if isinstance(agent.config_json, dict) else {}
+        context = config.get("context") if isinstance(config.get("context"), dict) else {}
+        # 只保存能力引用，避免把运行时配置当作可覆写载荷或泄露不相关内容。
+        action_data["agent_config_snapshot"] = {
+            "backend_id": agent.backend_id,
+            "skills": list(context.get("skills") or []),
+            "tools": list(context.get("tools") or []),
+            "knowledge_bases": list(context.get("knowledge_bases") or []),
+        }
+        return action_data
 
     @staticmethod
     def _same_request_or_raise(job: ScheduledJob, request_hash: str) -> ScheduledJob:

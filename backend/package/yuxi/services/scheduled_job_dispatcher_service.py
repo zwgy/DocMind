@@ -7,6 +7,9 @@ from collections.abc import Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yuxi.repositories.scheduled_job_repository import ScheduledJobRepository
+from yuxi.services.agent_run_service import enqueue_agent_run
+from yuxi.services.scheduled_job_action_handlers import get_action_handler
+from yuxi.storage.postgres.models_scheduled_jobs import ScheduledJobRun
 
 
 class ScheduledJobDispatcherService:
@@ -23,11 +26,29 @@ class ScheduledJobDispatcherService:
                 )
             return [run.id for run in runs]
 
-    async def dispatch_notification(self, *, run_id: str, instance_id: str) -> str | None:
+    async def dispatch_action(self, *, run_id: str, instance_id: str) -> str | None:
         async with self._session_factory() as session:
             async with session.begin():
-                return await ScheduledJobRepository(session).deliver_notification(
-                    run_id=run_id, instance_id=instance_id
+                repository = ScheduledJobRepository(session)
+                run = await session.get(ScheduledJobRun, run_id)
+                if run is None:
+                    return None
+                result = await get_action_handler(run.action_type).dispatch(
+                    repository=repository, run_id=run_id, instance_id=instance_id
+                )
+        if result.agent_run_id:
+            await enqueue_agent_run(result.agent_run_id)
+        return result.status
+
+    async def dispatch_notification(self, *, run_id: str, instance_id: str) -> str | None:
+        """兼容第一版调用方；新代码统一通过动作注册器分发。"""
+        return await self.dispatch_action(run_id=run_id, instance_id=instance_id)
+
+    async def sync_agent_run_status(self, *, agent_run_id: str, agent_status: str) -> bool:
+        async with self._session_factory() as session:
+            async with session.begin():
+                return await ScheduledJobRepository(session).sync_agent_run_status(
+                    agent_run_id=agent_run_id, agent_status=agent_status
                 )
 
     async def retry_or_fail(

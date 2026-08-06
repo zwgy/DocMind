@@ -24,7 +24,7 @@ from yuxi.storage.postgres.models_scheduled_jobs import (
     ScheduledServiceHeartbeat,
 )
 
-TERMINAL_RUN_STATUSES = frozenset({"succeeded", "partial", "failed", "skipped"})
+TERMINAL_RUN_STATUSES = frozenset({"succeeded", "partial", "failed", "cancelled", "skipped"})
 
 
 class ScheduledJobRepository:
@@ -197,6 +197,78 @@ class ScheduledJobRepository:
         await self._finish_run(run, status="failed", now=now, error_code=error_code, error_message=error_message)
         return True
 
+    async def lock_dispatching_run_with_job(
+        self, *, run_id: str, instance_id: str
+    ) -> tuple[ScheduledJobRun | None, ScheduledJob | None, datetime]:
+        """锁定租约所属的运行和任务，供需要创建外部执行单元的动作复用。"""
+        now = await self.database_now()
+        run = await self._lock_owned_run(run_id=run_id, instance_id=instance_id, now=now)
+        if run is None:
+            return None, None, now
+        job = await self.db.scalar(select(ScheduledJob).where(ScheduledJob.id == run.scheduled_job_id).with_for_update())
+        return run, job, now
+
+    async def mark_agent_run_queued(
+        self,
+        *,
+        run: ScheduledJobRun,
+        job: ScheduledJob,
+        agent_run_id: str,
+        conversation_id: str,
+        now: datetime,
+    ) -> None:
+        """ARQ 投递前先持久化排队状态，Worker 重启后可据 AgentRun 的 pending 状态恢复。"""
+        run.status = "queued"
+        run.agent_run_id = agent_run_id
+        run.conversation_id = conversation_id
+        run.lease_owner = None
+        run.lease_expires_at = None
+        run.next_attempt_at = None
+        run.result_data = {"agent_run_id": agent_run_id, "conversation_id": conversation_id}
+        await InboxRepository(self.db).insert_event_if_absent(
+            recipient_uid=job.owner_uid,
+            scheduled_job_id=job.id,
+            scheduled_job_run_id=run.id,
+            category="task",
+            item_type="agent_run_queued",
+            event_key=f"task:{run.id}:queued",
+            title="定时 Agent 任务已排队",
+            content_snapshot=f"任务“{job.name}”已提交，等待 Agent 开始执行。",
+        )
+        await self.db.flush()
+
+    async def sync_agent_run_status(self, *, agent_run_id: str, agent_status: str) -> bool:
+        """Agent Worker 是执行状态事实来源；这里只转换为调度运行与收件箱事件。"""
+        now = await self.database_now()
+        run = await self.db.scalar(
+            select(ScheduledJobRun).where(ScheduledJobRun.agent_run_id == agent_run_id).with_for_update()
+        )
+        if run is None or run.status in TERMINAL_RUN_STATUSES:
+            return False
+        job = await self.db.scalar(select(ScheduledJob).where(ScheduledJob.id == run.scheduled_job_id).with_for_update())
+        if job is None:
+            return False
+        if agent_status == "running":
+            if run.status == "queued":
+                run.status = "running"
+                await self.db.flush()
+                return True
+            return False
+
+        status = "succeeded" if agent_status == "completed" else "cancelled" if agent_status == "cancelled" else "failed"
+        error_code = None if status == "succeeded" else f"agent_{agent_status}"
+        await self._finish_run(
+            run,
+            status=status,
+            now=now,
+            result_data={**(run.result_data or {}), "agent_status": agent_status},
+            error_code=error_code,
+            error_message="Agent 运行需要人工交互" if agent_status == "interrupted" else None,
+            write_task_event=False,
+        )
+        await self._write_agent_task_event(job=job, run=run, status=status)
+        return True
+
     async def write_heartbeat(
         self,
         *,
@@ -242,11 +314,12 @@ class ScheduledJobRepository:
         self,
         run: ScheduledJobRun,
         *,
-        status: Literal["succeeded", "partial", "failed", "skipped"],
+        status: Literal["succeeded", "partial", "failed", "cancelled", "skipped"],
         now: datetime,
         result_data: dict | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
+        write_task_event: bool = True,
     ) -> None:
         run.status = status
         run.lease_owner = None
@@ -259,12 +332,33 @@ class ScheduledJobRepository:
         job = await self.db.scalar(
             select(ScheduledJob).where(ScheduledJob.id == run.scheduled_job_id).with_for_update()
         )
-        if job is not None and job.schedule_kind == "at":
+        if job is not None and job.schedule_kind == "at" and job.status != "cancelled":
             job.status = "completed"
             job.updated_at = now
-        if job is not None and status in {"partial", "skipped", "failed"}:
+        if write_task_event and job is not None and status in {"partial", "skipped", "failed"}:
             await self._write_task_event(job=job, run=run, status=status, error_message=error_message)
         await self.db.flush()
+
+    async def _write_agent_task_event(
+        self, *, job: ScheduledJob, run: ScheduledJobRun, status: Literal["succeeded", "failed", "cancelled"]
+    ) -> None:
+        if status == "succeeded":
+            title, content = "定时 Agent 任务已完成", f"任务“{job.name}”已完成。"
+        elif status == "cancelled":
+            title, content = "定时 Agent 任务已取消", f"任务“{job.name}”已取消。"
+        else:
+            title = "定时 Agent 任务执行失败"
+            content = run.error_message or f"任务“{job.name}”执行失败，请查看运行记录。"
+        await InboxRepository(self.db).insert_event_if_absent(
+            recipient_uid=job.owner_uid,
+            scheduled_job_id=job.id,
+            scheduled_job_run_id=run.id,
+            category="task",
+            item_type=f"agent_run_{status}",
+            event_key=f"task:{run.id}:{status}",
+            title=title,
+            content_snapshot=content,
+        )
 
     async def _write_task_event(
         self,

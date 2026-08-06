@@ -355,3 +355,89 @@ async def test_retry_limit_finishes_on_fifth_attempt_and_writes_one_task_event()
         if job_id:
             await _cleanup_job(job_id=job_id, user_uids=[owner_uid, recipient_uid])
         await pg_manager.close()
+
+
+@pytest.mark.integration
+async def test_agent_run_status_creates_terminal_unread_task_event():
+    """Agent Worker 的终态必须回写调度运行，不能只停留在聊天运行表。"""
+    pg_manager.initialize()
+    await pg_manager.create_tables()
+    await pg_manager.ensure_business_schema()
+
+    suffix = uuid4().hex
+    owner_uid = f"agent_status_owner_{suffix}"
+    job_id = new_scheduled_job_id("sj_")
+    run_id = new_scheduled_job_id("sjr_")
+    try:
+        async with pg_manager.get_async_session_context() as session:
+            repository = ScheduledJobRepository(session)
+            now = await repository.database_now()
+            session.add(User(uid=owner_uid, username=f"agent_owner_{suffix[:12]}", password_hash="not-used", role="user"))
+            session.add(
+                ScheduledJob(
+                    id=job_id,
+                    owner_uid=owner_uid,
+                    source_type="personal",
+                    source_snapshot={"entry_point": "integration_test", "thread_id": None},
+                    name="Agent 状态回写验收",
+                    schedule_kind="at",
+                    run_at=now - timedelta(minutes=1),
+                    timezone="Asia/Shanghai",
+                    next_run_at=None,
+                    action_type="agent",
+                    action_data={
+                        "type": "agent",
+                        "agent_slug": "assistant",
+                        "instruction": "整理待办",
+                        "timeout_seconds": 300,
+                    },
+                    status="active",
+                    created_by_uid=owner_uid,
+                )
+            )
+            await session.flush()
+            session.add(
+                ScheduledJobRun(
+                    id=run_id,
+                    scheduled_job_id=job_id,
+                    scheduled_for=now,
+                    status="queued",
+                    attempt_count=1,
+                    action_type="agent",
+                    action_snapshot={"type": "agent", "agent_slug": "assistant", "instruction": "整理待办", "timeout_seconds": 300},
+                    recipient_snapshot=[{"uid": owner_uid, "name": "agent owner"}],
+                    agent_run_id=f"run_{suffix}",
+                    conversation_id="1",
+                )
+            )
+            await session.flush()
+            await repository.mark_agent_run_queued(
+                run=await session.get(ScheduledJobRun, run_id),
+                job=await session.get(ScheduledJob, job_id),
+                agent_run_id=f"run_{suffix}",
+                conversation_id="1",
+                now=now,
+            )
+
+        async with pg_manager.get_async_session_context() as session:
+            repository = ScheduledJobRepository(session)
+            assert await repository.sync_agent_run_status(agent_run_id=f"run_{suffix}", agent_status="running")
+            assert await repository.sync_agent_run_status(agent_run_id=f"run_{suffix}", agent_status="completed")
+
+        async with pg_manager.get_async_session_context() as session:
+            run = await session.get(ScheduledJobRun, run_id)
+            events = list(
+                (
+                    await session.scalars(
+                        select(InboxItem)
+                        .where(InboxItem.scheduled_job_run_id == run_id, InboxItem.category == "task")
+                        .order_by(InboxItem.created_at.asc())
+                    )
+                ).all()
+            )
+            assert run is not None and run.status == "succeeded" and run.finished_at is not None
+            assert [event.item_type for event in events] == ["agent_run_queued", "agent_run_succeeded"]
+            assert all(not event.is_read for event in events)
+    finally:
+        await _cleanup_job(job_id=job_id, user_uids=[owner_uid])
+        await pg_manager.close()

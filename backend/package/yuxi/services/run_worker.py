@@ -73,6 +73,10 @@ class NonRetryableRunError(Exception):
     """Error type that should not trigger ARQ retry."""
 
 
+class ScheduledRunTimeoutError(NonRetryableRunError):
+    """定时 Agent 的显式执行上限，不能被 ARQ 重试放大为重复业务动作。"""
+
+
 @dataclass
 class RunContext:
     run_id: str
@@ -174,12 +178,27 @@ async def mark_run_running(run_id: str):
     async with pg_manager.get_async_session_context() as db:
         repo = AgentRunRepository(db)
         await repo.mark_running(run_id)
+    await _sync_scheduled_agent_run(run_id=run_id, agent_status="running")
 
 
 async def mark_run_terminal(run_id: str, status: str, error_type: str | None = None, error_message: str | None = None):
     async with pg_manager.get_async_session_context() as db:
         repo = AgentRunRepository(db)
         await repo.set_terminal_status(run_id, status=status, error_type=error_type, error_message=error_message)
+    await _sync_scheduled_agent_run(run_id=run_id, agent_status=status)
+
+
+async def _sync_scheduled_agent_run(*, run_id: str, agent_status: str) -> None:
+    """普通对话不受影响；只有已关联的定时 Agent 运行会产生收件箱状态事件。"""
+    from yuxi.services.scheduled_job_dispatcher_service import ScheduledJobDispatcherService
+
+    try:
+        await ScheduledJobDispatcherService(pg_manager.AsyncSession).sync_agent_run_status(
+            agent_run_id=run_id, agent_status=agent_status
+        )
+    except Exception:
+        # AgentRun 已有独立的终态持久化，状态镜像失败不能反向篡改真实执行结果。
+        logger.exception("同步定时 Agent 运行状态失败: %s", run_id)
 
 
 async def _load_user(uid: str):
@@ -308,6 +327,19 @@ async def _consume_stream_with_cancel(agen, run_ctx: RunContext):
             return
 
 
+async def _consume_stream_with_timeout(agen, run_ctx: RunContext, timeout_seconds: int | None):
+    if timeout_seconds is None:
+        async for chunk in _consume_stream_with_cancel(agen, run_ctx):
+            yield chunk
+        return
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            async for chunk in _consume_stream_with_cancel(agen, run_ctx):
+                yield chunk
+    except TimeoutError as error:
+        raise ScheduledRunTimeoutError(f"定时 Agent 执行超过 {timeout_seconds} 秒") from error
+
+
 async def process_agent_run(ctx, run_id: str):
     run = await _get_run(run_id)
     if not run:
@@ -316,6 +348,9 @@ async def process_agent_run(ctx, run_id: str):
 
     if run.status in TERMINAL_RUN_STATUSES:
         logger.info(f"Run already terminal, skip: {run_id}, status={run.status}")
+        return
+    if run.status == "cancel_requested":
+        await mark_run_terminal(run_id, "cancelled", error_type="cancelled", error_message="对话已取消")
         return
 
     payload = run.input_payload or {}
@@ -380,6 +415,10 @@ async def process_agent_run(ctx, run_id: str):
     )
     terminal_set = False
     dispatch_next = False
+    scheduled_payload = payload.get("scheduled_job") if isinstance(payload.get("scheduled_job"), dict) else {}
+    timeout_seconds = scheduled_payload.get("timeout_seconds")
+    if not isinstance(timeout_seconds, int) or not 60 <= timeout_seconds <= 3600:
+        timeout_seconds = None
 
     try:
         async with pg_manager.get_async_session_context() as db:
@@ -405,7 +444,7 @@ async def process_agent_run(ctx, run_id: str):
                         save_user_message=False,
                     )
 
-                async for chunk_bytes in _consume_stream_with_cancel(stream, run_ctx):
+                async for chunk_bytes in _consume_stream_with_timeout(stream, run_ctx, timeout_seconds):
                     for chunk in _iter_json_chunks(chunk_bytes):
                         target_thread_id = _chunk_thread_id(chunk, thread_id)
                         if chunk.get("status") == "loading":
@@ -499,6 +538,19 @@ async def process_agent_run(ctx, run_id: str):
         await mark_run_terminal(run_id, "cancelled", error_type="cancelled", error_message="对话已取消")
         await _append_end_event(run_id, "cancelled", thread_id=thread_id, payload={"chunk": cancel_chunk})
         logger.info(f"Run cancelled: {run_id}")
+    except ScheduledRunTimeoutError as error:
+        await writer.flush()
+        timeout_chunk = {
+            "status": "error",
+            "error_type": "scheduled_timeout",
+            "error_message": str(error),
+            "request_id": request_id,
+            "retryable": False,
+        }
+        await append_run_event(run_id, "error", {"chunk": timeout_chunk, "retryable": False}, thread_id=thread_id)
+        await mark_run_terminal(run_id, "failed", error_type="scheduled_timeout", error_message=str(error))
+        await _append_end_event(run_id, "failed", thread_id=thread_id, payload={"chunk": timeout_chunk})
+        return
     except Exception as e:
         await writer.flush()
         if _is_retryable_exception(e):

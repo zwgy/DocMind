@@ -40,6 +40,7 @@ class ConversationRepository:
         title: str | None = None,
         thread_id: str | None = None,
         metadata: dict | None = None,
+        commit: bool = True,
     ) -> Conversation:
         if not thread_id:
             thread_id = str(uuid_lib.uuid4())
@@ -63,8 +64,9 @@ class ConversationRepository:
 
         stats = ConversationStats(conversation_id=conversation.id)
         self.db.add(stats)
-        await self.db.commit()
-        await self.db.refresh(conversation)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(conversation)
 
         logger.info(f"Created conversation: {conversation.thread_id} for user {uid}")
         return conversation

@@ -21,6 +21,7 @@ from yuxi.services.scheduled_job_service import (
     ScheduledJobDomainError,
     ScheduledJobService,
 )
+from yuxi.services.run_queue_service import publish_cancel_signal
 from yuxi.storage.postgres.models_business import User
 from yuxi.storage.postgres.models_scheduled_jobs import ScheduledJob
 
@@ -52,6 +53,9 @@ def _format_datetime(value: datetime | None) -> str | None:
 
 
 def _serialize_job(job: ScheduledJob) -> dict:
+    action_data = dict(job.action_data or {})
+    # 配置摘要仅用于数据库审计，不能成为客户端可回传的运行时配置。
+    action_data.pop("agent_config_snapshot", None)
     return {
         "id": job.id,
         "name": job.name,
@@ -64,7 +68,7 @@ def _serialize_job(job: ScheduledJob) -> dict:
         "timezone": job.timezone,
         "next_run_at": _format_datetime(job.next_run_at),
         "action_type": job.action_type,
-        "action_data": job.action_data,
+        "action_data": action_data,
         "status": job.status,
         "version": job.version,
         "last_run_at": _format_datetime(job.last_run_at),
@@ -86,6 +90,8 @@ def _serialize_run(run) -> dict:
         "error_message": run.error_message,
         "started_at": _format_datetime(run.started_at),
         "finished_at": _format_datetime(run.finished_at),
+        "agent_run_id": run.agent_run_id,
+        "conversation_id": run.conversation_id,
         "created_at": _format_datetime(run.created_at),
     }
 
@@ -255,6 +261,8 @@ async def change_scheduled_job_status(
                 reason=payload.reason,
             )
         await db.commit()
+        for agent_run_id in service.cancelled_agent_run_ids:
+            await publish_cancel_signal(agent_run_id)
     except ScheduledJobDomainError as error:
         await db.rollback()
         _raise_domain_error(error)

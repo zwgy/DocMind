@@ -34,7 +34,7 @@ async def _dispatch_one(
 ) -> None:
     try:
         await asyncio.wait_for(
-            service.dispatch_notification(run_id=run_id, instance_id=instance_id),
+            service.dispatch_action(run_id=run_id, instance_id=instance_id),
             timeout=action_timeout_seconds,
         )
     except (TimeoutError, OperationalError, DBAPIError) as error:
@@ -42,15 +42,15 @@ async def _dispatch_one(
             run_id=run_id,
             instance_id=instance_id,
             max_attempts=max_attempts,
-            error_code="notification_temporary_error",
+            error_code="scheduled_action_temporary_error",
             error_message=str(error),
         )
     except Exception as error:
-        logger.exception("定时任务通知动作失败: run_id=%s", run_id)
+        logger.exception("定时任务动作失败: run_id=%s", run_id)
         await service.fail_non_retryable(
             run_id=run_id,
             instance_id=instance_id,
-            error_code="notification_action_error",
+            error_code="scheduled_action_error",
             error_message=str(error),
         )
 
