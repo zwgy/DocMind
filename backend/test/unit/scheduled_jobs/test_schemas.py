@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from yuxi.scheduled_jobs.ids import new_scheduled_job_id
-from yuxi.scheduled_jobs.schemas import IncomingTaskDraft, ScheduledJobDraft
+from yuxi.scheduled_jobs.schemas import IncomingTaskDraft, PersonalScheduledJobRequest, ScheduledJobDraft
 
 
 def test_scheduled_job_draft_normalizes_naive_time_to_declared_timezone_and_minute():
@@ -63,6 +63,19 @@ def test_incoming_task_draft_keeps_missing_schedule_for_manual_confirmation():
 
     assert draft.schedule is None
     assert draft.recipient_names == []
+
+
+def test_personal_request_rejects_client_supplied_owner_or_recipient():
+    with pytest.raises(ValidationError):
+        PersonalScheduledJobRequest.model_validate(
+            {
+                "name": "个人通知",
+                "timezone": "Asia/Shanghai",
+                "schedule": {"kind": "at", "run_at": "2026-08-07T10:00:00+08:00"},
+                "action": {"type": "notification", "title": "提醒", "content": "会议开始"},
+                "owner_uid": "forbidden",
+            }
+        )
 
 
 def test_new_scheduled_job_id_uses_declared_prefix_only():

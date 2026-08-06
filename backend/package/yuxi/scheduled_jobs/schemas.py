@@ -121,6 +121,29 @@ class ScheduledJobDraft(_StrictModel):
         return self
 
 
+class PersonalScheduledJobRequest(_StrictModel):
+    """HTTP 与 Agent 工具共用的个人创建载荷，身份字段只能由服务端补齐。"""
+
+    name: str = Field(min_length=1, max_length=100)
+    schedule: Schedule
+    action: NotificationAction
+    timezone: str = Field(min_length=1, max_length=64)
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        return ScheduledJobDraft.validate_timezone(value)
+
+    @model_validator(mode="after")
+    def normalize_schedule_datetime(self) -> PersonalScheduledJobRequest:
+        timezone = ZoneInfo(self.timezone)
+        if isinstance(self.schedule, AtSchedule):
+            self.schedule.run_at = _normalize_schedule_datetime(self.schedule.run_at, timezone)
+        elif isinstance(self.schedule, IntervalSchedule):
+            self.schedule.anchor_at = _normalize_schedule_datetime(self.schedule.anchor_at, timezone)
+        return self
+
+
 class IncomingTaskDraft(_StrictModel):
     """来文抽取输出；允许缺失调度信息，但不能伪造成可启用任务。"""
 
