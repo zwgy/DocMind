@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from base64 import urlsafe_b64decode, urlsafe_b64encode
+from binascii import Error as BinasciiError
+from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,15 +108,30 @@ class ScheduledJobService:
         return job
 
     async def list_owned_jobs(
-        self, *, owner_uid: str, status: str | None = None, limit: int = 20
-    ) -> list[ScheduledJob]:
+        self,
+        *,
+        owner_uid: str,
+        statuses: tuple[str, ...],
+        cursor: str | None,
+        limit: int = 20,
+    ) -> tuple[list[ScheduledJob], str | None]:
         statement = select(ScheduledJob).where(ScheduledJob.owner_uid == owner_uid)
-        if status:
-            statement = statement.where(ScheduledJob.status == status)
+        statement = statement.where(ScheduledJob.status.in_(statuses))
+        if cursor:
+            cursor_updated_at, cursor_id = self._decode_cursor(cursor)
+            statement = statement.where(
+                or_(
+                    ScheduledJob.updated_at < cursor_updated_at,
+                    and_(ScheduledJob.updated_at == cursor_updated_at, ScheduledJob.id < cursor_id),
+                )
+            )
         result = await self.db.execute(
-            statement.order_by(ScheduledJob.updated_at.desc(), ScheduledJob.id.desc()).limit(limit)
+            statement.order_by(ScheduledJob.updated_at.desc(), ScheduledJob.id.desc()).limit(limit + 1)
         )
-        return list(result.scalars())
+        jobs = list(result.scalars())
+        page = jobs[:limit]
+        next_cursor = self._encode_cursor(page[-1]) if len(jobs) > limit else None
+        return page, next_cursor
 
     async def get_owned_job(self, *, job_id: str, owner_uid: str) -> ScheduledJob | None:
         return await self.db.scalar(
@@ -152,7 +170,9 @@ class ScheduledJobService:
         await self.db.flush()
         return job
 
-    async def cancel(self, *, job_id: str, owner_uid: str, version: int) -> ScheduledJob:
+    async def cancel(
+        self, *, job_id: str, owner_uid: str, version: int, reason: str | None = None
+    ) -> ScheduledJob:
         job = await self._lock_owned_job(job_id=job_id, owner_uid=owner_uid, version=version)
         if job.schedule_kind == "at" and await self.db.scalar(
             select(ScheduledJobRun.id).where(ScheduledJobRun.scheduled_job_id == job.id).limit(1)
@@ -163,7 +183,7 @@ class ScheduledJobService:
         before = {"status": job.status}
         job.status = "cancelled"
         job.cancelled_at = await self.repository.database_now()
-        job.cancelled_reason = "owner_cancelled"
+        job.cancelled_reason = reason or "owner_cancelled"
         job.next_run_at = None
         job.version += 1
         self._audit(
@@ -172,6 +192,7 @@ class ScheduledJobService:
             action="cancelled",
             before_data=before,
             after_data={"status": job.status},
+            reason=job.cancelled_reason,
         )
         await self.db.flush()
         return job
@@ -208,6 +229,26 @@ class ScheduledJobService:
             raise IdempotencyKeyReusedError("Idempotency-Key 已用于不同请求")
         return job
 
+    @staticmethod
+    def _decode_cursor(cursor: str) -> tuple[datetime, str]:
+        try:
+            payload = json.loads(urlsafe_b64decode(cursor.encode()).decode())
+            updated_at = datetime.fromisoformat(payload["updated_at"])
+            job_id = payload["id"]
+        except (BinasciiError, KeyError, TypeError, ValueError, UnicodeDecodeError) as error:
+            raise ScheduledJobDomainError("cursor 无效") from error
+        if updated_at.tzinfo is None or updated_at.utcoffset() is None or not isinstance(job_id, str) or not job_id:
+            raise ScheduledJobDomainError("cursor 无效")
+        return updated_at.astimezone(UTC), job_id
+
+    @staticmethod
+    def _encode_cursor(job: ScheduledJob) -> str:
+        payload = json.dumps(
+            {"updated_at": job.updated_at.astimezone(UTC).isoformat(), "id": job.id},
+            separators=(",", ":"),
+        )
+        return urlsafe_b64encode(payload.encode()).decode()
+
     def _audit(
         self,
         *,
@@ -216,6 +257,7 @@ class ScheduledJobService:
         action: str,
         before_data: dict | None = None,
         after_data: dict | None = None,
+        reason: str | None = None,
     ) -> None:
         self.db.add(
             ScheduledJobAuditLog(
@@ -225,5 +267,6 @@ class ScheduledJobService:
                 action=action,
                 before_data=before_data,
                 after_data=after_data,
+                reason=reason,
             )
         )
