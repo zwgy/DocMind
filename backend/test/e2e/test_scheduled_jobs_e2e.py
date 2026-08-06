@@ -39,14 +39,15 @@ async def test_personal_scheduled_job_lifecycle_over_live_api(e2e_client):
     async with pg_manager.get_async_session_context() as session:
         session.add(User(uid=uid, username=username, password_hash=AuthUtils.hash_password(password), role="user"))
 
-    login = await e2e_client.post("/api/auth/token", data={"username": username, "password": password})
-    assert login.status_code == 200, login.text
-    e2e_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-    headers = {**e2e_headers, "Idempotency-Key": idempotency_key}
+    e2e_headers = None
     job_id = None
     version = None
 
     try:
+        login = await e2e_client.post("/api/auth/token", data={"username": username, "password": password})
+        assert login.status_code == 200, login.text
+        e2e_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        headers = {**e2e_headers, "Idempotency-Key": idempotency_key}
         preview = await e2e_client.post(
             "/api/scheduled-jobs/schedule-preview",
             json={"schedule": payload["schedule"], "timezone": payload["timezone"]},
@@ -88,7 +89,7 @@ async def test_personal_scheduled_job_lifecycle_over_live_api(e2e_client):
         assert inbox.status_code == 200, inbox.text
         assert set(inbox.json()) >= {"notification_unread_count", "task_unread_count", "total_unread_count"}
     finally:
-        if job_id and version:
+        if job_id and version and e2e_headers:
             cancelled = await e2e_client.post(
                 f"/api/scheduled-jobs/{job_id}/status",
                 json={"action": "cancel", "version": version, "reason": "pytest_cleanup"},
