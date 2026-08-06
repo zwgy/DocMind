@@ -148,6 +148,19 @@ const router = createRouter({
       ]
     },
     {
+      path: '/scheduled-jobs',
+      name: 'scheduled-jobs',
+      component: AppLayout,
+      children: [
+        {
+          path: '',
+          name: 'ScheduledJobsComp',
+          component: () => import('../views/ScheduledJobsView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        }
+      ]
+    },
+    {
       path: '/:pathMatch(.*)*',
       name: 'NotFound',
       component: () => import('../views/EmptyView.vue'),

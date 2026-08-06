@@ -6,6 +6,7 @@ import {
   ClipboardList,
   LibraryBig,
   Inbox,
+  Clock3,
   Box,
   FolderKanban,
   PanelLeftClose,
@@ -86,6 +87,13 @@ onMounted(async () => {
     await getRemoteConfig()
     taskerStore.loadTasks()
   }
+
+  items.push({
+    name: '定时任务',
+    path: '/scheduled-jobs',
+    icon: Clock3,
+    activeIcon: Clock3
+  })
 })
 
 const route = useRoute()
