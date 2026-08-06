@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import declarative_base
 from yuxi.storage.postgres.models_business import Base as BusinessBase
 from yuxi.storage.postgres.models_knowledge import Base as KnowledgeBase
+from yuxi.storage.postgres import models_scheduled_jobs  # noqa: F401
+from yuxi.storage.postgres.scheduled_jobs_migration import ensure_scheduled_jobs_schema
 from yuxi.utils import logger
 from yuxi.utils.singleton import SingletonMeta
 
@@ -780,6 +782,7 @@ class PostgresManager(metaclass=SingletonMeta):
         async with self.async_engine.begin() as conn:
             for stmt in stmts:
                 await conn.execute(text(stmt))
+            await ensure_scheduled_jobs_schema(conn)
 
     @property
     def is_postgresql(self) -> bool:

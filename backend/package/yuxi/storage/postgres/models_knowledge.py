@@ -114,6 +114,8 @@ class IncomingDocument(Base):
     knowledge_import_status = Column(String(32), default="none", index=True)
     knowledge_import_task_id = Column(String(64))
     knowledge_import_error = Column(Text)
+    archived_at = Column(DateTime(timezone=True))
+    archived_by = Column(String(64))
     created_by = Column(String(64))
     updated_by = Column(String(64))
     created_at = Column(DateTime(timezone=True), default=utc_now_naive)
