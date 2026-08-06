@@ -77,6 +77,8 @@ async def _create_extraction(
                 model_spec="integration-test",
             )
         )
+        # 模型未声明 ORM relationship，先落库运行记录才能满足结果表的外键。
+        await session.flush()
         result = DocumentBusinessExtractionResult(
             run_id=run_id,
             document_scope="incoming",
@@ -161,6 +163,7 @@ async def test_candidate_enable_is_idempotent_and_freezes_batch():
             run_id=run_id,
             user_uids=[owner_uid, recipient_uid],
         )
+        await pg_manager.close()
 
 
 @pytest.mark.integration
@@ -195,3 +198,4 @@ async def test_missing_incoming_owner_keeps_invalid_candidate_for_review():
             assert {error["code"] for error in candidate.validation_errors} >= {"recipient_forbidden", "required"}
     finally:
         await _cleanup(incoming_id=incoming_id, run_id=run_id, user_uids=[])
+        await pg_manager.close()
