@@ -117,3 +117,5 @@ async def test_scheduler_coalesces_missed_interval_and_dispatcher_delivers_once(
             await session.execute(delete(ScheduledJobRecipient).where(ScheduledJobRecipient.scheduled_job_id == job_id))
             await session.execute(delete(ScheduledJob).where(ScheduledJob.id == job_id))
             await session.execute(delete(User).where(User.uid.in_([owner_uid, recipient_uid, deleted_uid])))
+        # pytest 默认每个异步测试使用独立事件循环，测试间不得复用 asyncpg 连接池。
+        await pg_manager.close()

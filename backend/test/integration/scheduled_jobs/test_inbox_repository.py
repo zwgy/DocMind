@@ -101,6 +101,8 @@ async def test_inbox_paginates_aggregates_and_marks_read_with_owner_scope():
                     _job(job_id=job_ids[4], owner_uid=bob_uid, status="active", updated_at=base + timedelta(minutes=5)),
                 ]
             )
+            # 这些 ORM 对象没有定义 relationship；显式 flush 才能保证收件箱外键引用的任务先落库。
+            await session.flush()
             session.add_all(
                 [
                     _inbox_item(
@@ -198,3 +200,5 @@ async def test_inbox_paginates_aggregates_and_marks_read_with_owner_scope():
             await session.execute(delete(InboxItem).where(InboxItem.id.in_(item_ids)))
             await session.execute(delete(ScheduledJob).where(ScheduledJob.id.in_(job_ids)))
             await session.execute(delete(User).where(User.uid.in_([alice_uid, bob_uid])))
+        # pytest 默认每个异步测试使用独立事件循环，测试间不得复用 asyncpg 连接池。
+        await pg_manager.close()

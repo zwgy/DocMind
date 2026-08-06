@@ -140,3 +140,5 @@ async def test_scheduled_jobs_postgres_enforces_constraints_and_skip_locked():
             await session.execute(delete(ScheduledJobRun).where(ScheduledJobRun.scheduled_job_id == job_id))
             await session.execute(delete(ScheduledJob).where(ScheduledJob.id == job_id))
             await session.execute(delete(User).where(User.uid == uid))
+        # pytest 默认每个异步测试使用独立事件循环，测试间不得复用 asyncpg 连接池。
+        await pg_manager.close()
