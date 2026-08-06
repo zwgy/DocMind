@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import delete
 
 from yuxi.storage.postgres.manager import pg_manager
-from yuxi.storage.postgres.models_business import OperationLog, User
+from yuxi.storage.postgres.models_business import Department, OperationLog, User
 from yuxi.storage.postgres.models_scheduled_jobs import (
     InboxItem,
     ScheduledJob,
@@ -37,7 +37,17 @@ async def test_personal_scheduled_job_lifecycle_over_live_api(e2e_client):
         "timezone": "Asia/Shanghai",
     }
     async with pg_manager.get_async_session_context() as session:
-        user = User(uid=uid, username=username, password_hash=AuthUtils.hash_password(password), role="user")
+        department = Department(name=f"pytest_schedule_{suffix}")
+        session.add(department)
+        await session.flush()
+        department_id = department.id
+        user = User(
+            uid=uid,
+            username=username,
+            password_hash=AuthUtils.hash_password(password),
+            role="user",
+            department_id=department_id,
+        )
         session.add(user)
         await session.flush()
         user_id = user.id
@@ -123,3 +133,4 @@ async def test_personal_scheduled_job_lifecycle_over_live_api(e2e_client):
             # 批量删除不会触发 ORM 关系级联，登录留下的操作日志须先清理。
             await session.execute(delete(OperationLog).where(OperationLog.user_id == user_id))
             await session.execute(delete(User).where(User.id == user_id))
+            await session.execute(delete(Department).where(Department.id == department_id))
