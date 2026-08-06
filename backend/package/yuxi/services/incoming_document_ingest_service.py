@@ -23,7 +23,10 @@ from yuxi.knowledge.chunking.ragflow_like.dispatcher import chunk_markdown
 from yuxi.knowledge.chunking.ragflow_like.nlp import count_tokens
 from yuxi.knowledge.parser import Parser, is_supported_file_extension
 from yuxi.knowledge.utils import calculate_content_hash, parse_minio_url
-from yuxi.repositories.incoming_document_repository import IncomingDocumentAuditReferenceError, IncomingDocumentRepository
+from yuxi.repositories.incoming_document_repository import (
+    IncomingDocumentAuditReferenceError,
+    IncomingDocumentRepository,
+)
 from yuxi.services.incoming_task_candidate_service import IncomingTaskCandidateService
 from yuxi.services.knowledge_document_ingest_service import KnowledgeDocumentIngestService
 from yuxi.services.task_service import TaskContext, tasker

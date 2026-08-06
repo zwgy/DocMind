@@ -120,7 +120,8 @@ async def list_incoming_documents(
     capabilities = await repository.get_lifecycle_capabilities([item.incoming_id for item in items])
     return {
         "items": [
-            _incoming_document_payload(item, detail=False, capabilities=capabilities.get(item.incoming_id)) for item in items
+            _incoming_document_payload(item, detail=False, capabilities=capabilities.get(item.incoming_id))
+            for item in items
         ],
         "total": total,
     }

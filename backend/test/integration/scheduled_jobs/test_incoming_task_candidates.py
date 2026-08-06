@@ -279,7 +279,9 @@ async def test_draft_incoming_can_be_deleted_and_archived_incoming_is_hidden_fro
             assert await session.scalar(
                 select(ScheduledJobCandidate.id).where(ScheduledJobCandidate.incoming_id == incoming_id)
             ) is None
-            assert await session.scalar(select(IncomingTaskBatch.id).where(IncomingTaskBatch.incoming_id == incoming_id)) is None
+            assert await session.scalar(
+                select(IncomingTaskBatch.id).where(IncomingTaskBatch.incoming_id == incoming_id)
+            ) is None
     finally:
         await _cleanup(incoming_id=incoming_id, run_id=run_id, user_uids=[])
         await pg_manager.close()
@@ -297,7 +299,14 @@ async def test_incoming_with_candidate_audit_reference_cannot_be_deleted():
     run_id = f"run_audit_{suffix}"
     try:
         async with pg_manager.get_async_session_context() as session:
-            session.add(User(uid=owner_uid, username=f"audit_owner_{suffix[:12]}", password_hash="not-used", role="superadmin"))
+            session.add(
+                User(
+                    uid=owner_uid,
+                    username=f"audit_owner_{suffix[:12]}",
+                    password_hash="not-used",
+                    role="superadmin",
+                )
+            )
         await _create_extraction(
             incoming_id=incoming_id,
             run_id=run_id,

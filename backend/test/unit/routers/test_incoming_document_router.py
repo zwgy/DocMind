@@ -339,7 +339,9 @@ async def test_archive_incoming_document_delegates_to_service(monkeypatch):
 
     monkeypatch.setattr(incoming_document_router, "IncomingDocumentIngestService", FakeService)
 
-    result = await incoming_document_router.archive_incoming_document("inc_1", current_user=SimpleNamespace(uid="admin"))
+    result = await incoming_document_router.archive_incoming_document(
+        "inc_1", current_user=SimpleNamespace(uid="admin")
+    )
 
     assert result == {"incomingId": "inc_1", "archivedBy": "admin"}
     assert captured == {"incoming_id": "inc_1", "operator_id": "admin"}
