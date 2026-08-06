@@ -84,16 +84,34 @@ async def create_personal_scheduled_task(
     timezone: Annotated[str, Field(description="IANA 时区，例如 Asia/Shanghai")],
     schedule_kind: Annotated[Literal["at", "interval", "cron"], Field(description="调度类型")],
     tool_call_id: Annotated[str, InjectedToolCallId],
-    run_at: Annotated[datetime | None, Field(description="单次任务的未来触发时间，schedule_kind 为 at 时必填")]=None,
-    interval_seconds: Annotated[int | None, Field(ge=60, multiple_of=60, description="间隔秒数，schedule_kind 为 interval 时必填")]=None,
-    anchor_at: Annotated[datetime | None, Field(description="间隔任务首次触发时间，schedule_kind 为 interval 时必填")]=None,
-    cron_expression: Annotated[str | None, Field(description="五段 Cron 表达式，schedule_kind 为 cron 时必填")]=None,
-    action_type: Annotated[Literal["notification", "agent"], Field(description="动作类型")]='notification',
-    title: Annotated[str | None, Field(max_length=100, description="通知标题，action_type 为 notification 时必填")]=None,
-    content: Annotated[str | None, Field(max_length=4000, description="通知正文，action_type 为 notification 时必填")]=None,
-    agent_slug: Annotated[str | None, Field(max_length=80, description="目标顶层 Agent，action_type 为 agent 时必填")]=None,
-    instruction: Annotated[str | None, Field(max_length=8000, description="Agent 执行指令，action_type 为 agent 时必填")]=None,
-    timeout_seconds: Annotated[int | None, Field(ge=60, le=3600, description="Agent 超时秒数，action_type 为 agent 时可选")]=None,
+    run_at: Annotated[
+        datetime | None, Field(description="单次任务的未来触发时间，schedule_kind 为 at 时必填")
+    ] = None,
+    interval_seconds: Annotated[
+        int | None, Field(ge=60, multiple_of=60, description="间隔秒数，schedule_kind 为 interval 时必填")
+    ] = None,
+    anchor_at: Annotated[
+        datetime | None, Field(description="间隔任务首次触发时间，schedule_kind 为 interval 时必填")
+    ] = None,
+    cron_expression: Annotated[
+        str | None, Field(description="五段 Cron 表达式，schedule_kind 为 cron 时必填")
+    ] = None,
+    action_type: Annotated[Literal["notification", "agent"], Field(description="动作类型")] = "notification",
+    title: Annotated[
+        str | None, Field(max_length=100, description="通知标题，action_type 为 notification 时必填")
+    ] = None,
+    content: Annotated[
+        str | None, Field(max_length=4000, description="通知正文，action_type 为 notification 时必填")
+    ] = None,
+    agent_slug: Annotated[
+        str | None, Field(max_length=80, description="目标顶层 Agent，action_type 为 agent 时必填")
+    ] = None,
+    instruction: Annotated[
+        str | None, Field(max_length=8000, description="Agent 执行指令，action_type 为 agent 时必填")
+    ] = None,
+    timeout_seconds: Annotated[
+        int | None, Field(ge=60, le=3600, description="Agent 超时秒数，action_type 为 agent 时可选")
+    ] = None,
     runtime: ToolRuntime = None,
 ) -> dict[str, Any]:
     """为当前用户创建站内通知或指定顶层 Agent 的定时任务。"""

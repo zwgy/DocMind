@@ -4,7 +4,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from pydantic import ValidationError
 
 from yuxi.agents.middlewares.skills import resolve_skill_gated_tools
 from yuxi.agents.toolkits.scheduled_tasks import tools
