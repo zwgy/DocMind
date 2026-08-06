@@ -921,6 +921,9 @@ class IncomingDocumentIngestService:
         ready_updates: dict[str, Any],
     ) -> None:
         """真实抽取运行必须生成候选；仅为旧单元测试兼容无运行 ID 的替身返回值。"""
+        if not self._uses_database_candidate_workflows:
+            await self.incoming_repo.update_document(incoming_id, ready_updates)
+            return
         extraction_run_id = (extraction_result or {}).get("run_id")
         if not extraction_run_id:
             await self.incoming_repo.update_document(incoming_id, ready_updates)

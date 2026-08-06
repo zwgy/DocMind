@@ -105,7 +105,7 @@ async def test_candidate_enable_maps_version_conflict(monkeypatch):
     assert exc_info.value.status_code == 409
 
 
-def test_candidate_cursor_rejects_invalid_value():
+async def test_candidate_cursor_rejects_invalid_value():
     with pytest.raises(HTTPException) as exc_info:
         scheduled_job_candidate_router._decode_cursor("not-a-cursor")
 
