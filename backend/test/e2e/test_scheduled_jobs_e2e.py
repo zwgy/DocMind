@@ -85,7 +85,11 @@ async def test_personal_scheduled_job_lifecycle_over_live_api(e2e_client):
         assert conflict.status_code == 409, conflict.text
         assert conflict.json()["detail"] == "idempotency_key_reused"
 
-        listed = await e2e_client.get("/api/scheduled-jobs", params={"view": "ongoing", "limit": 20}, headers=e2e_headers)
+        listed = await e2e_client.get(
+            "/api/scheduled-jobs",
+            params={"view": "ongoing", "limit": 20},
+            headers=e2e_headers,
+        )
         assert listed.status_code == 200, listed.text
         assert any(item["id"] == job_id for item in listed.json()["items"])
 
@@ -127,9 +131,13 @@ async def test_personal_scheduled_job_lifecycle_over_live_api(e2e_client):
                 if run_ids:
                     await session.execute(delete(InboxItem).where(InboxItem.scheduled_job_run_id.in_(run_ids)))
                 await session.execute(delete(InboxItem).where(InboxItem.scheduled_job_id.in_(job_ids)))
-                await session.execute(delete(ScheduledJobAuditLog).where(ScheduledJobAuditLog.scheduled_job_id.in_(job_ids)))
+                await session.execute(
+                    delete(ScheduledJobAuditLog).where(ScheduledJobAuditLog.scheduled_job_id.in_(job_ids))
+                )
                 await session.execute(delete(ScheduledJobRun).where(ScheduledJobRun.scheduled_job_id.in_(job_ids)))
-                await session.execute(delete(ScheduledJobRecipient).where(ScheduledJobRecipient.scheduled_job_id.in_(job_ids)))
+                await session.execute(
+                    delete(ScheduledJobRecipient).where(ScheduledJobRecipient.scheduled_job_id.in_(job_ids))
+                )
                 await session.execute(delete(ScheduledJob).where(ScheduledJob.id.in_(job_ids)))
             # 批量删除不会触发 ORM 关系级联，登录留下的操作日志须先清理。
             await session.execute(delete(OperationLog).where(OperationLog.user_id == user_id))
