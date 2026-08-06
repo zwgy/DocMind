@@ -39,7 +39,20 @@ def test_scheduled_jobs_migration_has_idempotent_upgrade_and_manual_downgrade_sq
     assert any("notification_content DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
     assert any("owner_uid DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
     assert any("ADD COLUMN IF NOT EXISTS version" in statement for statement in UPGRADE_STATEMENTS)
-    assert all("IF NOT EXISTS" in statement or "DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
+    for table_name, constraint_name in (
+        ("scheduled_jobs", "ck_sj_action_type"),
+        ("scheduled_job_runs", "ck_sjr_status"),
+        ("scheduled_job_runs", "ck_sjr_terminal_finished_at"),
+    ):
+        drop_statement = f"ALTER TABLE IF EXISTS {table_name} DROP CONSTRAINT IF EXISTS {constraint_name}"
+        add_statement_prefix = f"ALTER TABLE IF EXISTS {table_name} ADD CONSTRAINT {constraint_name}"
+        drop_index = UPGRADE_STATEMENTS.index(drop_statement)
+        assert UPGRADE_STATEMENTS[drop_index + 1].startswith(add_statement_prefix)
+
+    assert all(
+        "IF EXISTS" in statement or "DROP NOT NULL" in statement or "ADD CONSTRAINT" in statement
+        for statement in UPGRADE_STATEMENTS
+    )
     assert "DROP TABLE IF EXISTS scheduled_jobs" in DOWNGRADE_SQL
     assert "DROP COLUMN IF EXISTS archived_at" in DOWNGRADE_SQL
 

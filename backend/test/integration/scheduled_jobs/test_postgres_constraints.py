@@ -11,6 +11,7 @@ from yuxi.scheduled_jobs.ids import new_scheduled_job_id
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_business import User
 from yuxi.storage.postgres.models_scheduled_jobs import ScheduledJob, ScheduledJobRun
+from yuxi.storage.postgres.scheduled_jobs_migration import ensure_scheduled_jobs_schema
 from yuxi.utils.datetime_utils import utc_now
 
 
@@ -33,6 +34,19 @@ def _personal_job(*, job_id: str, owner_uid: str, request_key: str, run_at):
         status="active",
         created_by_uid=owner_uid,
     )
+
+
+@pytest.mark.integration
+async def test_scheduled_job_migration_can_run_twice_against_postgres():
+    """约束替换无法使用不存在的 ADD CONSTRAINT IF NOT EXISTS，必须实际验证 DROP/ADD 对可重复执行。"""
+    pg_manager.initialize()
+    await pg_manager.create_tables()
+    try:
+        async with pg_manager.async_engine.begin() as connection:
+            await ensure_scheduled_jobs_schema(connection)
+            await ensure_scheduled_jobs_schema(connection)
+    finally:
+        await pg_manager.close()
 
 
 @pytest.mark.integration
