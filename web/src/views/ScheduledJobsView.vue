@@ -2,7 +2,7 @@
 import { computed, onMounted } from 'vue'
 import { Pause, Play, RefreshCw, X } from 'lucide-vue-next'
 import { useScheduledJobsStore } from '@/stores/scheduledJobs'
-import PageHeader from '@/components/PageHeader.vue'
+import PageHeader from '@/components/shared/PageHeader.vue'
 
 const store = useScheduledJobsStore()
 const page = computed(() => store.currentPage)
