@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { Pause, Play, RefreshCw, X } from 'lucide-vue-next'
+import { Pause, Pencil, Play, RefreshCw, X } from 'lucide-vue-next'
+import { message } from 'ant-design-vue'
 import { useScheduledJobsStore } from '@/stores/scheduledJobs'
 import { scheduledJobApi } from '@/apis/scheduled_job_api'
 import PageHeader from '@/components/shared/PageHeader.vue'
@@ -20,6 +21,69 @@ const currentTab = computed(() => tabs.find((item) => item.value === store.activ
 const detail = ref(null)
 const runs = ref([])
 const detailLoading = ref(false)
+const editorOpen = ref(false)
+const editingJob = ref(null)
+const preview = ref(null)
+const previewLoading = ref(false)
+const saving = ref(false)
+const editForm = ref(createEditForm())
+
+function createEditForm() {
+  return {
+    name: '',
+    title: '',
+    content: '',
+    timezone: 'Asia/Shanghai',
+    scheduleKind: 'at',
+    runAt: '',
+    intervalValue: 1,
+    intervalUnit: 'hours',
+    anchorAt: '',
+    cronExpression: ''
+  }
+}
+
+function intervalFields(seconds) {
+  if (seconds && seconds % 86400 === 0) return { value: seconds / 86400, unit: 'days' }
+  if (seconds && seconds % 3600 === 0) return { value: seconds / 3600, unit: 'hours' }
+  return { value: (seconds || 60) / 60, unit: 'minutes' }
+}
+
+function toLocalInput(value) {
+  return typeof value === 'string' ? value.slice(0, 16) : ''
+}
+
+function resetEditForm(job) {
+  const interval = intervalFields(job.interval_seconds)
+  editForm.value = {
+    ...createEditForm(),
+    name: job.name || '',
+    title: job.action_data?.title || '',
+    content: job.action_data?.content || '',
+    timezone: job.timezone || 'Asia/Shanghai',
+    scheduleKind: job.schedule_kind || 'at',
+    runAt: toLocalInput(job.run_at),
+    intervalValue: interval.value,
+    intervalUnit: interval.unit,
+    anchorAt: toLocalInput(job.anchor_at),
+    cronExpression: job.cron_expression || ''
+  }
+  preview.value = null
+}
+
+function buildSchedule() {
+  const form = editForm.value
+  if (form.scheduleKind === 'at') return { kind: 'at', run_at: form.runAt }
+  if (form.scheduleKind === 'interval') {
+    const secondsByUnit = { minutes: 60, hours: 3600, days: 86400 }
+    return {
+      kind: 'interval',
+      interval_seconds: Number(form.intervalValue) * secondsByUnit[form.intervalUnit],
+      anchor_at: form.anchorAt
+    }
+  }
+  return { kind: 'cron', cron_expression: form.cronExpression }
+}
 
 function formatTime(value) {
   if (!value) return '-'
@@ -44,6 +108,45 @@ async function openDetail(job) {
   detail.value = job
   detailLoading.value = true
   try { runs.value = (await scheduledJobApi.runs(job.id, { limit: 20 }))?.items || [] } finally { detailLoading.value = false }
+}
+
+function openEditor(job) {
+  editingJob.value = job
+  resetEditForm(job)
+  editorOpen.value = true
+}
+
+async function previewSchedule() {
+  previewLoading.value = true
+  preview.value = null
+  try {
+    preview.value = await scheduledJobApi.preview({ schedule: buildSchedule(), timezone: editForm.value.timezone })
+  } catch (error) {
+    message.error(error?.message || '调度规则不可用')
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+async function saveEditor() {
+  if (!editingJob.value) return
+  saving.value = true
+  try {
+    const form = editForm.value
+    await store.update(editingJob.value.id, {
+      version: editingJob.value.version,
+      name: form.name,
+      action: { type: 'notification', title: form.title, content: form.content },
+      schedule: buildSchedule(),
+      timezone: form.timezone
+    })
+    editorOpen.value = false
+    message.success('任务已更新')
+  } catch (error) {
+    message.error(error?.message || '更新任务失败')
+  } finally {
+    saving.value = false
+  }
 }
 
 onMounted(() => void store.refresh())
@@ -76,6 +179,7 @@ onMounted(() => void store.refresh())
           </div>
           <div class="job-actions">
             <a-button type="link" @click="openDetail(job)">详情</a-button>
+            <a-button v-if="['active', 'paused'].includes(job.status)" type="text" @click="openEditor(job)"><Pencil :size="16" />编辑</a-button>
             <a-button v-if="job.status === 'active' && job.schedule_kind !== 'at'" type="text" :loading="page.loading" @click="handleAction(job, 'pause')"><Pause :size="16" />暂停</a-button>
             <a-button v-if="job.status === 'paused'" type="text" :loading="page.loading" @click="handleAction(job, 'resume')"><Play :size="16" />恢复</a-button>
             <a-popconfirm v-if="['active', 'paused'].includes(job.status)" title="确认取消此任务？" ok-text="取消任务" cancel-text="返回" @confirm="handleAction(job, 'cancel')">
@@ -98,6 +202,23 @@ onMounted(() => void store.refresh())
       <a-empty v-else-if="!runs.length" description="暂无运行历史" />
       <a-timeline v-else><a-timeline-item v-for="run in runs" :key="run.id"><strong>{{ run.status }}</strong><div>{{ formatTime(run.scheduled_for) }} · 第 {{ run.attempt_count }} 次尝试</div><small v-if="run.error_message">{{ run.error_message }}</small></a-timeline-item></a-timeline>
     </a-drawer>
+    <a-drawer v-model:open="editorOpen" width="min(680px, 92vw)" title="编辑个人定时任务">
+      <a-form layout="vertical">
+        <a-form-item label="任务名称" required><a-input v-model:value="editForm.name" :maxlength="100" /></a-form-item>
+        <a-form-item label="通知标题" required><a-input v-model:value="editForm.title" :maxlength="100" /></a-form-item>
+        <a-form-item label="通知正文" required><a-textarea v-model:value="editForm.content" :rows="4" :maxlength="4000" /></a-form-item>
+        <div class="form-grid">
+          <a-form-item label="时区" required><a-input v-model:value="editForm.timezone" /></a-form-item>
+          <a-form-item label="调度类型" required><a-select v-model:value="editForm.scheduleKind"><a-select-option value="at">单次</a-select-option><a-select-option value="interval">间隔</a-select-option><a-select-option value="cron">Cron</a-select-option></a-select></a-form-item>
+        </div>
+        <a-form-item v-if="editForm.scheduleKind === 'at'" label="触发时间" required><a-input v-model:value="editForm.runAt" type="datetime-local" /></a-form-item>
+        <template v-else-if="editForm.scheduleKind === 'interval'"><div class="form-grid"><a-form-item label="间隔" required><a-space-compact class="full-width"><a-input-number v-model:value="editForm.intervalValue" :min="1" :precision="0" class="interval-value" /><a-select v-model:value="editForm.intervalUnit" class="interval-unit"><a-select-option value="minutes">分钟</a-select-option><a-select-option value="hours">小时</a-select-option><a-select-option value="days">天</a-select-option></a-select></a-space-compact></a-form-item><a-form-item label="首次触发时间" required><a-input v-model:value="editForm.anchorAt" type="datetime-local" /></a-form-item></div></template>
+        <a-form-item v-else label="Cron 表达式" required><a-input v-model:value="editForm.cronExpression" placeholder="0 9 * * 1-5" /></a-form-item>
+        <a-alert v-if="preview" type="info" show-icon class="preview-result" :message="`下一次：${formatTime(preview.next_run_at)}`" :description="preview.occurrences?.map((entry) => entry.local).join('；')" />
+        <p class="edit-hint">任务一旦已产生运行记录将不能编辑，接收人始终为当前用户。</p>
+        <div class="editor-actions"><a-button :loading="previewLoading" @click="previewSchedule">预览触发时间</a-button><a-button type="primary" :loading="saving" @click="saveEditor">保存</a-button></div>
+      </a-form>
+    </a-drawer>
   </div>
 </template>
 
@@ -119,5 +240,12 @@ onMounted(() => void store.refresh())
 .status-completed { color: var(--color-success-700); background: var(--color-success-50); border-color: transparent; }
 .status-cancelled { color: var(--gray-600); background: var(--gray-100); border-color: transparent; }
 .load-more { display: flex; justify-content: center; padding: 20px; }
-@media (max-width: 640px) { .scheduled-jobs-content { padding: 16px; } .job-row { align-items: flex-start; flex-direction: column; } .job-actions { width: 100%; } }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.full-width { width: 100%; }
+.interval-value { width: calc(100% - 100px); }
+.interval-unit { width: 100px; }
+.preview-result { margin-bottom: 16px; }
+.edit-hint { margin: 0 0 16px; color: var(--color-text-secondary); font-size: 13px; }
+.editor-actions { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 640px) { .scheduled-jobs-content { padding: 16px; } .job-row { align-items: flex-start; flex-direction: column; } .job-actions { width: 100%; } .form-grid { grid-template-columns: 1fr; gap: 0; } }
 </style>
