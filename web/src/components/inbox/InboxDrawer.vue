@@ -24,7 +24,7 @@ watch(() => store.open, (open) => { if (open) void store.refresh() })
     </a-tabs>
     <div class="drawer-actions"><a-button size="small" :disabled="!store.counts[`${store.category}_unread_count`]" @click="store.markAllRead()"><CheckCheck :size="15" />全部已读</a-button></div>
     <a-alert v-if="page.error" type="error" show-icon :message="page.error.message || '加载收件箱失败'" />
-    <a-skeleton v-else-if="page.loading && !page.items.length" active :paragraph="{ rows: 5 }" />
+    <a-skeleton v-if="page.loading && !page.items.length" active :paragraph="{ rows: 5 }" />
     <a-empty v-else-if="!page.items.length" :description="store.category === 'task' ? '暂无任务' : '暂无通知'" />
     <div v-else class="inbox-list"><button v-for="item in page.items" :key="itemId(item)" type="button" class="inbox-item" :class="{ unread: unread(item) }" @click="unread(item) && store.markRead(store.category, itemId(item))"><Mail :size="18" /><span class="inbox-copy"><strong>{{ title(item) }}</strong><span>{{ content(item) }}</span><time>{{ formatTime(store.category === 'task' ? item.sort_at : item.created_at) }}</time></span><i v-if="unread(item)" class="unread-dot" /></button></div>
     <div v-if="page.cursor" class="load-more"><a-button :loading="page.moreLoading" @click="store.load()">加载更多</a-button></div>

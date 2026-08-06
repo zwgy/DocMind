@@ -12,6 +12,7 @@ async function request(path: string, token?: string, options: RequestInit = {}) 
 
 export const inboxApi = {
   unreadCount: (token?: string) => request('/api/inbox/unread-count', token),
-  list: (category: 'notification' | 'task', token?: string) => request(`/api/inbox/${category === 'task' ? 'tasks' : 'notifications'}?limit=20`, token),
-  markRead: (category: 'notification' | 'task', id: string, token?: string) => request(`/api/inbox/${category === 'task' ? `tasks/${encodeURIComponent(id)}` : `notifications/${encodeURIComponent(id)}`}/read`, token, { method: 'POST', body: '{}' })
+  list: (category: 'notification' | 'task', token?: string, cursor?: string) => request(`/api/inbox/${category === 'task' ? 'tasks' : 'notifications'}?${new URLSearchParams({ limit: '20', ...(cursor ? { cursor } : {}) })}`, token),
+  markRead: (category: 'notification' | 'task', id: string, token?: string) => request(`/api/inbox/${category === 'task' ? `tasks/${encodeURIComponent(id)}` : `notifications/${encodeURIComponent(id)}`}/read`, token, { method: 'POST', body: '{}' }),
+  markAllRead: (category: 'notification' | 'task', token?: string) => request('/api/inbox/read-all', token, { method: 'POST', body: JSON.stringify({ category }) })
 }
