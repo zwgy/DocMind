@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { scheduledJobApi } from '@/apis/scheduled_job_api'
 
-const VIEWS = ['ongoing', 'paused', 'history']
+const VIEWS = ['ongoing', 'pending_confirmation', 'paused', 'history']
 
 function createPage() {
   return { items: [], cursor: null, loading: false, loadingMore: false, error: null }
@@ -16,6 +16,7 @@ export const useScheduledJobsStore = defineStore('scheduledJobs', () => {
   const currentPage = computed(() => pages.value[activeView.value])
 
   async function load(view = activeView.value, { reset = false } = {}) {
+    if (view === 'pending_confirmation') return
     const page = pages.value[view]
     if (!page || page.loading || (!reset && page.cursor === null && page.items.length)) return
     if (!reset && page.loadingMore) return

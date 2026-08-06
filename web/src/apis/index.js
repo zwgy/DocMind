@@ -8,6 +8,7 @@ export * from './system_api' // 系统管理API
 export * from './knowledge_api' // 知识库管理API
 export * from './incoming_document_api' // 来文管理API
 export * from './scheduled_job_api' // 定时任务 API
+export * from './scheduled_job_candidate_api' // 定时任务候选 API
 export * from './inbox_api' // 统一收件箱 API
 export * from './graph_api' // 图谱API
 export * from './agent_api' // 智能体API

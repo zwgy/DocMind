@@ -4,14 +4,18 @@ import { Pause, Play, RefreshCw, X } from 'lucide-vue-next'
 import { useScheduledJobsStore } from '@/stores/scheduledJobs'
 import { scheduledJobApi } from '@/apis/scheduled_job_api'
 import PageHeader from '@/components/shared/PageHeader.vue'
+import CandidateList from '@/components/scheduled-jobs/CandidateList.vue'
+import { useUserStore } from '@/stores/user'
 
 const store = useScheduledJobsStore()
+const userStore = useUserStore()
 const page = computed(() => store.currentPage)
 const tabs = [
   { value: 'ongoing', label: '进行中', empty: '暂无进行中的任务' },
   { value: 'paused', label: '已暂停', empty: '暂无已暂停任务' },
   { value: 'history', label: '历史', empty: '暂无历史任务' }
 ]
+if (userStore.isAdmin) tabs.splice(1, 0, { value: 'pending_confirmation', label: '待确认', empty: '' })
 const currentTab = computed(() => tabs.find((item) => item.value === store.activeView) || tabs[0])
 const detail = ref(null)
 const runs = ref([])
@@ -57,10 +61,11 @@ onMounted(() => void store.refresh())
       <a-tabs :active-key="store.activeView" @change="store.setActiveView">
         <a-tab-pane v-for="tab in tabs" :key="tab.value" :tab="tab.label" />
       </a-tabs>
-      <a-alert v-if="page.error" class="load-error" type="error" show-icon :message="page.error.message || '加载任务失败'">
+      <CandidateList v-if="store.activeView === 'pending_confirmation'" />
+      <a-alert v-else-if="page.error" class="load-error" type="error" show-icon :message="page.error.message || '加载任务失败'">
         <template #action><a-button size="small" @click="store.refresh()">重试</a-button></template>
       </a-alert>
-      <a-skeleton v-if="page.loading && !page.items.length" active :paragraph="{ rows: 6 }" />
+      <a-skeleton v-else-if="page.loading && !page.items.length" active :paragraph="{ rows: 6 }" />
       <a-empty v-else-if="!page.items.length" :description="currentTab.empty" />
       <section v-else class="job-list" aria-label="定时任务列表">
         <article v-for="job in page.items" :key="job.id" class="job-row">
