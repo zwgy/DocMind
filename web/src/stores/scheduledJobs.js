@@ -59,6 +59,12 @@ export const useScheduledJobsStore = defineStore('scheduledJobs', () => {
     }
   }
 
+  async function update(jobId, payload) {
+    const response = await scheduledJobApi.update(jobId, payload)
+    await Promise.all(VIEWS.map((view) => refresh(view)))
+    return response?.job
+  }
+
   function setActiveView(view) {
     if (!VIEWS.includes(view)) return
     activeView.value = view
@@ -66,5 +72,5 @@ export const useScheduledJobsStore = defineStore('scheduledJobs', () => {
     if (!page.items.length && !page.loading) void refresh(view)
   }
 
-  return { activeView, currentPage, pages, load, refresh, changeStatus, setActiveView }
+  return { activeView, currentPage, pages, load, refresh, changeStatus, update, setActiveView }
 })

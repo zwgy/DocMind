@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from './base'
+import { apiGet, apiPatch, apiPost } from './base'
 
 function queryString(params = {}) {
   const query = new URLSearchParams()
@@ -21,5 +21,12 @@ export const scheduledJobApi = {
   },
   changeStatus(jobId, payload) {
     return apiPost(`/api/scheduled-jobs/${encodeURIComponent(jobId)}/status`, payload)
+  },
+  update(jobId, payload) {
+    return apiPatch(`/api/scheduled-jobs/${encodeURIComponent(jobId)}`, payload)
+  },
+  runs(jobId, params = {}) {
+    const query = queryString(params)
+    return apiGet(`/api/scheduled-jobs/${encodeURIComponent(jobId)}/runs${query ? `?${query}` : ''}`)
   }
 }

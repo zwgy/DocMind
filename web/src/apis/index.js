@@ -24,6 +24,7 @@ export {
   apiGet,
   apiPost,
   apiPut,
+  apiPatch,
   apiDelete,
   apiAdminGet,
   apiAdminPost,

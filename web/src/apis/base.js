@@ -218,6 +218,15 @@ export function apiPut(url, data = {}, options = {}, requiresAuth = true, respon
   )
 }
 
+export function apiPatch(url, data = {}, options = {}, requiresAuth = true, responseType = 'json') {
+  return apiRequest(
+    url,
+    { method: 'PATCH', body: data instanceof FormData ? data : JSON.stringify(data), ...options },
+    requiresAuth,
+    responseType
+  )
+}
+
 export function apiAdminPut(url, data = {}, options = {}, responseType = 'json') {
   checkAdminPermission()
   return apiPut(url, data, options, true, responseType)

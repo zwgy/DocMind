@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Pause, Play, RefreshCw, X } from 'lucide-vue-next'
 import { useScheduledJobsStore } from '@/stores/scheduledJobs'
+import { scheduledJobApi } from '@/apis/scheduled_job_api'
 import PageHeader from '@/components/shared/PageHeader.vue'
 
 const store = useScheduledJobsStore()
@@ -12,6 +13,9 @@ const tabs = [
   { value: 'history', label: '历史', empty: '暂无历史任务' }
 ]
 const currentTab = computed(() => tabs.find((item) => item.value === store.activeView) || tabs[0])
+const detail = ref(null)
+const runs = ref([])
+const detailLoading = ref(false)
 
 function formatTime(value) {
   if (!value) return '-'
@@ -30,6 +34,12 @@ function statusText(status) {
 
 async function handleAction(job, action) {
   await store.changeStatus(job, action)
+}
+
+async function openDetail(job) {
+  detail.value = job
+  detailLoading.value = true
+  try { runs.value = (await scheduledJobApi.runs(job.id, { limit: 20 }))?.items || [] } finally { detailLoading.value = false }
 }
 
 onMounted(() => void store.refresh())
@@ -60,6 +70,7 @@ onMounted(() => void store.refresh())
             <div class="job-next">下一次：{{ formatTime(job.next_run_at) }}</div>
           </div>
           <div class="job-actions">
+            <a-button type="link" @click="openDetail(job)">详情</a-button>
             <a-button v-if="job.status === 'active' && job.schedule_kind !== 'at'" type="text" :loading="page.loading" @click="handleAction(job, 'pause')"><Pause :size="16" />暂停</a-button>
             <a-button v-if="job.status === 'paused'" type="text" :loading="page.loading" @click="handleAction(job, 'resume')"><Play :size="16" />恢复</a-button>
             <a-popconfirm v-if="['active', 'paused'].includes(job.status)" title="确认取消此任务？" ok-text="取消任务" cancel-text="返回" @confirm="handleAction(job, 'cancel')">
@@ -70,6 +81,18 @@ onMounted(() => void store.refresh())
       </section>
       <div v-if="page.cursor" class="load-more"><a-button :loading="page.loadingMore" @click="store.load()">加载更多</a-button></div>
     </main>
+    <a-drawer v-model:open="detail" width="min(680px, 92vw)" :title="detail?.name || '任务详情'">
+      <a-descriptions v-if="detail" size="small" bordered :column="1">
+        <a-descriptions-item label="状态">{{ statusText(detail.status) }}</a-descriptions-item>
+        <a-descriptions-item label="调度">{{ scheduleSummary(detail) }}</a-descriptions-item>
+        <a-descriptions-item label="时区">{{ detail.timezone }}</a-descriptions-item>
+        <a-descriptions-item label="下一次">{{ formatTime(detail.next_run_at) }}</a-descriptions-item>
+      </a-descriptions>
+      <h3 class="run-heading">运行历史</h3>
+      <a-skeleton v-if="detailLoading" active :paragraph="{ rows: 3 }" />
+      <a-empty v-else-if="!runs.length" description="暂无运行历史" />
+      <a-timeline v-else><a-timeline-item v-for="run in runs" :key="run.id"><strong>{{ run.status }}</strong><div>{{ formatTime(run.scheduled_for) }} · 第 {{ run.attempt_count }} 次尝试</div><small v-if="run.error_message">{{ run.error_message }}</small></a-timeline-item></a-timeline>
+    </a-drawer>
   </div>
 </template>
 
