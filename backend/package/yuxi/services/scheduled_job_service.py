@@ -221,18 +221,34 @@ class ScheduledJobService:
         job.action_data = request.action.model_dump(mode="json")
         job.next_run_at = next_at if job.status == "active" else None
         job.version += 1
-        self._audit(job=job, actor_uid=owner_uid, action="updated", before_data=before, after_data={"name": job.name, "schedule_kind": job.schedule_kind, "action_data": job.action_data})
+        self._audit(
+            job=job,
+            actor_uid=owner_uid,
+            action="updated",
+            before_data=before,
+            after_data={"name": job.name, "schedule_kind": job.schedule_kind, "action_data": job.action_data},
+        )
         await self.db.flush()
         return job
 
-    async def list_owned_runs(self, *, job_id: str, owner_uid: str, cursor: str | None, limit: int) -> tuple[list[ScheduledJobRun], str | None]:
+    async def list_owned_runs(
+        self, *, job_id: str, owner_uid: str, cursor: str | None, limit: int
+    ) -> tuple[list[ScheduledJobRun], str | None]:
         if await self.get_owned_job(job_id=job_id, owner_uid=owner_uid) is None:
             raise ScheduledJobDomainError("任务不存在")
         statement = select(ScheduledJobRun).where(ScheduledJobRun.scheduled_job_id == job_id)
         if cursor:
             created_at, run_id = self._decode_cursor(cursor)
-            statement = statement.where(or_(ScheduledJobRun.created_at < created_at, and_(ScheduledJobRun.created_at == created_at, ScheduledJobRun.id < run_id)))
-        rows = list((await self.db.scalars(statement.order_by(ScheduledJobRun.created_at.desc(), ScheduledJobRun.id.desc()).limit(limit + 1))).all())
+            statement = statement.where(
+                or_(
+                    ScheduledJobRun.created_at < created_at,
+                    and_(ScheduledJobRun.created_at == created_at, ScheduledJobRun.id < run_id),
+                )
+            )
+        result = await self.db.scalars(
+            statement.order_by(ScheduledJobRun.created_at.desc(), ScheduledJobRun.id.desc()).limit(limit + 1)
+        )
+        rows = list(result.all())
         page = rows[:limit]
         return page, self._encode_cursor(page[-1]) if len(rows) > limit else None
 

@@ -248,7 +248,15 @@ async def test_update_scheduled_job_uses_current_owner_and_version(monkeypatch):
             )
 
     monkeypatch.setattr(scheduled_job_router, "ScheduledJobService", FakeService)
-    payload = scheduled_job_router.ScheduledJobPatchRequest.model_validate({"version": 1, "name": "updated", "schedule": {"kind": "at", "run_at": "2030-01-02T09:00:00+08:00"}, "action": {"type": "notification", "title": "title", "content": "content"}, "timezone": "Asia/Shanghai"})
+    payload = scheduled_job_router.ScheduledJobPatchRequest.model_validate(
+        {
+            "version": 1,
+            "name": "updated",
+            "schedule": {"kind": "at", "run_at": "2030-01-02T09:00:00+08:00"},
+            "action": {"type": "notification", "title": "title", "content": "content"},
+            "timezone": "Asia/Shanghai",
+        }
+    )
     response = await scheduled_job_router.update_scheduled_job("sj_1", payload, SimpleNamespace(uid="alice"), _FakeDb())
 
     assert response["job"]["version"] == 2

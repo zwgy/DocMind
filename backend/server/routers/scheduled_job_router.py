@@ -76,7 +76,18 @@ def _serialize_job(job: ScheduledJob) -> dict:
 
 
 def _serialize_run(run) -> dict:
-    return {"id": run.id, "scheduled_for": _format_datetime(run.scheduled_for), "status": run.status, "attempt_count": run.attempt_count, "result_data": run.result_data, "error_code": run.error_code, "error_message": run.error_message, "started_at": _format_datetime(run.started_at), "finished_at": _format_datetime(run.finished_at), "created_at": _format_datetime(run.created_at)}
+    return {
+        "id": run.id,
+        "scheduled_for": _format_datetime(run.scheduled_for),
+        "status": run.status,
+        "attempt_count": run.attempt_count,
+        "result_data": run.result_data,
+        "error_code": run.error_code,
+        "error_message": run.error_message,
+        "started_at": _format_datetime(run.started_at),
+        "finished_at": _format_datetime(run.finished_at),
+        "created_at": _format_datetime(run.created_at),
+    }
 
 
 def _raise_domain_error(error: ScheduledJobDomainError) -> None:
@@ -187,19 +198,35 @@ async def get_scheduled_job(
 
 
 @scheduled_jobs.patch("/{job_id}")
-async def update_scheduled_job(job_id: str, payload: ScheduledJobPatchRequest, current_user: User = Depends(get_required_user), db: AsyncSession = Depends(get_db)):
+async def update_scheduled_job(
+    job_id: str,
+    payload: ScheduledJobPatchRequest,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
     try:
         async with db.begin():
-            job = await ScheduledJobService(db).update_personal_job(job_id=job_id, owner_uid=current_user.uid, version=payload.version, request=PersonalScheduledJobRequest.model_validate(payload.model_dump(exclude={"version"})))
+            request = PersonalScheduledJobRequest.model_validate(payload.model_dump(exclude={"version"}))
+            job = await ScheduledJobService(db).update_personal_job(
+                job_id=job_id, owner_uid=current_user.uid, version=payload.version, request=request
+            )
     except ScheduledJobDomainError as error:
         _raise_domain_error(error)
     return {"job": _serialize_job(job)}
 
 
 @scheduled_jobs.get("/{job_id}/runs")
-async def list_scheduled_job_runs(job_id: str, current_user: User = Depends(get_required_user), db: AsyncSession = Depends(get_db), cursor: str | None = Query(default=None, max_length=512), limit: int = Query(default=20, ge=1, le=100)):
+async def list_scheduled_job_runs(
+    job_id: str,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+    cursor: str | None = Query(default=None, max_length=512),
+    limit: int = Query(default=20, ge=1, le=100),
+):
     try:
-        runs, next_cursor = await ScheduledJobService(db).list_owned_runs(job_id=job_id, owner_uid=current_user.uid, cursor=cursor, limit=limit)
+        runs, next_cursor = await ScheduledJobService(db).list_owned_runs(
+            job_id=job_id, owner_uid=current_user.uid, cursor=cursor, limit=limit
+        )
     except ScheduledJobDomainError as error:
         _raise_domain_error(error)
     return {"items": [_serialize_run(run) for run in runs], "next_cursor": next_cursor}
