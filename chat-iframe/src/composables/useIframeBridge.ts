@@ -73,6 +73,8 @@ export function useIframeBridge() {
       send('WINDOW_DRAG_MOVE', payload),
     notifyWindowDragEnd: () => send('WINDOW_DRAG_END'),
     notifyConversationCreated: (payload: { conversationId: string }) => send('CONVERSATION_CREATED', payload),
-    notifyMessageSent: (payload: { conversationId: string; messageId?: string }) => send('MESSAGE_SENT', payload)
+    notifyMessageSent: (payload: { conversationId: string; messageId?: string }) => send('MESSAGE_SENT', payload),
+    notifyUnreadCountChanged: (totalUnreadCount: number) =>
+      send('UNREAD_COUNT_CHANGED', { total_unread_count: totalUnreadCount })
   }
 }

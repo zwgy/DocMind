@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Maximize2, Menu, Minimize2, Minus, X } from 'lucide-vue-next'
+import { Mail, Maximize2, Menu, Minimize2, Minus, X } from 'lucide-vue-next'
 import { ingestIncomingDocument, queryIncomingDocumentExtractions } from '@/apis/incoming-documents'
+import { inboxApi } from '@/apis/inbox'
 import ChatInput from '@/components/ChatInput.vue'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatSidebar from '@/components/ChatSidebar.vue'
 import RunInterruptCard from '@/components/RunInterruptCard.vue'
+import InboxDrawer from '@/components/InboxDrawer.vue'
 import { useIframeBridge } from '@/composables/useIframeBridge'
 import { useChatStore } from '@/stores/chat'
 import { useIframeContextStore } from '@/stores/iframe-context'
@@ -21,7 +23,8 @@ const {
   notifyRestore,
   notifyWindowDragEnd,
   notifyWindowDragMove,
-  notifyWindowDragStart
+  notifyWindowDragStart,
+  notifyUnreadCountChanged
 } = useIframeBridge()
 const chat = useChatStore()
 const loading = ref(false)
@@ -29,10 +32,13 @@ const error = ref('')
 const results = ref<Record<string, ExtractionResult>>({})
 const selectedPageFiles = ref<IncomingPageFile[]>([])
 const showSidebar = ref(false)
+const showInbox = ref(false)
+const unreadCount = ref(0)
 const draggingWindow = ref(false)
 const historyScrollRequest = ref(0)
 const ingestingFileIds = new Set<string>()
 let extractionRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let inboxRefreshTimer: ReturnType<typeof setInterval> | null = null
 
 const selectedFile = computed(() => context.selectedFile)
 const currentTokenUsage = computed(() => {
@@ -372,13 +378,24 @@ onMounted(() => {
   if (!context.files.length) refreshExtraction()
   document.addEventListener('visibilitychange', resumeVisibleThread)
   resumeVisibleThread()
+  inboxRefreshTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible' && context.config.token) void refreshInboxCount()
+  }, 30000)
 })
 
 onUnmounted(() => {
   endWindowDrag()
   if (extractionRefreshTimer) clearTimeout(extractionRefreshTimer)
+  if (inboxRefreshTimer) clearInterval(inboxRefreshTimer)
   document.removeEventListener('visibilitychange', resumeVisibleThread)
 })
+
+async function refreshInboxCount() {
+  if (!context.config.token) return
+  const counts = await inboxApi.unreadCount(context.config.token)
+  unreadCount.value = Number(counts?.total_unread_count || 0)
+  notifyUnreadCountChanged(unreadCount.value)
+}
 </script>
 
 <template>
@@ -389,6 +406,7 @@ onUnmounted(() => {
       </button>
       <h1 class="chat-title">AI智能助手</h1>
       <nav class="window-actions" aria-label="窗口控制">
+        <button type="button" title="收件箱" class="mail-button" @click="showInbox = true"><Mail :size="16" /><i v-if="unreadCount" /></button>
         <button
           v-if="context.windowState === 'normal'"
           type="button"
@@ -423,6 +441,7 @@ onUnmounted(() => {
         @click="showSidebar = false"
       ></button>
     </Transition>
+    <InboxDrawer :open="showInbox" :token="context.config.token" @close="showInbox = false" @unread-changed="(count) => { unreadCount = count; notifyUnreadCountChanged(count) }" />
     <Transition name="sidebar-slide">
       <aside v-if="showSidebar" class="conversation-drawer">
         <ChatSidebar

@@ -438,9 +438,18 @@
       case 'MESSAGE_SENT':
         this._emit('messageSent', message.payload)
         break
+      case 'UNREAD_COUNT_CHANGED':
+        this._setUnreadCount(message.payload && message.payload.total_unread_count)
+        break
       default:
         break
     }
+  }
+
+  DocMindChatIframe.prototype._setUnreadCount = function (value) {
+    var count = Number(value) || 0
+    var button = this.container && this.container.querySelector('.docmind-chat-restore')
+    if (button) button.setAttribute('data-unread', count > 0 ? 'true' : 'false')
   }
 
   DocMindChatIframe.prototype._pageContentFromDocument = function () {
