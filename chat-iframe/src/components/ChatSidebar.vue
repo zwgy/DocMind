@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
   MessageSquare,
@@ -13,7 +13,7 @@ import {
 } from 'lucide-vue-next'
 import type { ChatThread } from '@/types'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     threads?: ChatThread[]
     currentThreadId?: string
@@ -36,6 +36,7 @@ const emit = defineEmits<{
 }>()
 
 const openActionsThreadId = ref('')
+const sidebarContent = ref<HTMLElement | null>(null)
 const pendingDeleteThreadId = ref('')
 const pendingRenameThreadId = ref('')
 const renameDraft = ref('')
@@ -149,6 +150,32 @@ function closeDialog() {
   renameDraft.value = ''
 }
 
+async function revealCurrentThread() {
+  if (props.loading || !props.currentThreadId) return
+
+  await nextTick()
+  const list = sidebarContent.value
+  const activeThread = list?.querySelector<HTMLElement>('.thread-option.active')
+  if (!list || !activeThread) return
+
+  // 抽屉每次打开都会重新挂载；只在选中项不可见时移动列表，避免顶部会话发生无意义跳动。
+  const listRect = list.getBoundingClientRect()
+  const threadRect = activeThread.getBoundingClientRect()
+  if (threadRect.top < listRect.top) {
+    list.scrollTop -= listRect.top - threadRect.top
+  } else if (threadRect.bottom > listRect.bottom) {
+    list.scrollTop += threadRect.bottom - listRect.bottom
+  }
+}
+
+onMounted(revealCurrentThread)
+watch(
+  [() => props.loading, () => props.currentThreadId],
+  ([loading]) => {
+    if (!loading) revealCurrentThread()
+  },
+  { flush: 'post' }
+)
 onBeforeUnmount(() => hideTitleTooltip())
 </script>
 
@@ -174,7 +201,7 @@ onBeforeUnmount(() => hideTitleTooltip())
       </div>
     </header>
 
-    <div class="sidebar-content" @scroll="hideTitleTooltip()">
+    <div ref="sidebarContent" class="sidebar-content" @scroll="hideTitleTooltip()">
       <div v-if="loading" class="sidebar-state">
         <span class="loading-spinner"></span>
         <span>加载中...</span>
