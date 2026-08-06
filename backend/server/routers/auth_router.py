@@ -19,6 +19,7 @@ from server.utils.auth_middleware import (
     get_required_user,
 )
 from yuxi.utils.auth_utils import AuthUtils
+from yuxi.utils.datetime_utils import utc_now_naive
 from yuxi.services.user_identity_service import generate_unique_uid, validate_username, is_valid_phone_number
 from yuxi.services.user_lifecycle_service import UserLifecycleService
 from yuxi.services.operation_log_service import log_operation
