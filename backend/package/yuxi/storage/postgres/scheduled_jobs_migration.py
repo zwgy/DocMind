@@ -17,11 +17,23 @@ UPGRADE_STATEMENTS = (
     "ALTER TABLE IF EXISTS scheduled_job_candidates ALTER COLUMN owner_uid DROP NOT NULL",
     "ALTER TABLE IF EXISTS scheduled_job_candidates ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE IF EXISTS scheduled_jobs DROP CONSTRAINT IF EXISTS ck_sj_action_type",
-    "ALTER TABLE IF EXISTS scheduled_jobs ADD CONSTRAINT ck_sj_action_type CHECK (action_type IN ('notification', 'agent'))",
+    (
+        "ALTER TABLE IF EXISTS scheduled_jobs ADD CONSTRAINT ck_sj_action_type "
+        "CHECK (action_type IN ('notification', 'agent'))"
+    ),
     "ALTER TABLE IF EXISTS scheduled_job_runs DROP CONSTRAINT IF EXISTS ck_sjr_status",
-    "ALTER TABLE IF EXISTS scheduled_job_runs ADD CONSTRAINT ck_sjr_status CHECK (status IN ('pending', 'dispatching', 'queued', 'running', 'succeeded', 'partial', 'failed', 'cancelled', 'skipped'))",
+    (
+        "ALTER TABLE IF EXISTS scheduled_job_runs ADD CONSTRAINT ck_sjr_status "
+        "CHECK (status IN ('pending', 'dispatching', 'queued', 'running', 'succeeded', "
+        "'partial', 'failed', 'cancelled', 'skipped'))"
+    ),
     "ALTER TABLE IF EXISTS scheduled_job_runs DROP CONSTRAINT IF EXISTS ck_sjr_terminal_finished_at",
-    "ALTER TABLE IF EXISTS scheduled_job_runs ADD CONSTRAINT ck_sjr_terminal_finished_at CHECK ((status IN ('succeeded', 'partial', 'failed', 'cancelled', 'skipped') AND finished_at IS NOT NULL) OR (status NOT IN ('succeeded', 'partial', 'failed', 'cancelled', 'skipped') AND finished_at IS NULL))",
+    (
+        "ALTER TABLE IF EXISTS scheduled_job_runs ADD CONSTRAINT ck_sjr_terminal_finished_at "
+        "CHECK ((status IN ('succeeded', 'partial', 'failed', 'cancelled', 'skipped') "
+        "AND finished_at IS NOT NULL) OR (status NOT IN ('succeeded', 'partial', 'failed', "
+        "'cancelled', 'skipped') AND finished_at IS NULL))"
+    ),
 )
 
 # 发布回滚前先停止 Scheduler/Dispatcher，并确认没有依赖这些表的生产数据。
