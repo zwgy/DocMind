@@ -29,6 +29,7 @@ from yuxi.services.file_preview import (
     render_preview_too_large_payload,
 )
 from yuxi.services.incoming_document_ingest_service import (
+    IncomingDocumentAuditReferenceError,
     IncomingDocumentIngestService,
     IncomingKnowledgeImportConflict,
 )
@@ -96,6 +97,7 @@ async def list_incoming_documents(
     keyword: str | None = None,
     source_system: str | None = None,
     classification: str | None = None,
+    include_archived: bool = False,
     current_user: User = Depends(get_admin_user),
 ):
     del current_user
@@ -104,7 +106,8 @@ async def list_incoming_documents(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     # 管理页列表只暴露来文处理状态和入库状态，知识库内容仍走知识库文件接口。
-    items, total = await IncomingDocumentRepository().list_for_management(
+    repository = IncomingDocumentRepository()
+    items, total = await repository.list_for_management(
         page=page,
         page_size=page_size,
         status=status,
@@ -112,8 +115,15 @@ async def list_incoming_documents(
         keyword=keyword,
         source_system=source_system,
         classification=classification,
+        include_archived=include_archived,
     )
-    return {"items": [_incoming_document_payload(item, detail=False) for item in items], "total": total}
+    capabilities = await repository.get_lifecycle_capabilities([item.incoming_id for item in items])
+    return {
+        "items": [
+            _incoming_document_payload(item, detail=False, capabilities=capabilities.get(item.incoming_id)) for item in items
+        ],
+        "total": total,
+    }
 
 
 @incoming_documents.get("/options")
@@ -128,11 +138,13 @@ async def get_incoming_document_options(current_user: User = Depends(get_admin_u
 @incoming_documents.get("/{incoming_id}")
 async def get_incoming_document_detail(incoming_id: str, current_user: User = Depends(get_admin_user)):
     del current_user
-    record = await IncomingDocumentRepository().get_by_incoming_id(incoming_id)
+    repository = IncomingDocumentRepository()
+    record = await repository.get_by_incoming_id(incoming_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Incoming document not found: {incoming_id}")
-    payload = _incoming_document_payload(record, detail=True)
-    files = await IncomingDocumentRepository().list_files(incoming_id)
+    capabilities = await repository.get_lifecycle_capabilities([incoming_id])
+    payload = _incoming_document_payload(record, detail=True, capabilities=capabilities.get(incoming_id))
+    files = await repository.list_files(incoming_id)
     business_extraction = (
         await DocumentBusinessExtractionRepository().get_latest_by_incoming_id(incoming_id)
         if record.status == "ready"
@@ -264,10 +276,23 @@ async def delete_incoming_document(incoming_id: str, current_user: User = Depend
 
     try:
         return await IncomingDocumentIngestService().delete_incoming(incoming_id, operator_id=current_user.uid)
+    except IncomingDocumentAuditReferenceError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
     except ValueError as exc:
         message = str(exc)
         status_code = 409 if "已入库知识库" in message else 400
         raise HTTPException(status_code=status_code, detail=message) from exc
+
+
+@incoming_documents.post("/{incoming_id}/archive")
+async def archive_incoming_document(incoming_id: str, current_user: User = Depends(get_admin_user)):
+    try:
+        return await IncomingDocumentIngestService().archive_incoming(incoming_id, operator_id=current_user.uid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @incoming_documents.get("/{incoming_id}/file/original")
@@ -394,13 +419,26 @@ def _parse_document_metadata(raw_value) -> dict:
     return metadata
 
 
-def _incoming_document_payload(record, *, detail: bool) -> dict:
+def _incoming_document_payload(record, *, detail: bool, capabilities: dict | None = None) -> dict:
     metadata = getattr(record, "document_metadata", None) or {}
     effective_classification = getattr(record, "confirmed_classification", None) or getattr(
         record, "ai_classification", None
     )
     ai_classification = getattr(record, "ai_classification", None)
     confirmed_classification = getattr(record, "confirmed_classification", None)
+    capabilities = capabilities or {}
+    is_archived = getattr(record, "archived_at", None) is not None
+    has_audit_reference = bool(capabilities.get("has_audit_reference"))
+    enabled_job_count = int(capabilities.get("enabled_job_count") or 0)
+    can_delete = (
+        not is_archived
+        and getattr(record, "review_status", None) != "confirmed"
+        and not has_audit_reference
+        and enabled_job_count == 0
+        and getattr(record, "status", None) not in {"parsing", "extracting"}
+        and getattr(record, "knowledge_import_status", None) not in {"importing", "partial", "indexed"}
+        and not getattr(record, "linked_kb_id", None)
+    )
     payload = {
         "incomingId": record.incoming_id,
         "sourceSystem": record.source_system,
@@ -434,6 +472,12 @@ def _incoming_document_payload(record, *, detail: bool) -> dict:
         "knowledgeImportStatus": getattr(record, "knowledge_import_status", None) or "none",
         "knowledgeImportTaskId": getattr(record, "knowledge_import_task_id", None),
         "knowledgeImportError": getattr(record, "knowledge_import_error", None),
+        "archivedAt": _iso(getattr(record, "archived_at", None)),
+        "archivedBy": getattr(record, "archived_by", None),
+        "candidateCount": int(capabilities.get("candidate_count") or 0),
+        "enabledJobCount": enabled_job_count,
+        "canDelete": can_delete,
+        "canArchive": not is_archived and getattr(record, "status", None) not in {"parsing", "extracting"},
         "createdAt": _iso(getattr(record, "created_at", None)),
         "updatedAt": _iso(getattr(record, "updated_at", None)),
     }

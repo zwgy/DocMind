@@ -6,6 +6,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import delete, select
 
+from yuxi.repositories.incoming_document_repository import (
+    IncomingDocumentAuditReferenceError,
+    IncomingDocumentRepository,
+)
 from yuxi.services.incoming_task_candidate_service import IncomingTaskCandidateService
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_business import User
@@ -232,4 +236,100 @@ async def test_missing_incoming_owner_keeps_invalid_candidate_for_review():
             assert {error["code"] for error in candidate.validation_errors} >= {"recipient_forbidden", "required"}
     finally:
         await _cleanup(incoming_id=incoming_id, run_id=run_id, user_uids=[])
+        await pg_manager.close()
+
+
+@pytest.mark.integration
+async def test_draft_incoming_can_be_deleted_and_archived_incoming_is_hidden_from_management_list():
+    pg_manager.initialize()
+    await pg_manager.create_tables()
+    await pg_manager.ensure_business_schema()
+
+    suffix = uuid4().hex
+    incoming_id = f"inc_lifecycle_{suffix}"
+    run_id = f"run_lifecycle_{suffix}"
+    try:
+        await _create_extraction(
+            incoming_id=incoming_id,
+            run_id=run_id,
+            created_by=None,
+            item_data={
+                "task_name": "待确认任务",
+                "recipient_scope": "unknown",
+                "source_quote": "请落实有关工作。",
+                "source_file_id": "file_main",
+            },
+        )
+        async with pg_manager.get_async_session_context() as session:
+            await IncomingTaskCandidateService(session).build_batch_from_extraction(
+                incoming_id=incoming_id,
+                extraction_run_id=run_id,
+            )
+
+        repository = IncomingDocumentRepository()
+        archived = await repository.archive_document(incoming_id, archived_by="integration-admin")
+        assert archived is not None and archived.archived_by == "integration-admin"
+        items, total = await repository.list_for_management(page=1, page_size=100)
+        assert incoming_id not in {item.incoming_id for item in items}
+        assert total >= 0
+
+        deleted, _files = await repository.delete_cascade(incoming_id)
+        assert deleted is not None
+        async with pg_manager.get_async_session_context() as session:
+            assert await session.scalar(
+                select(ScheduledJobCandidate.id).where(ScheduledJobCandidate.incoming_id == incoming_id)
+            ) is None
+            assert await session.scalar(select(IncomingTaskBatch.id).where(IncomingTaskBatch.incoming_id == incoming_id)) is None
+    finally:
+        await _cleanup(incoming_id=incoming_id, run_id=run_id, user_uids=[])
+        await pg_manager.close()
+
+
+@pytest.mark.integration
+async def test_incoming_with_candidate_audit_reference_cannot_be_deleted():
+    pg_manager.initialize()
+    await pg_manager.create_tables()
+    await pg_manager.ensure_business_schema()
+
+    suffix = uuid4().hex
+    owner_uid = f"candidate_audit_owner_{suffix}"
+    incoming_id = f"inc_audit_{suffix}"
+    run_id = f"run_audit_{suffix}"
+    try:
+        async with pg_manager.get_async_session_context() as session:
+            session.add(User(uid=owner_uid, username=f"audit_owner_{suffix[:12]}", password_hash="not-used", role="superadmin"))
+        await _create_extraction(
+            incoming_id=incoming_id,
+            run_id=run_id,
+            created_by=owner_uid,
+            item_data={
+                "task_name": "待确认任务",
+                "recipient_scope": "unknown",
+                "source_quote": "请落实有关工作。",
+                "source_file_id": "file_main",
+            },
+        )
+        async with pg_manager.get_async_session_context() as session:
+            batch = await IncomingTaskCandidateService(session).build_batch_from_extraction(
+                incoming_id=incoming_id,
+                extraction_run_id=run_id,
+            )
+            candidate = await session.scalar(
+                select(ScheduledJobCandidate).where(ScheduledJobCandidate.batch_id == batch.id)
+            )
+            assert candidate is not None
+            session.add(
+                ScheduledJobAuditLog(
+                    id=f"sja_{uuid4().hex}",
+                    candidate_id=candidate.id,
+                    actor_uid=owner_uid,
+                    action="candidate_reviewed",
+                )
+            )
+
+        with pytest.raises(IncomingDocumentAuditReferenceError) as exc_info:
+            await IncomingDocumentRepository().delete_cascade(incoming_id)
+        assert exc_info.value.code == "incoming_has_audit_reference"
+    finally:
+        await _cleanup(incoming_id=incoming_id, run_id=run_id, user_uids=[owner_uid])
         await pg_manager.close()

@@ -23,7 +23,7 @@ from yuxi.knowledge.chunking.ragflow_like.dispatcher import chunk_markdown
 from yuxi.knowledge.chunking.ragflow_like.nlp import count_tokens
 from yuxi.knowledge.parser import Parser, is_supported_file_extension
 from yuxi.knowledge.utils import calculate_content_hash, parse_minio_url
-from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
+from yuxi.repositories.incoming_document_repository import IncomingDocumentAuditReferenceError, IncomingDocumentRepository
 from yuxi.services.incoming_task_candidate_service import IncomingTaskCandidateService
 from yuxi.services.knowledge_document_ingest_service import KnowledgeDocumentIngestService
 from yuxi.services.task_service import TaskContext, tasker
@@ -65,6 +65,10 @@ def _clear_cancellation_for_state_update() -> None:
 
 class IncomingKnowledgeImportConflict(ValueError):
     """来文入库任务已经在执行。"""
+
+
+# 路由层需要稳定识别审计引用冲突；从仓储重导出以保持来文用例的错误边界集中。
+__all__ = ["IncomingDocumentAuditReferenceError", "IncomingDocumentIngestService", "IncomingKnowledgeImportConflict"]
 
 
 class IncomingDocumentIngestService:
@@ -548,6 +552,13 @@ class IncomingDocumentIngestService:
             "minioErrors": minio_errors,
             "operatorId": operator_id,
         }
+
+    async def archive_incoming(self, incoming_id: str, *, operator_id: str) -> dict[str, Any]:
+        """归档来源记录，供已确认或已启用来文保留可追溯入口。"""
+        document = await self.incoming_repo.archive_document(incoming_id, archived_by=operator_id)
+        if document is None:
+            raise ValueError(f"Incoming document not found: {incoming_id}")
+        return {"incomingId": incoming_id, "archivedBy": operator_id}
 
     async def retry_processing(self, incoming_id: str, *, operator_id: str | None = None) -> dict[str, Any]:
         document = await self.incoming_repo.get_by_incoming_id(incoming_id)

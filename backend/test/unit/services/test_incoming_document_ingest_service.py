@@ -63,6 +63,13 @@ class FakeIncomingRepo:
         self.document = None
         return deleted_document, files
 
+    async def archive_document(self, incoming_id, *, archived_by):
+        if self.document is None or self.document.incoming_id != incoming_id:
+            return None
+        self.document.archived_by = archived_by
+        self.document.archived_at = "archived"
+        return self.document
+
     async def upsert_file(self, incoming_id, incoming_file_id, data):
         file = next((item for item in self.files if item.source_file_id == data["source_file_id"]), None)
         if file is None:
@@ -970,3 +977,15 @@ async def test_delete_incoming_raises_when_document_missing(monkeypatch):
 
     with pytest.raises(ValueError, match="not found"):
         await IncomingDocumentIngestService().delete_incoming("inc-missing")
+
+
+@pytest.mark.asyncio
+async def test_archive_incoming_preserves_document_and_returns_archive_metadata(monkeypatch):
+    repo = FakeIncomingRepo()
+    repo.document = SimpleNamespace(incoming_id="inc-1")
+    monkeypatch.setattr(ingest_module, "IncomingDocumentRepository", lambda: repo)
+
+    result = await IncomingDocumentIngestService().archive_incoming("inc-1", operator_id="admin")
+
+    assert result == {"incomingId": "inc-1", "archivedBy": "admin"}
+    assert repo.document.archived_at == "archived"

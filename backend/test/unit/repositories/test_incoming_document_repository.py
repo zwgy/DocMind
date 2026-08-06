@@ -241,6 +241,9 @@ async def test_delete_cascade_removes_document_runs_and_returns_files(monkeypatc
         def scalars(self):
             return FakeScalarsResult(self.rows)
 
+        def scalar_one_or_none(self):
+            return self.rows[0][0] if self.rows else None
+
     class FakeScalarResult:
         def __init__(self, value):
             self.value = value
@@ -282,8 +285,10 @@ async def test_delete_cascade_removes_document_runs_and_returns_files(monkeypatc
     assert deleted is document
     assert [file.incoming_file_id for file in returned_files] == ["incf-1", "incf-2"]
     assert session.committed is True
-    # 两条 DELETE：先清抽取运行，再清来文主表（CASCADE 带动附件与抽取结果）。
-    assert len(delete_calls) == 2
+    # 草稿没有调度审计时按候选、批次、抽取运行、来文的依赖逆序删除。
+    assert len(delete_calls) == 4
     joined = " | ".join(delete_calls).upper()
+    assert "SCHEDULED_JOB_CANDIDATES" in joined
+    assert "INCOMING_TASK_BATCHES" in joined
     assert "DOCUMENT_BUSINESS_EXTRACTION_RUNS" in joined
     assert "INCOMING_DOCUMENTS" in joined

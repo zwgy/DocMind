@@ -36,6 +36,10 @@ async def test_management_list_normalizes_classification_label(monkeypatch):
             captured.update(kwargs)
             return [], 0
 
+        async def get_lifecycle_capabilities(self, incoming_ids):
+            assert incoming_ids == []
+            return {}
+
     monkeypatch.setattr(incoming_document_router, "IncomingDocumentRepository", FakeRepo)
 
     result = await incoming_document_router.list_incoming_documents(
@@ -45,6 +49,7 @@ async def test_management_list_normalizes_classification_label(monkeypatch):
 
     assert result == {"items": [], "total": 0}
     assert captured["classification"] == "risk_management"
+    assert captured["include_archived"] is False
 
 
 async def test_get_detail_returns_document_and_attachment_list(monkeypatch):
@@ -101,6 +106,10 @@ async def test_get_detail_returns_document_and_attachment_list(monkeypatch):
         async def get_by_incoming_id(self, _incoming_id):
             return document
 
+        async def get_lifecycle_capabilities(self, incoming_ids):
+            assert incoming_ids == ["inc_1"]
+            return {"inc_1": {"candidate_count": 2, "enabled_job_count": 1, "has_audit_reference": True}}
+
         async def list_files(self, _incoming_id):
             return [file, attachment]
 
@@ -122,6 +131,10 @@ async def test_get_detail_returns_document_and_attachment_list(monkeypatch):
     assert result["title"] == "专项检查"
     assert result["effectiveClassification"] == "staged_work"
     assert result["effectiveClassificationLabel"] == "阶段性工作类"
+    assert result["candidateCount"] == 2
+    assert result["enabledJobCount"] == 1
+    assert result["canDelete"] is False
+    assert result["canArchive"] is True
     assert result["files"][0] == {
         "incomingFileId": "incf_1",
         "sourceFileId": "main",
@@ -296,6 +309,40 @@ async def test_delete_incoming_document_maps_imported_error_to_409(monkeypatch):
 
     assert exc_info.value.status_code == 409
     assert "已入库知识库" in str(exc_info.value.detail)
+
+
+async def test_delete_incoming_document_maps_audit_reference_to_stable_409(monkeypatch):
+    class FakeService:
+        async def delete_incoming(self, incoming_id, *, operator_id=None):
+            raise incoming_document_router.IncomingDocumentAuditReferenceError()
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentIngestService", FakeService)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await incoming_document_router.delete_incoming_document("inc_1", current_user=SimpleNamespace(uid="admin"))
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == {
+        "code": "incoming_has_audit_reference",
+        "message": "来文已确认或存在定时任务审计引用，不能物理删除",
+    }
+
+
+async def test_archive_incoming_document_delegates_to_service(monkeypatch):
+    captured = {}
+
+    class FakeService:
+        async def archive_incoming(self, incoming_id, *, operator_id):
+            captured["incoming_id"] = incoming_id
+            captured["operator_id"] = operator_id
+            return {"incomingId": incoming_id, "archivedBy": operator_id}
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentIngestService", FakeService)
+
+    result = await incoming_document_router.archive_incoming_document("inc_1", current_user=SimpleNamespace(uid="admin"))
+
+    assert result == {"incomingId": "inc_1", "archivedBy": "admin"}
+    assert captured == {"incoming_id": "inc_1", "operator_id": "admin"}
 
 
 async def test_delete_incoming_document_propagates_minio_errors(monkeypatch):
