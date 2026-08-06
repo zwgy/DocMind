@@ -229,3 +229,28 @@ async def test_schedule_preview_rejects_elapsed_one_off_schedule():
             timezone=payload.timezone,
             now=datetime(2030, 1, 2, 1, 0, tzinfo=UTC),
         )
+
+
+async def test_update_scheduled_job_uses_current_owner_and_version(monkeypatch):
+    calls = []
+
+    class FakeService:
+        def __init__(self, _db):
+            pass
+
+        async def update_personal_job(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                id="sj_1", name="updated", source_type="personal", schedule_kind="at", run_at=None,
+                anchor_at=None, interval_seconds=None, cron_expression=None, timezone="Asia/Shanghai",
+                next_run_at=None, action_type="notification", action_data={}, status="active", version=2,
+                last_run_at=None, paused_at=None, cancelled_at=None, created_at=None, updated_at=None,
+            )
+
+    monkeypatch.setattr(scheduled_job_router, "ScheduledJobService", FakeService)
+    payload = scheduled_job_router.ScheduledJobPatchRequest.model_validate({"version": 1, "name": "updated", "schedule": {"kind": "at", "run_at": "2030-01-02T09:00:00+08:00"}, "action": {"type": "notification", "title": "title", "content": "content"}, "timezone": "Asia/Shanghai"})
+    response = await scheduled_job_router.update_scheduled_job("sj_1", payload, SimpleNamespace(uid="alice"), _FakeDb())
+
+    assert response["job"]["version"] == 2
+    assert calls[0]["owner_uid"] == "alice"
+    assert calls[0]["version"] == 1

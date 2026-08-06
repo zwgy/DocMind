@@ -197,6 +197,45 @@ class ScheduledJobService:
         await self.db.flush()
         return job
 
+    async def update_personal_job(
+        self, *, job_id: str, owner_uid: str, version: int, request: PersonalScheduledJobRequest
+    ) -> ScheduledJob:
+        """编辑尚未产生运行的个人任务，避免改写已经冻结的运行快照。"""
+        job = await self._lock_owned_job(job_id=job_id, owner_uid=owner_uid, version=version)
+        if job.status not in {"active", "paused"}:
+            raise ScheduledJobDomainError("当前状态不能编辑任务")
+        if await self.db.scalar(select(ScheduledJobRun.id).where(ScheduledJobRun.scheduled_job_id == job.id).limit(1)):
+            raise ScheduledJobDomainError("任务已经生成运行，不能编辑")
+        now = await self.repository.database_now()
+        next_at = next_run_at(request.schedule, request.timezone, now, inclusive=False)
+        if request.schedule.kind == "at" and next_at <= now:
+            raise ScheduledJobDomainError("一次性任务触发时间必须晚于当前时间")
+        before = {"name": job.name, "schedule_kind": job.schedule_kind, "action_data": job.action_data}
+        job.name = request.name
+        job.schedule_kind = request.schedule.kind
+        job.run_at = getattr(request.schedule, "run_at", None)
+        job.anchor_at = getattr(request.schedule, "anchor_at", None)
+        job.interval_seconds = getattr(request.schedule, "interval_seconds", None)
+        job.cron_expression = getattr(request.schedule, "cron_expression", None)
+        job.timezone = request.timezone
+        job.action_data = request.action.model_dump(mode="json")
+        job.next_run_at = next_at if job.status == "active" else None
+        job.version += 1
+        self._audit(job=job, actor_uid=owner_uid, action="updated", before_data=before, after_data={"name": job.name, "schedule_kind": job.schedule_kind, "action_data": job.action_data})
+        await self.db.flush()
+        return job
+
+    async def list_owned_runs(self, *, job_id: str, owner_uid: str, cursor: str | None, limit: int) -> tuple[list[ScheduledJobRun], str | None]:
+        if await self.get_owned_job(job_id=job_id, owner_uid=owner_uid) is None:
+            raise ScheduledJobDomainError("任务不存在")
+        statement = select(ScheduledJobRun).where(ScheduledJobRun.scheduled_job_id == job_id)
+        if cursor:
+            created_at, run_id = self._decode_cursor(cursor)
+            statement = statement.where(or_(ScheduledJobRun.created_at < created_at, and_(ScheduledJobRun.created_at == created_at, ScheduledJobRun.id < run_id)))
+        rows = list((await self.db.scalars(statement.order_by(ScheduledJobRun.created_at.desc(), ScheduledJobRun.id.desc()).limit(limit + 1))).all())
+        page = rows[:limit]
+        return page, self._encode_cursor(page[-1]) if len(rows) > limit else None
+
     async def _lock_owned_job(self, *, job_id: str, owner_uid: str, version: int) -> ScheduledJob:
         job = await self.db.scalar(
             select(ScheduledJob)
