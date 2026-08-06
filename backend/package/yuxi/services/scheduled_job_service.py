@@ -310,7 +310,7 @@ class ScheduledJobService:
         return hashlib.sha256(serialized.encode()).hexdigest()
 
     async def _resolve_action_data(self, *, request: PersonalScheduledJobRequest, owner: User) -> dict:
-        """创建时只记录审计摘要；运行时必须重新读取管理员保存的 Agent 能力配置。"""
+        """校验 Agent 动作目标；运行时必须重新读取管理员保存的能力配置。"""
         action_data = request.action.model_dump(mode="json")
         if not isinstance(request.action, AgentAction):
             return action_data
@@ -321,15 +321,6 @@ class ScheduledJobService:
         )
         if agent is None or agent.is_subagent:
             raise ScheduledJobDomainError("目标 Agent 不存在、不可见或不能作为定时任务执行")
-        config = agent.config_json if isinstance(agent.config_json, dict) else {}
-        context = config.get("context") if isinstance(config.get("context"), dict) else {}
-        # 只保存能力引用，避免把运行时配置当作可覆写载荷或泄露不相关内容。
-        action_data["agent_config_snapshot"] = {
-            "backend_id": agent.backend_id,
-            "skills": list(context.get("skills") or []),
-            "tools": list(context.get("tools") or []),
-            "knowledge_bases": list(context.get("knowledge_bases") or []),
-        }
         return action_data
 
     @staticmethod

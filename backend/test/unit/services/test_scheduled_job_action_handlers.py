@@ -8,6 +8,57 @@ import pytest
 
 from yuxi.services import scheduled_job_action_handlers as handlers
 from yuxi.services import scheduled_job_dispatcher_service as dispatcher_service
+from yuxi.services.scheduled_job_service import ScheduledJobService
+from yuxi.scheduled_jobs.schemas import PersonalScheduledJobRequest
+
+
+@pytest.mark.asyncio
+async def test_agent_action_does_not_persist_agent_capability_snapshot(monkeypatch):
+    request = PersonalScheduledJobRequest.model_validate(
+        {
+            "name": "每日待办",
+            "timezone": "Asia/Shanghai",
+            "schedule": {"kind": "at", "run_at": "2026-08-08T09:00:00+08:00"},
+            "action": {
+                "type": "agent",
+                "agent_slug": "daily-assistant",
+                "instruction": "整理今天待办。",
+                "timeout_seconds": 300,
+            },
+        }
+    )
+
+    class FakeAgentRepository:
+        def __init__(self, db):
+            assert db is service.db
+
+        async def get_visible_by_slug(self, *, slug, user):
+            assert (slug, user.uid) == ("daily-assistant", "user-1")
+            return SimpleNamespace(
+                is_subagent=False,
+                config_json={
+                    "context": {
+                        "skills": ["scheduled-task", "knowledge-base"],
+                        "tools": ["query_kb"],
+                        "knowledge_bases": ["kb-1"],
+                    }
+                },
+            )
+
+    service = ScheduledJobService(SimpleNamespace())
+    monkeypatch.setattr("yuxi.services.scheduled_job_service.AgentRepository", FakeAgentRepository)
+
+    action_data = await service._resolve_action_data(
+        request=request,
+        owner=SimpleNamespace(uid="user-1"),
+    )
+
+    assert action_data == {
+        "type": "agent",
+        "agent_slug": "daily-assistant",
+        "instruction": "整理今天待办。",
+        "timeout_seconds": 300,
+    }
 
 
 @pytest.mark.asyncio
