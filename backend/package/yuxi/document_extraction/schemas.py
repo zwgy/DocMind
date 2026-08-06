@@ -152,6 +152,16 @@ class TaskItem(BaseModel):
         description="需要用户重点跟进的关键任务、整改要求或工作要求名称，必须有原文支持",
         json_schema_extra={"label": "任务名称"},
     )
+    notification_title: str | None = Field(
+        default=None,
+        description="需要发送的通知标题；原文未明确时为 null，不能自行编造",
+        json_schema_extra={"label": "通知标题"},
+    )
+    notification_content: str | None = Field(
+        default=None,
+        description="需要发送的通知正文；原文未明确时为 null，不能自行编造",
+        json_schema_extra={"label": "通知内容"},
+    )
     department: str | None = Field(
         default=None,
         description="责任部门；原文没有明确部门时为 null",
@@ -166,6 +176,21 @@ class TaskItem(BaseModel):
         default=None,
         description="明确时间节点、周期或截止日期；没有则为 null",
         json_schema_extra={"label": "时间节点"},
+    )
+    recipient_expression: str | None = Field(
+        default=None,
+        description="原文中的接收人或范围表达；没有明确对象时为 null",
+        json_schema_extra={"label": "接收人表达"},
+    )
+    recipient_scope: Literal["named", "all", "unknown"] = Field(
+        default="unknown",
+        description="接收人是具名人员、全体范围或无法确定",
+        json_schema_extra={"label": "接收人范围"},
+    )
+    recipient_names: list[str] = Field(
+        default_factory=list,
+        description="仅当接收人范围为 named 时填写原文姓名，不填写 UID",
+        json_schema_extra={"label": "接收人姓名"},
     )
     period_type: ExtractedPeriodType = Field(
         default="未明确",

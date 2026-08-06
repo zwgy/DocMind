@@ -48,7 +48,9 @@ class ScheduledJobCandidate(Base):
     extraction_run_id = Column(String(64), nullable=False)
     owner_uid = Column(String(64), ForeignKey("users.uid", ondelete="RESTRICT"), nullable=False)
     name = Column(String(100), nullable=False)
-    notification_content = Column(Text, nullable=False)
+    # 抽取不完整时仍要保留候选供人工补全，不能因通知字段缺失而丢弃来源事实。
+    notification_title = Column(String(100))
+    notification_content = Column(Text)
     schedule_data = Column(JSON_VALUE, nullable=True)
     timezone = Column(String(64), nullable=True)
     recipient_scope = Column(String(16), nullable=False)
@@ -68,9 +70,7 @@ class ScheduledJobCandidate(Base):
 
     __table_args__ = (
         CheckConstraint("recipient_scope IN ('named', 'all', 'unknown')", name="ck_sjc_recipient_scope"),
-        CheckConstraint(
-            "status IN ('pending_confirmation', 'enabled', 'rejected', 'stale')", name="ck_sjc_status"
-        ),
+        CheckConstraint("status IN ('pending_confirmation', 'enabled', 'rejected', 'stale')", name="ck_sjc_status"),
         Index("uq_sjc_batch_extraction_item", "batch_id", "extraction_item_id", unique=True),
         Index("ix_sjc_status_updated_at", "status", text("updated_at DESC")),
     )
@@ -290,6 +290,4 @@ class ScheduledServiceHeartbeat(Base):
     last_seen_at = Column(DateTime(timezone=True), nullable=False)
     last_error_code = Column(String(128))
 
-    __table_args__ = (
-        CheckConstraint("service_type IN ('scheduler', 'dispatcher')", name="ck_ssh_service_type"),
-    )
+    __table_args__ = (CheckConstraint("service_type IN ('scheduler', 'dispatcher')", name="ck_ssh_service_type"),)

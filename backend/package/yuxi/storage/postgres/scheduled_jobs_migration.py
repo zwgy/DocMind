@@ -12,6 +12,8 @@ UPGRADE_STATEMENTS = (
     "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS archived_by VARCHAR(64)",
     "CREATE INDEX IF NOT EXISTS ix_incoming_documents_archived_at ON incoming_documents(archived_at)",
     "ALTER TABLE IF EXISTS scheduled_job_runs ALTER COLUMN next_attempt_at DROP NOT NULL",
+    "ALTER TABLE IF EXISTS scheduled_job_candidates ADD COLUMN IF NOT EXISTS notification_title VARCHAR(100)",
+    "ALTER TABLE IF EXISTS scheduled_job_candidates ALTER COLUMN notification_content DROP NOT NULL",
 )
 
 # 发布回滚前先停止 Scheduler/Dispatcher，并确认没有依赖这些表的生产数据。
