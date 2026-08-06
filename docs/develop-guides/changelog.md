@@ -9,6 +9,7 @@
 ### 定时任务（阶段 2，来文候选）
 
 - 完成定时任务第二版 Agent 自动执行闭环：新增受控 `agent` 动作、独立会话与 Agent Run/ARQ 投递、`queued / running / succeeded / failed / cancelled` 运行状态和终态未读任务事件。目标 Agent 必须对任务所有者可见且不能是 SubAgent；动作载荷拒绝工具、知识库、Skills 等运行时覆盖字段，实际能力始终按管理员保存的目标 Agent 配置装配。既有 `scheduled-task` 工具以同一幂等与身份边界支持明确的 Agent 动作，信息不完整时要求模型反问；Web 任务编辑器可选择 Agent、设置指令和 60 至 3600 秒超时，并在运行历史中展示关联的 Agent Run。
+- 优化本地模型的个人定时任务创建调用：`qwen3.6:35b` 对嵌套判别联合参数的字段层级不稳定，`create_personal_scheduled_task` 改为仅向模型暴露扁平的调度和动作字段，工具内部仍重建并执行原有严格联合 Schema 校验；不改变 HTTP API、权限、幂等、动作白名单或 Agent 能力边界。浏览器验收确认，在管理员显式配置 `scheduled-task` 后模型可一次调用成功创建任务。
 - Web 新增独立“定时任务”页面和管理员“待确认”页签：候选可编辑通知、`at / interval / cron` 调度、时区和人员目录范围，预览复用后端计算，校验错误会阻止启用；拒绝必须填写原因并再次确认。个人未触发任务支持相同的调度编辑和运行历史查看，接收人固定为任务所有者。候选人员选择复用已有、按管理员部门范围过滤的账户访问选项接口，避免新增与既有权限边界重复的人员目录 HTTP 接口。
 - 补齐来文确认的单一事务边界：Repository 为调用方 `AsyncSession` 提供无提交的锁定读取与更新方法，确认用例不再在事务外预检；审计写入异常时，来文确认状态、批次冻结、候选状态、任务和审计记录会一并回滚。新增内置 `scheduled-task` Skill 和创建、查询、暂停/恢复、取消四个原生个人任务工具，创建幂等键由认证身份、会话线程和框架注入的工具调用 ID 生成；Skill 严格遵循管理员保存的 Agent `skills` 配置，顶层 Agent 和子 Agent 均不接受运行时强制注入，工具在读取 Skill 前对模型保持隐藏。
 - 新增 `POST /api/scheduled-jobs/schedule-preview`：复用后端 `croniter` 与 `zoneinfo` 规则，以 PostgreSQL 当前时间计算最多三次本地/UTC 触发预览，不写入任务数据。
