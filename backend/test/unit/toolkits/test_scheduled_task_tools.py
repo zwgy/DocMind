@@ -81,8 +81,10 @@ def test_personal_task_tool_schema_accepts_agent_action_without_capability_overr
     assert parsed.action_type == "agent"
     assert parsed.agent_slug == "daily-assistant"
 
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        schema.model_validate({**_agent_request(), "skills": ["scheduled-task"]})
+    schema_text = str(schema.model_json_schema())
+    assert "skills" not in schema_text
+    assert "knowledge" not in schema_text
+    assert "mcp" not in schema_text
 
 
 def test_scheduled_task_tools_are_only_resolved_after_skill_is_readable():
