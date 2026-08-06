@@ -492,13 +492,17 @@ class IncomingDocumentIngestService:
         }
 
     async def confirm_document(self, incoming_id: str, *, operator_id: str) -> dict[str, Any]:
-        document = await self.incoming_repo.get_by_incoming_id(incoming_id)
-        if document is None:
-            raise ValueError(f"Incoming document not found: {incoming_id}")
-        if document.status != "ready":
-            raise ValueError("Incoming document is not ready")
         if self._uses_database_candidate_workflows:
             async with pg_manager.get_async_session_context() as session:
+                # 来文检查、批次冻结、候选复验和任务审计必须处于同一事务；
+                # 不能先用仓储自建会话读到一个在提交前已失效的状态。
+                document = await self.incoming_repo.get_by_incoming_id_in_session(
+                    session, incoming_id, for_update=True
+                )
+                if document is None:
+                    raise ValueError(f"Incoming document not found: {incoming_id}")
+                if document.status != "ready":
+                    raise ValueError("Incoming document is not ready")
                 result = await IncomingTaskCandidateService(session).confirm_incoming(
                     incoming_id=incoming_id,
                     actor_uid=operator_id,
@@ -511,6 +515,11 @@ class IncomingDocumentIngestService:
                 "invalid_count": result.invalid_count,
                 "invalid_candidate_ids": list(result.invalid_candidate_ids),
             }
+        document = await self.incoming_repo.get_by_incoming_id(incoming_id)
+        if document is None:
+            raise ValueError(f"Incoming document not found: {incoming_id}")
+        if document.status != "ready":
+            raise ValueError("Incoming document is not ready")
         await self.incoming_repo.update_document(
             incoming_id,
             {

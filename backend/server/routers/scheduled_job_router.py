@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.utils.auth_middleware import get_db, get_required_user
-from yuxi.scheduled_jobs.schemas import PersonalScheduledJobRequest
+from yuxi.repositories.scheduled_job_repository import ScheduledJobRepository
+from yuxi.scheduled_jobs.schemas import AtSchedule, PersonalScheduledJobRequest, Schedule, ScheduledJobDraft
+from yuxi.scheduled_jobs.timing import next_run_at
 from yuxi.services.scheduled_job_service import (
     IdempotencyKeyReusedError,
     JobAlreadyTriggeredError,
@@ -28,6 +31,16 @@ class StatusChangeRequest(BaseModel):
     action: Literal["pause", "resume", "cancel"]
     version: int = Field(ge=1)
     reason: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class SchedulePreviewRequest(BaseModel):
+    """只校验和展示规则，不创建任务，供候选和任务编辑共用。"""
+
+    schedule: Schedule
+    timezone: str = Field(min_length=1, max_length=64)
+
+    def model_post_init(self, __context) -> None:
+        ScheduledJobDraft.validate_timezone(self.timezone)
 
 
 def _format_datetime(value: datetime | None) -> str | None:
@@ -68,6 +81,34 @@ def _raise_domain_error(error: ScheduledJobDomainError) -> None:
     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
 
 
+def _schedule_preview(*, schedule: Schedule, timezone: str, now: datetime) -> dict:
+    """按同一条时间规则生成最多三次将来触发，避免 UI 自行解释 Cron。"""
+    first_run_at = next_run_at(schedule, timezone, now, inclusive=False)
+    if isinstance(schedule, AtSchedule) and first_run_at <= now:
+        raise ScheduledJobDomainError("一次性任务触发时间必须晚于当前时间")
+
+    occurrences: list[datetime] = [first_run_at]
+    if not isinstance(schedule, AtSchedule):
+        cursor = first_run_at
+        for _ in range(2):
+            cursor = next_run_at(schedule, timezone, cursor, inclusive=False)
+            occurrences.append(cursor)
+
+    display_timezone = ZoneInfo(timezone)
+    return {
+        "schedule": schedule.model_dump(mode="json"),
+        "timezone": timezone,
+        "next_run_at": first_run_at.astimezone(UTC).isoformat(),
+        "occurrences": [
+            {
+                "utc": occurrence.astimezone(UTC).isoformat(),
+                "local": occurrence.astimezone(display_timezone).isoformat(),
+            }
+            for occurrence in occurrences
+        ],
+    }
+
+
 @scheduled_jobs.post("", status_code=status.HTTP_201_CREATED)
 async def create_scheduled_job(
     payload: PersonalScheduledJobRequest,
@@ -85,6 +126,19 @@ async def create_scheduled_job(
     except ScheduledJobDomainError as error:
         _raise_domain_error(error)
     return {"job": _serialize_job(job)}
+
+
+@scheduled_jobs.post("/schedule-preview")
+async def preview_schedule(
+    payload: SchedulePreviewRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """必须置于 ``/{job_id}`` 前，避免将固定路径误识别为任务 ID。"""
+    try:
+        now = await ScheduledJobRepository(db).database_now()
+        return _schedule_preview(schedule=payload.schedule, timezone=payload.timezone, now=now)
+    except ScheduledJobDomainError as error:
+        _raise_domain_error(error)
 
 
 @scheduled_jobs.get("")

@@ -10,6 +10,7 @@ from yuxi.repositories.incoming_document_repository import (
     IncomingDocumentAuditReferenceError,
     IncomingDocumentRepository,
 )
+from yuxi.services.incoming_document_ingest_service import IncomingDocumentIngestService
 from yuxi.services.incoming_task_candidate_service import IncomingTaskCandidateService
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_business import User
@@ -193,6 +194,89 @@ async def test_candidate_enable_is_idempotent_and_freezes_batch():
                 ).all()
             )
             assert [recipient.recipient_uid for recipient in recipients] == [recipient_uid]
+    finally:
+        await _cleanup(
+            incoming_id=incoming_id,
+            run_id=run_id,
+            user_uids=[owner_uid, recipient_uid],
+        )
+        await pg_manager.close()
+
+
+@pytest.mark.integration
+async def test_confirm_document_rolls_back_everything_when_candidate_audit_write_fails(monkeypatch):
+    """确认前置检查也在同一会话内，审计异常不能留下来文或任务半成品。"""
+    pg_manager.initialize()
+    await pg_manager.create_tables()
+    await pg_manager.ensure_business_schema()
+
+    suffix = uuid4().hex
+    owner_uid = f"confirm_rollback_owner_{suffix}"
+    recipient_uid = f"confirm_rollback_recipient_{suffix}"
+    incoming_id = f"inc_confirm_rollback_{suffix}"
+    run_id = f"run_confirm_rollback_{suffix}"
+    try:
+        async with pg_manager.get_async_session_context() as session:
+            now = await IncomingTaskCandidateService(session)._database_now()
+            session.add_all(
+                [
+                    User(
+                        uid=owner_uid,
+                        username=f"confirm_owner_{suffix[:12]}",
+                        password_hash="not-used",
+                        role="superadmin",
+                    ),
+                    User(
+                        uid=recipient_uid,
+                        username=f"confirm_recipient_{suffix[:12]}",
+                        password_hash="not-used",
+                    ),
+                ]
+            )
+        await _create_extraction(
+            incoming_id=incoming_id,
+            run_id=run_id,
+            created_by=owner_uid,
+            item_data={
+                "task_name": "确认回滚任务",
+                "notification_title": "确认回滚提醒",
+                "notification_content": "确认事务必须完整回滚。",
+                "schedule": {"kind": "at", "run_at": (now + timedelta(hours=1)).isoformat()},
+                "timezone": "Asia/Shanghai",
+                "recipient_scope": "named",
+                "recipient_names": [f"confirm_recipient_{suffix[:12]}"],
+                "source_quote": "确认事务必须完整回滚。",
+                "source_file_id": "file_main",
+            },
+        )
+        async with pg_manager.get_async_session_context() as session:
+            await IncomingTaskCandidateService(session).build_batch_from_extraction(
+                incoming_id=incoming_id,
+                extraction_run_id=run_id,
+            )
+
+        def fail_audit(_self, **_kwargs):
+            raise RuntimeError("simulated candidate audit failure")
+
+        monkeypatch.setattr(IncomingTaskCandidateService, "_audit", fail_audit)
+        with pytest.raises(RuntimeError, match="simulated candidate audit failure"):
+            await IncomingDocumentIngestService().confirm_document(incoming_id, operator_id=owner_uid)
+
+        async with pg_manager.get_async_session_context() as session:
+            document = await session.scalar(select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id))
+            batch = await session.scalar(select(IncomingTaskBatch).where(IncomingTaskBatch.incoming_id == incoming_id))
+            candidate = await session.scalar(
+                select(ScheduledJobCandidate).where(ScheduledJobCandidate.batch_id == batch.id)
+            )
+            assert document is not None and document.review_status == "draft"
+            assert batch is not None and batch.status == "ready" and batch.frozen_at is None
+            assert candidate is not None and candidate.status == "pending_confirmation" and candidate.enabled_at is None
+            assert await session.scalar(
+                select(ScheduledJob.id).where(ScheduledJob.source_candidate_id == candidate.id)
+            ) is None
+            assert await session.scalar(
+                select(ScheduledJobAuditLog.id).where(ScheduledJobAuditLog.candidate_id == candidate.id)
+            ) is None
     finally:
         await _cleanup(
             incoming_id=incoming_id,

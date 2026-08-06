@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -187,3 +187,45 @@ async def test_scheduled_job_cursor_is_opaque_and_rejects_invalid_payload():
     assert service._decode_cursor(cursor)[1] == "sj_1"
     with pytest.raises(ScheduledJobDomainError, match="cursor 无效"):
         service._decode_cursor("not-a-cursor")
+
+
+def test_schedule_preview_returns_three_localized_occurrences_without_writing_database():
+    payload = scheduled_job_router.SchedulePreviewRequest.model_validate(
+        {
+            "schedule": {
+                "kind": "interval",
+                "anchor_at": "2030-01-02T09:00:00+08:00",
+                "interval_seconds": 3600,
+            },
+            "timezone": "Asia/Shanghai",
+        }
+    )
+
+    preview = scheduled_job_router._schedule_preview(
+        schedule=payload.schedule,
+        timezone=payload.timezone,
+        now=datetime(2030, 1, 2, 0, 30, tzinfo=UTC),
+    )
+
+    assert preview["next_run_at"] == "2030-01-02T01:00:00+00:00"
+    assert [item["local"] for item in preview["occurrences"]] == [
+        "2030-01-02T09:00:00+08:00",
+        "2030-01-02T10:00:00+08:00",
+        "2030-01-02T11:00:00+08:00",
+    ]
+
+
+def test_schedule_preview_rejects_elapsed_one_off_schedule():
+    payload = scheduled_job_router.SchedulePreviewRequest.model_validate(
+        {
+            "schedule": {"kind": "at", "run_at": "2030-01-02T09:00:00+08:00"},
+            "timezone": "Asia/Shanghai",
+        }
+    )
+
+    with pytest.raises(ScheduledJobDomainError, match="触发时间"):
+        scheduled_job_router._schedule_preview(
+            schedule=payload.schedule,
+            timezone=payload.timezone,
+            now=datetime(2030, 1, 2, 1, 0, tzinfo=UTC),
+        )

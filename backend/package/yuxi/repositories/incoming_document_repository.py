@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_knowledge import (
@@ -98,6 +99,27 @@ class IncomingDocumentRepository:
         async with pg_manager.get_async_session_context() as session:
             result = await session.execute(select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id))
             return result.scalar_one_or_none()
+
+    async def get_by_incoming_id_in_session(
+        self, db_session: AsyncSession, incoming_id: str, *, for_update: bool = False
+    ) -> IncomingDocument | None:
+        """在调用方事务中读取来文，确认等跨表用例不能切换到仓储自建会话。"""
+        statement = select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id)
+        if for_update:
+            statement = statement.with_for_update()
+        return await db_session.scalar(statement)
+
+    async def update_document_in_session(
+        self, db_session: AsyncSession, incoming_id: str, data: dict[str, Any]
+    ) -> IncomingDocument:
+        """仅写入调用方会话；提交由跨表服务统一控制。"""
+        record = await self.get_by_incoming_id_in_session(db_session, incoming_id, for_update=True)
+        if record is None:
+            raise ValueError(f"Incoming document not found: {incoming_id}")
+        for key, value in self._sanitize(data, self._document_fields).items():
+            setattr(record, key, value)
+        await db_session.flush()
+        return record
 
     async def upsert_document(self, incoming_id: str, data: dict[str, Any]) -> IncomingDocument:
         sanitized = self._sanitize(data, self._document_fields)
