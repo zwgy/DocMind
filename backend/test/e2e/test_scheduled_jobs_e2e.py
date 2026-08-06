@@ -146,6 +146,7 @@ async def test_personal_scheduled_job_lifecycle_over_live_api(e2e_client):
             await session.execute(delete(OperationLog).where(OperationLog.user_id == user_id))
             await session.execute(delete(User).where(User.id == user_id))
             await session.execute(delete(Department).where(Department.id == department_id))
+        await pg_manager.close()
 
 
 async def test_pending_candidate_is_only_visible_to_admin_review_api(e2e_client):
@@ -277,3 +278,4 @@ async def test_pending_candidate_is_only_visible_to_admin_review_api(e2e_client)
             await session.execute(delete(OperationLog).where(OperationLog.user_id.in_([admin_id, viewer_id])))
             await session.execute(delete(User).where(User.id.in_([admin_id, viewer_id])))
             await session.execute(delete(Department).where(Department.id == department_id))
+        await pg_manager.close()
