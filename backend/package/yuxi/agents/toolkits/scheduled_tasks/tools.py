@@ -83,7 +83,7 @@ async def create_personal_scheduled_task(
     tool_call_id: Annotated[str, InjectedToolCallId],
     runtime: ToolRuntime = None,
 ) -> dict[str, Any]:
-    """为当前用户创建仅通知其本人的定时任务。"""
+    """为当前用户创建站内通知或指定顶层 Agent 的定时任务。"""
     owner_uid = _owner_uid(runtime)
     try:
         async with pg_manager.get_async_session_context() as db:

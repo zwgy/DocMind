@@ -3,6 +3,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from yuxi.agents.middlewares.skills import resolve_skill_gated_tools
 from yuxi.agents.toolkits.scheduled_tasks import tools
@@ -44,6 +45,20 @@ def _request():
     )
 
 
+def _agent_request():
+    return {
+        "name": "每日待办整理",
+        "schedule": {"kind": "at", "run_at": "2026-08-08T09:00:00+08:00"},
+        "action": {
+            "type": "agent",
+            "agent_slug": "daily-assistant",
+            "instruction": "整理今天待办并给出优先级。",
+            "timeout_seconds": 300,
+        },
+        "timezone": "Asia/Shanghai",
+    }
+
+
 def test_scheduled_task_tool_schema_never_exposes_owner_or_recipient_uid():
     for task_tool in (
         tools.create_personal_scheduled_task,
@@ -56,6 +71,24 @@ def test_scheduled_task_tool_schema_never_exposes_owner_or_recipient_uid():
         assert "owner_uid" not in schema_text
         assert "recipient_uid" not in schema_text
         assert "recipient_uids" not in schema_text
+
+
+def test_personal_task_tool_schema_accepts_agent_action_without_capability_overrides():
+    schema = tools.create_personal_scheduled_task.tool_call_schema
+    parsed = schema.model_validate({"request": _agent_request()})
+
+    assert parsed.request.action.type == "agent"
+    assert parsed.request.action.agent_slug == "daily-assistant"
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        schema.model_validate(
+            {
+                "request": {
+                    **_agent_request(),
+                    "action": {**_agent_request()["action"], "skills": ["scheduled-task"]},
+                }
+            }
+        )
 
 
 def test_scheduled_task_tools_are_only_resolved_after_skill_is_readable():

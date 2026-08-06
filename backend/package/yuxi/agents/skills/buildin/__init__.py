@@ -113,7 +113,7 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
     BuiltinSkillSpec(
         slug="scheduled-task",
         source_dir=_SKILLS_ROOT / "scheduled-task",
-        description="创建、查询、暂停、恢复和取消当前用户自己的通知型定时任务。",
+        description="创建、查询、暂停、恢复和取消当前用户自己的通知或 Agent 执行型定时任务。",
         version="2026.08.06",
         tool_dependencies=(
             "create_personal_scheduled_task",
