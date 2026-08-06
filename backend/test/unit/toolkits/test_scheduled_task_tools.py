@@ -51,7 +51,8 @@ def test_scheduled_task_tool_schema_never_exposes_owner_or_recipient_uid():
         tools.set_personal_scheduled_task_status,
         tools.cancel_personal_scheduled_task,
     ):
-        schema_text = str(task_tool.args_schema.model_json_schema())
+        # ``args_schema`` 保留 ToolRuntime 等执行器注入参数；模型实际看到的是 tool_call_schema。
+        schema_text = str(task_tool.tool_call_schema.model_json_schema())
         assert "owner_uid" not in schema_text
         assert "recipient_uid" not in schema_text
         assert "recipient_uids" not in schema_text

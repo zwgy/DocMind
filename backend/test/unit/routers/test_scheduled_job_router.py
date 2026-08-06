@@ -189,7 +189,7 @@ async def test_scheduled_job_cursor_is_opaque_and_rejects_invalid_payload():
         service._decode_cursor("not-a-cursor")
 
 
-def test_schedule_preview_returns_three_localized_occurrences_without_writing_database():
+async def test_schedule_preview_returns_three_localized_occurrences_without_writing_database():
     payload = scheduled_job_router.SchedulePreviewRequest.model_validate(
         {
             "schedule": {
@@ -215,7 +215,7 @@ def test_schedule_preview_returns_three_localized_occurrences_without_writing_da
     ]
 
 
-def test_schedule_preview_rejects_elapsed_one_off_schedule():
+async def test_schedule_preview_rejects_elapsed_one_off_schedule():
     payload = scheduled_job_router.SchedulePreviewRequest.model_validate(
         {
             "schedule": {"kind": "at", "run_at": "2030-01-02T09:00:00+08:00"},
