@@ -95,12 +95,6 @@ onMounted(async () => {
     taskerStore.loadTasks()
   }
 
-  items.push({
-    name: '定时任务',
-    path: '/scheduled-jobs',
-    icon: Clock3,
-    activeIcon: Clock3
-  })
 })
 
 onUnmounted(() => inboxStore.stopPolling())
@@ -134,6 +128,13 @@ const mainList = computed(() => {
     path: '/workspace',
     icon: FolderKanban,
     activeIcon: FolderKanban
+  })
+
+  items.push({
+    name: '定时任务',
+    path: '/scheduled-jobs',
+    icon: Clock3,
+    activeIcon: Clock3
   })
 
   items.push({
