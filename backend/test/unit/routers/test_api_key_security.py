@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from server.routers.auth_router import delete_user
@@ -13,6 +15,7 @@ from server.utils.auth_middleware import _verify_api_key
 from yuxi.repositories import user_repository as user_repository_module
 from yuxi.repositories.user_repository import UserRepository
 from yuxi.storage.postgres.models_business import APIKey, Base, Department, User
+from yuxi.storage.postgres.models_scheduled_jobs import ScheduledJob, ScheduledJobAuditLog
 from yuxi.utils.auth_utils import AuthUtils
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
@@ -158,6 +161,38 @@ async def test_delete_user_disables_owned_api_keys(session):
 
     assert result["success"] is True
     assert api_key.is_enabled is False
+
+
+async def test_delete_user_cancels_owned_active_jobs_with_audit(session):
+    db = session["db"]
+    now = datetime.now(UTC)
+    job = ScheduledJob(
+        id="sj_user_delete",
+        owner_uid=session["regular_user"].uid,
+        source_type="personal",
+        source_snapshot={"entry_point": "test"},
+        name="待取消提醒",
+        schedule_kind="interval",
+        anchor_at=now,
+        interval_seconds=300,
+        timezone="Asia/Shanghai",
+        next_run_at=now + timedelta(minutes=5),
+        action_type="notification",
+        action_data={"type": "notification", "title": "提醒", "content": "正文"},
+        status="active",
+        created_by_uid=session["superadmin"].uid,
+    )
+    db.add(job)
+    await db.commit()
+
+    await delete_user(session["regular_user"].id, None, session["superadmin"], db)
+    await db.refresh(job)
+    audit = await db.scalar(select(ScheduledJobAuditLog).where(ScheduledJobAuditLog.scheduled_job_id == job.id))
+
+    assert job.status == "cancelled"
+    assert job.cancelled_reason == "owner_deleted"
+    assert job.next_run_at is None
+    assert audit is not None and audit.reason == "owner_deleted"
 
 
 async def test_user_repository_soft_delete_disables_owned_api_keys(session, monkeypatch):

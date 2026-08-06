@@ -20,6 +20,7 @@ from server.utils.auth_middleware import (
 )
 from yuxi.utils.auth_utils import AuthUtils
 from yuxi.services.user_identity_service import generate_unique_uid, validate_username, is_valid_phone_number
+from yuxi.services.user_lifecycle_service import UserLifecycleService
 from yuxi.services.operation_log_service import log_operation
 from yuxi.services.auth_service import (
     CLI_AUTH_POLL_INTERVAL_SECONDS,
@@ -32,7 +33,6 @@ from yuxi.services.auth_service import (
 )
 from yuxi.storage.minio import upload_image_to_minio
 from yuxi.storage.minio.client import normalize_public_minio_url
-from yuxi.utils.datetime_utils import utc_now_naive
 
 # OIDC 认证相关导入
 from yuxi.services.oidc_service import (
@@ -871,17 +871,12 @@ async def delete_user(
 
     deletion_detail = f"删除用户: {user.username}, ID: {user.id}, 角色: {user.role}"
 
-    user.is_deleted = 1
-    user.deleted_at = utc_now_naive()
-    user.username = f"已注销用户-{user.id}"
-    user.phone_number = None  # 清空手机号，释放该手机号供其他用户使用
-    user.password_hash = "DELETED"  # 禁止登录
-    user.avatar = None  # 清空头像
-    api_key_result = await db.execute(select(APIKey).filter(APIKey.user_id == user.id))
-    for api_key in api_key_result.scalars().all():
-        api_key.is_enabled = False
-
-    await db.commit()
+    try:
+        await UserLifecycleService(db).delete_user(user=user, actor_uid=current_user.uid)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
 
     # 记录操作
     await log_operation(db, current_user.id, "删除用户", deletion_detail, request)
