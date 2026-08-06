@@ -65,8 +65,7 @@ async def test_get_scheduled_job_scopes_lookup_to_current_owner(monkeypatch):
 
     class FakeService:
         def __init__(self, _db):
-            # 通知任务没有关联 Agent Run，路由不应发布取消信号。
-            self.cancelled_agent_run_ids = []
+            pass
 
         async def get_owned_job(self, *, job_id, owner_uid):
             captured.update(job_id=job_id, owner_uid=owner_uid)
@@ -141,7 +140,8 @@ async def test_status_command_delegates_cancel_reason(monkeypatch):
 
     class FakeService:
         def __init__(self, _db):
-            pass
+            # 通知任务没有关联 Agent Run，路由不应发布取消信号。
+            self.cancelled_agent_run_ids = []
 
         async def cancel(self, **kwargs):
             captured.update(kwargs)
