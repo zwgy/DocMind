@@ -28,26 +28,52 @@ async def _cleanup(*, incoming_id: str, run_id: str, user_uids: list[str]) -> No
     """按外键逆序清理本用例数据，避免影响共享 Compose 数据库。"""
     async with pg_manager.get_async_session_context() as session:
         candidate_ids = list(
-            (await session.scalars(select(ScheduledJobCandidate.id).where(ScheduledJobCandidate.incoming_id == incoming_id))).all()
+            (
+                await session.scalars(
+                    select(ScheduledJobCandidate.id).where(ScheduledJobCandidate.incoming_id == incoming_id)
+                )
+            ).all()
         )
         job_ids = list(
-            (await session.scalars(select(ScheduledJob.id).where(ScheduledJob.source_candidate_id.in_(candidate_ids)))).all()
+            (
+                await session.scalars(
+                    select(ScheduledJob.id).where(ScheduledJob.source_candidate_id.in_(candidate_ids))
+                )
+            ).all()
         )
         if job_ids:
-            await session.execute(delete(ScheduledJobRecipient).where(ScheduledJobRecipient.scheduled_job_id.in_(job_ids)))
-            await session.execute(delete(ScheduledJobAuditLog).where(ScheduledJobAuditLog.scheduled_job_id.in_(job_ids)))
+            await session.execute(
+                delete(ScheduledJobRecipient).where(ScheduledJobRecipient.scheduled_job_id.in_(job_ids))
+            )
+            await session.execute(
+                delete(ScheduledJobAuditLog).where(ScheduledJobAuditLog.scheduled_job_id.in_(job_ids))
+            )
             await session.execute(delete(ScheduledJob).where(ScheduledJob.id.in_(job_ids)))
         if candidate_ids:
-            await session.execute(delete(ScheduledJobAuditLog).where(ScheduledJobAuditLog.candidate_id.in_(candidate_ids)))
+            await session.execute(
+                delete(ScheduledJobAuditLog).where(ScheduledJobAuditLog.candidate_id.in_(candidate_ids))
+            )
             await session.execute(delete(ScheduledJobCandidate).where(ScheduledJobCandidate.id.in_(candidate_ids)))
         await session.execute(delete(IncomingTaskBatch).where(IncomingTaskBatch.incoming_id == incoming_id))
         result_ids = list(
-            (await session.scalars(select(DocumentBusinessExtractionResult.id).where(DocumentBusinessExtractionResult.run_id == run_id))).all()
+            (
+                await session.scalars(
+                    select(DocumentBusinessExtractionResult.id).where(
+                        DocumentBusinessExtractionResult.run_id == run_id
+                    )
+                )
+            ).all()
         )
         if result_ids:
-            await session.execute(delete(DocumentBusinessExtractionItem).where(DocumentBusinessExtractionItem.result_id.in_(result_ids)))
-        await session.execute(delete(DocumentBusinessExtractionResult).where(DocumentBusinessExtractionResult.run_id == run_id))
-        await session.execute(delete(DocumentBusinessExtractionRun).where(DocumentBusinessExtractionRun.run_id == run_id))
+            await session.execute(
+                delete(DocumentBusinessExtractionItem).where(DocumentBusinessExtractionItem.result_id.in_(result_ids))
+            )
+        await session.execute(
+            delete(DocumentBusinessExtractionResult).where(DocumentBusinessExtractionResult.run_id == run_id)
+        )
+        await session.execute(
+            delete(DocumentBusinessExtractionRun).where(DocumentBusinessExtractionRun.run_id == run_id)
+        )
         await session.execute(delete(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id))
         if user_uids:
             await session.execute(delete(User).where(User.uid.in_(user_uids)))
@@ -141,7 +167,9 @@ async def test_candidate_enable_is_idempotent_and_freezes_batch():
         async with pg_manager.get_async_session_context() as session:
             service = IncomingTaskCandidateService(session)
             batch = await service.build_batch_from_extraction(incoming_id=incoming_id, extraction_run_id=run_id)
-            candidate = await session.scalar(select(ScheduledJobCandidate).where(ScheduledJobCandidate.batch_id == batch.id))
+            candidate = await session.scalar(
+                select(ScheduledJobCandidate).where(ScheduledJobCandidate.batch_id == batch.id)
+            )
             assert batch.status == "ready"
             assert candidate is not None and candidate.validation_errors == []
             first_job = await service.enable_candidate(
@@ -154,7 +182,11 @@ async def test_candidate_enable_is_idempotent_and_freezes_batch():
             assert batch.status == "frozen"
             assert candidate.status == "enabled"
             recipients = list(
-                (await session.scalars(select(ScheduledJobRecipient).where(ScheduledJobRecipient.scheduled_job_id == first_job.id))).all()
+                (
+                    await session.scalars(
+                        select(ScheduledJobRecipient).where(ScheduledJobRecipient.scheduled_job_id == first_job.id)
+                    )
+                ).all()
             )
             assert [recipient.recipient_uid for recipient in recipients] == [recipient_uid]
     finally:
@@ -192,7 +224,9 @@ async def test_missing_incoming_owner_keeps_invalid_candidate_for_review():
                 incoming_id=incoming_id,
                 extraction_run_id=run_id,
             )
-            candidate = await session.scalar(select(ScheduledJobCandidate).where(ScheduledJobCandidate.batch_id == batch.id))
+            candidate = await session.scalar(
+                select(ScheduledJobCandidate).where(ScheduledJobCandidate.batch_id == batch.id)
+            )
             assert batch.status == "ready"
             assert candidate is not None and candidate.owner_uid is None
             assert {error["code"] for error in candidate.validation_errors} >= {"recipient_forbidden", "required"}

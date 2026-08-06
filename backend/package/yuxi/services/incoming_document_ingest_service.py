@@ -96,7 +96,11 @@ class IncomingDocumentIngestService:
         self.build_candidates = build_candidates or self._build_candidates
         self.ensure_candidate_batch_rebuildable = (
             ensure_candidate_batch_rebuildable
-            or (self._ensure_candidate_batch_rebuildable if self._uses_database_candidate_workflows else _noop_batch_rebuild_check)
+            or (
+                self._ensure_candidate_batch_rebuildable
+                if self._uses_database_candidate_workflows
+                else _noop_batch_rebuild_check
+            )
         )
 
     async def ingest_files(

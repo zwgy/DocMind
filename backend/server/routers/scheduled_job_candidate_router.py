@@ -105,7 +105,12 @@ def _decode_cursor(cursor: str) -> tuple[datetime, str]:
         candidate_id = payload["id"]
     except (BinasciiError, KeyError, TypeError, ValueError, UnicodeDecodeError) as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_cursor") from error
-    if updated_at.tzinfo is None or updated_at.utcoffset() is None or not isinstance(candidate_id, str) or not candidate_id:
+    if (
+        updated_at.tzinfo is None
+        or updated_at.utcoffset() is None
+        or not isinstance(candidate_id, str)
+        or not candidate_id
+    ):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_cursor")
     return updated_at.astimezone(UTC), candidate_id
 
