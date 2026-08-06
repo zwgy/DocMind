@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import delete
@@ -29,7 +30,7 @@ async def test_personal_scheduled_job_lifecycle_over_live_api(e2e_client):
     password = f"Pytest!{suffix}"
     uid = f"pytest_schedule_{suffix}"
     idempotency_key = f"pytest-scheduled-{suffix}"
-    run_at = (datetime.now(UTC) + timedelta(minutes=10)).replace(second=0, microsecond=0)
+    run_at = (datetime.now(ZoneInfo("Asia/Shanghai")) + timedelta(minutes=10)).replace(second=0, microsecond=0)
     payload = {
         "name": f"pytest-scheduled-{suffix}",
         "schedule": {"kind": "at", "run_at": run_at.isoformat()},
