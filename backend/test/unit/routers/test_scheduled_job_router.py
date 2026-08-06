@@ -27,6 +27,12 @@ class _FakeDb:
     def begin(self):
         return _Transaction()
 
+    async def commit(self):
+        pass
+
+    async def rollback(self):
+        pass
+
 
 async def test_create_scheduled_job_requires_idempotency_key():
     app = FastAPI()

@@ -136,13 +136,14 @@ async def create_scheduled_job(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        async with db.begin():
-            job = await ScheduledJobService(db).create_personal_job(
-                owner_uid=current_user.uid,
-                request=payload,
-                idempotency_key=idempotency_key,
-            )
+        job = await ScheduledJobService(db).create_personal_job(
+            owner_uid=current_user.uid,
+            request=payload,
+            idempotency_key=idempotency_key,
+        )
+        await db.commit()
     except ScheduledJobDomainError as error:
+        await db.rollback()
         _raise_domain_error(error)
     return {"job": _serialize_job(job)}
 
@@ -205,12 +206,13 @@ async def update_scheduled_job(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        async with db.begin():
-            request = PersonalScheduledJobRequest.model_validate(payload.model_dump(exclude={"version"}))
-            job = await ScheduledJobService(db).update_personal_job(
-                job_id=job_id, owner_uid=current_user.uid, version=payload.version, request=request
-            )
+        request = PersonalScheduledJobRequest.model_validate(payload.model_dump(exclude={"version"}))
+        job = await ScheduledJobService(db).update_personal_job(
+            job_id=job_id, owner_uid=current_user.uid, version=payload.version, request=request
+        )
+        await db.commit()
     except ScheduledJobDomainError as error:
+        await db.rollback()
         _raise_domain_error(error)
     return {"job": _serialize_job(job)}
 
@@ -240,19 +242,20 @@ async def change_scheduled_job_status(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        async with db.begin():
-            service = ScheduledJobService(db)
-            if payload.action == "pause":
-                job = await service.pause(job_id=job_id, owner_uid=current_user.uid, version=payload.version)
-            elif payload.action == "resume":
-                job = await service.resume(job_id=job_id, owner_uid=current_user.uid, version=payload.version)
-            else:
-                job = await service.cancel(
-                    job_id=job_id,
-                    owner_uid=current_user.uid,
-                    version=payload.version,
-                    reason=payload.reason,
-                )
+        service = ScheduledJobService(db)
+        if payload.action == "pause":
+            job = await service.pause(job_id=job_id, owner_uid=current_user.uid, version=payload.version)
+        elif payload.action == "resume":
+            job = await service.resume(job_id=job_id, owner_uid=current_user.uid, version=payload.version)
+        else:
+            job = await service.cancel(
+                job_id=job_id,
+                owner_uid=current_user.uid,
+                version=payload.version,
+                reason=payload.reason,
+            )
+        await db.commit()
     except ScheduledJobDomainError as error:
+        await db.rollback()
         _raise_domain_error(error)
     return {"job": _serialize_job(job)}

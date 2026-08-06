@@ -66,11 +66,10 @@ async def mark_notification_read(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        async with db.begin():
-            marked_count = await InboxService(db).mark_notification_read(
-                item_id=item_id, recipient_uid=current_user.uid
-            )
+        marked_count = await InboxService(db).mark_notification_read(item_id=item_id, recipient_uid=current_user.uid)
+        await db.commit()
     except InboxDomainError as error:
+        await db.rollback()
         _raise_inbox_error(error)
     return {"marked_count": marked_count}
 
@@ -82,9 +81,10 @@ async def mark_task_read(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        async with db.begin():
-            marked_count = await InboxService(db).mark_task_read(job_id=job_id, owner_uid=current_user.uid)
+        marked_count = await InboxService(db).mark_task_read(job_id=job_id, owner_uid=current_user.uid)
+        await db.commit()
     except InboxDomainError as error:
+        await db.rollback()
         _raise_inbox_error(error)
     return {"marked_count": marked_count}
 
@@ -95,6 +95,10 @@ async def mark_all_read(
     current_user: User = Depends(get_required_user),
     db: AsyncSession = Depends(get_db),
 ):
-    async with db.begin():
+    try:
         marked_count = await InboxService(db).mark_all_read(recipient_uid=current_user.uid, category=payload.category)
+        await db.commit()
+    except InboxDomainError as error:
+        await db.rollback()
+        _raise_inbox_error(error)
     return {"marked_count": marked_count}

@@ -23,6 +23,12 @@ class _FakeDb:
     def begin(self):
         return _Transaction()
 
+    async def commit(self):
+        pass
+
+    async def rollback(self):
+        pass
+
 
 async def test_candidate_update_delegates_only_mutable_fields(monkeypatch):
     captured = {}

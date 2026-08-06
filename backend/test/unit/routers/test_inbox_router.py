@@ -25,6 +25,12 @@ class _FakeDb:
     def begin(self):
         return _Transaction()
 
+    async def commit(self):
+        pass
+
+    async def rollback(self):
+        pass
+
 
 def _app(*, user_override):
     app = FastAPI()

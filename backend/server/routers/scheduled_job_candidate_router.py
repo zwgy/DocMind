@@ -177,20 +177,21 @@ async def update_scheduled_job_candidate(
 ):
     fields = payload.model_fields_set
     try:
-        async with db.begin():
-            candidate = await IncomingTaskCandidateService(db).update_candidate(
-                candidate_id=candidate_id,
-                actor_uid=current_user.uid,
-                version=payload.version,
-                name=payload.name if "name" in fields else None,
-                notification_title=payload.action.title if payload.action is not None else None,
-                notification_content=payload.action.content if payload.action is not None else None,
-                schedule_data=payload.schedule.model_dump(mode="json") if payload.schedule is not None else None,
-                timezone=payload.timezone if "timezone" in fields else None,
-                recipient_scope=payload.recipient_scope if "recipient_scope" in fields else None,
-                recipient_names=payload.recipient_names if "recipient_names" in fields else None,
-            )
+        candidate = await IncomingTaskCandidateService(db).update_candidate(
+            candidate_id=candidate_id,
+            actor_uid=current_user.uid,
+            version=payload.version,
+            name=payload.name if "name" in fields else None,
+            notification_title=payload.action.title if payload.action is not None else None,
+            notification_content=payload.action.content if payload.action is not None else None,
+            schedule_data=payload.schedule.model_dump(mode="json") if payload.schedule is not None else None,
+            timezone=payload.timezone if "timezone" in fields else None,
+            recipient_scope=payload.recipient_scope if "recipient_scope" in fields else None,
+            recipient_names=payload.recipient_names if "recipient_names" in fields else None,
+        )
+        await db.commit()
     except IncomingTaskCandidateError as error:
+        await db.rollback()
         _raise_candidate_error(error)
     return {"candidate": _serialize_candidate(candidate)}
 
@@ -203,13 +204,14 @@ async def enable_scheduled_job_candidate(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        async with db.begin():
-            job = await IncomingTaskCandidateService(db).enable_candidate(
-                candidate_id=candidate_id,
-                actor_uid=current_user.uid,
-                version=payload.version,
-            )
+        job = await IncomingTaskCandidateService(db).enable_candidate(
+            candidate_id=candidate_id,
+            actor_uid=current_user.uid,
+            version=payload.version,
+        )
+        await db.commit()
     except IncomingTaskCandidateError as error:
+        await db.rollback()
         _raise_candidate_error(error)
     if job is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="candidate_validation_failed")
@@ -224,13 +226,14 @@ async def reject_scheduled_job_candidate(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        async with db.begin():
-            candidate = await IncomingTaskCandidateService(db).reject_candidate(
-                candidate_id=candidate_id,
-                actor_uid=current_user.uid,
-                version=payload.version,
-                reason=payload.reason,
-            )
+        candidate = await IncomingTaskCandidateService(db).reject_candidate(
+            candidate_id=candidate_id,
+            actor_uid=current_user.uid,
+            version=payload.version,
+            reason=payload.reason,
+        )
+        await db.commit()
     except IncomingTaskCandidateError as error:
+        await db.rollback()
         _raise_candidate_error(error)
     return {"candidate": _serialize_candidate(candidate)}
