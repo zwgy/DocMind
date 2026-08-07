@@ -227,12 +227,14 @@ class ScheduledJobService:
     async def update_personal_job(
         self, *, job_id: str, owner_uid: str, version: int, request: PersonalScheduledJobRequest
     ) -> ScheduledJob:
-        """编辑尚未产生运行的个人任务，避免改写已经冻结的运行快照。"""
+        """编辑个人任务；周期任务的历史运行已冻结，修改只影响未来运行。"""
         job = await self._lock_owned_job(job_id=job_id, owner_uid=owner_uid, version=version)
         if job.status not in {"active", "paused"}:
             raise ScheduledJobDomainError("当前状态不能编辑任务")
-        if await self.db.scalar(select(ScheduledJobRun.id).where(ScheduledJobRun.scheduled_job_id == job.id).limit(1)):
-            raise ScheduledJobDomainError("任务已经生成运行，不能编辑")
+        if job.schedule_kind == "at" and await self.db.scalar(
+            select(ScheduledJobRun.id).where(ScheduledJobRun.scheduled_job_id == job.id).limit(1)
+        ):
+            raise JobAlreadyTriggeredError("一次性任务已经生成运行，不能编辑")
         now = await self.repository.database_now()
         next_at = next_run_at(request.schedule, request.timezone, now, inclusive=False)
         if request.schedule.kind == "at" and next_at <= now:
