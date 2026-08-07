@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Bell, Bot, CalendarClock, CheckCheck, Pause, Play, RefreshCw, Save, Trash2, X } from 'lucide-vue-next'
+import { Bell, Bot, CalendarClock, CheckCheck, Inbox, MessageCircleMore, Pause, Play, RefreshCw, Save, Trash2, X } from 'lucide-vue-next'
 import { inboxApi } from '@/apis/inbox'
 import type { InboxItem, TaskInboxItem } from '@/apis/inbox'
 import { scheduledJobApi } from '@/apis/scheduled-jobs'
@@ -31,7 +31,15 @@ const error = ref('')
 
 const currentScheduledPage = computed(() => scheduledPages.value[scheduleView.value])
 const currentItems = computed(() => section.value === 'scheduled' ? currentScheduledPage.value.items : inboxItems.value)
-const currentTitle = computed(() => section.value === 'scheduled' ? '定时任务' : inboxCategory.value === 'notification' ? '通知' : '任务')
+const hasUnreadInboxItems = computed(() => inboxItems.value.some(unread))
+const emptyStateLabel = computed(() => {
+  if (section.value === 'inbox') return inboxCategory.value === 'notification' ? '暂无通知' : '暂无任务状态'
+  return {
+    ongoing: '暂无进行中的定时',
+    paused: '暂无已暂停的定时',
+    history: '暂无历史记录'
+  }[scheduleView.value]
+})
 
 function createEditForm() {
   return {
@@ -69,6 +77,15 @@ function jobContent(job: ScheduledJob) {
     ? job.action_data?.content
     : job.action_data?.instruction
   return typeof content === 'string' && content.trim() ? content.trim() : '未填写正文'
+}
+
+function jobAction(job: ScheduledJob) {
+  if (job.action_type === 'agent') {
+    const agentSlug = job.action_data?.agent_slug
+    return typeof agentSlug === 'string' && agentSlug ? `Agent · ${agentSlug}` : '执行 Agent'
+  }
+  const title = job.action_data?.title
+  return typeof title === 'string' && title ? `通知 · ${title}` : '站内通知'
 }
 
 function jobTrigger(job: ScheduledJob) {
@@ -275,12 +292,19 @@ onMounted(() => { if (props.open) void refresh() })
         <button type="button" :class="{ active: inboxCategory === 'notification' }" @click="inboxCategory = 'notification'">通知</button>
         <button type="button" :class="{ active: inboxCategory === 'task' }" @click="inboxCategory = 'task'">任务</button>
       </div>
-      <button type="button" class="mark-all" :disabled="!inboxItems.some(unread)" @click="markAll"><CheckCheck :size="15" />全部已读</button>
+      <button v-if="hasUnreadInboxItems" type="button" class="mark-all" :disabled="loading" @click="markAll"><CheckCheck :size="14" />全部已读</button>
     </div>
 
     <p v-if="error" class="hint error">{{ error }}</p>
     <p v-else-if="loading && !currentItems.length" class="hint">加载中…</p>
-    <p v-else-if="!currentItems.length" class="hint">暂无{{ currentTitle }}</p>
+    <div v-else-if="!currentItems.length" class="empty-state">
+      <div class="empty-visual" aria-hidden="true">
+        <CalendarClock v-if="section === 'scheduled'" :size="52" :stroke-width="1.35" />
+        <Inbox v-else :size="54" :stroke-width="1.35" />
+        <MessageCircleMore :size="22" :stroke-width="1.5" />
+      </div>
+      <p>{{ emptyStateLabel }}</p>
+    </div>
 
     <section v-else class="center-list">
       <template v-if="section === 'scheduled'">
@@ -288,7 +312,7 @@ onMounted(() => { if (props.open) void refresh() })
           <div class="card-icon" :class="job.action_type"><Bell v-if="job.action_type === 'notification'" :size="18" /><Bot v-else :size="18" /></div>
           <div class="card-body">
             <div class="card-title"><strong>{{ job.name }}</strong><span class="status" :class="job.status">{{ statusText(job.status) }}</span></div>
-            <div class="card-meta"><span>{{ job.action_type === 'notification' ? '站内通知' : '执行 Agent' }}</span><span>{{ scheduleSummary(job) }}</span><span>{{ job.timezone }}</span></div>
+            <div class="card-meta"><span>{{ jobAction(job) }}</span><span>{{ scheduleSummary(job) }}</span></div>
             <p class="job-content" :title="jobContent(job)">{{ jobContent(job) }}</p>
             <div class="trigger"><CalendarClock :size="14" />{{ jobTrigger(job) }}</div>
             <div v-if="['active', 'paused'].includes(job.status)" class="card-actions">
@@ -305,7 +329,7 @@ onMounted(() => { if (props.open) void refresh() })
           <div class="card-icon" :class="isTaskItem(item) ? 'agent' : 'notification'"><Bot v-if="isTaskItem(item)" :size="18" /><Bell v-else :size="18" /></div>
           <div class="card-body">
             <div class="card-title"><strong>{{ isTaskItem(item) ? item.job.name : item.title }}</strong><span class="status" :class="unread(item) ? 'active' : 'read'">{{ unread(item) ? '未读' : '已读' }}</span></div>
-            <div class="card-meta"><span>{{ notificationType(item) }}</span><span v-if="isTaskItem(item)">{{ taskAction(item) }}</span><span v-if="isTaskItem(item)">{{ item.job.timezone }}</span></div>
+            <div class="card-meta"><span>{{ notificationType(item) }}</span><span v-if="isTaskItem(item)">{{ taskAction(item) }}</span></div>
             <p>{{ isTaskItem(item) ? item.latest_update?.content || '暂无状态更新' : item.content }}</p>
             <div class="trigger"><CalendarClock :size="14" />{{ isTaskItem(item) ? taskTrigger(item) : `触发时间：${formatTime(item.created_at)}` }}</div>
           </div>
@@ -338,7 +362,6 @@ onMounted(() => { if (props.open) void refresh() })
         <label v-if="editForm.scheduleKind === 'at'">触发时间<input v-model="editForm.runAt" type="datetime-local" /></label>
         <template v-else-if="editForm.scheduleKind === 'interval'"><label>间隔（秒）<input v-model.number="editForm.intervalSeconds" type="number" min="60" step="60" /></label><label>首次触发<input v-model="editForm.anchorAt" type="datetime-local" /></label></template>
         <label v-else>Cron 表达式<input v-model="editForm.cronExpression" placeholder="0 9 * * 1-5" /></label>
-        <small>时区：{{ editingJob.timezone }}</small>
         <footer><button type="button" @click="editingJob = null">取消</button><button type="button" class="primary" :disabled="saving" @click="saveEditor"><Save :size="15" />{{ saving ? '保存中…' : '保存' }}</button></footer>
       </section>
     </div>
@@ -356,18 +379,24 @@ onMounted(() => { if (props.open) void refresh() })
 .header-actions button { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 6px; }
 .header-actions button:hover { color: var(--main-900); background: var(--main-50); }
 .primary-tabs, .secondary-tabs { flex: 0 0 auto; padding: 0 14px; border-bottom: 1px solid var(--gray-200); }
-.primary-tabs { display: flex; justify-content: center; gap: 28px; }
+.primary-tabs { display: flex; gap: 18px; }
 .primary-tabs button, .secondary-tablist button { position: relative; padding: 12px 2px 10px; color: var(--gray-600); }
-.primary-tabs button { min-width: 72px; font-size: 14px; }
+.primary-tabs button { font-size: 14px; }
 .primary-tabs button.active, .secondary-tablist button.active { color: var(--main-700); font-weight: 600; }
 .primary-tabs button.active::after, .secondary-tablist button.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--main-700); content: ''; }
 .secondary-tabs { display: flex; align-items: center; justify-content: space-between; min-height: 39px; gap: 12px; background: var(--gray-25); }
 .secondary-tablist { display: flex; align-items: center; gap: 20px; }
 .secondary-tablist button { padding-top: 10px; padding-bottom: 8px; font-size: 13px; }
-.mark-all { display: inline-flex; align-items: center; gap: 4px; color: var(--main-700) !important; font-size: 13px; }
+.mark-all { display: inline-flex; align-items: center; gap: 5px; padding: 5px 7px; border-radius: 6px; color: var(--main-700) !important; font-size: 12px; }
+.mark-all:hover { background: var(--main-50); }
 .mark-all:disabled, .card-actions button:disabled { color: var(--gray-400) !important; cursor: not-allowed; }
 .hint { margin: auto 0; padding: 24px; color: var(--gray-500); text-align: center; }
 .hint.error { color: var(--color-error-700); }
+.empty-state { display: grid; justify-items: center; gap: 12px; margin: auto; padding: 32px 20px 72px; color: var(--gray-600); text-align: center; }
+.empty-state p { margin: 0; color: var(--gray-700); font-size: 14px; }
+.empty-visual { position: relative; width: 76px; height: 64px; color: var(--gray-300); }
+.empty-visual > svg:first-child { position: absolute; bottom: 0; left: 8px; }
+.empty-visual > svg:last-child { position: absolute; top: 0; right: 0; color: var(--gray-350, var(--gray-400)); fill: var(--gray-25); }
 .center-list { display: grid; gap: 8px; padding: 12px; overflow: auto; }
 .scheduled-card, .inbox-card { display: flex; gap: 10px; width: 100%; padding: 12px; color: inherit; background: var(--gray-0); border: 1px solid var(--gray-200); border-radius: 8px; text-align: left; }
 .inbox-card { cursor: pointer; }
@@ -390,5 +419,5 @@ onMounted(() => { if (props.open) void refresh() })
 .dialog-mask { position: absolute; z-index: 8; inset: 0; display: flex; align-items: flex-end; justify-content: center; padding: 12px; background: rgba(15, 23, 42, 0.28); }
 .confirm-dialog, .editor-dialog { width: min(100%, 440px); max-height: calc(100% - 12px); padding: 16px; border: 1px solid var(--gray-200); border-radius: 8px; background: var(--gray-0); box-shadow: var(--shadow-panel); overflow: auto; }
 .confirm-dialog p, .editor-dialog small { color: var(--gray-600); font-size: 12px; }.confirm-dialog > div, .editor-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }.confirm-dialog button, .editor-dialog footer button { padding: 7px 10px; border: 1px solid var(--gray-200); border-radius: 6px; }.editor-dialog { display: grid; gap: 11px; }.editor-dialog header { display: flex; justify-content: space-between; align-items: center; }.editor-dialog header button { display: inline-flex; }.editor-dialog label { display: grid; gap: 5px; color: var(--gray-700); font-size: 12px; }.editor-dialog input, .editor-dialog textarea, .editor-dialog select { width: 100%; padding: 7px 8px; border: 1px solid var(--gray-200); border-radius: 6px; color: var(--gray-800); background: var(--gray-0); font: inherit; }.editor-dialog textarea { resize: vertical; }.editor-dialog .primary { display: inline-flex; align-items: center; gap: 5px; color: var(--gray-0); background: var(--main-700); border-color: var(--main-700); }
-@media (max-width: 420px) { .primary-tabs { gap: 18px; }.secondary-tablist { gap: 14px; }.center-list { padding: 10px; }.scheduled-card, .inbox-card { padding: 10px; } }
+@media (max-width: 420px) { .primary-tabs { gap: 14px; }.secondary-tablist { gap: 14px; }.center-list { padding: 10px; }.scheduled-card, .inbox-card { padding: 10px; } }
 </style>

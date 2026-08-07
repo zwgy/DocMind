@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { Pause, Pencil, Play, RefreshCw, X } from 'lucide-vue-next'
+import { CalendarClock, Pause, Pencil, Play, RefreshCw, X } from 'lucide-vue-next'
 import { message } from 'ant-design-vue'
 import { useScheduledJobsStore } from '@/stores/scheduledJobs'
 import { scheduledJobApi } from '@/apis/scheduled_job_api'
@@ -8,6 +8,7 @@ import { agentApi } from '@/apis/agent_api'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import CandidateList from '@/components/scheduled-jobs/CandidateList.vue'
 import { useUserStore } from '@/stores/user'
+import { describeCron, describeInterval } from '@/utils/scheduledJobDisplay'
 
 const store = useScheduledJobsStore()
 const userStore = useUserStore()
@@ -102,8 +103,8 @@ function formatTime(value) {
 
 function scheduleSummary(job) {
   if (job.schedule_kind === 'at') return `单次 · ${formatTime(job.run_at)}`
-  if (job.schedule_kind === 'interval') return `每 ${Math.round(job.interval_seconds / 60)} 分钟`
-  return `Cron · ${job.cron_expression}`
+  if (job.schedule_kind === 'interval') return describeInterval(job.interval_seconds)
+  return describeCron(job.cron_expression)
 }
 
 function statusText(status) {
@@ -111,7 +112,20 @@ function statusText(status) {
 }
 
 function actionSummary(job) {
-  return job.action_type === 'agent' ? `Agent：${job.action_data?.agent_slug || '-'}` : '站内通知'
+  if (job.action_type === 'agent') return `Agent：${job.action_data?.agent_slug || '-'}`
+  return `通知：${job.action_data?.title || job.name}`
+}
+
+function actionContent(job) {
+  const value = job.action_type === 'agent' ? job.action_data?.instruction : job.action_data?.content
+  return typeof value === 'string' && value.trim() ? value.trim() : '未填写正文'
+}
+
+function triggerSummary(job) {
+  if (job.next_run_at) return `下一次触发：${formatTime(job.next_run_at)}`
+  const lastRunAt = job.last_run_at || (job.status === 'completed' && job.schedule_kind === 'at' ? job.run_at : null)
+  if (lastRunAt) return `最近触发：${formatTime(lastRunAt)}`
+  return job.status === 'cancelled' ? '尚未触发' : '暂无触发记录'
 }
 
 function runStatusText(status) {
@@ -202,8 +216,9 @@ onMounted(async () => {
         <article v-for="job in page.items" :key="job.id" class="job-row">
           <div class="job-main">
             <div class="job-title"><strong>{{ job.name }}</strong><a-tag :class="`status-${job.status}`">{{ statusText(job.status) }}</a-tag></div>
-            <div class="job-meta"><span>{{ job.source_type === 'incoming' ? '来文任务' : '个人任务' }}</span><span>{{ actionSummary(job) }}</span><span>{{ scheduleSummary(job) }}</span><span>{{ job.timezone }}</span></div>
-            <div class="job-next">下一次：{{ formatTime(job.next_run_at) }}</div>
+            <div class="job-meta"><span>{{ job.source_type === 'incoming' ? '来文任务' : '个人任务' }}</span><span>{{ actionSummary(job) }}</span><span>{{ scheduleSummary(job) }}</span></div>
+            <p class="job-content" :title="actionContent(job)">{{ actionContent(job) }}</p>
+            <div class="job-next"><CalendarClock :size="14" />{{ triggerSummary(job) }}</div>
           </div>
           <div class="job-actions">
             <a-button type="link" @click="openDetail(job)">详情</a-button>
@@ -222,9 +237,9 @@ onMounted(async () => {
       <a-descriptions v-if="detail" size="small" bordered :column="1">
         <a-descriptions-item label="状态">{{ statusText(detail.status) }}</a-descriptions-item>
         <a-descriptions-item label="调度">{{ scheduleSummary(detail) }}</a-descriptions-item>
-        <a-descriptions-item label="时区">{{ detail.timezone }}</a-descriptions-item>
         <a-descriptions-item label="动作">{{ actionSummary(detail) }}</a-descriptions-item>
-        <a-descriptions-item label="下一次">{{ formatTime(detail.next_run_at) }}</a-descriptions-item>
+        <a-descriptions-item label="正文">{{ actionContent(detail) }}</a-descriptions-item>
+        <a-descriptions-item label="触发">{{ triggerSummary(detail) }}</a-descriptions-item>
       </a-descriptions>
       <h3 class="run-heading">运行历史</h3>
       <a-skeleton v-if="detailLoading" active :paragraph="{ rows: 3 }" />
@@ -259,10 +274,11 @@ onMounted(async () => {
 .job-list { border: 1px solid var(--gray-150); border-radius: 8px; background: var(--gray-0); }
 .job-row { display: flex; gap: 16px; justify-content: space-between; padding: 16px; border-bottom: 1px solid var(--gray-100); }
 .job-row:last-child { border-bottom: 0; }
-.job-main { min-width: 0; }
+.job-main { min-width: 0; flex: 1; }
 .job-title { display: flex; gap: 8px; align-items: center; color: var(--color-text); }
-.job-meta, .job-next { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; color: var(--color-text-secondary); font-size: 13px; }
+.job-meta, .job-next { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; color: var(--color-text-secondary); font-size: 13px; }
 .job-meta span + span::before { content: '·'; margin-right: 8px; color: var(--gray-400); }
+.job-content { display: -webkit-box; max-width: 720px; margin: 8px 0 0; overflow: hidden; color: var(--color-text); font-size: 14px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .job-actions { display: flex; align-items: center; flex: 0 0 auto; }
 .job-actions :deep(.ant-btn) { display: inline-flex; align-items: center; gap: 5px; }
 .status-active { color: var(--color-info-700); background: var(--color-info-50); border-color: transparent; }
