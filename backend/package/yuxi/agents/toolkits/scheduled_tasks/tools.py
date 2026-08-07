@@ -21,6 +21,7 @@ from yuxi.services.scheduled_job_service import ScheduledJobDomainError, Schedul
 from yuxi.storage.postgres.manager import pg_manager
 
 SCHEDULED_TASK_TOOL_CONFIG_GUIDE = "由定时任务 Skill 按需加载，不作为 Agent 基础工具直接配置。"
+_SCHEDULE_TIME_QUESTION_ID = "scheduled_task_time"
 _CLOCK_TIME_PATTERN = re.compile(
     r"(?:凌晨|早上|上午|中午|下午|傍晚|晚上|夜里|早晨|晨间|午后)?\s*"
     r"(?:[01]?\d|2[0-3])\s*(?::|：|点)(?:\s*[0-5]?\d\s*分?)?"
@@ -75,12 +76,31 @@ def _latest_user_message(runtime: ToolRuntime | None) -> str:
     return ""
 
 
-def _has_answered_periodic_time_question(runtime: ToolRuntime | None) -> bool:
-    """结构化反问会以 ToolMessage 回放答案，不能只查看最初的 HumanMessage。"""
+def _current_request_schedule_time_answer(runtime: ToolRuntime | None) -> object | None:
+    """从当前用户请求之后的结构化反问结果中取得时间回答。
+
+    LangGraph 将恢复答案写入 ToolMessage；以最新 HumanMessage 为边界可隔离旧轮次，
+    精确 question_id 则避免把自然语言问题文案当成运行时协议。
+    """
     state = getattr(runtime, "state", None)
     messages = state.get("messages", []) if isinstance(state, Mapping) else getattr(state, "messages", [])
-    for message in reversed(messages or []):
-        if getattr(message, "type", None) != "tool" or getattr(message, "name", None) != "ask_user_question":
+    messages = list(messages or [])
+    latest_user_index = next(
+        (
+            index
+            for index in range(len(messages) - 1, -1, -1)
+            if getattr(messages[index], "type", None) == "human"
+        ),
+        None,
+    )
+    if latest_user_index is None:
+        return None
+
+    for message in reversed(messages[latest_user_index + 1 :]):
+        if (
+            getattr(message, "type", None) != "tool"
+            or getattr(message, "name", None) != "ask_user_question"
+        ):
             continue
         content = getattr(message, "content", "")
         if isinstance(content, Mapping):
@@ -92,12 +112,25 @@ def _has_answered_periodic_time_question(runtime: ToolRuntime | None) -> bool:
                 continue
         else:
             continue
-        answer = payload.get("answer") if isinstance(payload, Mapping) else None
-        questions = payload.get("questions", []) if isinstance(payload, Mapping) else []
-        question_text = json.dumps(questions, ensure_ascii=False) if questions else ""
-        if answer and any(keyword in question_text for keyword in ("scheduled_task_time", "每周几", "几点", "提醒")):
-            return True
-    return False
+        questions = payload.get("questions", [])
+        if not any(
+            isinstance(question, Mapping) and question.get("question_id") == _SCHEDULE_TIME_QUESTION_ID
+            for question in questions
+        ):
+            continue
+        answers = payload.get("answer")
+        if not isinstance(answers, Mapping):
+            continue
+        answer = answers.get(_SCHEDULE_TIME_QUESTION_ID)
+        if isinstance(answer, str) and answer.strip():
+            return answer
+        if (
+            isinstance(answer, Mapping)
+            and answer.get("type") == "other"
+            and str(answer.get("text", "")).strip()
+        ):
+            return answer
+    return None
 
 
 def _needs_periodic_time_clarification(schedule_kind: str, runtime: ToolRuntime | None) -> bool:
@@ -105,7 +138,7 @@ def _needs_periodic_time_clarification(schedule_kind: str, runtime: ToolRuntime 
     return schedule_kind in {"interval", "cron"} and bool(
         (user_message := _latest_user_message(runtime))
         and not _CLOCK_TIME_PATTERN.search(user_message)
-        and not _has_answered_periodic_time_question(runtime)
+        and _current_request_schedule_time_answer(runtime) is None
     )
 
 
@@ -114,7 +147,7 @@ def _ask_periodic_schedule_time(schedule_kind: str) -> dict[str, Any]:
     answer = ask_user_question.func(
         questions=[
             {
-                "question_id": "scheduled_task_time",
+                "question_id": _SCHEDULE_TIME_QUESTION_ID,
                 "question": question,
                 "options": [
                     {"label": "上午 9:00", "value": "上午 9:00"},

@@ -131,11 +131,59 @@ def test_answered_schedule_question_allows_periodic_task_recovery():
         SimpleNamespace(
             type="tool",
             name="ask_user_question",
-            content='{"questions":[{"question_id":"scheduled_task_time","question":"请指定每周几、几点提醒您。"}],"answer":"每周五下午四点"}',
+            content=(
+                '{"questions":[{"question_id":"scheduled_task_time","question":"When should it run?"}],'
+                '"answer":{"scheduled_task_time":{"type":"other","text":"Friday at 4 PM","selected":[]}}}'
+            ),
         )
     )
 
     assert not tools._needs_periodic_time_clarification("cron", runtime)
+
+
+def test_unrelated_or_unstructured_answer_does_not_bypass_periodic_time_clarification():
+    runtime = _runtime("每周提醒我写周报")
+    runtime.state["messages"].extend(
+        [
+            SimpleNamespace(
+                type="tool",
+                name="ask_user_question",
+                content=(
+                    '{"questions":[{"question_id":"notification_content","question":"几点提醒？"}],'
+                    '"answer":{"notification_content":"Friday at 4 PM"}}'
+                ),
+            ),
+            SimpleNamespace(
+                type="tool",
+                name="ask_user_question",
+                content=(
+                    '{"questions":[{"question_id":"scheduled_task_time","question":"When should it run?"}],'
+                    '"answer":"Friday at 4 PM"}'
+                ),
+            ),
+        ]
+    )
+
+    assert tools._needs_periodic_time_clarification("cron", runtime)
+
+
+def test_previous_request_schedule_answer_does_not_bypass_new_request_clarification():
+    runtime = _runtime("上一个每周任务")
+    runtime.state["messages"].extend(
+        [
+            SimpleNamespace(
+                type="tool",
+                name="ask_user_question",
+                content=(
+                    '{"questions":[{"question_id":"scheduled_task_time","question":"When should it run?"}],'
+                    '"answer":{"scheduled_task_time":"Friday at 4 PM"}}'
+                ),
+            ),
+            SimpleNamespace(type="human", content="每周提醒我写周报"),
+        ]
+    )
+
+    assert tools._needs_periodic_time_clarification("cron", runtime)
 
 
 @pytest.mark.asyncio
