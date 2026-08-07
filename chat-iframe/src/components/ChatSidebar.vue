@@ -158,14 +158,13 @@ async function revealCurrentThread() {
   const activeThread = list?.querySelector<HTMLElement>('.thread-option.active')
   if (!list || !activeThread) return
 
-  // 抽屉每次打开都会重新挂载；只在选中项不可见时移动列表，避免顶部会话发生无意义跳动。
+  // 抽屉每次打开都会重新挂载；保留列表原生首行间距，让当前会话稳定成为顶部第一条可见项。
   const listRect = list.getBoundingClientRect()
   const threadRect = activeThread.getBoundingClientRect()
-  if (threadRect.top < listRect.top) {
-    list.scrollTop -= listRect.top - threadRect.top
-  } else if (threadRect.bottom > listRect.bottom) {
-    list.scrollTop += threadRect.bottom - listRect.bottom
-  }
+  const listStyle = window.getComputedStyle(list)
+  const threadStyle = window.getComputedStyle(activeThread)
+  const topGap = Number.parseFloat(listStyle.paddingTop) + Number.parseFloat(threadStyle.marginTop)
+  list.scrollTop += threadRect.top - listRect.top - topGap
 }
 
 onMounted(revealCurrentThread)
