@@ -26,7 +26,7 @@ export type TaskInboxItem = {
     next_run_at: string | null
     status: string
   }
-  latest_update: { content: string; created_at: string | null } | null
+  latest_update: { title: string; content: string; created_at: string | null } | null
   unread_update_count: number
   sort_at: string | null
 }
@@ -49,7 +49,11 @@ type MarkReadResponse = { marked_count: number }
 async function request<T>(path: string, token?: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(apiUrl(path), {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers }
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers
+    }
   })
   if (response.ok) return response.json() as Promise<T>
   const payload: { detail?: string; message?: string } = await response.json().catch(() => ({}))
@@ -58,7 +62,20 @@ async function request<T>(path: string, token?: string, options: RequestInit = {
 
 export const inboxApi = {
   unreadCount: (token?: string) => request<InboxUnreadCounts>('/api/inbox/unread-count', token),
-  list: (category: InboxCategory, token?: string, cursor?: string) => request<InboxListResponse>(`/api/inbox/${category === 'task' ? 'tasks' : 'notifications'}?${new URLSearchParams({ limit: '20', ...(cursor ? { cursor } : {}) })}`, token),
-  markRead: (category: InboxCategory, id: string, token?: string) => request<MarkReadResponse>(`/api/inbox/${category === 'task' ? `tasks/${encodeURIComponent(id)}` : `notifications/${encodeURIComponent(id)}`}/read`, token, { method: 'POST', body: '{}' }),
-  markAllRead: (category: InboxCategory, token?: string) => request<MarkReadResponse>('/api/inbox/read-all', token, { method: 'POST', body: JSON.stringify({ category }) })
+  list: (category: InboxCategory, token?: string, cursor?: string) =>
+    request<InboxListResponse>(
+      `/api/inbox/${category === 'task' ? 'tasks' : 'notifications'}?${new URLSearchParams({ limit: '20', ...(cursor ? { cursor } : {}) })}`,
+      token
+    ),
+  markRead: (category: InboxCategory, id: string, token?: string) =>
+    request<MarkReadResponse>(
+      `/api/inbox/${category === 'task' ? `tasks/${encodeURIComponent(id)}` : `notifications/${encodeURIComponent(id)}`}/read`,
+      token,
+      { method: 'POST', body: '{}' }
+    ),
+  markAllRead: (category: InboxCategory, token?: string) =>
+    request<MarkReadResponse>('/api/inbox/read-all', token, {
+      method: 'POST',
+      body: JSON.stringify({ category })
+    })
 }

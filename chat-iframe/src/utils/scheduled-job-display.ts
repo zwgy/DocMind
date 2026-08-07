@@ -68,3 +68,60 @@ export function describeInterval(seconds: number | null) {
   if (value > 0 && value % 60 === 0) return `每 ${value / 60} 分钟`
   return value > 0 ? `每 ${value} 秒` : '固定间隔'
 }
+
+export type CronEditorRule = 'daily' | 'workdays' | 'weekly' | 'custom'
+
+export function parseCronEditor(expression: string | null): {
+  rule: CronEditorRule
+  time: string
+  weekdays: number[]
+} {
+  const normalized = expression?.trim() || ''
+  const match = normalized.match(/^(\d{1,2}) (\d{1,2}) \* \* (\*|1-5|[0-7](?:,[0-7])*)$/)
+  if (!match) return { rule: 'custom', time: '09:00', weekdays: [1] }
+  const time = clockTime(match[2], match[1])
+  if (!time) return { rule: 'custom', time: '09:00', weekdays: [1] }
+  if (match[3] === '*') return { rule: 'daily', time, weekdays: [1] }
+  if (match[3] === '1-5') return { rule: 'workdays', time, weekdays: [1, 2, 3, 4, 5] }
+  const weekdays = [...new Set(match[3].split(',').map((value) => Number(value) || 7))].sort((a, b) => a - b)
+  return { rule: 'weekly', time, weekdays }
+}
+
+export function buildCronExpression(
+  rule: CronEditorRule,
+  time: string,
+  weekdays: number[],
+  originalExpression: string
+) {
+  if (rule === 'custom') return originalExpression.trim()
+  const match = time.match(/^(\d{2}):(\d{2})$/)
+  if (!match || !clockTime(match[1], match[2])) throw new Error('请选择有效的重复提醒时间')
+  const [, hour, minute] = match
+  if (rule === 'daily') return `${minute} ${hour} * * *`
+  if (rule === 'workdays') return `${minute} ${hour} * * 1-5`
+  const normalizedWeekdays = [...new Set(weekdays)]
+    .filter((value) => value >= 1 && value <= 7)
+    .sort((a, b) => a - b)
+    .map((value) => value === 7 ? 0 : value)
+  if (!normalizedWeekdays.length) throw new Error('请至少选择一个星期')
+  return `${minute} ${hour} * * ${normalizedWeekdays.join(',')}`
+}
+
+/** 后端时间使用 UTC 持久化；编辑器必须按任务声明的时区还原墙钟时间。 */
+export function toZonedDateTimeInput(value: string | null, timezone: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23'
+    }).formatToParts(date).map((part) => [part.type, part.value])
+  )
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`
+}

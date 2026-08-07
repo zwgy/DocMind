@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Clock3, Maximize2, Menu, Minimize2, Minus, X } from 'lucide-vue-next'
+import { Bell, Bot, Clock3, Maximize2, Menu, Minimize2, Minus, X } from 'lucide-vue-next'
 import { ingestIncomingDocument, queryIncomingDocumentExtractions } from '@/apis/incoming-documents'
 import { inboxApi } from '@/apis/inbox'
+import type { InboxUnreadCounts, NotificationInboxItem, TaskInboxItem } from '@/apis/inbox'
 import ChatInput from '@/components/ChatInput.vue'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatSidebar from '@/components/ChatSidebar.vue'
@@ -33,14 +34,32 @@ const results = ref<Record<string, ExtractionResult>>({})
 const selectedPageFiles = ref<IncomingPageFile[]>([])
 const showSidebar = ref(false)
 const showScheduledCenter = ref(false)
-const unreadCount = ref(0)
+const unreadCounts = ref<InboxUnreadCounts>({
+  notification_unread_count: 0,
+  task_unread_count: 0,
+  total_unread_count: 0
+})
+type TickerItem = {
+  key: string
+  id: string
+  category: 'notification' | 'task'
+  title: string
+  content: string
+  createdAt: string | null
+}
+const tickerItems = ref<TickerItem[]>([])
+const tickerIndex = ref(0)
+const inboxNavigation = ref<{ key: number; category: 'notification' | 'task' } | null>(null)
 const draggingWindow = ref(false)
 const historyScrollRequest = ref(0)
 const ingestingFileIds = new Set<string>()
 let extractionRefreshTimer: ReturnType<typeof setTimeout> | null = null
 let inboxRefreshTimer: number | null = null
+let tickerTimer: number | null = null
+let inboxRefreshPromise: Promise<void> | null = null
 
 const selectedFile = computed(() => context.selectedFile)
+const currentTickerItem = computed(() => tickerItems.value[tickerIndex.value] || null)
 const currentTokenUsage = computed(() => {
   const usage = chat.agentState?.token_usage
   return usage && typeof usage === 'object' && !Array.isArray(usage)
@@ -58,6 +77,113 @@ function openSidebar() {
     context.config.agentId,
     context.config.conversationScopeKey
   )
+}
+
+function displayCount(value: number) {
+  return value > 99 ? '99+' : String(value)
+}
+
+function applyUnreadCounts(counts: InboxUnreadCounts) {
+  unreadCounts.value = {
+    notification_unread_count: Number(counts?.notification_unread_count || 0),
+    task_unread_count: Number(counts?.task_unread_count || 0),
+    total_unread_count: Number(counts?.total_unread_count || 0)
+  }
+  notifyUnreadCountChanged(unreadCounts.value.total_unread_count)
+}
+
+function resetInboxSnapshot() {
+  tickerItems.value = []
+  tickerIndex.value = 0
+  applyUnreadCounts({
+    notification_unread_count: 0,
+    task_unread_count: 0,
+    total_unread_count: 0
+  })
+}
+
+async function loadInboxSnapshot() {
+  const token = context.config.token
+  if (!token) return
+  try {
+    const counts = await inboxApi.unreadCount(token)
+    const [notificationPage, taskPage] = await Promise.all([
+      counts.notification_unread_count
+        ? inboxApi.list('notification', token)
+        : Promise.resolve({ items: [], next_cursor: null }),
+      counts.task_unread_count
+        ? inboxApi.list('task', token)
+        : Promise.resolve({ items: [], next_cursor: null })
+    ])
+    // 认证切换期间到达的旧请求结果不能覆盖新用户的收件箱状态。
+    if (context.config.token !== token) return
+    const activeKey = currentTickerItem.value?.key
+    const notifications = notificationPage.items
+      .filter((item): item is NotificationInboxItem => 'id' in item && !item.is_read)
+      .map((item) => ({
+        key: `notification:${item.id}`,
+        id: item.id,
+        category: 'notification' as const,
+        title: item.title,
+        content: item.content,
+        createdAt: item.created_at
+      }))
+    const tasks = taskPage.items
+      .filter((item): item is TaskInboxItem => 'job' in item && item.unread_update_count > 0)
+      .map((item) => ({
+        key: `task:${item.job.id}`,
+        id: item.job.id,
+        category: 'task' as const,
+        title: item.latest_update?.title || item.job.name,
+        content: item.latest_update?.content || '任务状态已更新',
+        createdAt: item.latest_update?.created_at || item.sort_at
+      }))
+    tickerItems.value = [...notifications, ...tasks].sort(
+      (left, right) => Date.parse(left.createdAt || '') - Date.parse(right.createdAt || '')
+    )
+    const activeIndex = tickerItems.value.findIndex((item) => item.key === activeKey)
+    tickerIndex.value = activeIndex >= 0 ? activeIndex : 0
+    applyUnreadCounts(counts)
+  } catch {
+    // 轮询失败时保留上一次状态，避免网络抖动把未读提示错误清零。
+  }
+}
+
+async function refreshInboxSnapshot(force = false) {
+  if (inboxRefreshPromise) {
+    await inboxRefreshPromise
+    if (!force) return
+  }
+  inboxRefreshPromise = loadInboxSnapshot()
+  try {
+    await inboxRefreshPromise
+  } finally {
+    inboxRefreshPromise = null
+  }
+}
+
+function openScheduledCenter(category?: 'notification' | 'task') {
+  if (category) {
+    inboxNavigation.value = { key: (inboxNavigation.value?.key || 0) + 1, category }
+  }
+  showScheduledCenter.value = true
+  void refreshInboxSnapshot()
+}
+
+async function openTickerItem(item: TickerItem) {
+  openScheduledCenter(item.category)
+  if (!context.config.token) return
+  try {
+    await inboxApi.markRead(item.category, item.id, context.config.token)
+    await refreshInboxSnapshot(true)
+  } catch (err) {
+    chat.error = err instanceof Error ? err.message : '标记通知已读失败'
+  }
+}
+
+function handleUnreadChanged(counts: InboxUnreadCounts) {
+  applyUnreadCounts(counts)
+  void refreshInboxSnapshot(true)
 }
 
 function cacheExtractionResults(files: IncomingPageFile[], items: ExtractionResult[] = []) {
@@ -326,6 +452,11 @@ function startWindowDrag(event: PointerEvent) {
 }
 
 watch(
+  () => context.config.token,
+  () => resetInboxSnapshot()
+)
+
+watch(
   () => selectedFile.value?.source_file_id,
   () => {
     refreshContextSummaries()
@@ -350,7 +481,7 @@ watch(
       return
     }
     if (!context.config.token) return
-    void refreshInboxCount()
+    void refreshInboxSnapshot(true)
     void chat
       .bootstrap(context.config.token, context.config.agentId, context.config.conversationScopeKey)
       .then(() => {
@@ -371,31 +502,41 @@ watch(
     requestAnimationFrame(() => {
       historyScrollRequest.value += 1
     })
+    void refreshInboxSnapshot()
   },
   { flush: 'post' }
 )
 
 onMounted(() => {
   if (!context.files.length) refreshExtraction()
-  document.addEventListener('visibilitychange', resumeVisibleThread)
+  document.addEventListener('visibilitychange', resumeVisiblePage)
+  window.addEventListener('focus', refreshVisibleInbox)
   resumeVisibleThread()
   inboxRefreshTimer = window.setInterval(() => {
-    if (document.visibilityState === 'visible' && context.config.token) void refreshInboxCount()
+    if (document.visibilityState === 'visible' && context.config.token) void refreshInboxSnapshot()
   }, 30000)
+  tickerTimer = window.setInterval(() => {
+    if (tickerItems.value.length > 1)
+      tickerIndex.value = (tickerIndex.value + 1) % tickerItems.value.length
+  }, 4500)
 })
 
 onUnmounted(() => {
   endWindowDrag()
   if (extractionRefreshTimer) clearTimeout(extractionRefreshTimer)
   if (inboxRefreshTimer) clearInterval(inboxRefreshTimer)
-  document.removeEventListener('visibilitychange', resumeVisibleThread)
+  if (tickerTimer) clearInterval(tickerTimer)
+  document.removeEventListener('visibilitychange', resumeVisiblePage)
+  window.removeEventListener('focus', refreshVisibleInbox)
 })
 
-async function refreshInboxCount() {
-  if (!context.config.token) return
-  const counts = await inboxApi.unreadCount(context.config.token)
-  unreadCount.value = Number(counts?.total_unread_count || 0)
-  notifyUnreadCountChanged(unreadCount.value)
+function refreshVisibleInbox() {
+  if (document.visibilityState === 'visible' && context.config.token) void refreshInboxSnapshot()
+}
+
+function resumeVisiblePage() {
+  resumeVisibleThread()
+  refreshVisibleInbox()
 }
 </script>
 
@@ -407,7 +548,17 @@ async function refreshInboxCount() {
       </button>
       <h1 class="chat-title">AI智能助手</h1>
       <nav class="window-actions" aria-label="窗口控制">
-        <button type="button" title="定时中心" class="timing-center-button" @click="showScheduledCenter = true"><Clock3 :size="16" /><i v-if="unreadCount" /></button>
+        <button
+          type="button"
+          title="定时中心"
+          class="timing-center-button"
+          @click="openScheduledCenter()"
+        >
+          <Clock3 :size="16" />
+          <span v-if="unreadCounts.total_unread_count" class="timing-count">{{
+            displayCount(unreadCounts.total_unread_count)
+          }}</span>
+        </button>
         <button
           v-if="context.windowState === 'normal'"
           type="button"
@@ -442,7 +593,14 @@ async function refreshInboxCount() {
         @click="showSidebar = false"
       ></button>
     </Transition>
-    <ScheduledCenterDrawer :open="showScheduledCenter" :token="context.config.token" @close="showScheduledCenter = false" @unread-changed="(count) => { unreadCount = count; notifyUnreadCountChanged(count) }" />
+    <ScheduledCenterDrawer
+      :open="showScheduledCenter"
+      :token="context.config.token"
+      :unread-counts="unreadCounts"
+      :inbox-navigation="inboxNavigation"
+      @close="showScheduledCenter = false"
+      @unread-changed="handleUnreadChanged"
+    />
     <Transition name="sidebar-slide">
       <aside v-if="showSidebar" class="conversation-drawer">
         <ChatSidebar
@@ -488,6 +646,32 @@ async function refreshInboxCount() {
     </Transition>
 
     <section class="chat-body">
+      <Transition name="ticker-slide" mode="out-in">
+        <button
+          v-if="currentTickerItem"
+          :key="currentTickerItem.key"
+          type="button"
+          class="notification-ticker"
+          :class="currentTickerItem.category"
+          @click="openTickerItem(currentTickerItem)"
+        >
+          <span class="ticker-icon"
+            ><Bell v-if="currentTickerItem.category === 'notification'" :size="14" /><Bot
+              v-else
+              :size="14"
+          /></span>
+          <span class="ticker-label">{{
+            currentTickerItem.category === 'notification' ? '通知' : '任务'
+          }}</span>
+          <span class="ticker-content"
+            ><strong>{{ currentTickerItem.title }}</strong
+            ><span>{{ currentTickerItem.content }}</span></span
+          >
+          <span v-if="tickerItems.length > 1" class="ticker-position"
+            >{{ tickerIndex + 1 }}/{{ tickerItems.length }}</span
+          >
+        </button>
+      </Transition>
       <section class="workbench">
         <ChatMessages
           :messages="chat.displayMessages"
