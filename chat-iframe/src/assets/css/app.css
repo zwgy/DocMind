@@ -101,9 +101,11 @@
 }
 
 .notification-ticker {
-  width: 100%;
+  width: calc(100% - 24px);
   min-height: 34px;
-  border-bottom: 1px solid var(--gray-200);
+  margin: 6px 12px 0;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
   background: var(--gray-50);
   overflow: hidden;
 }
@@ -115,7 +117,7 @@
 .ticker-marquee {
   width: 100%;
   min-width: 0;
-  padding: 0 12px;
+  padding: 0 8px;
   overflow: hidden;
   mask-image: linear-gradient(to right, transparent, #000 8px, #000 calc(100% - 8px), transparent);
 }
@@ -141,6 +143,7 @@
 }
 
 .ticker-item {
+  position: relative;
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -154,6 +157,14 @@
   line-height: 1.4;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.ticker-item::after {
+  position: absolute;
+  right: -14px;
+  color: var(--gray-400);
+  content: '·';
+  pointer-events: none;
 }
 
 .notification-ticker:hover .ticker-track.is-moving,
@@ -171,30 +182,6 @@
   border-radius: 4px;
   outline: 2px solid var(--main-color);
   outline-offset: 1px;
-}
-
-.ticker-number {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  min-width: 17px;
-  height: 17px;
-  padding: 0 4px;
-  border-radius: 9px;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-.ticker-item.notification .ticker-number {
-  color: var(--color-info-700);
-  background: var(--color-info-50);
-}
-
-.ticker-item.task .ticker-number {
-  color: var(--color-success-700);
-  background: var(--color-success-50);
 }
 
 .ticker-item-icon {

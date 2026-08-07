@@ -736,15 +736,14 @@ function resumeVisiblePage() {
           >
             <div ref="tickerGroup" class="ticker-group">
               <button
-                v-for="(item, index) in tickerItems"
+                v-for="item in tickerItems"
                 :key="item.key"
                 type="button"
                 class="ticker-item"
                 :class="item.category"
-                :aria-label="`${index + 1}，${item.content}`"
+                :aria-label="item.content"
                 @click="openTickerItem(item)"
               >
-                <span class="ticker-number">{{ index + 1 }}</span>
                 <Bell v-if="item.category === 'notification'" class="ticker-item-icon" :size="13" />
                 <Bot v-else class="ticker-item-icon" :size="13" />
                 <span class="ticker-content">{{ item.content }}</span>
@@ -756,7 +755,7 @@ function resumeVisiblePage() {
               aria-hidden="true"
             >
               <button
-                v-for="(item, index) in tickerItems"
+                v-for="item in tickerItems"
                 :key="`duplicate:${item.key}`"
                 type="button"
                 tabindex="-1"
@@ -764,7 +763,6 @@ function resumeVisiblePage() {
                 :class="item.category"
                 @click="openTickerItem(item)"
               >
-                <span class="ticker-number">{{ index + 1 }}</span>
                 <Bell v-if="item.category === 'notification'" class="ticker-item-icon" :size="13" />
                 <Bot v-else class="ticker-item-icon" :size="13" />
                 <span class="ticker-content">{{ item.content }}</span>

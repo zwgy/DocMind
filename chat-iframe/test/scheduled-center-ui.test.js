@@ -43,16 +43,17 @@ test('unread state is layered across the clock entry and inbox tabs', () => {
   )
 })
 
-test('global ticker scrolls one numbered batch and opens each matching inbox item on click', () => {
+test('global ticker scrolls one icon-separated batch and opens each matching inbox item on click', () => {
   assert.match(appSource, /class="notification-ticker"/)
   assert.match(appSource, /const TICKER_ITEM_LIMIT = 5/)
   assert.match(appSource, /\.slice\(0, TICKER_ITEM_LIMIT\)/)
-  assert.match(appSource, /class="ticker-marquee"[\s\S]*v-for="\(item, index\) in tickerItems"/)
-  assert.match(appSource, /class="ticker-number">\{\{ index \+ 1 \}\}/)
+  assert.match(appSource, /class="ticker-marquee"[\s\S]*v-for="item in tickerItems"/)
+  assert.match(appSource, /class="ticker-item-icon"/)
   assert.match(appSource, /class="ticker-content">\{\{ item\.content \}\}/)
   assert.match(appSource, /aria-hidden="true"[\s\S]*`duplicate:\$\{item\.key\}`/)
   assert.doesNotMatch(appSource, /class="ticker-label"/)
   assert.doesNotMatch(appSource, /currentTickerItem/)
+  assert.doesNotMatch(appSource, /ticker-number/)
   assert.doesNotMatch(appSource, /ticker-position/)
   assert.match(appSource, /setInterval\([\s\S]*30000/)
   assert.doesNotMatch(appSource, /4500/)
@@ -66,7 +67,10 @@ test('global ticker scrolls one numbered batch and opens each matching inbox ite
     drawerSource,
     /inboxCategory\.value = props\.inboxNavigation\.category\s+if \(props\.open\) void refresh\(\)/
   )
-  assert.match(styles, /\.notification-ticker \{[\s\S]*background: var\(--gray-50\)/)
+  assert.match(
+    styles,
+    /\.notification-ticker \{[\s\S]*width: calc\(100% - 24px\);[\s\S]*margin: 6px 12px 0;[\s\S]*background: var\(--gray-50\)/
+  )
   assert.match(styles, /grid-template-rows: auto minmax\(0, 1fr\)/)
   assert.match(styles, /\.chat-body > \.workbench \{\s*grid-row: 2/)
   assert.match(
@@ -74,6 +78,7 @@ test('global ticker scrolls one numbered batch and opens each matching inbox ite
     /\.ticker-track\.is-moving \{[\s\S]*animation: ticker-marquee var\(--ticker-duration\) linear infinite/
   )
   assert.match(styles, /transform: translate3d\(calc\(var\(--ticker-distance\) \* -1\), 0, 0\)/)
+  assert.match(styles, /\.ticker-item::after \{[\s\S]*content: '·'/)
   assert.match(styles, /@keyframes ticker-marquee/)
 })
 
