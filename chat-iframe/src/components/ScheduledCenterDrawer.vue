@@ -38,6 +38,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: []; unreadChanged: [counts: InboxUnreadCounts] }>()
 const datePickerActionRow = { selectBtnLabel: '确定', cancelBtnLabel: '取消' }
+const datePickerInputAttrs = { clearable: false }
 const datePickerTimeConfig = { enableSeconds: false, is24: true }
 
 const section = ref<'scheduled' | 'inbox'>('scheduled')
@@ -621,7 +622,7 @@ onMounted(() => {
             :locale="zhCN"
             teleport="body"
             :action-row="datePickerActionRow"
-            :clearable="false"
+            :input-attrs="datePickerInputAttrs"
             :time-config="datePickerTimeConfig"
           />
         </label>
@@ -643,7 +644,7 @@ onMounted(() => {
               :locale="zhCN"
               teleport="body"
               :action-row="datePickerActionRow"
-              :clearable="false"
+              :input-attrs="datePickerInputAttrs"
               :time-config="datePickerTimeConfig"
             />
           </label>
@@ -677,7 +678,7 @@ onMounted(() => {
               :locale="zhCN"
               teleport="body"
               :action-row="datePickerActionRow"
-              :clearable="false"
+              :input-attrs="datePickerInputAttrs"
               :time-config="datePickerTimeConfig"
             />
           </label>
@@ -824,7 +825,7 @@ onMounted(() => {
   border: 2px solid var(--gray-0);
   border-radius: 10px;
   color: var(--gray-0);
-  background: var(--color-error-500);
+  background: var(--color-error-700);
   font-size: 11px;
   font-weight: 700;
   line-height: 1;

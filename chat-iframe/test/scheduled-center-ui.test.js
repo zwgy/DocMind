@@ -33,8 +33,14 @@ test('unread state is layered across the clock entry and inbox tabs', () => {
   assert.match(drawerSource, /unreadCounts\?\.total_unread_count/)
   assert.match(drawerSource, /unreadCounts\?\.notification_unread_count/)
   assert.match(drawerSource, /unreadCounts\?\.task_unread_count/)
-  assert.match(styles, /\.timing-count \{[\s\S]*min-width: 19px;[\s\S]*border: 2px solid/)
-  assert.match(drawerSource, /\.tab-count \{[\s\S]*min-width: 20px;[\s\S]*font-weight: 700/)
+  assert.match(
+    styles,
+    /\.timing-count \{[\s\S]*min-width: 19px;[\s\S]*background: var\(--color-error-700\)/
+  )
+  assert.match(
+    drawerSource,
+    /\.tab-count \{[\s\S]*min-width: 20px;[\s\S]*background: var\(--color-error-700\)/
+  )
 })
 
 test('global ticker polls while visible and opens the matching inbox category on click', () => {
@@ -63,6 +69,7 @@ test('scheduled editor uses the date picker component instead of native date and
   assert.match(drawerSource, /model-type="yyyy-MM-dd'T'HH:mm"/)
   assert.match(drawerSource, /model-type="HH:mm"/)
   assert.match(drawerSource, /:action-row="datePickerActionRow"/)
+  assert.match(drawerSource, /:input-attrs="datePickerInputAttrs"/)
   assert.match(drawerSource, /:time-config="datePickerTimeConfig"/)
   assert.doesNotMatch(drawerSource, /type="datetime-local"/)
   assert.doesNotMatch(drawerSource, /type="time"/)
