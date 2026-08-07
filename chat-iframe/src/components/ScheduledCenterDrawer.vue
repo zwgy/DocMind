@@ -362,6 +362,7 @@ watch(
     if (!props.inboxNavigation) return
     section.value = 'inbox'
     inboxCategory.value = props.inboxNavigation.category
+    if (props.open) void refresh()
   }
 )
 onMounted(() => {

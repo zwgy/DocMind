@@ -176,6 +176,10 @@ async function openTickerItem(item: TickerItem) {
   try {
     await inboxApi.markRead(item.category, item.id, context.config.token)
     await refreshInboxSnapshot(true)
+    inboxNavigation.value = {
+      key: (inboxNavigation.value?.key || 0) + 1,
+      category: item.category
+    }
   } catch (err) {
     chat.error = err instanceof Error ? err.message : '标记通知已读失败'
   }

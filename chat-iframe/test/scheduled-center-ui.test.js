@@ -43,6 +43,7 @@ test('global ticker polls while visible and opens the matching inbox category on
   assert.match(appSource, /await inboxApi\.markRead\(item\.category, item\.id/)
   assert.match(appSource, /openScheduledCenter\(item\.category\)/)
   assert.match(appSource, /inboxNavigation\.value = \{ key:/)
+  assert.match(drawerSource, /inboxCategory\.value = props\.inboxNavigation\.category\s+if \(props\.open\) void refresh\(\)/)
   assert.match(styles, /\.notification-ticker \{[\s\S]*background: var\(--gray-50\)/)
   assert.match(styles, /grid-template-rows: auto minmax\(0, 1fr\)/)
   assert.match(styles, /\.chat-body > \.workbench \{\s*grid-row: 2/)
