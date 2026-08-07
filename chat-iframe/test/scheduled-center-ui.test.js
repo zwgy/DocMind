@@ -55,7 +55,10 @@ test('global ticker polls while visible and opens the matching inbox category on
   assert.match(appSource, /await inboxApi\.markRead\(item\.category, item\.id/)
   assert.match(appSource, /openScheduledCenter\(item\.category\)/)
   assert.match(appSource, /inboxNavigation\.value = \{ key:/)
-  assert.match(drawerSource, /inboxCategory\.value = props\.inboxNavigation\.category\s+if \(props\.open\) void refresh\(\)/)
+  assert.match(
+    drawerSource,
+    /inboxCategory\.value = props\.inboxNavigation\.category\s+if \(props\.open\) void refresh\(\)/
+  )
   assert.match(styles, /\.notification-ticker \{[\s\S]*background: var\(--gray-50\)/)
   assert.match(styles, /grid-template-rows: auto minmax\(0, 1fr\)/)
   assert.match(styles, /\.chat-body > \.workbench \{\s*grid-row: 2/)
@@ -84,7 +87,27 @@ test('cancel confirmation is centered and uses equal modern actions', () => {
     drawerSource,
     /\.confirm-dialog \.confirm-actions \{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/
   )
-  assert.match(drawerSource, /\.confirm-dialog \.danger \{[\s\S]*background: var\(--color-error-700\)/)
+  assert.match(
+    drawerSource,
+    /\.confirm-dialog \.danger \{[\s\S]*background: var\(--color-error-700\)/
+  )
+})
+
+test('inbox cards keep their border despite the drawer button reset', () => {
+  assert.match(
+    drawerSource,
+    /\.scheduled-card,\s*\.timing-center \.inbox-card \{[\s\S]*border: 1px solid var\(--gray-200\)/
+  )
+})
+
+test('scheduled editor reports save results without hiding existing list data', () => {
+  assert.match(drawerSource, /const successMessage = ref\(''\)/)
+  assert.match(drawerSource, /const editorError = ref\(''\)/)
+  assert.match(drawerSource, /editingJob\.value = null\s+successMessage\.value = '定时任务已保存'/)
+  assert.match(drawerSource, /v-if="editorError" class="editor-feedback" role="alert"/)
+  assert.match(drawerSource, /v-if="error" class="feedback-banner error" role="alert"/)
+  assert.match(drawerSource, /<section v-if="currentItems\.length" class="center-list">/)
+  assert.doesNotMatch(drawerSource, /v-if="error"[^>]*>[\s\S]{0,100}v-else-if="loading/)
 })
 
 test('ticker state is owned by App rather than a conversation component', () => {

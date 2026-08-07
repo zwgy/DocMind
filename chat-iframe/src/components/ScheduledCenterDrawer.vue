@@ -4,6 +4,7 @@ import {
   Bell,
   Bot,
   CalendarClock,
+  CircleCheck,
   CheckCheck,
   Inbox,
   MessageCircleMore,
@@ -61,6 +62,8 @@ const editingJob = ref<ScheduledJob | null>(null)
 const editForm = ref(createEditForm())
 const saving = ref(false)
 const error = ref('')
+const successMessage = ref('')
+const editorError = ref('')
 const weekdayOptions = [
   { value: 1, label: '一' },
   { value: 2, label: '二' },
@@ -201,6 +204,7 @@ async function refresh({ reset = true }: { reset?: boolean } = {}) {
   if (reset) loading.value = true
   else loadingMore.value = true
   error.value = ''
+  successMessage.value = ''
   try {
     if (section.value === 'scheduled') {
       const page = currentScheduledPage.value
@@ -262,6 +266,9 @@ async function changeStatus(job: ScheduledJob, action: 'pause' | 'resume' | 'can
 
 function openEditor(job: ScheduledJob) {
   const cronEditor = parseCronEditor(job.cron_expression)
+  error.value = ''
+  successMessage.value = ''
+  editorError.value = ''
   editingJob.value = job
   editForm.value = {
     name: job.name,
@@ -305,7 +312,7 @@ async function saveEditor() {
   const job = editingJob.value
   if (!job || !props.token) return
   saving.value = true
-  error.value = ''
+  editorError.value = ''
   try {
     const form = editForm.value
     const action =
@@ -317,7 +324,7 @@ async function saveEditor() {
             timeout_seconds: Number(form.timeoutSeconds)
           }
         : { type: 'notification', title: form.title, content: form.content }
-    await scheduledJobApi.update(
+    const response = await scheduledJobApi.update(
       job.id,
       {
         version: job.version,
@@ -328,10 +335,20 @@ async function saveEditor() {
       },
       props.token
     )
+    for (const page of Object.values(scheduledPages.value)) {
+      const index = page.items.findIndex((item) => item.id === job.id)
+      if (index >= 0) page.items[index] = response.job
+    }
     editingJob.value = null
-    await refreshScheduledPages()
+    successMessage.value = '定时任务已保存'
+    try {
+      await refreshScheduledPages()
+    } catch {
+      successMessage.value = ''
+      error.value = '任务已保存，但列表刷新失败，请点击右上角刷新按钮重试'
+    }
   } catch (value) {
-    error.value = value instanceof Error ? value.message : '更新任务失败'
+    editorError.value = value instanceof Error ? value.message : '更新任务失败'
   } finally {
     saving.value = false
   }
@@ -456,9 +473,12 @@ onMounted(() => {
       </button>
     </div>
 
-    <p v-if="error" class="hint error">{{ error }}</p>
-    <p v-else-if="loading && !currentItems.length" class="hint">加载中…</p>
-    <div v-else-if="!currentItems.length" class="empty-state">
+    <p v-if="successMessage" class="feedback-banner success" role="status">
+      <CircleCheck :size="15" />{{ successMessage }}
+    </p>
+    <p v-if="error" class="feedback-banner error" role="alert">{{ error }}</p>
+    <p v-if="loading && !currentItems.length" class="hint">加载中…</p>
+    <div v-else-if="!currentItems.length && !error" class="empty-state">
       <div class="empty-visual" aria-hidden="true">
         <CalendarClock v-if="section === 'scheduled'" :size="52" :stroke-width="1.35" />
         <Inbox v-else :size="54" :stroke-width="1.35" />
@@ -467,7 +487,7 @@ onMounted(() => {
       <p>{{ emptyStateLabel }}</p>
     </div>
 
-    <section v-else class="center-list">
+    <section v-if="currentItems.length" class="center-list">
       <template v-if="section === 'scheduled'">
         <article v-for="job in currentScheduledPage.items" :key="job.id" class="scheduled-card">
           <div class="card-icon" :class="job.action_type">
@@ -686,6 +706,7 @@ onMounted(() => {
             当前任务使用高级自定义周期。如需修改，请先选择常用重复规则。
           </p>
         </template>
+        <p v-if="editorError" class="editor-feedback" role="alert">保存失败：{{ editorError }}</p>
         <footer>
           <button type="button" @click="editingJob = null">取消</button
           ><button type="button" class="primary" :disabled="saving" @click="saveEditor">
@@ -857,6 +878,27 @@ onMounted(() => {
 .hint.error {
   color: var(--color-error-700);
 }
+.feedback-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.feedback-banner.success {
+  color: var(--color-success-700);
+  background: var(--gray-50);
+  border-color: var(--gray-200);
+}
+.feedback-banner.error {
+  color: var(--color-error-700);
+  background: var(--color-error-50);
+  border-color: var(--gray-200);
+}
 .empty-state {
   display: grid;
   justify-items: center;
@@ -896,7 +938,7 @@ onMounted(() => {
   overflow: auto;
 }
 .scheduled-card,
-.inbox-card {
+.timing-center .inbox-card {
   display: flex;
   gap: 10px;
   width: 100%;
@@ -1158,6 +1200,16 @@ onMounted(() => {
   color: var(--gray-0);
   background: var(--main-700);
   border-color: var(--main-700);
+}
+.editor-feedback {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  color: var(--color-error-700);
+  background: var(--color-error-50);
+  font-size: 12px;
+  line-height: 1.5;
 }
 .schedule-picker :deep(.dp__input) {
   min-height: 36px;
