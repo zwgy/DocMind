@@ -11,6 +11,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  Repeat2,
   Save,
   Trash2,
   TriangleAlert,
@@ -126,11 +127,15 @@ function formatTime(value: string | null | undefined, timezone?: string) {
     : '-'
 }
 
-function scheduleSummary(job: ScheduledJob) {
-  if (job.schedule_kind === 'at') return `单次提醒 · ${formatTime(job.run_at, job.timezone)}`
-  if (job.schedule_kind === 'interval')
-    return `重复提醒 · ${describeInterval(job.interval_seconds)}`
-  return `重复提醒 · ${describeCron(job.cron_expression)}`
+function scheduleMode(job: ScheduledJob) {
+  const actionLabel = job.action_type === 'agent' ? '执行' : '提醒'
+  return `${job.schedule_kind === 'at' ? '单次' : '重复'}${actionLabel}`
+}
+
+function scheduleRule(job: ScheduledJob) {
+  if (job.schedule_kind === 'at') return formatTime(job.run_at, job.timezone)
+  if (job.schedule_kind === 'interval') return describeInterval(job.interval_seconds)
+  return describeCron(job.cron_expression)
 }
 
 function displayCount(value: number | null | undefined) {
@@ -145,12 +150,8 @@ function jobContent(job: ScheduledJob) {
 }
 
 function jobAction(job: ScheduledJob) {
-  if (job.action_type === 'agent') {
-    const agentSlug = job.action_data?.agent_slug
-    return typeof agentSlug === 'string' && agentSlug ? `Agent · ${agentSlug}` : '执行 Agent'
-  }
-  const title = job.action_data?.title
-  return typeof title === 'string' && title ? `通知 · ${title}` : '站内通知'
+  const agentSlug = job.action_data?.agent_slug
+  return typeof agentSlug === 'string' && agentSlug ? `执行 Agent · ${agentSlug}` : '执行 Agent'
 }
 
 function jobTrigger(job: ScheduledJob) {
@@ -498,9 +499,16 @@ onMounted(() => {
               <strong>{{ job.name }}</strong
               ><span class="status" :class="job.status">{{ statusText(job.status) }}</span>
             </div>
-            <div class="card-meta">
-              <span>{{ jobAction(job) }}</span
-              ><span>{{ scheduleSummary(job) }}</span>
+            <div class="schedule-summary">
+              <span class="schedule-mode">
+                <CalendarClock v-if="job.schedule_kind === 'at'" :size="13" />
+                <Repeat2 v-else :size="13" />
+                {{ scheduleMode(job) }}
+              </span>
+              <span class="schedule-rule">{{ scheduleRule(job) }}</span>
+            </div>
+            <div v-if="job.action_type === 'agent'" class="card-meta">
+              <span>{{ jobAction(job) }}</span>
             </div>
             <p class="job-content" :title="jobContent(job)">{{ jobContent(job) }}</p>
             <div class="trigger"><CalendarClock :size="14" />{{ jobTrigger(job) }}</div>
@@ -557,7 +565,7 @@ onMounted(() => {
               <span>{{ notificationType(item) }}</span
               ><span v-if="isTaskItem(item)">{{ taskAction(item) }}</span>
             </div>
-            <p>
+            <p class="inbox-content">
               {{ isTaskItem(item) ? item.latest_update?.content || '暂无状态更新' : item.content }}
             </p>
             <div class="trigger">
@@ -754,6 +762,7 @@ onMounted(() => {
 .header-actions,
 .card-title,
 .card-meta,
+.schedule-summary,
 .trigger,
 .card-actions {
   display: flex;
@@ -990,8 +999,7 @@ onMounted(() => {
   gap: 8px;
   color: var(--gray-1000);
 }
-.card-title strong,
-.inbox-card p {
+.card-title strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1034,18 +1042,40 @@ onMounted(() => {
   color: var(--gray-400);
   content: '·';
 }
-.inbox-card p,
-.job-content {
-  margin: 0;
-  color: var(--gray-700);
-  font-size: 13px;
-}
-.job-content {
+.job-content,
+.inbox-content {
   display: -webkit-box;
+  margin: 0;
   overflow: hidden;
-  line-height: 1.5;
+  color: var(--gray-900);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+.schedule-summary {
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 1px 0;
+}
+.schedule-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  color: var(--main-700);
+  background: var(--main-50);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.schedule-rule {
+  color: var(--gray-900);
+  font-size: 13px;
+  font-weight: 600;
 }
 .trigger {
   gap: 5px;

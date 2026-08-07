@@ -110,6 +110,25 @@ test('scheduled editor reports save results without hiding existing list data', 
   assert.doesNotMatch(drawerSource, /v-if="error"[^>]*>[\s\S]{0,100}v-else-if="loading/)
 })
 
+test('scheduled and inbox cards promote body content and separate schedule semantics', () => {
+  assert.match(drawerSource, /function scheduleMode\(job: ScheduledJob\)/)
+  assert.match(drawerSource, /function scheduleRule\(job: ScheduledJob\)/)
+  assert.doesNotMatch(drawerSource, /function scheduleSummary\(/)
+  assert.match(
+    drawerSource,
+    /class="schedule-summary"[\s\S]{0,500}v-if="job\.action_type === 'agent'" class="card-meta"[\s\S]{0,200}class="job-content"/
+  )
+  assert.match(drawerSource, /class="schedule-mode"[\s\S]*scheduleMode\(job\)/)
+  assert.match(drawerSource, /class="schedule-rule">\{\{ scheduleRule\(job\) \}\}/)
+  assert.match(drawerSource, /class="card-meta"[\s\S]{0,300}class="inbox-content"/)
+  assert.match(drawerSource, /const actionLabel = job\.action_type === 'agent' \? '执行' : '提醒'/)
+  assert.doesNotMatch(drawerSource, /job\.action_data\?\.title[\s\S]{0,100}站内通知/)
+  assert.match(
+    drawerSource,
+    /\.job-content,\s*\.inbox-content \{[\s\S]*color: var\(--gray-900\);[\s\S]*font-size: 14px;[\s\S]*-webkit-line-clamp: 2;/
+  )
+})
+
 test('ticker state is owned by App rather than a conversation component', () => {
   assert.match(appSource, /const tickerItems = ref<TickerItem\[]>\(\[]\)/)
   assert.doesNotMatch(
