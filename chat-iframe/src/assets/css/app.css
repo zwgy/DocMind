@@ -64,6 +64,21 @@
   background: var(--main-50);
 }
 
+.timing-center-button {
+  position: relative;
+}
+
+.timing-center-button i {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--gray-0);
+  border-radius: 50%;
+  background: var(--color-error-500);
+}
+
 .chat-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

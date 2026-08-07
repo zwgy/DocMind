@@ -1,18 +1,34 @@
-import { apiUrl } from './api-url'
+import { apiUrl } from './api-url.ts'
 
 export type InboxCategory = 'notification' | 'task'
 
 export type NotificationInboxItem = {
   id: string
+  item_type: string
   title: string
   content: string
   is_read: boolean
+  created_at: string | null
 }
 
 export type TaskInboxItem = {
-  job: { id: string; name: string }
-  latest_update: { content: string } | null
+  job: {
+    id: string
+    name: string
+    action_type: 'agent'
+    agent_slug: string | null
+    timezone: string
+    schedule_kind: 'at' | 'interval' | 'cron'
+    run_at: string | null
+    anchor_at: string | null
+    interval_seconds: number | null
+    cron_expression: string | null
+    next_run_at: string | null
+    status: string
+  }
+  latest_update: { content: string; created_at: string | null } | null
   unread_update_count: number
+  sort_at: string | null
 }
 
 export type InboxItem = NotificationInboxItem | TaskInboxItem

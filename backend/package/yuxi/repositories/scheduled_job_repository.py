@@ -377,7 +377,7 @@ class ScheduledJobRepository:
         status: Literal["partial", "skipped", "failed"],
         error_message: str | None,
     ) -> None:
-        """第一版只将异常运行写入任务页签，避免正常通知在两个页签重复出现。"""
+        """通知动作的投递异常也属于通知收件箱，不能与 Agent 执行任务混在一起。"""
         delivered_count = (run.result_data or {}).get("delivered_count", 0)
         recipient_count = (run.result_data or {}).get("recipient_count", 0)
         if status == "partial":
@@ -393,7 +393,7 @@ class ScheduledJobRepository:
             recipient_uid=job.owner_uid,
             scheduled_job_id=job.id,
             scheduled_job_run_id=run.id,
-            category="task",
+            category="notification",
             item_type=f"run_{status}",
             event_key=f"task:{run.id}:{status}",
             title=title,

@@ -87,7 +87,7 @@ class InboxRepository:
         cursor: tuple[int, datetime, str] | None,
         limit: int,
     ) -> list[tuple]:
-        """任务页以任务定义为主表，尚无异常事件的已启用任务也必须可见。"""
+        """任务页只展示由 Agent 执行的定时任务及其运行状态。"""
         task_events = (
             select(
                 InboxItem.scheduled_job_id.label("scheduled_job_id"),
@@ -143,7 +143,10 @@ class InboxRepository:
             )
             .outerjoin(latest_event, latest_event.c.scheduled_job_id == ScheduledJob.id)
             .outerjoin(unread_events, unread_events.c.scheduled_job_id == ScheduledJob.id)
-            .where(ScheduledJob.owner_uid == owner_uid)
+            .where(
+                ScheduledJob.owner_uid == owner_uid,
+                ScheduledJob.action_type == "agent",
+            )
         )
         if cursor is not None:
             cursor_has_unread, cursor_sort_at, cursor_job_id = cursor
@@ -175,6 +178,7 @@ class InboxRepository:
                 InboxItem.category == "task",
                 InboxItem.is_read.is_(False),
                 ScheduledJob.owner_uid == recipient_uid,
+                ScheduledJob.action_type == "agent",
             )
         )
         return int(notification_count or 0), int(task_count or 0)
@@ -193,7 +197,11 @@ class InboxRepository:
     async def task_exists_for_owner(self, *, job_id: str, owner_uid: str) -> bool:
         return bool(
             await self.db.scalar(
-                select(ScheduledJob.id).where(ScheduledJob.id == job_id, ScheduledJob.owner_uid == owner_uid)
+                select(ScheduledJob.id).where(
+                    ScheduledJob.id == job_id,
+                    ScheduledJob.owner_uid == owner_uid,
+                    ScheduledJob.action_type == "agent",
+                )
             )
         )
 
@@ -231,7 +239,12 @@ class InboxRepository:
         )
         if category == "task":
             statement = statement.where(
-                InboxItem.scheduled_job_id.in_(select(ScheduledJob.id).where(ScheduledJob.owner_uid == recipient_uid))
+                InboxItem.scheduled_job_id.in_(
+                    select(ScheduledJob.id).where(
+                        ScheduledJob.owner_uid == recipient_uid,
+                        ScheduledJob.action_type == "agent",
+                    )
+                )
             )
         result = await self.db.execute(statement.values(is_read=True, read_at=func.now()))
         return int(result.rowcount or 0)

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Mail, Maximize2, Menu, Minimize2, Minus, X } from 'lucide-vue-next'
+import { Clock3, Maximize2, Menu, Minimize2, Minus, X } from 'lucide-vue-next'
 import { ingestIncomingDocument, queryIncomingDocumentExtractions } from '@/apis/incoming-documents'
 import { inboxApi } from '@/apis/inbox'
 import ChatInput from '@/components/ChatInput.vue'
 import ChatMessages from '@/components/ChatMessages.vue'
 import ChatSidebar from '@/components/ChatSidebar.vue'
 import RunInterruptCard from '@/components/RunInterruptCard.vue'
-import InboxDrawer from '@/components/InboxDrawer.vue'
+import ScheduledCenterDrawer from '@/components/ScheduledCenterDrawer.vue'
 import { useIframeBridge } from '@/composables/useIframeBridge'
 import { useChatStore } from '@/stores/chat'
 import { useIframeContextStore } from '@/stores/iframe-context'
@@ -32,7 +32,7 @@ const error = ref('')
 const results = ref<Record<string, ExtractionResult>>({})
 const selectedPageFiles = ref<IncomingPageFile[]>([])
 const showSidebar = ref(false)
-const showInbox = ref(false)
+const showScheduledCenter = ref(false)
 const unreadCount = ref(0)
 const draggingWindow = ref(false)
 const historyScrollRequest = ref(0)
@@ -407,7 +407,7 @@ async function refreshInboxCount() {
       </button>
       <h1 class="chat-title">AI智能助手</h1>
       <nav class="window-actions" aria-label="窗口控制">
-        <button type="button" title="收件箱" class="mail-button" @click="showInbox = true"><Mail :size="16" /><i v-if="unreadCount" /></button>
+        <button type="button" title="定时中心" class="timing-center-button" @click="showScheduledCenter = true"><Clock3 :size="16" /><i v-if="unreadCount" /></button>
         <button
           v-if="context.windowState === 'normal'"
           type="button"
@@ -442,7 +442,7 @@ async function refreshInboxCount() {
         @click="showSidebar = false"
       ></button>
     </Transition>
-    <InboxDrawer :open="showInbox" :token="context.config.token" @close="showInbox = false" @unread-changed="(count) => { unreadCount = count; notifyUnreadCountChanged(count) }" />
+    <ScheduledCenterDrawer :open="showScheduledCenter" :token="context.config.token" @close="showScheduledCenter = false" @unread-changed="(count) => { unreadCount = count; notifyUnreadCountChanged(count) }" />
     <Transition name="sidebar-slide">
       <aside v-if="showSidebar" class="conversation-drawer">
         <ChatSidebar

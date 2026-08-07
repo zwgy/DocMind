@@ -91,6 +91,7 @@ class InboxService:
     def _serialize_task(row: tuple) -> dict:
         job: ScheduledJob = row[0]
         latest_title, latest_content, latest_update_at, unread_count, _has_unread, sort_at = row[1:]
+        action_data = job.action_data if isinstance(job.action_data, dict) else {}
         return {
             "job": {
                 "id": job.id,
@@ -98,6 +99,13 @@ class InboxService:
                 "source_type": job.source_type,
                 "source_snapshot": job.source_snapshot,
                 "schedule_kind": job.schedule_kind,
+                "run_at": InboxService._format_datetime(job.run_at),
+                "anchor_at": InboxService._format_datetime(job.anchor_at),
+                "interval_seconds": job.interval_seconds,
+                "cron_expression": job.cron_expression,
+                "timezone": job.timezone,
+                "action_type": job.action_type,
+                "agent_slug": action_data.get("agent_slug"),
                 "next_run_at": InboxService._format_datetime(job.next_run_at),
                 "status": job.status,
                 "updated_at": InboxService._format_datetime(job.updated_at),
