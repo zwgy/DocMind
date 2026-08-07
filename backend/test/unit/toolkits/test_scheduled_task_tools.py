@@ -125,6 +125,19 @@ def test_periodic_task_without_explicit_clock_time_requires_clarification():
     assert not tools._needs_periodic_time_clarification("at", _runtime("明天提醒我写周报"))
 
 
+def test_answered_schedule_question_allows_periodic_task_recovery():
+    runtime = _runtime("每周提醒我写周报")
+    runtime.state["messages"].append(
+        SimpleNamespace(
+            type="tool",
+            name="ask_user_question",
+            content='{"questions":[{"question_id":"scheduled_task_time","question":"请指定每周几、几点提醒您。"}],"answer":"每周五下午四点"}',
+        )
+    )
+
+    assert not tools._needs_periodic_time_clarification("cron", runtime)
+
+
 @pytest.mark.asyncio
 async def test_periodic_task_without_clock_time_asks_before_creating(monkeypatch):
     questions = []

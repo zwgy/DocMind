@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import Mapping
 from datetime import datetime
@@ -74,10 +75,37 @@ def _latest_user_message(runtime: ToolRuntime | None) -> str:
     return ""
 
 
+def _has_answered_periodic_time_question(runtime: ToolRuntime | None) -> bool:
+    """结构化反问会以 ToolMessage 回放答案，不能只查看最初的 HumanMessage。"""
+    state = getattr(runtime, "state", None)
+    messages = state.get("messages", []) if isinstance(state, Mapping) else getattr(state, "messages", [])
+    for message in reversed(messages or []):
+        if getattr(message, "type", None) != "tool" or getattr(message, "name", None) != "ask_user_question":
+            continue
+        content = getattr(message, "content", "")
+        if isinstance(content, Mapping):
+            payload = content
+        elif isinstance(content, str):
+            try:
+                payload = json.loads(content)
+            except json.JSONDecodeError:
+                continue
+        else:
+            continue
+        answer = payload.get("answer") if isinstance(payload, Mapping) else None
+        questions = payload.get("questions", []) if isinstance(payload, Mapping) else []
+        question_text = json.dumps(questions, ensure_ascii=False) if questions else ""
+        if answer and any(keyword in question_text for keyword in ("scheduled_task_time", "每周几", "几点", "提醒")):
+            return True
+    return False
+
+
 def _needs_periodic_time_clarification(schedule_kind: str, runtime: ToolRuntime | None) -> bool:
     """周期任务必须由用户给出钟点，不能让本地模型以默认时间补全。"""
     return schedule_kind in {"interval", "cron"} and bool(
-        (user_message := _latest_user_message(runtime)) and not _CLOCK_TIME_PATTERN.search(user_message)
+        (user_message := _latest_user_message(runtime))
+        and not _CLOCK_TIME_PATTERN.search(user_message)
+        and not _has_answered_periodic_time_question(runtime)
     )
 
 

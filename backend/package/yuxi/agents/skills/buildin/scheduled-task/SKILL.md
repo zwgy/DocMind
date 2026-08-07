@@ -16,7 +16,7 @@ description: "管理当前用户自己的通知或 Agent 执行型定时任务�
 - 周期：`interval`、以秒表示且不少于 60 秒的 `interval_seconds`，以及 `anchor_at`；
 - Cron：五段 `cron_expression`。
 
-用户表达的时间、时区、频率或通知内容有歧义时，先调用 `ask_user_question` 澄清。周期任务必须由用户明确给出钟点；创建工具也会复核当前轮用户原文，缺少钟点时直接发起时间追问，不能以默认时间或猜测时间创建。确认完整信息后只调用一次 `create_personal_scheduled_task`；工具重放会按本次调用自动幂等。
+用户表达的时间、时区、频率或通知内容有歧义时，先调用 `ask_user_question` 澄清。周期任务必须由用户明确给出钟点；创建工具会复核用户原文和已回放的结构化追问回答，缺少钟点时直接发起时间追问，不能以默认时间或猜测时间创建。确认完整信息后只调用一次 `create_personal_scheduled_task`；工具重放会按本次调用自动幂等。
 
 通知动作必须有通知标题和正文。Agent 动作必须有目标顶层 Agent 的准确 `agent_slug`、执行指令和 60 到 3600 秒的超时；不得替用户猜测 Agent，也不得在载荷中指定工具、知识库、MCP 或 Skills。目标 Agent 的实际能力始终由管理员保存的当前 Agent 配置决定，创建时和执行时都会校验该 Agent 对当前用户可见且不是 SubAgent。缺少任何必要信息或存在歧义时，使用 `ask_user_question` 补齐后再创建。
 
