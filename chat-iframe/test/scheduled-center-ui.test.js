@@ -43,14 +43,21 @@ test('unread state is layered across the clock entry and inbox tabs', () => {
   )
 })
 
-test('global ticker polls while visible and opens the matching inbox category on click', () => {
+test('global ticker scrolls one numbered batch and opens each matching inbox item on click', () => {
   assert.match(appSource, /class="notification-ticker"/)
-  assert.match(appSource, /class="ticker-marquee"[\s\S]*currentTickerItem\.content/)
-  assert.match(appSource, /aria-hidden="true"[\s\S]*currentTickerItem\.content/)
+  assert.match(appSource, /const TICKER_ITEM_LIMIT = 5/)
+  assert.match(appSource, /\.slice\(0, TICKER_ITEM_LIMIT\)/)
+  assert.match(appSource, /class="ticker-marquee"[\s\S]*v-for="\(item, index\) in tickerItems"/)
+  assert.match(appSource, /class="ticker-number">\{\{ index \+ 1 \}\}/)
+  assert.match(appSource, /class="ticker-content">\{\{ item\.content \}\}/)
+  assert.match(appSource, /aria-hidden="true"[\s\S]*`duplicate:\$\{item\.key\}`/)
   assert.doesNotMatch(appSource, /class="ticker-label"/)
-  assert.doesNotMatch(appSource, /currentTickerItem\.title/)
+  assert.doesNotMatch(appSource, /currentTickerItem/)
+  assert.doesNotMatch(appSource, /ticker-position/)
   assert.match(appSource, /setInterval\([\s\S]*30000/)
-  assert.match(appSource, /setInterval\([\s\S]*4500/)
+  assert.doesNotMatch(appSource, /4500/)
+  assert.match(appSource, /pendingTickerItems = items/)
+  assert.match(appSource, /@animationiteration="commitPendingTickerItems"/)
   assert.match(appSource, /window\.addEventListener\('focus', refreshVisibleInbox\)/)
   assert.match(appSource, /await inboxApi\.markRead\(item\.category, item\.id/)
   assert.match(appSource, /openScheduledCenter\(item\.category\)/)
@@ -62,7 +69,11 @@ test('global ticker polls while visible and opens the matching inbox category on
   assert.match(styles, /\.notification-ticker \{[\s\S]*background: var\(--gray-50\)/)
   assert.match(styles, /grid-template-rows: auto minmax\(0, 1fr\)/)
   assert.match(styles, /\.chat-body > \.workbench \{\s*grid-row: 2/)
-  assert.match(styles, /\.ticker-track \{[\s\S]*animation: ticker-marquee 14s linear infinite/)
+  assert.match(
+    styles,
+    /\.ticker-track\.is-moving \{[\s\S]*animation: ticker-marquee var\(--ticker-duration\) linear infinite/
+  )
+  assert.match(styles, /transform: translate3d\(calc\(var\(--ticker-distance\) \* -1\), 0, 0\)/)
   assert.match(styles, /@keyframes ticker-marquee/)
 })
 

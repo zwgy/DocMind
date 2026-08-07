@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Bell, Bot, Clock3, Maximize2, Menu, Minimize2, Minus, X } from 'lucide-vue-next'
 import { ingestIncomingDocument, queryIncomingDocumentExtractions } from '@/apis/incoming-documents'
 import { inboxApi } from '@/apis/inbox'
@@ -43,23 +43,31 @@ type TickerItem = {
   key: string
   id: string
   category: 'notification' | 'task'
-  title: string
   content: string
   createdAt: string | null
 }
+const TICKER_ITEM_LIMIT = 5
+const TICKER_SPEED_PX_PER_SECOND = 40
 const tickerItems = ref<TickerItem[]>([])
-const tickerIndex = ref(0)
+const tickerViewport = ref<HTMLElement | null>(null)
+const tickerGroup = ref<HTMLElement | null>(null)
+const tickerCycleKey = ref(0)
+const tickerDistance = ref(0)
+const tickerDuration = ref('12s')
+const tickerIsOverflowing = ref(false)
+const tickerMotionReduced = ref(false)
 const inboxNavigation = ref<{ key: number; category: 'notification' | 'task' } | null>(null)
 const draggingWindow = ref(false)
 const historyScrollRequest = ref(0)
 const ingestingFileIds = new Set<string>()
 let extractionRefreshTimer: ReturnType<typeof setTimeout> | null = null
 let inboxRefreshTimer: number | null = null
-let tickerTimer: number | null = null
 let inboxRefreshPromise: Promise<void> | null = null
+let pendingTickerItems: TickerItem[] | null = null
+let tickerResizeObserver: ResizeObserver | null = null
+let tickerMotionQuery: MediaQueryList | null = null
 
 const selectedFile = computed(() => context.selectedFile)
-const currentTickerItem = computed(() => tickerItems.value[tickerIndex.value] || null)
 const currentTokenUsage = computed(() => {
   const usage = chat.agentState?.token_usage
   return usage && typeof usage === 'object' && !Array.isArray(usage)
@@ -93,13 +101,72 @@ function applyUnreadCounts(counts: InboxUnreadCounts) {
 }
 
 function resetInboxSnapshot() {
+  pendingTickerItems = null
   tickerItems.value = []
-  tickerIndex.value = 0
+  tickerCycleKey.value += 1
+  tickerIsOverflowing.value = false
   applyUnreadCounts({
     notification_unread_count: 0,
     task_unread_count: 0,
     total_unread_count: 0
   })
+}
+
+function tickerItemsSignature(items: TickerItem[]) {
+  return items
+    .map((item) => `${item.key}\u0000${item.category}\u0000${item.content}`)
+    .join('\u0001')
+}
+
+function measureTickerTrack() {
+  const viewportWidth = tickerViewport.value?.clientWidth || 0
+  const groupWidth = tickerGroup.value?.scrollWidth || 0
+  tickerDistance.value = groupWidth
+  tickerDuration.value = `${Math.max(groupWidth / TICKER_SPEED_PX_PER_SECOND, 12).toFixed(2)}s`
+  tickerIsOverflowing.value = groupWidth > viewportWidth + 1
+}
+
+function observeTickerTrack() {
+  tickerResizeObserver?.disconnect()
+  if (tickerViewport.value) tickerResizeObserver?.observe(tickerViewport.value)
+  if (tickerGroup.value) tickerResizeObserver?.observe(tickerGroup.value)
+  measureTickerTrack()
+}
+
+function applyTickerItems(items: TickerItem[]) {
+  pendingTickerItems = null
+  tickerItems.value = items
+  tickerCycleKey.value += 1
+  tickerIsOverflowing.value = false
+  void nextTick(observeTickerTrack)
+}
+
+function queueTickerItems(items: TickerItem[]) {
+  if (tickerItemsSignature(items) === tickerItemsSignature(tickerItems.value)) {
+    pendingTickerItems = null
+    return
+  }
+  if (
+    !tickerItems.value.length ||
+    !items.length ||
+    !tickerIsOverflowing.value ||
+    tickerMotionReduced.value
+  ) {
+    applyTickerItems(items)
+    return
+  }
+  // 轮询结果先进入下一批，等当前轨道完整跑完一圈再替换，避免正文阅读到一半突然跳动。
+  pendingTickerItems = items
+}
+
+function commitPendingTickerItems() {
+  if (pendingTickerItems) applyTickerItems(pendingTickerItems)
+}
+
+function handleTickerMotionPreference(event: MediaQueryListEvent) {
+  tickerMotionReduced.value = event.matches
+  if (event.matches) commitPendingTickerItems()
+  void nextTick(observeTickerTrack)
 }
 
 async function loadInboxSnapshot() {
@@ -117,14 +184,12 @@ async function loadInboxSnapshot() {
     ])
     // 认证切换期间到达的旧请求结果不能覆盖新用户的收件箱状态。
     if (context.config.token !== token) return
-    const activeKey = currentTickerItem.value?.key
     const notifications = notificationPage.items
       .filter((item): item is NotificationInboxItem => 'id' in item && !item.is_read)
       .map((item) => ({
         key: `notification:${item.id}`,
         id: item.id,
         category: 'notification' as const,
-        title: item.title,
         content: item.content,
         createdAt: item.created_at
       }))
@@ -134,15 +199,14 @@ async function loadInboxSnapshot() {
         key: `task:${item.job.id}`,
         id: item.job.id,
         category: 'task' as const,
-        title: item.latest_update?.title || item.job.name,
         content: item.latest_update?.content || '任务状态已更新',
         createdAt: item.latest_update?.created_at || item.sort_at
       }))
-    tickerItems.value = [...notifications, ...tasks].sort(
-      (left, right) => Date.parse(left.createdAt || '') - Date.parse(right.createdAt || '')
-    )
-    const activeIndex = tickerItems.value.findIndex((item) => item.key === activeKey)
-    tickerIndex.value = activeIndex >= 0 ? activeIndex : 0
+    const nextTickerItems = [...notifications, ...tasks]
+      .sort((left, right) => Date.parse(right.createdAt || '') - Date.parse(left.createdAt || ''))
+      .slice(0, TICKER_ITEM_LIMIT)
+      .reverse()
+    queueTickerItems(nextTickerItems)
     applyUnreadCounts(counts)
   } catch {
     // 轮询失败时保留上一次状态，避免网络抖动把未读提示错误清零。
@@ -175,6 +239,7 @@ async function openTickerItem(item: TickerItem) {
   if (!context.config.token) return
   try {
     await inboxApi.markRead(item.category, item.id, context.config.token)
+    applyTickerItems(tickerItems.value.filter((candidate) => candidate.key !== item.key))
     await refreshInboxSnapshot(true)
     inboxNavigation.value = {
       key: (inboxNavigation.value?.key || 0) + 1,
@@ -519,17 +584,19 @@ onMounted(() => {
   inboxRefreshTimer = window.setInterval(() => {
     if (document.visibilityState === 'visible' && context.config.token) void refreshInboxSnapshot()
   }, 30000)
-  tickerTimer = window.setInterval(() => {
-    if (tickerItems.value.length > 1)
-      tickerIndex.value = (tickerIndex.value + 1) % tickerItems.value.length
-  }, 4500)
+  tickerResizeObserver = new ResizeObserver(measureTickerTrack)
+  tickerMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+  tickerMotionReduced.value = tickerMotionQuery.matches
+  tickerMotionQuery.addEventListener('change', handleTickerMotionPreference)
+  void nextTick(observeTickerTrack)
 })
 
 onUnmounted(() => {
   endWindowDrag()
   if (extractionRefreshTimer) clearTimeout(extractionRefreshTimer)
   if (inboxRefreshTimer) clearInterval(inboxRefreshTimer)
-  if (tickerTimer) clearInterval(tickerTimer)
+  tickerResizeObserver?.disconnect()
+  tickerMotionQuery?.removeEventListener('change', handleTickerMotionPreference)
   document.removeEventListener('visibilitychange', resumeVisiblePage)
   window.removeEventListener('focus', refreshVisibleInbox)
 })
@@ -555,7 +622,11 @@ function resumeVisiblePage() {
         <button
           type="button"
           title="定时中心"
-          :aria-label="unreadCounts.total_unread_count ? `定时中心，${unreadCounts.total_unread_count} 条未读` : '定时中心'"
+          :aria-label="
+            unreadCounts.total_unread_count
+              ? `定时中心，${unreadCounts.total_unread_count} 条未读`
+              : '定时中心'
+          "
           class="timing-center-button"
           @click="openScheduledCenter()"
         >
@@ -651,31 +722,57 @@ function resumeVisiblePage() {
     </Transition>
 
     <section class="chat-body">
-      <Transition name="ticker-slide" mode="out-in">
-        <button
-          v-if="currentTickerItem"
-          :key="currentTickerItem.key"
-          type="button"
-          class="notification-ticker"
-          :class="currentTickerItem.category"
-          @click="openTickerItem(currentTickerItem)"
-        >
-          <span class="ticker-icon"
-            ><Bell v-if="currentTickerItem.category === 'notification'" :size="14" /><Bot
-              v-else
-              :size="14"
-          /></span>
-          <span class="ticker-marquee" :aria-label="currentTickerItem.content">
-            <span class="ticker-track">
-              <span>{{ currentTickerItem.content }}</span>
-              <span aria-hidden="true">{{ currentTickerItem.content }}</span>
-            </span>
-          </span>
-          <span v-if="tickerItems.length > 1" class="ticker-position"
-            >{{ tickerIndex + 1 }}/{{ tickerItems.length }}</span
+      <section v-if="tickerItems.length" class="notification-ticker" aria-label="未读消息轮播">
+        <div ref="tickerViewport" class="ticker-marquee">
+          <div
+            :key="tickerCycleKey"
+            class="ticker-track"
+            :class="{ 'is-moving': tickerIsOverflowing && !tickerMotionReduced }"
+            :style="{
+              '--ticker-distance': `${tickerDistance}px`,
+              '--ticker-duration': tickerDuration
+            }"
+            @animationiteration="commitPendingTickerItems"
           >
-        </button>
-      </Transition>
+            <div ref="tickerGroup" class="ticker-group">
+              <button
+                v-for="(item, index) in tickerItems"
+                :key="item.key"
+                type="button"
+                class="ticker-item"
+                :class="item.category"
+                :aria-label="`${index + 1}，${item.content}`"
+                @click="openTickerItem(item)"
+              >
+                <span class="ticker-number">{{ index + 1 }}</span>
+                <Bell v-if="item.category === 'notification'" class="ticker-item-icon" :size="13" />
+                <Bot v-else class="ticker-item-icon" :size="13" />
+                <span class="ticker-content">{{ item.content }}</span>
+              </button>
+            </div>
+            <div
+              v-if="tickerIsOverflowing && !tickerMotionReduced"
+              class="ticker-group"
+              aria-hidden="true"
+            >
+              <button
+                v-for="(item, index) in tickerItems"
+                :key="`duplicate:${item.key}`"
+                type="button"
+                tabindex="-1"
+                class="ticker-item"
+                :class="item.category"
+                @click="openTickerItem(item)"
+              >
+                <span class="ticker-number">{{ index + 1 }}</span>
+                <Bell v-if="item.category === 'notification'" class="ticker-item-icon" :size="13" />
+                <Bot v-else class="ticker-item-icon" :size="13" />
+                <span class="ticker-content">{{ item.content }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
       <section class="workbench">
         <ChatMessages
           :messages="chat.displayMessages"
