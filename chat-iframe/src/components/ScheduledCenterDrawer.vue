@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Bell, Bot, CalendarClock, CheckCheck, Clock3, Pause, Play, RefreshCw, Save, Trash2, X } from 'lucide-vue-next'
+import { Bell, Bot, CalendarClock, CheckCheck, Pause, Play, RefreshCw, Save, Trash2, X } from 'lucide-vue-next'
 import { inboxApi } from '@/apis/inbox'
 import type { InboxItem, TaskInboxItem } from '@/apis/inbox'
 import { scheduledJobApi } from '@/apis/scheduled-jobs'
 import type { ScheduledJob, ScheduledJobView } from '@/apis/scheduled-jobs'
+import { describeCron, describeInterval } from '@/utils/scheduled-job-display'
 
 const props = defineProps<{ token?: string; open: boolean }>()
 const emit = defineEmits<{ close: []; unreadChanged: [count: number] }>()
@@ -59,8 +60,22 @@ function formatTime(value: string | null | undefined) {
 
 function scheduleSummary(job: ScheduledJob) {
   if (job.schedule_kind === 'at') return `单次 · ${formatTime(job.run_at)}`
-  if (job.schedule_kind === 'interval') return `每 ${Math.round((job.interval_seconds || 60) / 60)} 分钟`
-  return `Cron · ${job.cron_expression || '-'}`
+  if (job.schedule_kind === 'interval') return describeInterval(job.interval_seconds)
+  return describeCron(job.cron_expression)
+}
+
+function jobContent(job: ScheduledJob) {
+  const content = job.action_type === 'notification'
+    ? job.action_data?.content
+    : job.action_data?.instruction
+  return typeof content === 'string' && content.trim() ? content.trim() : '未填写正文'
+}
+
+function jobTrigger(job: ScheduledJob) {
+  if (job.next_run_at) return `下一次触发：${formatTime(job.next_run_at)}`
+  const lastRunAt = job.last_run_at || (job.status === 'completed' && job.schedule_kind === 'at' ? job.run_at : null)
+  if (lastRunAt) return `最近触发：${formatTime(lastRunAt)}`
+  return job.status === 'cancelled' ? '尚未触发' : '暂无触发记录'
 }
 
 function statusText(status: string) {
@@ -238,7 +253,7 @@ onMounted(() => { if (props.open) void refresh() })
 <template>
   <aside v-if="open" class="timing-center" aria-label="定时中心">
     <header class="center-header">
-      <div><Clock3 :size="18" /><strong>定时中心</strong></div>
+      <strong>定时中心</strong>
       <div class="header-actions">
         <button type="button" title="刷新" :disabled="loading" @click="refresh()"><RefreshCw :size="16" /></button>
         <button type="button" title="关闭定时中心" @click="emit('close')"><X :size="17" /></button>
@@ -250,11 +265,13 @@ onMounted(() => { if (props.open) void refresh() })
       <button type="button" :class="{ active: section === 'inbox' }" @click="section = 'inbox'">收件箱</button>
     </nav>
 
-    <div v-if="section === 'scheduled'" class="secondary-tabs" role="tablist" aria-label="我的定时状态">
-      <button v-for="view in [{ value: 'ongoing', label: '进行中' }, { value: 'paused', label: '已暂停' }, { value: 'history', label: '历史' }]" :key="view.value" type="button" :class="{ active: scheduleView === view.value }" @click="scheduleView = view.value as ScheduledJobView">{{ view.label }}</button>
+    <div v-if="section === 'scheduled'" class="secondary-tabs">
+      <div class="secondary-tablist" role="tablist" aria-label="我的定时状态">
+        <button v-for="view in [{ value: 'ongoing', label: '进行中' }, { value: 'paused', label: '已暂停' }, { value: 'history', label: '历史' }]" :key="view.value" type="button" :class="{ active: scheduleView === view.value }" @click="scheduleView = view.value as ScheduledJobView">{{ view.label }}</button>
+      </div>
     </div>
-    <div v-else class="inbox-tabs">
-      <div role="tablist" aria-label="收件箱分类">
+    <div v-else class="secondary-tabs">
+      <div class="secondary-tablist" role="tablist" aria-label="收件箱分类">
         <button type="button" :class="{ active: inboxCategory === 'notification' }" @click="inboxCategory = 'notification'">通知</button>
         <button type="button" :class="{ active: inboxCategory === 'task' }" @click="inboxCategory = 'task'">任务</button>
       </div>
@@ -272,7 +289,8 @@ onMounted(() => { if (props.open) void refresh() })
           <div class="card-body">
             <div class="card-title"><strong>{{ job.name }}</strong><span class="status" :class="job.status">{{ statusText(job.status) }}</span></div>
             <div class="card-meta"><span>{{ job.action_type === 'notification' ? '站内通知' : '执行 Agent' }}</span><span>{{ scheduleSummary(job) }}</span><span>{{ job.timezone }}</span></div>
-            <div class="trigger"><CalendarClock :size="14" />{{ job.next_run_at ? `下一次触发：${formatTime(job.next_run_at)}` : `最近触发：${formatTime(job.last_run_at)}` }}</div>
+            <p class="job-content" :title="jobContent(job)">{{ jobContent(job) }}</p>
+            <div class="trigger"><CalendarClock :size="14" />{{ jobTrigger(job) }}</div>
             <div v-if="['active', 'paused'].includes(job.status)" class="card-actions">
               <button type="button" title="编辑任务" @click="openEditor(job)">编辑</button>
               <button v-if="job.status === 'active' && job.schedule_kind !== 'at'" type="button" :disabled="actingJobId === job.id" @click="changeStatus(job, 'pause')"><Pause :size="14" />暂停</button>
@@ -330,21 +348,22 @@ onMounted(() => { if (props.open) void refresh() })
 <style scoped>
 .timing-center { position: absolute; z-index: 6; inset: 44px 0 0; display: flex; flex-direction: column; color: var(--gray-800); background: var(--gray-0); border-top: 1px solid var(--gray-200); overflow: hidden; }
 .timing-center button { border: 0; color: inherit; background: transparent; cursor: pointer; font: inherit; }
-.center-header { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 0 14px; border-bottom: 1px solid var(--gray-200); }
-.center-header > div, .header-actions, .card-title, .card-meta, .trigger, .card-actions, .inbox-tabs { display: flex; align-items: center; }
-.center-header > div { gap: 7px; color: var(--gray-1000); }
+.center-header { display: grid; grid-template-columns: 64px minmax(0, 1fr) 64px; align-items: center; min-height: 48px; padding: 0 12px; border-bottom: 1px solid var(--gray-200); }
+.center-header > strong { grid-column: 2; color: var(--gray-1000); font-size: 15px; text-align: center; }
+.header-actions, .card-title, .card-meta, .trigger, .card-actions { display: flex; align-items: center; }
 .header-actions { gap: 2px; }
+.center-header .header-actions { grid-column: 3; justify-self: end; }
 .header-actions button { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 6px; }
 .header-actions button:hover { color: var(--main-900); background: var(--main-50); }
-.primary-tabs, .secondary-tabs, .inbox-tabs { flex: 0 0 auto; padding: 0 14px; border-bottom: 1px solid var(--gray-200); }
-.primary-tabs { display: flex; gap: 18px; }
-.primary-tabs button, .secondary-tabs button, .inbox-tabs [role='tablist'] button { position: relative; padding: 12px 2px 10px; color: var(--gray-600); }
-.primary-tabs button.active, .secondary-tabs button.active, .inbox-tabs button.active { color: var(--main-700); font-weight: 600; }
-.primary-tabs button.active::after, .secondary-tabs button.active::after, .inbox-tabs [role='tablist'] button.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--main-700); content: ''; }
-.secondary-tabs { display: flex; gap: 20px; background: var(--gray-25); }
-.secondary-tabs button { padding-top: 10px; padding-bottom: 8px; font-size: 13px; }
-.inbox-tabs { justify-content: space-between; gap: 12px; }
-.inbox-tabs [role='tablist'] { display: flex; gap: 20px; }
+.primary-tabs, .secondary-tabs { flex: 0 0 auto; padding: 0 14px; border-bottom: 1px solid var(--gray-200); }
+.primary-tabs { display: flex; justify-content: center; gap: 28px; }
+.primary-tabs button, .secondary-tablist button { position: relative; padding: 12px 2px 10px; color: var(--gray-600); }
+.primary-tabs button { min-width: 72px; font-size: 14px; }
+.primary-tabs button.active, .secondary-tablist button.active { color: var(--main-700); font-weight: 600; }
+.primary-tabs button.active::after, .secondary-tablist button.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--main-700); content: ''; }
+.secondary-tabs { display: flex; align-items: center; justify-content: space-between; min-height: 39px; gap: 12px; background: var(--gray-25); }
+.secondary-tablist { display: flex; align-items: center; gap: 20px; }
+.secondary-tablist button { padding-top: 10px; padding-bottom: 8px; font-size: 13px; }
 .mark-all { display: inline-flex; align-items: center; gap: 4px; color: var(--main-700) !important; font-size: 13px; }
 .mark-all:disabled, .card-actions button:disabled { color: var(--gray-400) !important; cursor: not-allowed; }
 .hint { margin: auto 0; padding: 24px; color: var(--gray-500); text-align: center; }
@@ -363,12 +382,13 @@ onMounted(() => { if (props.open) void refresh() })
 .status { flex: 0 0 auto; padding: 2px 6px; border-radius: 4px; color: var(--gray-600); background: var(--gray-100); font-size: 11px; font-weight: 600; }
 .status.active { color: var(--color-info-700); background: var(--color-info-50); }.status.paused { color: var(--color-warning-700); background: var(--color-warning-50); }.status.completed { color: var(--color-success-700); background: var(--color-success-50); }.status.cancelled, .status.read { color: var(--gray-600); background: var(--gray-100); }
 .card-meta { flex-wrap: wrap; gap: 0; color: var(--gray-600); font-size: 12px; }.card-meta span + span::before { margin: 0 6px; color: var(--gray-400); content: '·'; }
-.inbox-card p { margin: 0; color: var(--gray-700); font-size: 13px; }
+.inbox-card p, .job-content { margin: 0; color: var(--gray-700); font-size: 13px; }
+.job-content { display: -webkit-box; overflow: hidden; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .trigger { gap: 5px; color: var(--gray-500); font-size: 12px; }
 .card-actions { flex-wrap: wrap; gap: 8px; margin-top: 2px; }.card-actions button { display: inline-flex; align-items: center; gap: 4px; padding: 3px 0; color: var(--main-700); font-size: 12px; }.card-actions .danger, .danger { color: var(--color-error-700) !important; }
 .load-more { display: flex; justify-content: center; padding: 4px 0 16px; }.load-more button { color: var(--main-700); }
 .dialog-mask { position: absolute; z-index: 8; inset: 0; display: flex; align-items: flex-end; justify-content: center; padding: 12px; background: rgba(15, 23, 42, 0.28); }
 .confirm-dialog, .editor-dialog { width: min(100%, 440px); max-height: calc(100% - 12px); padding: 16px; border: 1px solid var(--gray-200); border-radius: 8px; background: var(--gray-0); box-shadow: var(--shadow-panel); overflow: auto; }
 .confirm-dialog p, .editor-dialog small { color: var(--gray-600); font-size: 12px; }.confirm-dialog > div, .editor-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }.confirm-dialog button, .editor-dialog footer button { padding: 7px 10px; border: 1px solid var(--gray-200); border-radius: 6px; }.editor-dialog { display: grid; gap: 11px; }.editor-dialog header { display: flex; justify-content: space-between; align-items: center; }.editor-dialog header button { display: inline-flex; }.editor-dialog label { display: grid; gap: 5px; color: var(--gray-700); font-size: 12px; }.editor-dialog input, .editor-dialog textarea, .editor-dialog select { width: 100%; padding: 7px 8px; border: 1px solid var(--gray-200); border-radius: 6px; color: var(--gray-800); background: var(--gray-0); font: inherit; }.editor-dialog textarea { resize: vertical; }.editor-dialog .primary { display: inline-flex; align-items: center; gap: 5px; color: var(--gray-0); background: var(--main-700); border-color: var(--main-700); }
-@media (max-width: 420px) { .primary-tabs { gap: 14px; }.secondary-tabs, .inbox-tabs [role='tablist'] { gap: 14px; }.center-list { padding: 10px; }.scheduled-card, .inbox-card { padding: 10px; } }
+@media (max-width: 420px) { .primary-tabs { gap: 18px; }.secondary-tablist { gap: 14px; }.center-list { padding: 10px; }.scheduled-card, .inbox-card { padding: 10px; } }
 </style>
