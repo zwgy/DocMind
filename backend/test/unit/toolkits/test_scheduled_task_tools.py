@@ -132,8 +132,8 @@ def test_answered_schedule_question_allows_periodic_task_recovery():
             type="tool",
             name="ask_user_question",
             content=(
-                '{"questions":[{"question_id":"scheduled_task_time","question":"When should it run?"}],'
-                '"answer":{"scheduled_task_time":{"type":"other","text":"Friday at 4 PM","selected":[]}}}'
+                '{"questions":[{"question_id":"q-1","question":"When should it run?"}],'
+                '"answer":{"q-1":{"type":"other","text":"Friday at 4 PM","selected":[]}}}'
             ),
         )
     )
@@ -141,7 +141,7 @@ def test_answered_schedule_question_allows_periodic_task_recovery():
     assert not tools._needs_periodic_time_clarification("cron", runtime)
 
 
-def test_unrelated_or_unstructured_answer_does_not_bypass_periodic_time_clarification():
+def test_unstructured_or_superseded_answer_does_not_bypass_periodic_time_clarification():
     runtime = _runtime("每周提醒我写周报")
     runtime.state["messages"].extend(
         [
@@ -149,21 +149,25 @@ def test_unrelated_or_unstructured_answer_does_not_bypass_periodic_time_clarific
                 type="tool",
                 name="ask_user_question",
                 content=(
-                    '{"questions":[{"question_id":"notification_content","question":"几点提醒？"}],'
-                    '"answer":{"notification_content":"Friday at 4 PM"}}'
+                    '{"questions":[{"question_id":"q-1","question":"When should it run?"}],'
+                    '"answer":{"q-1":"Friday at 4 PM"}}'
                 ),
             ),
             SimpleNamespace(
                 type="tool",
-                name="ask_user_question",
-                content=(
-                    '{"questions":[{"question_id":"scheduled_task_time","question":"When should it run?"}],'
-                    '"answer":"Friday at 4 PM"}'
-                ),
+                name="read_file",
+                content='{"content":"unrelated result"}',
             ),
         ]
     )
 
+    assert tools._needs_periodic_time_clarification("cron", runtime)
+
+    runtime.state["messages"][-1] = SimpleNamespace(
+        type="tool",
+        name="ask_user_question",
+        content='{"questions":[{"question_id":"q-1"}],"answer":"Friday at 4 PM"}',
+    )
     assert tools._needs_periodic_time_clarification("cron", runtime)
 
 
@@ -175,8 +179,8 @@ def test_previous_request_schedule_answer_does_not_bypass_new_request_clarificat
                 type="tool",
                 name="ask_user_question",
                 content=(
-                    '{"questions":[{"question_id":"scheduled_task_time","question":"When should it run?"}],'
-                    '"answer":{"scheduled_task_time":"Friday at 4 PM"}}'
+                    '{"questions":[{"question_id":"q-1","question":"When should it run?"}],'
+                    '"answer":{"q-1":"Friday at 4 PM"}}'
                 ),
             ),
             SimpleNamespace(type="human", content="每周提醒我写周报"),
@@ -184,6 +188,23 @@ def test_previous_request_schedule_answer_does_not_bypass_new_request_clarificat
     )
 
     assert tools._needs_periodic_time_clarification("cron", runtime)
+
+
+def test_create_tool_clarification_result_allows_periodic_task_recovery():
+    runtime = _runtime("每周提醒我写周报")
+    runtime.state["messages"].append(
+        SimpleNamespace(
+            type="tool",
+            name="create_personal_scheduled_task",
+            content=(
+                '{"status":"needs_clarification","answer":{"questions":['
+                '{"question_id":"scheduled_task_time"}],'
+                '"answer":{"scheduled_task_time":"每周五 17:00"}}}'
+            ),
+        )
+    )
+
+    assert not tools._needs_periodic_time_clarification("cron", runtime)
 
 
 @pytest.mark.asyncio

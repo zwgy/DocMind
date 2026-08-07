@@ -76,11 +76,24 @@ def _latest_user_message(runtime: ToolRuntime | None) -> str:
     return ""
 
 
-def _current_request_schedule_time_answer(runtime: ToolRuntime | None) -> object | None:
-    """从当前用户请求之后的结构化反问结果中取得时间回答。
+def _has_nonempty_user_answer(value: object) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(_has_nonempty_user_answer(item) for item in value)
+    if isinstance(value, Mapping):
+        if value.get("type") == "other":
+            return bool(str(value.get("text", "")).strip())
+        return any(_has_nonempty_user_answer(item) for item in value.values())
+    return False
+
+
+def _current_request_structured_user_answer(runtime: ToolRuntime | None) -> Mapping | None:
+    """读取当前请求中紧邻创建调用的结构化用户回答。
 
     LangGraph 将恢复答案写入 ToolMessage；以最新 HumanMessage 为边界可隔离旧轮次，
-    精确 question_id 则避免把自然语言问题文案当成运行时协议。
+    只接受最近工具结果可避免复用已被后续工具调用跨过的陈旧回答。回答语义由看到完整
+    上下文的模型解释，工具边界仅校验该值确实来自用户完成的结构化反问。
     """
     state = getattr(runtime, "state", None)
     messages = state.get("messages", []) if isinstance(state, Mapping) else getattr(state, "messages", [])
@@ -97,11 +110,9 @@ def _current_request_schedule_time_answer(runtime: ToolRuntime | None) -> object
         return None
 
     for message in reversed(messages[latest_user_index + 1 :]):
-        if (
-            getattr(message, "type", None) != "tool"
-            or getattr(message, "name", None) != "ask_user_question"
-        ):
+        if getattr(message, "type", None) != "tool":
             continue
+        tool_name = getattr(message, "name", None)
         content = getattr(message, "content", "")
         if isinstance(content, Mapping):
             payload = content
@@ -109,27 +120,19 @@ def _current_request_schedule_time_answer(runtime: ToolRuntime | None) -> object
             try:
                 payload = json.loads(content)
             except json.JSONDecodeError:
-                continue
+                return None
         else:
-            continue
-        questions = payload.get("questions", [])
-        if not any(
-            isinstance(question, Mapping) and question.get("question_id") == _SCHEDULE_TIME_QUESTION_ID
-            for question in questions
-        ):
-            continue
-        answers = payload.get("answer")
-        if not isinstance(answers, Mapping):
-            continue
-        answer = answers.get(_SCHEDULE_TIME_QUESTION_ID)
-        if isinstance(answer, str) and answer.strip():
-            return answer
-        if (
-            isinstance(answer, Mapping)
-            and answer.get("type") == "other"
-            and str(answer.get("text", "")).strip()
-        ):
-            return answer
+            return None
+        if not isinstance(payload, Mapping):
+            return None
+
+        answers: object = payload.get("answer")
+        if tool_name == "create_personal_scheduled_task" and payload.get("status") == "needs_clarification":
+            answers = answers.get("answer") if isinstance(answers, Mapping) else None
+        elif tool_name != "ask_user_question":
+            return None
+
+        return answers if isinstance(answers, Mapping) and _has_nonempty_user_answer(answers) else None
     return None
 
 
@@ -138,7 +141,7 @@ def _needs_periodic_time_clarification(schedule_kind: str, runtime: ToolRuntime 
     return schedule_kind in {"interval", "cron"} and bool(
         (user_message := _latest_user_message(runtime))
         and not _CLOCK_TIME_PATTERN.search(user_message)
-        and _current_request_schedule_time_answer(runtime) is None
+        and _current_request_structured_user_answer(runtime) is None
     )
 
 
