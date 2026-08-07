@@ -174,9 +174,7 @@ class ScheduledJobService:
         await self.db.flush()
         return job
 
-    async def cancel(
-        self, *, job_id: str, owner_uid: str, version: int, reason: str | None = None
-    ) -> ScheduledJob:
+    async def cancel(self, *, job_id: str, owner_uid: str, version: int, reason: str | None = None) -> ScheduledJob:
         job = await self._lock_owned_job(job_id=job_id, owner_uid=owner_uid, version=version)
         existing_run = await self.db.scalar(
             select(ScheduledJobRun)
@@ -184,8 +182,10 @@ class ScheduledJobService:
             .order_by(ScheduledJobRun.created_at.desc())
             .limit(1)
         )
-        if job.schedule_kind == "at" and existing_run and (
-            existing_run.action_type != "agent" or existing_run.status not in {"queued", "running"}
+        if (
+            job.schedule_kind == "at"
+            and existing_run
+            and (existing_run.action_type != "agent" or existing_run.status not in {"queued", "running"})
         ):
             raise JobAlreadyTriggeredError("一次性任务已经生成运行，不能取消")
         if job.status not in {"active", "paused"}:
@@ -287,9 +287,7 @@ class ScheduledJobService:
 
     async def _lock_owned_job(self, *, job_id: str, owner_uid: str, version: int) -> ScheduledJob:
         job = await self.db.scalar(
-            select(ScheduledJob)
-            .where(ScheduledJob.id == job_id, ScheduledJob.owner_uid == owner_uid)
-            .with_for_update()
+            select(ScheduledJob).where(ScheduledJob.id == job_id, ScheduledJob.owner_uid == owner_uid).with_for_update()
         )
         if job is None:
             raise ScheduledJobDomainError("任务不存在")
