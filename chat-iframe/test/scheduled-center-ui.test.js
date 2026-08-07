@@ -33,10 +33,16 @@ test('unread state is layered across the clock entry and inbox tabs', () => {
   assert.match(drawerSource, /unreadCounts\?\.total_unread_count/)
   assert.match(drawerSource, /unreadCounts\?\.notification_unread_count/)
   assert.match(drawerSource, /unreadCounts\?\.task_unread_count/)
+  assert.match(styles, /\.timing-count \{[\s\S]*min-width: 19px;[\s\S]*border: 2px solid/)
+  assert.match(drawerSource, /\.tab-count \{[\s\S]*min-width: 20px;[\s\S]*font-weight: 700/)
 })
 
 test('global ticker polls while visible and opens the matching inbox category on click', () => {
   assert.match(appSource, /class="notification-ticker"/)
+  assert.match(appSource, /class="ticker-marquee"[\s\S]*currentTickerItem\.content/)
+  assert.match(appSource, /aria-hidden="true"[\s\S]*currentTickerItem\.content/)
+  assert.doesNotMatch(appSource, /class="ticker-label"/)
+  assert.doesNotMatch(appSource, /currentTickerItem\.title/)
   assert.match(appSource, /setInterval\([\s\S]*30000/)
   assert.match(appSource, /setInterval\([\s\S]*4500/)
   assert.match(appSource, /window\.addEventListener\('focus', refreshVisibleInbox\)/)
@@ -47,6 +53,31 @@ test('global ticker polls while visible and opens the matching inbox category on
   assert.match(styles, /\.notification-ticker \{[\s\S]*background: var\(--gray-50\)/)
   assert.match(styles, /grid-template-rows: auto minmax\(0, 1fr\)/)
   assert.match(styles, /\.chat-body > \.workbench \{\s*grid-row: 2/)
+  assert.match(styles, /\.ticker-track \{[\s\S]*animation: ticker-marquee 14s linear infinite/)
+  assert.match(styles, /@keyframes ticker-marquee/)
+})
+
+test('scheduled editor uses the date picker component instead of native date and time controls', () => {
+  assert.match(drawerSource, /import \{ VueDatePicker \} from '@vuepic\/vue-datepicker'/)
+  assert.equal((drawerSource.match(/<VueDatePicker/g) || []).length, 3)
+  assert.match(drawerSource, /model-type="yyyy-MM-dd'T'HH:mm"/)
+  assert.match(drawerSource, /model-type="HH:mm"/)
+  assert.match(drawerSource, /:action-row="datePickerActionRow"/)
+  assert.match(drawerSource, /:time-config="datePickerTimeConfig"/)
+  assert.doesNotMatch(drawerSource, /type="datetime-local"/)
+  assert.doesNotMatch(drawerSource, /type="time"/)
+})
+
+test('cancel confirmation is centered and uses equal modern actions', () => {
+  assert.match(drawerSource, /class="dialog-mask confirm-mask"/)
+  assert.match(drawerSource, /class="confirm-icon"[\s\S]*TriangleAlert/)
+  assert.match(drawerSource, /class="confirm-actions"/)
+  assert.match(drawerSource, /\.dialog-mask \{[\s\S]*align-items: center/)
+  assert.match(
+    drawerSource,
+    /\.confirm-dialog \.confirm-actions \{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/
+  )
+  assert.match(drawerSource, /\.confirm-dialog \.danger \{[\s\S]*background: var\(--color-error-700\)/)
 })
 
 test('ticker state is owned by App rather than a conversation component', () => {

@@ -18,6 +18,8 @@
   },
   "dependencies": {
     "@vscode/markdown-it-katex": "^1.1.2",
+    "@vuepic/vue-datepicker": "^14.0.0",
+    "date-fns": "^4.4.0",
     "highlight.js": "^11.11.1",
     "katex": "^0.17.0",
     "lucide-vue-next": "^1.0.0",

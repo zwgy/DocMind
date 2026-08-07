@@ -555,6 +555,7 @@ function resumeVisiblePage() {
         <button
           type="button"
           title="定时中心"
+          :aria-label="unreadCounts.total_unread_count ? `定时中心，${unreadCounts.total_unread_count} 条未读` : '定时中心'"
           class="timing-center-button"
           @click="openScheduledCenter()"
         >
@@ -664,13 +665,12 @@ function resumeVisiblePage() {
               v-else
               :size="14"
           /></span>
-          <span class="ticker-label">{{
-            currentTickerItem.category === 'notification' ? '通知' : '任务'
-          }}</span>
-          <span class="ticker-content"
-            ><strong>{{ currentTickerItem.title }}</strong
-            ><span>{{ currentTickerItem.content }}</span></span
-          >
+          <span class="ticker-marquee" :aria-label="currentTickerItem.content">
+            <span class="ticker-track">
+              <span>{{ currentTickerItem.content }}</span>
+              <span aria-hidden="true">{{ currentTickerItem.content }}</span>
+            </span>
+          </span>
           <span v-if="tickerItems.length > 1" class="ticker-position"
             >{{ tickerIndex + 1 }}/{{ tickerItems.length }}</span
           >

@@ -12,8 +12,12 @@ import {
   RefreshCw,
   Save,
   Trash2,
+  TriangleAlert,
   X
 } from 'lucide-vue-next'
+import { VueDatePicker } from '@vuepic/vue-datepicker'
+import '@vuepic/vue-datepicker/dist/main.css'
+import { zhCN } from 'date-fns/locale'
 import { inboxApi } from '@/apis/inbox'
 import type { InboxItem, InboxUnreadCounts, TaskInboxItem } from '@/apis/inbox'
 import { scheduledJobApi } from '@/apis/scheduled-jobs'
@@ -33,6 +37,8 @@ const props = defineProps<{
   inboxNavigation?: { key: number; category: 'notification' | 'task' } | null
 }>()
 const emit = defineEmits<{ close: []; unreadChanged: [counts: InboxUnreadCounts] }>()
+const datePickerActionRow = { selectBtnLabel: '确定', cancelBtnLabel: '取消' }
+const datePickerTimeConfig = { enableSeconds: false, is24: true }
 
 const section = ref<'scheduled' | 'inbox'>('scheduled')
 const scheduleView = ref<ScheduledJobView>('ongoing')
@@ -551,12 +557,13 @@ onMounted(() => {
       </button>
     </div>
 
-    <div v-if="cancellingJob" class="dialog-mask">
+    <div v-if="cancellingJob" class="dialog-mask confirm-mask">
       <section class="confirm-dialog" role="dialog" aria-modal="true" aria-label="取消定时任务">
-        <strong>取消“{{ cancellingJob.name }}”吗？</strong>
+        <span class="confirm-icon" aria-hidden="true"><TriangleAlert :size="22" /></span>
+        <h3>取消“{{ cancellingJob.name }}”吗？</h3>
         <p>取消后不会再触发，历史记录仍会保留。</p>
-        <div>
-          <button type="button" @click="cancellingJob = null">返回</button
+        <div class="confirm-actions">
+          <button type="button" class="secondary" @click="cancellingJob = null">暂不取消</button
           ><button
             type="button"
             class="danger"
@@ -569,7 +576,7 @@ onMounted(() => {
       </section>
     </div>
 
-    <div v-if="editingJob" class="dialog-mask">
+    <div v-if="editingJob" class="dialog-mask editor-mask">
       <section class="editor-dialog" role="dialog" aria-modal="true" aria-label="编辑定时任务">
         <header>
           <strong>编辑定时任务</strong
@@ -604,9 +611,20 @@ onMounted(() => {
             <option value="cron">按日/周重复</option>
           </select></label
         >
-        <label v-if="editForm.scheduleKind === 'at'"
-          >{{ triggerTimeLabel }}<input v-model="editForm.runAt" type="datetime-local"
-        /></label>
+        <label v-if="editForm.scheduleKind === 'at'">
+          {{ triggerTimeLabel }}
+          <VueDatePicker
+            v-model="editForm.runAt"
+            class="schedule-picker"
+            model-type="yyyy-MM-dd'T'HH:mm"
+            format="yyyy-MM-dd HH:mm"
+            :locale="zhCN"
+            teleport="body"
+            :action-row="datePickerActionRow"
+            :clearable="false"
+            :time-config="datePickerTimeConfig"
+          />
+        </label>
         <template v-else-if="editForm.scheduleKind === 'interval'">
           <label
             >重复间隔（分钟）<input
@@ -615,9 +633,20 @@ onMounted(() => {
               min="1"
               step="1"
           /></label>
-          <label
-            >{{ firstTriggerTimeLabel }}<input v-model="editForm.anchorAt" type="datetime-local"
-          /></label>
+          <label>
+            {{ firstTriggerTimeLabel }}
+            <VueDatePicker
+              v-model="editForm.anchorAt"
+              class="schedule-picker"
+              model-type="yyyy-MM-dd'T'HH:mm"
+              format="yyyy-MM-dd HH:mm"
+              :locale="zhCN"
+              teleport="body"
+              :action-row="datePickerActionRow"
+              :clearable="false"
+              :time-config="datePickerTimeConfig"
+            />
+          </label>
         </template>
         <template v-else>
           <label
@@ -637,9 +666,21 @@ onMounted(() => {
               </label>
             </div>
           </div>
-          <label v-if="editForm.cronRule !== 'custom'"
-            >{{ triggerTimeLabel }}<input v-model="editForm.cronTime" type="time"
-          /></label>
+          <label v-if="editForm.cronRule !== 'custom'">
+            {{ triggerTimeLabel }}
+            <VueDatePicker
+              v-model="editForm.cronTime"
+              class="schedule-picker"
+              time-picker
+              model-type="HH:mm"
+              format="HH:mm"
+              :locale="zhCN"
+              teleport="body"
+              :action-row="datePickerActionRow"
+              :clearable="false"
+              :time-config="datePickerTimeConfig"
+            />
+          </label>
           <p v-else class="custom-schedule">
             当前任务使用高级自定义周期。如需修改，请先选择常用重复规则。
           </p>
@@ -777,14 +818,15 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 17px;
-  height: 17px;
-  padding: 0 5px;
-  border-radius: 9px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border: 2px solid var(--gray-0);
+  border-radius: 10px;
   color: var(--gray-0);
   background: var(--color-error-500);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -997,10 +1039,11 @@ onMounted(() => {
   z-index: 8;
   inset: 0;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
   padding: 12px;
-  background: rgba(15, 23, 42, 0.28);
+  background: rgba(15, 23, 42, 0.32);
+  backdrop-filter: blur(2px);
 }
 .confirm-dialog,
 .editor-dialog {
@@ -1018,6 +1061,33 @@ onMounted(() => {
   color: var(--gray-600);
   font-size: 12px;
 }
+.confirm-dialog {
+  width: min(100%, 336px);
+  padding: 22px;
+  text-align: center;
+}
+.confirm-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 12px;
+  border-radius: 50%;
+  color: var(--color-error-700);
+  background: var(--color-error-50);
+}
+.confirm-dialog h3 {
+  margin: 0;
+  color: var(--gray-1000);
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.confirm-dialog p {
+  margin: 8px 0 0;
+  line-height: 1.55;
+}
 .confirm-dialog > div,
 .editor-dialog footer {
   display: flex;
@@ -1025,11 +1095,28 @@ onMounted(() => {
   gap: 8px;
   margin-top: 16px;
 }
+.confirm-dialog .confirm-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .confirm-dialog button,
 .editor-dialog footer button {
-  padding: 7px 10px;
+  min-height: 36px;
+  padding: 7px 12px;
   border: 1px solid var(--gray-200);
   border-radius: 6px;
+}
+.confirm-dialog .secondary:hover {
+  border-color: var(--gray-300);
+  background: var(--gray-50);
+}
+.confirm-dialog .danger {
+  border-color: var(--color-error-700);
+  color: var(--gray-0) !important;
+  background: var(--color-error-700);
+}
+.confirm-dialog .danger:hover {
+  filter: brightness(0.94);
 }
 .editor-dialog {
   display: grid;
@@ -1070,6 +1157,29 @@ onMounted(() => {
   color: var(--gray-0);
   background: var(--main-700);
   border-color: var(--main-700);
+}
+.schedule-picker :deep(.dp__input) {
+  min-height: 36px;
+  padding: 7px 36px;
+  border-color: var(--gray-200);
+  border-radius: 6px;
+  color: var(--gray-800);
+  font-family: inherit;
+  font-size: 13px;
+}
+.schedule-picker :deep(.dp__input:focus),
+.schedule-picker :deep(.dp__input_focus) {
+  border-color: var(--main-700);
+  box-shadow: 0 0 0 2px var(--main-50);
+}
+:global(.dp__theme_light) {
+  --dp-primary-color: var(--main-700);
+  --dp-primary-text-color: var(--gray-0);
+  --dp-border-color: var(--gray-200);
+  --dp-menu-border-color: var(--gray-200);
+  --dp-border-radius: 6px;
+  --dp-font-family: inherit;
+  --dp-font-size: 13px;
 }
 .weekday-field {
   display: grid;
