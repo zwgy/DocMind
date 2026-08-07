@@ -13,8 +13,11 @@ def _tool_callable(tool):
     return tool.coroutine
 
 
-def _runtime():
-    return SimpleNamespace(context=SimpleNamespace(uid="user-1", thread_id="thread-1"), config={}, state={})
+def _runtime(user_message: str | None = None):
+    messages = [SimpleNamespace(type="human", content=user_message)] if user_message else []
+    return SimpleNamespace(
+        context=SimpleNamespace(uid="user-1", thread_id="thread-1"), config={}, state={"messages": messages}
+    )
 
 
 def _job():
@@ -114,6 +117,36 @@ def test_scheduled_task_skill_provides_canonical_local_model_create_payload():
     assert '"schedule_kind": "at"' in content
     assert '"run_at": "2026-08-08T09:00:00+08:00"' in content
     assert "不要使用 `once`、`time_at` 或嵌套 `schedule` 对象" in content
+
+
+def test_periodic_task_without_explicit_clock_time_requires_clarification():
+    assert tools._needs_periodic_time_clarification("cron", _runtime("每周提醒我写周报"))
+    assert not tools._needs_periodic_time_clarification("cron", _runtime("每周五下午五点提醒我写周报"))
+    assert not tools._needs_periodic_time_clarification("at", _runtime("明天提醒我写周报"))
+
+
+@pytest.mark.asyncio
+async def test_periodic_task_without_clock_time_asks_before_creating(monkeypatch):
+    questions = []
+    monkeypatch.setattr(
+        tools,
+        "ask_user_question",
+        SimpleNamespace(func=lambda **kwargs: questions.append(kwargs) or {"answer": "周五下午五点"}),
+    )
+
+    result = await _tool_callable(tools.create_personal_scheduled_task)(
+        **{
+            **_request(),
+            "schedule_kind": "cron",
+            "run_at": None,
+            "cron_expression": "0 17 * * 5",
+        },
+        tool_call_id="call-clarify-1",
+        runtime=_runtime("每周提醒我写周报"),
+    )
+
+    assert result == {"status": "needs_clarification", "answer": {"answer": "周五下午五点"}}
+    assert questions[0]["questions"][0]["question_id"] == "scheduled_task_time"
 
 
 @pytest.mark.asyncio

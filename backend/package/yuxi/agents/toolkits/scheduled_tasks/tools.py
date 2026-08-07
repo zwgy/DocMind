@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated, Any, Literal
@@ -12,12 +13,19 @@ from langchain_core.tools import ToolException
 from langgraph.prebuilt.tool_node import ToolRuntime
 from pydantic import Field
 
+from yuxi.agents.toolkits.buildin.tools import ask_user_question
 from yuxi.agents.toolkits.registry import tool
 from yuxi.scheduled_jobs.schemas import PersonalScheduledJobRequest
 from yuxi.services.scheduled_job_service import ScheduledJobDomainError, ScheduledJobService
 from yuxi.storage.postgres.manager import pg_manager
 
 SCHEDULED_TASK_TOOL_CONFIG_GUIDE = "由定时任务 Skill 按需加载，不作为 Agent 基础工具直接配置。"
+_CLOCK_TIME_PATTERN = re.compile(
+    r"(?:凌晨|早上|上午|中午|下午|傍晚|晚上|夜里|早晨|晨间|午后)?\s*"
+    r"(?:[01]?\d|2[0-3])\s*(?::|：|点)(?:\s*[0-5]?\d\s*分?)?"
+    r"|(?:凌晨|早上|上午|中午|下午|傍晚|晚上|夜里|早晨|晨间|午后)?\s*"
+    r"[零一二三四五六七八九十]{1,3}点(?:[零一二三四五六七八九十]{1,3}分)?"
+)
 
 
 def _runtime_value(runtime: ToolRuntime | None, key: str) -> str:
@@ -46,6 +54,49 @@ def _creation_key(runtime: ToolRuntime | None, tool_call_id: str) -> str:
         raise ToolException("当前运行时缺少 thread_id，不能创建个人定时任务")
     digest = hashlib.sha256(f"{uid}:{thread_id}:{tool_call_id}".encode()).hexdigest()
     return f"agent-v1-{digest}"
+
+
+def _latest_user_message(runtime: ToolRuntime | None) -> str:
+    """只从当前会话状态读取用户原文，避免把模型臆测的时间当成用户已确认的信息。"""
+    state = getattr(runtime, "state", None)
+    messages = state.get("messages", []) if isinstance(state, Mapping) else getattr(state, "messages", [])
+    for message in reversed(messages or []):
+        if getattr(message, "type", None) != "human":
+            continue
+        content = getattr(message, "content", "")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            return "".join(
+                item.get("text", "") if isinstance(item, Mapping) else str(item)
+                for item in content
+            ).strip()
+    return ""
+
+
+def _needs_periodic_time_clarification(schedule_kind: str, runtime: ToolRuntime | None) -> bool:
+    """周期任务必须由用户给出钟点，不能让本地模型以默认时间补全。"""
+    return schedule_kind in {"interval", "cron"} and bool(
+        (user_message := _latest_user_message(runtime)) and not _CLOCK_TIME_PATTERN.search(user_message)
+    )
+
+
+def _ask_periodic_schedule_time(schedule_kind: str) -> dict[str, Any]:
+    question = "请指定首次提醒的具体日期和时间。" if schedule_kind == "interval" else "请指定每周几、几点提醒您。"
+    answer = ask_user_question.func(
+        questions=[
+            {
+                "question_id": "scheduled_task_time",
+                "question": question,
+                "options": [
+                    {"label": "上午 9:00", "value": "上午 9:00"},
+                    {"label": "下午 5:00", "value": "下午 5:00"},
+                ],
+                "allow_other": True,
+            }
+        ]
+    )
+    return {"status": "needs_clarification", "answer": answer}
 
 
 def _job_payload(job) -> dict[str, Any]:
@@ -116,6 +167,8 @@ async def create_personal_scheduled_task(
 ) -> dict[str, Any]:
     """为当前用户创建站内通知或指定顶层 Agent 的定时任务。"""
     owner_uid = _owner_uid(runtime)
+    if _needs_periodic_time_clarification(schedule_kind, runtime):
+        return _ask_periodic_schedule_time(schedule_kind)
     schedule: dict[str, Any] = {"kind": schedule_kind}
     if schedule_kind == "at":
         schedule["run_at"] = run_at
