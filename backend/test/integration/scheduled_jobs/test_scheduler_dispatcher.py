@@ -350,9 +350,7 @@ async def test_retry_limit_finishes_on_fifth_attempt_and_writes_one_notification
             assert run is not None
             assert run.status == "failed" and run.attempt_count == 5 and run.finished_at is not None
             assert run.lease_owner is None and run.lease_expires_at is None and run.next_attempt_at is None
-            assert [(item.recipient_uid, item.item_type) for item in notification_events] == [
-                (owner_uid, "run_failed")
-            ]
+            assert [(item.recipient_uid, item.item_type) for item in notification_events] == [(owner_uid, "run_failed")]
     finally:
         if job_id:
             await _cleanup_job(job_id=job_id, user_uids=[owner_uid, recipient_uid])
