@@ -166,7 +166,7 @@ async def test_scheduler_coalesces_missed_interval_and_dispatcher_delivers_once(
             )
             assert run is not None and run.status == "partial" and run.next_attempt_at is None
             assert {(item.recipient_uid, item.category, item.item_type) for item in inboxes} == {
-                (owner_uid, "task", "run_partial"),
+                (owner_uid, "notification", "run_partial"),
                 (recipient_uid, "notification", "notification_delivered"),
             }
 
@@ -300,7 +300,7 @@ async def test_expired_lease_is_handed_over_without_duplicate_notification():
 
 
 @pytest.mark.integration
-async def test_retry_limit_finishes_on_fifth_attempt_and_writes_one_task_event():
+async def test_retry_limit_finishes_on_fifth_attempt_and_writes_one_notification_event():
     """可重试错误按五次封顶，终态清理租约且所有者只收到一条异常事件。"""
     pg_manager.initialize()
     await pg_manager.create_tables()
@@ -337,12 +337,12 @@ async def test_retry_limit_finishes_on_fifth_attempt_and_writes_one_task_event()
 
         async with pg_manager.get_async_session_context() as session:
             run = await session.scalar(select(ScheduledJobRun).where(ScheduledJobRun.id == run_id))
-            task_events = list(
+            notification_events = list(
                 (
                     await session.scalars(
                         select(InboxItem).where(
                             InboxItem.scheduled_job_run_id == run_id,
-                            InboxItem.category == "task",
+                            InboxItem.category == "notification",
                         )
                     )
                 ).all()
@@ -350,7 +350,9 @@ async def test_retry_limit_finishes_on_fifth_attempt_and_writes_one_task_event()
             assert run is not None
             assert run.status == "failed" and run.attempt_count == 5 and run.finished_at is not None
             assert run.lease_owner is None and run.lease_expires_at is None and run.next_attempt_at is None
-            assert [(item.recipient_uid, item.item_type) for item in task_events] == [(owner_uid, "run_failed")]
+            assert [(item.recipient_uid, item.item_type) for item in notification_events] == [
+                (owner_uid, "run_failed")
+            ]
     finally:
         if job_id:
             await _cleanup_job(job_id=job_id, user_uids=[owner_uid, recipient_uid])
