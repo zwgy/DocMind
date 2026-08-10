@@ -13,6 +13,22 @@ from yuxi.scheduled_jobs.schemas import PersonalScheduledJobRequest
 
 
 @pytest.mark.asyncio
+async def test_notification_action_only_delivers_notification_without_creating_conversation():
+    class FakeRepository:
+        async def deliver_notification(self, *, run_id, instance_id):
+            assert (run_id, instance_id) == ("sjr-notification", "dispatcher-1")
+            return "succeeded"
+
+    result = await handlers.NotificationActionHandler().dispatch(
+        repository=FakeRepository(),
+        run_id="sjr-notification",
+        instance_id="dispatcher-1",
+    )
+
+    assert result == handlers.ActionDispatchResult(status="succeeded")
+
+
+@pytest.mark.asyncio
 async def test_agent_action_does_not_persist_agent_capability_snapshot(monkeypatch):
     request = PersonalScheduledJobRequest.model_validate(
         {
@@ -35,6 +51,7 @@ async def test_agent_action_does_not_persist_agent_capability_snapshot(monkeypat
         async def get_visible_by_slug(self, *, slug, user):
             assert (slug, user.uid) == ("daily-assistant", "user-1")
             return SimpleNamespace(
+                slug="daily-assistant",
                 is_subagent=False,
                 config_json={
                     "context": {
@@ -141,6 +158,7 @@ async def test_agent_action_creates_isolated_run_from_current_visible_agent_conf
     assert queued["run"] is run and queued["job"] is job
     assert queued["agent_run_id"] == "run-1"
     assert queued["conversation_id"] == "42"
+    assert queued["conversation_thread_id"] == "scheduled-thread"
 
 
 @pytest.mark.asyncio

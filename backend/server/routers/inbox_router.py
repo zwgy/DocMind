@@ -89,6 +89,24 @@ async def mark_task_read(
     return {"marked_count": marked_count}
 
 
+@inbox.post("/tasks/{job_id}/runs/{run_id}/read")
+async def mark_task_run_read(
+    job_id: str,
+    run_id: str,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        marked_count = await InboxService(db).mark_task_run_read(
+            job_id=job_id, run_id=run_id, owner_uid=current_user.uid
+        )
+        await db.commit()
+    except InboxDomainError as error:
+        await db.rollback()
+        _raise_inbox_error(error)
+    return {"marked_count": marked_count}
+
+
 @inbox.post("/read-all")
 async def mark_all_read(
     payload: ReadAllRequest,

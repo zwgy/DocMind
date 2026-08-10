@@ -1,6 +1,6 @@
 import traceback
 import uuid
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 import aiofiles
@@ -20,6 +20,7 @@ from yuxi.services.conversation_service import (
     create_thread_view,
     delete_thread_attachment_view,
     delete_thread_view,
+    get_thread_view,
     get_thread_history_view,
     list_thread_attachments_view,
     list_threads_view,
@@ -241,6 +242,7 @@ class ThreadResponse(BaseModel):
     created_at: str
     updated_at: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+    thread_kind: Literal["regular", "scheduled_run"] = "regular"
 
 
 class AttachmentResponse(BaseModel):
@@ -377,6 +379,7 @@ async def list_threads(
     conversation_scope_key: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    include_scheduled_runs: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_required_user),
 ):
@@ -388,7 +391,18 @@ async def list_threads(
         current_uid=str(current_user.uid),
         limit=limit,
         offset=offset,
+        include_scheduled_runs=include_scheduled_runs,
     )
+
+
+@chat.get("/thread/{thread_id}", response_model=ThreadResponse)
+async def get_thread(
+    thread_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_required_user),
+):
+    """按公开 thread_id 定位当前用户可见会话。"""
+    return await get_thread_view(thread_id=thread_id, db=db, current_uid=str(current_user.uid))
 
 
 @chat.delete("/thread/{thread_id}")

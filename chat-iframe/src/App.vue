@@ -236,7 +236,7 @@ function openScheduledCenter(category?: 'notification' | 'task') {
 
 async function openTickerItem(item: TickerItem) {
   openScheduledCenter(item.category)
-  if (!context.config.token) return
+  if (!context.config.token || item.category === 'task') return
   try {
     await inboxApi.markRead(item.category, item.id, context.config.token)
     applyTickerItems(tickerItems.value.filter((candidate) => candidate.key !== item.key))
@@ -407,6 +407,19 @@ async function selectThread(threadId: string) {
   // 避免依赖流式状态或消息数组更新时机来猜测是否需要滚动。
   historyScrollRequest.value += 1
   showSidebar.value = false
+}
+
+async function openScheduledResult(payload: { jobId: string; runId: string; threadId: string }) {
+  try {
+    await chat.locateThread(payload.threadId, context.config.token)
+    await inboxApi.markRunRead(payload.jobId, payload.runId, context.config.token)
+    historyScrollRequest.value += 1
+    showScheduledCenter.value = false
+    showSidebar.value = false
+    await refreshInboxSnapshot(true)
+  } catch (err) {
+    chat.error = err instanceof Error ? err.message : '加载任务结果失败'
+  }
 }
 
 async function submitInterrupt(answer: unknown) {
@@ -676,6 +689,7 @@ function resumeVisiblePage() {
       :inbox-navigation="inboxNavigation"
       @close="showScheduledCenter = false"
       @unread-changed="handleUnreadChanged"
+      @open-result="openScheduledResult"
     />
     <Transition name="sidebar-slide">
       <aside v-if="showSidebar" class="conversation-drawer">

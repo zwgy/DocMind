@@ -11,7 +11,7 @@ from typing import Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yuxi.repositories.inbox_repository import InboxRepository
-from yuxi.storage.postgres.models_scheduled_jobs import InboxItem, ScheduledJob
+from yuxi.storage.postgres.models_scheduled_jobs import InboxItem, ScheduledJob, ScheduledJobRun
 
 
 class InboxDomainError(ValueError):
@@ -47,8 +47,20 @@ class InboxService:
             limit=limit,
         )
         items = rows[:limit]
+        job_ids = [row[0].id for row in items]
+        latest_runs, latest_unread_runs, unread_run_counts = await self.repository.task_run_summaries(
+            job_ids=job_ids, owner_uid=owner_uid
+        )
         return {
-            "items": [self._serialize_task(row) for row in items],
+            "items": [
+                self._serialize_task(
+                    row,
+                    latest_run=latest_runs.get(row[0].id),
+                    latest_unread_run=latest_unread_runs.get(row[0].id),
+                    unread_run_count=unread_run_counts.get(row[0].id, 0),
+                )
+                for row in items
+            ],
             "next_cursor": self._encode_task_cursor(items[-1]) if len(rows) > limit else None,
         }
 
@@ -70,6 +82,11 @@ class InboxService:
             raise InboxItemNotFoundError("scheduled_job_not_found")
         return await self.repository.mark_task_read(job_id=job_id, owner_uid=owner_uid)
 
+    async def mark_task_run_read(self, *, job_id: str, run_id: str, owner_uid: str) -> int:
+        if not await self.repository.task_run_exists_for_owner(job_id=job_id, run_id=run_id, owner_uid=owner_uid):
+            raise InboxItemNotFoundError("scheduled_job_run_not_found")
+        return await self.repository.mark_task_run_read(job_id=job_id, run_id=run_id, owner_uid=owner_uid)
+
     async def mark_all_read(self, *, recipient_uid: str, category: Literal["notification", "task"]) -> int:
         return await self.repository.mark_all_read(recipient_uid=recipient_uid, category=category)
 
@@ -88,7 +105,13 @@ class InboxService:
         }
 
     @staticmethod
-    def _serialize_task(row: tuple) -> dict:
+    def _serialize_task(
+        row: tuple,
+        *,
+        latest_run: ScheduledJobRun | None,
+        latest_unread_run: ScheduledJobRun | None,
+        unread_run_count: int,
+    ) -> dict:
         job: ScheduledJob = row[0]
         latest_title, latest_content, latest_update_at, unread_count, _has_unread, sort_at = row[1:]
         action_data = job.action_data if isinstance(job.action_data, dict) else {}
@@ -120,7 +143,29 @@ class InboxService:
                 else None
             ),
             "unread_update_count": int(unread_count),
+            "unread_run_count": unread_run_count,
+            "latest_run": InboxService._serialize_run(latest_run),
+            "latest_unread_run": InboxService._serialize_run(latest_unread_run),
             "sort_at": InboxService._format_datetime(sort_at),
+        }
+
+    @staticmethod
+    def _serialize_run(run: ScheduledJobRun | None) -> dict | None:
+        if run is None:
+            return None
+        result_data = run.result_data if isinstance(run.result_data, dict) else {}
+        return {
+            "id": run.id,
+            "status": run.status,
+            "scheduled_for": InboxService._format_datetime(run.scheduled_for),
+            "started_at": InboxService._format_datetime(run.started_at),
+            "finished_at": InboxService._format_datetime(run.finished_at),
+            "conversation_thread_id": run.conversation_thread_id,
+            "final_message_id": result_data.get("final_message_id"),
+            "result_preview": result_data.get("result_preview"),
+            "artifact_count": int(result_data.get("artifact_count") or 0),
+            "error_code": run.error_code,
+            "error_message": run.error_message,
         }
 
     @staticmethod

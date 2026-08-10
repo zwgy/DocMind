@@ -37,7 +37,7 @@ test('createConversation posts the default agent thread with bearer token', asyn
   })
 })
 
-test('listConversations filters by configured agent id', async () => {
+test('listConversations filters ordinary threads and includes scheduled runs', async () => {
   const calls = []
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options })
@@ -48,7 +48,7 @@ test('listConversations filters by configured agent id', async () => {
 
   assert.equal(
     calls[0].url,
-    '/api/chat/threads?limit=50&offset=0&agent_id=agent-iframe&conversation_scope_key=oa%3Acontract%3A001'
+    '/api/chat/threads?limit=50&offset=0&include_scheduled_runs=true&agent_id=agent-iframe&conversation_scope_key=oa%3Acontract%3A001'
   )
   assert.equal(calls[0].options.headers.Authorization, 'Bearer token-1')
 })

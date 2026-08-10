@@ -98,3 +98,34 @@ async def test_update_one_off_job_with_existing_run_keeps_trigger_conflict():
         )
 
     db.scalar.assert_awaited_once()
+
+
+async def test_agent_action_without_slug_freezes_visible_default_agent(monkeypatch):
+    request = PersonalScheduledJobRequest.model_validate(
+        {
+            "name": "默认 Agent 任务",
+            "schedule": {"kind": "at", "run_at": "2030-01-03T09:00:00+08:00"},
+            "action": {"type": "agent", "instruction": "整理结果"},
+            "timezone": "Asia/Shanghai",
+        }
+    )
+    default_agent = SimpleNamespace(slug="default-chatbot", is_subagent=False)
+
+    class FakeAgentRepository:
+        def __init__(self, _db):
+            pass
+
+        async def get_default(self):
+            return default_agent
+
+        async def get_visible_by_slug(self, *, slug, user):
+            assert slug == "default-chatbot" and user.uid == "alice"
+            return default_agent
+
+    monkeypatch.setattr("yuxi.services.scheduled_job_service.AgentRepository", FakeAgentRepository)
+
+    action_data = await ScheduledJobService(SimpleNamespace())._resolve_action_data(
+        request=request, owner=SimpleNamespace(uid="alice")
+    )
+
+    assert action_data["agent_slug"] == "default-chatbot"

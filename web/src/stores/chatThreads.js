@@ -10,6 +10,7 @@ export const useChatThreadsStore = defineStore('chatThreads', () => {
   const currentThreadId = ref(null)
   const hasMoreThreads = ref(true)
   const isLoadingMoreThreads = ref(false)
+  const nextOffset = ref(0)
 
   const currentThread = computed(() => {
     if (!currentThreadId.value) return null
@@ -24,12 +25,15 @@ export const useChatThreadsStore = defineStore('chatThreads', () => {
     try {
       const fetchedThreads = await threadApi.getThreads(agentId, PAGE_SIZE, 0)
       threads.value = fetchedThreads || []
-      hasMoreThreads.value = Boolean(fetchedThreads && fetchedThreads.length >= PAGE_SIZE)
+      const pageThreads = threads.value.filter((thread) => !thread.is_pinned)
+      nextOffset.value = pageThreads.length
+      hasMoreThreads.value = pageThreads.length >= PAGE_SIZE
       if (
         currentThreadId.value &&
         !threads.value.find((thread) => thread.id === currentThreadId.value)
       ) {
-        currentThreadId.value = null
+        const current = await threadApi.getThread(currentThreadId.value)
+        threads.value = [current, ...threads.value.filter((thread) => thread.id !== current.id)]
       }
       return threads.value
     } catch (error) {
@@ -44,13 +48,15 @@ export const useChatThreadsStore = defineStore('chatThreads', () => {
 
     isLoadingMoreThreads.value = true
     try {
-      const fetchedThreads = await threadApi.getThreads(agentId, PAGE_SIZE, threads.value.length)
+      const fetchedThreads = await threadApi.getThreads(agentId, PAGE_SIZE, nextOffset.value)
       if (fetchedThreads && fetchedThreads.length > 0) {
         // 后端分页会重复返回置顶项，这里只追加列表中尚不存在的线程。
         const existingIds = new Set(threads.value.map((thread) => thread.id))
         const newThreads = fetchedThreads.filter((thread) => !existingIds.has(thread.id))
         threads.value = [...threads.value, ...newThreads]
-        hasMoreThreads.value = newThreads.length >= PAGE_SIZE
+        const pageThreads = fetchedThreads.filter((thread) => !thread.is_pinned)
+        nextOffset.value += pageThreads.length
+        hasMoreThreads.value = pageThreads.length >= PAGE_SIZE
       } else {
         hasMoreThreads.value = false
       }
@@ -60,6 +66,16 @@ export const useChatThreadsStore = defineStore('chatThreads', () => {
     } finally {
       isLoadingMoreThreads.value = false
     }
+  }
+
+  const locateThread = async (threadId) => {
+    if (!threadId) return null
+    let thread = threads.value.find((item) => item.id === threadId)
+    if (!thread) {
+      thread = await threadApi.getThread(threadId)
+      threads.value = [thread, ...threads.value.filter((item) => item.id !== thread.id)]
+    }
+    return thread
   }
 
   const createThread = async (agentId, title = '新的对话') => {
@@ -142,6 +158,7 @@ export const useChatThreadsStore = defineStore('chatThreads', () => {
     setCurrentThreadId,
     loadThreads,
     loadMoreThreads,
+    locateThread,
     createThread,
     deleteThread,
     updateThread

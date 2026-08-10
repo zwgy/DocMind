@@ -44,6 +44,8 @@ class AgentActionHandler:
                 "timeout_seconds": run.action_snapshot.get("timeout_seconds"),
             }
         )
+        if not action.agent_slug:
+            raise ValueError("定时任务运行快照缺少目标 Agent")
         user = await repository.db.scalar(select(User).where(User.uid == job.owner_uid, User.is_deleted == 0))
         if user is None:
             raise ValueError("任务所有者不存在或已删除")
@@ -78,6 +80,7 @@ class AgentActionHandler:
             job=job,
             agent_run_id=agent_run.id,
             conversation_id=str(conversation.id),
+            conversation_thread_id=conversation.thread_id,
             now=now,
         )
         return ActionDispatchResult(status="queued", agent_run_id=agent_run.id)

@@ -202,17 +202,20 @@ export const threadApi = {
    * @param {number} offset - 偏移量，默认0
    * @returns {Promise} - 对话线程列表
    */
-  getThreads: (agentId = null, limit = 100, offset = 0) => {
+  getThreads: (agentId = null, limit = 100, offset = 0, includeScheduledRuns = true) => {
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset)
     })
+    params.set('include_scheduled_runs', String(includeScheduledRuns))
     if (agentId) {
       params.set('agent_id', agentId)
     }
     const url = `/api/chat/threads?${params.toString()}`
     return apiGet(url)
   },
+
+  getThread: (threadId) => apiGet(`/api/chat/thread/${encodeURIComponent(threadId)}`),
 
   /**
    * 创建新对话线程

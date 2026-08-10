@@ -443,6 +443,7 @@ async def create_thread_view(
         "created_at": conversation.created_at.isoformat(),
         "updated_at": conversation.updated_at.isoformat(),
         "metadata": conversation.extra_metadata or {},
+        "thread_kind": "regular",
     }
 
 
@@ -454,6 +455,7 @@ async def list_threads_view(
     conversation_scope_key: str | None = None,
     limit: int | None = None,
     offset: int = 0,
+    include_scheduled_runs: bool = False,
 ) -> list[dict]:
     conv_repo = ConversationRepository(db)
     conversations = await conv_repo.list_conversations(
@@ -463,6 +465,7 @@ async def list_threads_view(
         status="active",
         limit=limit,
         offset=offset,
+        include_scheduled_runs=include_scheduled_runs,
     )
 
     return [
@@ -475,9 +478,29 @@ async def list_threads_view(
             "created_at": conv.created_at.isoformat(),
             "updated_at": conv.updated_at.isoformat(),
             "metadata": conv.extra_metadata or {},
+            "thread_kind": (
+                "scheduled_run" if (conv.extra_metadata or {}).get("source") == "scheduled_job" else "regular"
+            ),
         }
         for conv in conversations
     ]
+
+
+async def get_thread_view(*, thread_id: str, db: AsyncSession, current_uid: str) -> dict:
+    conversation = await require_user_conversation(ConversationRepository(db), thread_id, str(current_uid))
+    return {
+        "id": conversation.thread_id,
+        "uid": conversation.uid,
+        "agent_id": conversation.agent_id,
+        "title": conversation.title,
+        "is_pinned": bool(conversation.is_pinned),
+        "created_at": conversation.created_at.isoformat(),
+        "updated_at": conversation.updated_at.isoformat(),
+        "metadata": conversation.extra_metadata or {},
+        "thread_kind": (
+            "scheduled_run" if (conversation.extra_metadata or {}).get("source") == "scheduled_job" else "regular"
+        ),
+    }
 
 
 async def delete_thread_view(
@@ -487,7 +510,9 @@ async def delete_thread_view(
     current_uid: str,
 ) -> dict:
     conv_repo = ConversationRepository(db)
-    await require_user_conversation(conv_repo, thread_id, str(current_uid))
+    conversation = await require_user_conversation(conv_repo, thread_id, str(current_uid))
+    if (conversation.extra_metadata or {}).get("source") == "scheduled_job":
+        raise HTTPException(status_code=409, detail="scheduled_run_conversation_protected")
     deleted = await conv_repo.delete_conversation(thread_id, soft_delete=True)
     if not deleted:
         raise HTTPException(status_code=404, detail="对话线程不存在")
@@ -516,6 +541,9 @@ async def update_thread_view(
         "created_at": updated_conv.created_at.isoformat(),
         "updated_at": updated_conv.updated_at.isoformat(),
         "metadata": updated_conv.extra_metadata or {},
+        "thread_kind": (
+            "scheduled_run" if (updated_conv.extra_metadata or {}).get("source") == "scheduled_job" else "regular"
+        ),
     }
 
 

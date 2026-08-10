@@ -423,6 +423,7 @@ async def test_agent_run_status_creates_terminal_unread_task_event():
                 job=await session.get(ScheduledJob, job_id),
                 agent_run_id=f"run_{suffix}",
                 conversation_id="1",
+                conversation_thread_id=f"thread_{suffix}",
                 now=now,
             )
 
@@ -430,6 +431,7 @@ async def test_agent_run_status_creates_terminal_unread_task_event():
             repository = ScheduledJobRepository(session)
             assert await repository.sync_agent_run_status(agent_run_id=f"run_{suffix}", agent_status="running")
             assert await repository.sync_agent_run_status(agent_run_id=f"run_{suffix}", agent_status="completed")
+            assert not await repository.sync_agent_run_status(agent_run_id=f"run_{suffix}", agent_status="completed")
 
         async with pg_manager.get_async_session_context() as session:
             run = await session.get(ScheduledJobRun, run_id)

@@ -198,12 +198,14 @@ class ScheduledJobRun(Base):
     finished_at = Column(DateTime(timezone=True))
     agent_run_id = Column(String(64))
     conversation_id = Column(String(64))
+    conversation_thread_id = Column(String(64))
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending', 'dispatching', 'queued', 'running', 'succeeded', 'partial', 'failed', 'cancelled', 'skipped')",
+            "status IN ('pending', 'dispatching', 'queued', 'running', 'succeeded', "
+            "'partial', 'failed', 'cancelled', 'skipped')",
             name="ck_sjr_status",
         ),
         CheckConstraint("attempt_count >= 0", name="ck_sjr_attempt_count"),
@@ -220,6 +222,19 @@ class ScheduledJobRun(Base):
         Index("uq_sjr_job_scheduled_for", "scheduled_job_id", "scheduled_for", unique=True),
         Index("ix_sjr_status_next_attempt_at", "status", "next_attempt_at", "id"),
         Index("ix_sjr_status_lease_expires_at", "status", "lease_expires_at", "id"),
+        Index(
+            "uq_sjr_conversation_thread_id",
+            "conversation_thread_id",
+            unique=True,
+            postgresql_where=text("conversation_thread_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_sjr_agent_reconcile",
+            "status",
+            "updated_at",
+            "id",
+            postgresql_where=text("action_type = 'agent' AND status IN ('queued', 'running')"),
+        ),
     )
 
 

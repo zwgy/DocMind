@@ -217,16 +217,22 @@ class ScheduledJobRepository:
         job: ScheduledJob,
         agent_run_id: str,
         conversation_id: str,
+        conversation_thread_id: str,
         now: datetime,
     ) -> None:
         """ARQ 投递前先持久化排队状态，Worker 重启后可据 AgentRun 的 pending 状态恢复。"""
         run.status = "queued"
         run.agent_run_id = agent_run_id
         run.conversation_id = conversation_id
+        run.conversation_thread_id = conversation_thread_id
         run.lease_owner = None
         run.lease_expires_at = None
         run.next_attempt_at = None
-        run.result_data = {"agent_run_id": agent_run_id, "conversation_id": conversation_id}
+        run.result_data = {
+            "agent_run_id": agent_run_id,
+            "conversation_id": conversation_id,
+            "conversation_thread_id": conversation_thread_id,
+        }
         await InboxRepository(self.db).insert_event_if_absent(
             recipient_uid=job.owner_uid,
             scheduled_job_id=job.id,
@@ -239,7 +245,14 @@ class ScheduledJobRepository:
         )
         await self.db.flush()
 
-    async def sync_agent_run_status(self, *, agent_run_id: str, agent_status: str) -> bool:
+    async def sync_agent_run_status(
+        self,
+        *,
+        agent_run_id: str,
+        agent_status: str,
+        result_projection: dict | None = None,
+        agent_error_message: str | None = None,
+    ) -> bool:
         """Agent Worker 是执行状态事实来源；这里只转换为调度运行与收件箱事件。"""
         now = await self.database_now()
         run = await self.db.scalar(
@@ -266,13 +279,18 @@ class ScheduledJobRepository:
         else:
             status = "failed"
         error_code = None if status == "succeeded" else f"agent_{agent_status}"
+        result_data = {**(run.result_data or {}), "agent_status": agent_status, **(result_projection or {})}
         await self._finish_run(
             run,
             status=status,
             now=now,
-            result_data={**(run.result_data or {}), "agent_status": agent_status},
+            result_data=result_data,
             error_code=error_code,
-            error_message="Agent 运行需要人工交互" if agent_status == "interrupted" else None,
+            error_message=(
+                "Agent 运行需要人工交互"
+                if agent_status == "interrupted" and not agent_error_message
+                else agent_error_message
+            ),
             write_task_event=False,
         )
         await self._write_agent_task_event(job=job, run=run, status=status)
@@ -352,7 +370,8 @@ class ScheduledJobRepository:
         self, *, job: ScheduledJob, run: ScheduledJobRun, status: Literal["succeeded", "failed", "cancelled"]
     ) -> None:
         if status == "succeeded":
-            title, content = "定时 Agent 任务已完成", f"任务“{job.name}”已完成。"
+            title = "定时 Agent 任务已完成"
+            content = (run.result_data or {}).get("result_preview") or f"任务“{job.name}”已完成。"
         elif status == "cancelled":
             title, content = "定时 Agent 任务已取消", f"任务“{job.name}”已取消。"
         else:

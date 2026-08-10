@@ -80,6 +80,7 @@ def _serialize_job(job: ScheduledJob) -> dict:
 
 
 def _serialize_run(run) -> dict:
+    result_data = run.result_data if isinstance(run.result_data, dict) else {}
     return {
         "id": run.id,
         "scheduled_for": _format_datetime(run.scheduled_for),
@@ -92,6 +93,10 @@ def _serialize_run(run) -> dict:
         "finished_at": _format_datetime(run.finished_at),
         "agent_run_id": run.agent_run_id,
         "conversation_id": run.conversation_id,
+        "conversation_thread_id": run.conversation_thread_id,
+        "final_message_id": result_data.get("final_message_id"),
+        "result_preview": result_data.get("result_preview"),
+        "artifact_count": int(result_data.get("artifact_count") or 0),
         "created_at": _format_datetime(run.created_at),
     }
 

@@ -4,9 +4,11 @@ from datetime import timedelta
 
 import pytest
 import pytest_asyncio
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from yuxi.repositories.conversation_repository import ConversationRepository
+from yuxi.services.conversation_service import delete_thread_view, update_thread_view
 from yuxi.storage.postgres.models_business import Base, Conversation, Department, User
 from yuxi.utils.datetime_utils import utc_now_naive
 
@@ -68,6 +70,19 @@ async def session():
                     created_at=now,
                     updated_at=now,
                 ),
+                Conversation(
+                    thread_id="scheduled-other-agent",
+                    uid="ext_oa_1001",
+                    agent_id="report-agent",
+                    title="Scheduled",
+                    status="active",
+                    extra_metadata={
+                        "source": "scheduled_job",
+                        "conversation_scope_key": "oa:contract:002",
+                    },
+                    created_at=now,
+                    updated_at=now,
+                ),
             ]
         )
         await db.commit()
@@ -96,6 +111,38 @@ async def test_list_conversations_without_scope_keeps_existing_behavior(session)
     assert {item.thread_id for item in all_threads} == {"scope-a-pinned", "scope-a-normal", "scope-b", "no-scope"}
 
 
+async def test_list_conversations_includes_scheduled_runs_across_scope_and_agent(session):
+    conversations = await ConversationRepository(session).list_conversations(
+        uid="ext_oa_1001",
+        agent_id="default-chatbot",
+        conversation_scope_key="oa:contract:001",
+        include_scheduled_runs=True,
+        limit=100,
+    )
+
+    assert {item.thread_id for item in conversations} == {
+        "scope-a-pinned",
+        "scope-a-normal",
+        "scheduled-other-agent",
+    }
+
+
+async def test_list_conversations_with_scheduled_runs_and_no_regular_filter_keeps_all_threads(session):
+    conversations = await ConversationRepository(session).list_conversations(
+        uid="ext_oa_1001",
+        include_scheduled_runs=True,
+        limit=100,
+    )
+
+    assert {item.thread_id for item in conversations} == {
+        "scope-a-pinned",
+        "scope-a-normal",
+        "scope-b",
+        "no-scope",
+        "scheduled-other-agent",
+    }
+
+
 async def test_update_conversation_persists_merged_json_metadata(session):
     repo = ConversationRepository(session)
 
@@ -111,6 +158,27 @@ async def test_update_conversation_persists_merged_json_metadata(session):
         "conversation_scope_key": "oa:contract:001",
         "tool_approval_mode": "always_trust",
     }
+
+
+async def test_scheduled_conversation_keeps_kind_after_update_and_rejects_delete(session):
+    updated = await update_thread_view(
+        thread_id="scheduled-other-agent",
+        title="定时结果已重命名",
+        is_pinned=True,
+        db=session,
+        current_uid="ext_oa_1001",
+    )
+
+    assert updated["thread_kind"] == "scheduled_run"
+    assert updated["is_pinned"] is True
+    with pytest.raises(HTTPException) as exc_info:
+        await delete_thread_view(
+            thread_id="scheduled-other-agent",
+            db=session,
+            current_uid="ext_oa_1001",
+        )
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "scheduled_run_conversation_protected"
 
 
 async def test_list_conversations_keeps_pinned_threads_outside_non_pinned_page_limit(session):

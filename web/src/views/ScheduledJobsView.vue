@@ -1,17 +1,21 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { CalendarClock, Pause, Pencil, Play, RefreshCw, X } from 'lucide-vue-next'
+import { CalendarClock, Eye, Paperclip, Pause, Pencil, Play, RefreshCw, X } from 'lucide-vue-next'
 import { message } from 'ant-design-vue'
+import { useRouter } from 'vue-router'
 import { useScheduledJobsStore } from '@/stores/scheduledJobs'
 import { scheduledJobApi } from '@/apis/scheduled_job_api'
 import { agentApi } from '@/apis/agent_api'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import CandidateList from '@/components/scheduled-jobs/CandidateList.vue'
 import { useUserStore } from '@/stores/user'
+import { useChatThreadsStore } from '@/stores/chatThreads'
 import { describeCron, describeInterval, toZonedDateTimeInput } from '@/utils/scheduledJobDisplay'
 
 const store = useScheduledJobsStore()
 const userStore = useUserStore()
+const chatThreadsStore = useChatThreadsStore()
+const router = useRouter()
 const page = computed(() => store.currentPage)
 const tabs = [
   { value: 'ongoing', label: '进行中', empty: '暂无进行中的任务' },
@@ -149,6 +153,10 @@ function runStatusText(status) {
   )
 }
 
+function canViewRunResult(run) {
+  return run.conversation_thread_id && ['succeeded', 'failed', 'cancelled'].includes(run.status)
+}
+
 async function handleAction(job, action) {
   await store.changeStatus(job, action)
 }
@@ -160,6 +168,22 @@ async function openDetail(job) {
     runs.value = (await scheduledJobApi.runs(job.id, { limit: 20 }))?.items || []
   } finally {
     detailLoading.value = false
+  }
+}
+
+async function openRunResult(run) {
+  if (!detail.value?.id || !run.conversation_thread_id) return
+  try {
+    await chatThreadsStore.locateThread(run.conversation_thread_id)
+    const jobId = detail.value.id
+    detail.value = null
+    await router.push({
+      name: 'AgentCompWithThreadId',
+      params: { thread_id: run.conversation_thread_id },
+      query: { scheduled_job_id: jobId, scheduled_run_id: run.id }
+    })
+  } catch (error) {
+    message.error(error?.message || '加载任务结果失败')
   }
 }
 
@@ -234,7 +258,7 @@ onMounted(async () => {
       </template>
     </PageHeader>
     <main class="scheduled-jobs-content">
-      <p class="page-intro">集中查看和管理个人及来文产生的定时通知。</p>
+      <p class="page-intro">集中查看和管理个人及来文产生的定时通知与 Agent 任务。</p>
       <a-tabs :active-key="store.activeView" @change="store.setActiveView">
         <a-tab-pane v-for="tab in tabs" :key="tab.value" :tab="tab.label" />
       </a-tabs>
@@ -316,10 +340,22 @@ onMounted(async () => {
       <a-empty v-else-if="!runs.length" description="暂无运行历史" />
       <a-timeline v-else
         ><a-timeline-item v-for="run in runs" :key="run.id"
-          ><strong>{{ runStatusText(run.status) }}</strong>
-          <div>{{ formatTime(run.scheduled_for) }} · 第 {{ run.attempt_count }} 次尝试</div>
-          <small v-if="run.agent_run_id">Agent Run：{{ run.agent_run_id }}</small
-          ><small v-if="run.error_message">{{ run.error_message }}</small></a-timeline-item
+          ><div class="run-title">
+            <strong>{{ runStatusText(run.status) }}</strong>
+            <a-button
+              v-if="canViewRunResult(run)"
+              type="link"
+              size="small"
+              @click="openRunResult(run)"
+              ><Eye :size="14" />查看结果</a-button
+            >
+          </div>
+          <div>{{ formatTime(run.finished_at || run.started_at || run.scheduled_for) }}</div>
+          <p v-if="run.result_preview" class="run-preview">{{ run.result_preview }}</p>
+          <div v-if="run.conversation_thread_id" class="run-artifacts">
+            <Paperclip :size="13" />{{ run.artifact_count || 0 }} 个产物
+          </div>
+          <small v-if="run.error_message">{{ run.error_message }}</small></a-timeline-item
         ></a-timeline
       >
     </a-drawer>
@@ -532,6 +568,31 @@ onMounted(async () => {
 }
 .preview-result {
   margin-bottom: 16px;
+}
+.run-title {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.run-title :deep(.ant-btn) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.run-preview {
+  margin: 6px 0;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.run-artifacts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
 }
 .edit-hint {
   margin: 0 0 16px;

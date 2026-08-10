@@ -5,6 +5,7 @@ import {
   createConversation,
   deleteConversation,
   generateConversationTitle,
+  getConversation,
   getRun,
   getThreadActiveRun,
   getThreadState,
@@ -408,6 +409,20 @@ export const useChatStore = defineStore('chat', {
         this.isLoadingMoreThreads = false
       }
     },
+    async locateThread(threadId: string, token?: string) {
+      if (!threadId) return null
+      let thread = this.threads.find((item) => item.id === threadId)
+      if (!thread) {
+        const fetchedThread = await getConversation(threadId, token)
+        this.threads = [
+          fetchedThread,
+          ...this.threads.filter((item) => item.id !== fetchedThread.id)
+        ]
+        thread = fetchedThread
+      }
+      await this.selectThread(thread.id, token)
+      return thread
+    },
     async newConversation(token?: string, agentId?: string, conversationScopeKey?: string) {
       const thread = await this.createThread(token, agentId, conversationScopeKey)
       // 仅在用户主动"新建会话"时清空消息；send() 走 ensureThread 复用同一创建路径，
@@ -562,7 +577,7 @@ export const useChatStore = defineStore('chat', {
       try {
         const result = await createResumeRun({
           threadId,
-          agentId,
+          agentId: this.threads.find((item) => item.id === threadId)?.agent_id || agentId,
           parentRunId: pending.parentRunId,
           answer,
           token
@@ -878,8 +893,13 @@ export const useChatStore = defineStore('chat', {
         },
         onStatus: (chunk: Record<string, unknown>) => {
           this.consumeRunStatus(runtime, chunk)
-          if (chunk.status === 'agent_state' && chunk.agent_state && typeof chunk.agent_state === 'object') {
-            runtime.showRunTodos ||= todoSignature(chunk.agent_state as Record<string, unknown>) !== initialTodoSignature
+          if (
+            chunk.status === 'agent_state' &&
+            chunk.agent_state &&
+            typeof chunk.agent_state === 'object'
+          ) {
+            runtime.showRunTodos ||=
+              todoSignature(chunk.agent_state as Record<string, unknown>) !== initialTodoSignature
           }
         },
         onChunk: (chunk: RunStreamChunk) => {
@@ -921,6 +941,7 @@ export const useChatStore = defineStore('chat', {
       }
       try {
         const threadId = await this.ensureThread(token, agentId, conversationScopeKey)
+        const runAgentId = this.threads.find((item) => item.id === threadId)?.agent_id || agentId
         // 与主站一致地补拉状态，避免 SSE 短暂中断时遗漏 write_todos 的状态变更。
         stateRefreshTimer = globalThis.setInterval(() => {
           if (!runtime.isStreaming) return
@@ -955,7 +976,7 @@ export const useChatStore = defineStore('chat', {
               text,
               token,
               threadId,
-              agentId,
+              agentId: runAgentId,
               modelSpec: selectedModelSpec,
               includePage: this.askPage,
               includeFile: this.askFile,

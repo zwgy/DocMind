@@ -98,6 +98,7 @@ import { agentApi } from '@/apis/agent_api'
 import AgentChatComponent from '@/components/AgentChatComponent.vue'
 import AgentEditModal from '@/components/model-management/AgentEditModal.vue'
 import { isBuiltinAgent, useAgentStore } from '@/stores/agent'
+import { useInboxStore } from '@/stores/inbox'
 import { handleChatError } from '@/utils/errorHandler'
 import { generatePixelAvatar } from '@/utils/pixelAvatar'
 import FallbackAvatar from '@/components/common/FallbackAvatar.vue'
@@ -110,6 +111,7 @@ const agentEditModalRef = ref(null)
 
 // Stores
 const agentStore = useAgentStore()
+const inboxStore = useInboxStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -137,6 +139,19 @@ const syncSelectedThreadFromRoute = async () => {
     const ok = await chatComponent.selectThreadFromRoute(threadId)
     if (threadId && !ok) {
       await router.replace({ name: 'AgentComp' })
+      return
+    }
+
+    const jobId =
+      typeof route.query.scheduled_job_id === 'string' ? route.query.scheduled_job_id : ''
+    const runId =
+      typeof route.query.scheduled_run_id === 'string' ? route.query.scheduled_run_id : ''
+    if (threadId && ok && jobId && runId) {
+      await inboxStore.markRunRead(jobId, runId)
+      const query = { ...route.query }
+      delete query.scheduled_job_id
+      delete query.scheduled_run_id
+      await router.replace({ params: route.params, query })
     }
   } catch (error) {
     handleChatError(error, 'load')
@@ -146,7 +161,7 @@ const syncSelectedThreadFromRoute = async () => {
 }
 
 watch(
-  () => route.params.thread_id,
+  () => [route.params.thread_id, route.query.scheduled_job_id, route.query.scheduled_run_id],
   () => {
     syncSelectedThreadFromRoute()
   },

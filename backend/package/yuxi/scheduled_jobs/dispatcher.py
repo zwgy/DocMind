@@ -66,6 +66,7 @@ async def run() -> None:
     _install_stop_signals(stop_event)
     active: set[asyncio.Task[None]] = set()
     last_heartbeat = 0.0
+    last_reconciliation = 0.0
 
     while not stop_event.is_set():
         completed = {task for task in active if task.done()}
@@ -79,6 +80,10 @@ async def run() -> None:
             if time.monotonic() - last_heartbeat >= 10:
                 await service.heartbeat(instance_id=config.instance_id)
                 last_heartbeat = time.monotonic()
+            if time.monotonic() - last_reconciliation >= 10:
+                await service.reconcile_agent_runs(limit=config.dispatch_batch_size)
+                await service.backfill_terminal_results(limit=config.dispatch_batch_size)
+                last_reconciliation = time.monotonic()
             free_slots = config.dispatch_concurrency - len(active)
             if free_slots > 0:
                 run_ids = await service.claim_once(

@@ -12,6 +12,49 @@ UPGRADE_STATEMENTS = (
     "ALTER TABLE IF EXISTS incoming_documents ADD COLUMN IF NOT EXISTS archived_by VARCHAR(64)",
     "CREATE INDEX IF NOT EXISTS ix_incoming_documents_archived_at ON incoming_documents(archived_at)",
     "ALTER TABLE IF EXISTS scheduled_job_runs ALTER COLUMN next_attempt_at DROP NOT NULL",
+    "ALTER TABLE IF EXISTS scheduled_job_runs ADD COLUMN IF NOT EXISTS conversation_thread_id VARCHAR(64)",
+    (
+        "DO $$ BEGIN IF EXISTS (SELECT 1 FROM scheduled_job_runs AS run "
+        "JOIN conversations AS conversation ON run.conversation_id = conversation.id::text "
+        "JOIN scheduled_jobs AS job ON job.id = run.scheduled_job_id "
+        "WHERE run.conversation_thread_id IS NULL AND conversation.uid <> job.owner_uid) "
+        "THEN RAISE EXCEPTION 'scheduled_job_run_conversation_owner_mismatch'; END IF; END $$"
+    ),
+    (
+        "DO $$ BEGIN IF EXISTS (SELECT 1 FROM scheduled_job_runs AS run "
+        "JOIN scheduled_jobs AS job ON job.id = run.scheduled_job_id "
+        "LEFT JOIN conversations AS conversation ON run.conversation_thread_id = conversation.thread_id "
+        "WHERE run.conversation_thread_id IS NOT NULL "
+        "AND (conversation.id IS NULL OR conversation.uid <> job.owner_uid)) "
+        "THEN RAISE EXCEPTION 'scheduled_job_run_conversation_thread_invalid'; END IF; END $$"
+    ),
+    (
+        "DO $$ BEGIN IF EXISTS (SELECT target_thread_id FROM ("
+        "SELECT COALESCE(run.conversation_thread_id, conversation.thread_id) AS target_thread_id "
+        "FROM scheduled_job_runs AS run "
+        "LEFT JOIN conversations AS conversation ON run.conversation_id = conversation.id::text"
+        ") AS candidates WHERE target_thread_id IS NOT NULL GROUP BY target_thread_id HAVING COUNT(*) > 1) "
+        "THEN RAISE EXCEPTION 'scheduled_job_run_conversation_thread_duplicate'; END IF; END $$"
+    ),
+    (
+        "UPDATE scheduled_job_runs AS run SET conversation_thread_id = conversation.thread_id "
+        "FROM conversations AS conversation, scheduled_jobs AS job "
+        "WHERE run.conversation_thread_id IS NULL AND run.conversation_id = conversation.id::text "
+        "AND job.id = run.scheduled_job_id AND conversation.uid = job.owner_uid"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_sjr_conversation_thread_id "
+        "ON scheduled_job_runs(conversation_thread_id) WHERE conversation_thread_id IS NOT NULL"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS ix_sjr_agent_reconcile ON scheduled_job_runs(status, updated_at, id) "
+        "WHERE action_type = 'agent' AND status IN ('queued', 'running')"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS ix_conversations_scheduled_owner_updated "
+        "ON conversations(uid, updated_at DESC, id DESC) "
+        "WHERE status = 'active' AND extra_metadata->>'source' = 'scheduled_job'"
+    ),
     "ALTER TABLE IF EXISTS scheduled_job_candidates ADD COLUMN IF NOT EXISTS notification_title VARCHAR(100)",
     "ALTER TABLE IF EXISTS scheduled_job_candidates ALTER COLUMN notification_content DROP NOT NULL",
     "ALTER TABLE IF EXISTS scheduled_job_candidates ALTER COLUMN owner_uid DROP NOT NULL",
@@ -47,6 +90,7 @@ DROP TABLE IF EXISTS scheduled_job_recipients;
 DROP TABLE IF EXISTS scheduled_jobs;
 DROP TABLE IF EXISTS scheduled_job_candidates;
 DROP TABLE IF EXISTS incoming_task_batches;
+DROP INDEX IF EXISTS ix_conversations_scheduled_owner_updated;
 DROP INDEX IF EXISTS ix_incoming_documents_archived_at;
 ALTER TABLE IF EXISTS incoming_documents DROP COLUMN IF EXISTS archived_by;
 ALTER TABLE IF EXISTS incoming_documents DROP COLUMN IF EXISTS archived_at;

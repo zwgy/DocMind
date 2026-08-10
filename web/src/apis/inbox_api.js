@@ -11,14 +11,25 @@ function queryString(params = {}) {
 export const inboxApi = {
   list(category, params = {}) {
     const query = queryString(params)
-    return apiGet(`/api/inbox/${category === 'task' ? 'tasks' : 'notifications'}${query ? `?${query}` : ''}`)
+    return apiGet(
+      `/api/inbox/${category === 'task' ? 'tasks' : 'notifications'}${query ? `?${query}` : ''}`
+    )
   },
   unreadCount() {
     return apiGet('/api/inbox/unread-count')
   },
   markRead(category, id) {
-    const path = category === 'task' ? `/api/inbox/tasks/${encodeURIComponent(id)}/read` : `/api/inbox/notifications/${encodeURIComponent(id)}/read`
+    const path =
+      category === 'task'
+        ? `/api/inbox/tasks/${encodeURIComponent(id)}/read`
+        : `/api/inbox/notifications/${encodeURIComponent(id)}/read`
     return apiPost(path, {})
+  },
+  markRunRead(jobId, runId) {
+    return apiPost(
+      `/api/inbox/tasks/${encodeURIComponent(jobId)}/runs/${encodeURIComponent(runId)}/read`,
+      {}
+    )
   },
   markAllRead(category) {
     return apiPost('/api/inbox/read-all', { category })

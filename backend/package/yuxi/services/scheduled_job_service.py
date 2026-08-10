@@ -315,12 +315,16 @@ class ScheduledJobService:
         if not isinstance(request.action, AgentAction):
             return action_data
 
-        agent = await AgentRepository(self.db).get_visible_by_slug(
-            slug=request.action.agent_slug,
-            user=owner,
-        )
+        agent_repository = AgentRepository(self.db)
+        if request.action.agent_slug:
+            agent = await agent_repository.get_visible_by_slug(slug=request.action.agent_slug, user=owner)
+        else:
+            agent = await agent_repository.get_default()
+            if agent is not None and not await agent_repository.get_visible_by_slug(slug=agent.slug, user=owner):
+                agent = None
         if agent is None or agent.is_subagent:
             raise ScheduledJobDomainError("目标 Agent 不存在、不可见或不能作为定时任务执行")
+        action_data["agent_slug"] = agent.slug
         return action_data
 
     @staticmethod

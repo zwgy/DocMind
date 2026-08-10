@@ -473,12 +473,20 @@ export async function listConversations(
   limit = 50
 ): Promise<ChatThread[]> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  params.set('include_scheduled_runs', 'true')
   if (agentId) params.set('agent_id', agentId)
   if (conversationScopeKey) params.set('conversation_scope_key', conversationScopeKey)
   const response = await fetch(apiUrl(`/api/chat/threads?${params.toString()}`), {
     headers: authHeaders(token, false)
   })
   return parseResponse<ChatThread[]>(response, '获取对话列表失败')
+}
+
+export async function getConversation(threadId: string, token?: string): Promise<ChatThread> {
+  const response = await fetch(apiUrl(`/api/chat/thread/${encodeURIComponent(threadId)}`), {
+    headers: authHeaders(token, false)
+  })
+  return parseResponse<ChatThread>(response, '获取对话失败')
 }
 
 export async function createConversation(
@@ -527,9 +535,7 @@ export async function listMessages(threadId: string, token?: string): Promise<Ch
           : {}
       // resume 消息是恢复 LangGraph checkpoint 的内部协议载荷，不是用户的新发言；
       // 在历史边界过滤可保证实时回写与页面刷新使用同一展示口径。
-      return (
-        message.message_type !== 'resume' && extra.source !== 'ask_user_question_resume'
-      )
+      return message.message_type !== 'resume' && extra.source !== 'ask_user_question_resume'
     })
     .map(normalizeChatMessage)
 }

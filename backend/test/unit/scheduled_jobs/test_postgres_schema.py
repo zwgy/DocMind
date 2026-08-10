@@ -22,6 +22,9 @@ def test_scheduled_job_postgres_ddl_has_schedule_and_idempotency_guards():
 
 def test_run_and_inbox_postgres_ddl_protect_lease_and_event_idempotency():
     run_ddl = str(CreateTable(ScheduledJobRun.__table__).compile(dialect=postgresql.dialect()))
+    run_indexes = "\n".join(
+        str(CreateIndex(index).compile(dialect=postgresql.dialect())) for index in ScheduledJobRun.__table__.indexes
+    )
     inbox_indexes = "\n".join(
         str(CreateIndex(index).compile(dialect=postgresql.dialect())) for index in InboxItem.__table__.indexes
     )
@@ -30,6 +33,11 @@ def test_run_and_inbox_postgres_ddl_protect_lease_and_event_idempotency():
     assert "ck_sjr_terminal_finished_at" in run_ddl
     assert "next_attempt_at TIMESTAMP WITH TIME ZONE" in run_ddl
     assert "next_attempt_at TIMESTAMP WITH TIME ZONE NOT NULL" not in run_ddl
+    assert "conversation_thread_id VARCHAR(64)" in run_ddl
+    assert "CREATE UNIQUE INDEX uq_sjr_conversation_thread_id" in run_indexes
+    assert "WHERE conversation_thread_id IS NOT NULL" in run_indexes
+    assert "CREATE INDEX ix_sjr_agent_reconcile" in run_indexes
+    assert "WHERE action_type = 'agent' AND status IN ('queued', 'running')" in run_indexes
     assert "CREATE UNIQUE INDEX uq_ibi_recipient_event_key ON inbox_items (recipient_uid, event_key)" in inbox_indexes
 
 
@@ -39,6 +47,14 @@ def test_scheduled_jobs_migration_has_idempotent_upgrade_and_manual_downgrade_sq
     assert any("notification_content DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
     assert any("owner_uid DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
     assert any("ADD COLUMN IF NOT EXISTS version" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("conversation_thread_id VARCHAR(64)" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("uq_sjr_conversation_thread_id" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("ix_sjr_agent_reconcile" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("ix_conversations_scheduled_owner_updated" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("run.conversation_id = conversation.id::text" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("scheduled_job_run_conversation_owner_mismatch" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("scheduled_job_run_conversation_thread_invalid" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("scheduled_job_run_conversation_thread_duplicate" in statement for statement in UPGRADE_STATEMENTS)
     for table_name, constraint_name in (
         ("scheduled_jobs", "ck_sj_action_type"),
         ("scheduled_job_runs", "ck_sjr_status"),
@@ -54,6 +70,7 @@ def test_scheduled_jobs_migration_has_idempotent_upgrade_and_manual_downgrade_sq
         or "IF NOT EXISTS" in statement
         or "DROP NOT NULL" in statement
         or "ADD CONSTRAINT" in statement
+        or statement.startswith("UPDATE scheduled_job_runs")
         for statement in UPGRADE_STATEMENTS
     )
     assert "DROP TABLE IF EXISTS scheduled_jobs" in DOWNGRADE_SQL

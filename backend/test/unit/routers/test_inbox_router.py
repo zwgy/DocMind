@@ -117,6 +117,31 @@ async def test_read_all_rejects_unknown_category_before_service_is_called(monkey
     assert response.status_code == 422
 
 
+async def test_mark_task_run_read_uses_job_run_and_authenticated_owner(monkeypatch):
+    captured = {}
+
+    class FakeService:
+        def __init__(self, _db):
+            pass
+
+        async def mark_task_run_read(self, **kwargs):
+            captured.update(kwargs)
+            return 2
+
+    monkeypatch.setattr(inbox_router, "InboxService", FakeService)
+
+    async def current_user():
+        return SimpleNamespace(uid="alice")
+
+    app = _app(user_override=current_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/inbox/tasks/sj-1/runs/sjr-2/read")
+
+    assert response.status_code == 200
+    assert response.json() == {"marked_count": 2}
+    assert captured == {"job_id": "sj-1", "run_id": "sjr-2", "owner_uid": "alice"}
+
+
 async def test_inbox_routes_require_authenticated_user():
     async def reject_user():
         raise HTTPException(status_code=401, detail="not_authenticated")

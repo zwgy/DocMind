@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from yuxi.repositories.scheduled_job_repository import ScheduledJobRepository
 from yuxi.services.agent_run_service import enqueue_agent_run
 from yuxi.services.scheduled_job_action_handlers import get_action_handler
+from yuxi.services.scheduled_job_result_service import ScheduledJobResultService
 from yuxi.storage.postgres.models_scheduled_jobs import ScheduledJobRun
 
 
@@ -47,9 +48,29 @@ class ScheduledJobDispatcherService:
     async def sync_agent_run_status(self, *, agent_run_id: str, agent_status: str) -> bool:
         async with self._session_factory() as session:
             async with session.begin():
-                return await ScheduledJobRepository(session).sync_agent_run_status(
+                return await ScheduledJobResultService(session).sync_agent_run_status(
                     agent_run_id=agent_run_id, agent_status=agent_status
                 )
+
+    async def reconcile_agent_runs(self, *, limit: int) -> int:
+        async with self._session_factory() as session:
+            mismatches = await ScheduledJobResultService(session).list_status_mismatches(limit=limit)
+        reconciled = 0
+        for agent_run_id, agent_status in mismatches:
+            if await self.sync_agent_run_status(agent_run_id=agent_run_id, agent_status=agent_status):
+                reconciled += 1
+        return reconciled
+
+    async def backfill_terminal_results(self, *, limit: int) -> int:
+        async with self._session_factory() as session:
+            run_ids = await ScheduledJobResultService(session).list_terminal_projection_gaps(limit=limit)
+        projected = 0
+        for run_id in run_ids:
+            async with self._session_factory() as session:
+                async with session.begin():
+                    if await ScheduledJobResultService(session).project_existing_terminal_run(scheduled_run_id=run_id):
+                        projected += 1
+        return projected
 
     async def retry_or_fail(
         self, *, run_id: str, instance_id: str, max_attempts: int, error_code: str, error_message: str

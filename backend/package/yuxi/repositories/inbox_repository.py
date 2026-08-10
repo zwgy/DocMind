@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yuxi.scheduled_jobs.ids import new_scheduled_job_id
-from yuxi.storage.postgres.models_scheduled_jobs import InboxItem, ScheduledJob
+from yuxi.storage.postgres.models_scheduled_jobs import InboxItem, ScheduledJob, ScheduledJobRun
 
 
 class InboxRepository:
@@ -183,6 +183,74 @@ class InboxRepository:
         )
         return int(notification_count or 0), int(task_count or 0)
 
+    async def task_run_summaries(
+        self, *, job_ids: list[str], owner_uid: str
+    ) -> tuple[dict[str, ScheduledJobRun], dict[str, ScheduledJobRun], dict[str, int]]:
+        if not job_ids:
+            return {}, {}, {}
+
+        ranked_runs = (
+            select(
+                ScheduledJobRun.id.label("run_id"),
+                ScheduledJobRun.scheduled_job_id.label("job_id"),
+                func.row_number()
+                .over(
+                    partition_by=ScheduledJobRun.scheduled_job_id,
+                    order_by=(ScheduledJobRun.created_at.desc(), ScheduledJobRun.id.desc()),
+                )
+                .label("row_number"),
+            )
+            .where(ScheduledJobRun.scheduled_job_id.in_(job_ids))
+            .cte("ranked_task_runs")
+        )
+        latest_rows = await self.db.execute(
+            select(ScheduledJobRun)
+            .join(ranked_runs, ranked_runs.c.run_id == ScheduledJobRun.id)
+            .where(ranked_runs.c.row_number == 1)
+        )
+        latest_by_job = {run.scheduled_job_id: run for run in latest_rows.scalars().all()}
+
+        unread_run_ids = (
+            select(
+                InboxItem.scheduled_job_id.label("job_id"),
+                InboxItem.scheduled_job_run_id.label("run_id"),
+            )
+            .where(
+                InboxItem.recipient_uid == owner_uid,
+                InboxItem.category == "task",
+                InboxItem.is_read.is_(False),
+                InboxItem.scheduled_job_id.in_(job_ids),
+                InboxItem.scheduled_job_run_id.is_not(None),
+            )
+            .distinct()
+            .cte("unread_task_run_ids")
+        )
+        ranked_unread_runs = (
+            select(
+                unread_run_ids.c.job_id,
+                unread_run_ids.c.run_id,
+                func.row_number()
+                .over(
+                    partition_by=unread_run_ids.c.job_id,
+                    order_by=(ScheduledJobRun.created_at.desc(), ScheduledJobRun.id.desc()),
+                )
+                .label("row_number"),
+            )
+            .join(ScheduledJobRun, ScheduledJobRun.id == unread_run_ids.c.run_id)
+            .cte("ranked_unread_task_runs")
+        )
+        unread_rows = await self.db.execute(
+            select(ScheduledJobRun)
+            .join(ranked_unread_runs, ranked_unread_runs.c.run_id == ScheduledJobRun.id)
+            .where(ranked_unread_runs.c.row_number == 1)
+        )
+        latest_unread_by_job = {run.scheduled_job_id: run for run in unread_rows.scalars().all()}
+        count_rows = await self.db.execute(
+            select(unread_run_ids.c.job_id, func.count().label("unread_run_count")).group_by(unread_run_ids.c.job_id)
+        )
+        unread_counts = {job_id: int(count) for job_id, count in count_rows.all()}
+        return latest_by_job, latest_unread_by_job, unread_counts
+
     async def notification_exists(self, *, item_id: str, recipient_uid: str) -> bool:
         return bool(
             await self.db.scalar(
@@ -199,6 +267,20 @@ class InboxRepository:
             await self.db.scalar(
                 select(ScheduledJob.id).where(
                     ScheduledJob.id == job_id,
+                    ScheduledJob.owner_uid == owner_uid,
+                    ScheduledJob.action_type == "agent",
+                )
+            )
+        )
+
+    async def task_run_exists_for_owner(self, *, job_id: str, run_id: str, owner_uid: str) -> bool:
+        return bool(
+            await self.db.scalar(
+                select(ScheduledJobRun.id)
+                .join(ScheduledJob, ScheduledJob.id == ScheduledJobRun.scheduled_job_id)
+                .where(
+                    ScheduledJobRun.id == run_id,
+                    ScheduledJobRun.scheduled_job_id == job_id,
                     ScheduledJob.owner_uid == owner_uid,
                     ScheduledJob.action_type == "agent",
                 )
@@ -223,6 +305,20 @@ class InboxRepository:
             update(InboxItem)
             .where(
                 InboxItem.scheduled_job_id == job_id,
+                InboxItem.recipient_uid == owner_uid,
+                InboxItem.category == "task",
+                InboxItem.is_read.is_(False),
+            )
+            .values(is_read=True, read_at=func.now())
+        )
+        return int(result.rowcount or 0)
+
+    async def mark_task_run_read(self, *, job_id: str, run_id: str, owner_uid: str) -> int:
+        result = await self.db.execute(
+            update(InboxItem)
+            .where(
+                InboxItem.scheduled_job_id == job_id,
+                InboxItem.scheduled_job_run_id == run_id,
                 InboxItem.recipient_uid == owner_uid,
                 InboxItem.category == "task",
                 InboxItem.is_read.is_(False),

@@ -94,9 +94,33 @@ async def test_scheduled_jobs_postgres_enforces_constraints_and_skip_locked():
                     "WHERE tablename = 'scheduled_jobs' AND indexname = 'uq_sj_owner_create_request_key'"
                 )
             )
+            conversation_thread_type = await session.scalar(
+                text(
+                    "SELECT data_type FROM information_schema.columns "
+                    "WHERE table_name = 'scheduled_job_runs' AND column_name = 'conversation_thread_id'"
+                )
+            )
+            conversation_thread_index = await session.scalar(
+                text(
+                    "SELECT indexdef FROM pg_indexes "
+                    "WHERE tablename = 'scheduled_job_runs' AND indexname = 'uq_sjr_conversation_thread_id'"
+                )
+            )
+            scheduled_conversation_index = await session.scalar(
+                text(
+                    "SELECT indexdef FROM pg_indexes "
+                    "WHERE tablename = 'conversations' "
+                    "AND indexname = 'ix_conversations_scheduled_owner_updated'"
+                )
+            )
 
         assert data_type == "timestamp with time zone"
         assert partial_index is not None and "WHERE (create_request_key IS NOT NULL)" in partial_index
+        assert conversation_thread_type == "character varying"
+        assert (
+            conversation_thread_index is not None and "conversation_thread_id IS NOT NULL" in conversation_thread_index
+        )
+        assert scheduled_conversation_index is not None and "scheduled_job" in scheduled_conversation_index
 
         duplicate_session = await pg_manager.get_async_session()
         try:

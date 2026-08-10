@@ -162,6 +162,7 @@ export type ExtractionQueryResponse = {
 export type ChatThread = {
   id: string
   agent_id?: string
+  thread_kind?: 'regular' | 'scheduled_run'
   title?: string | null
   is_pinned?: boolean
   created_at?: string

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
+  Clock3,
   MessageSquare,
   MessageSquarePlus,
   MoreVertical,
@@ -49,6 +50,18 @@ const titleTooltip = ref<{
   width: number
 } | null>(null)
 let titleTooltipTimer: number | undefined
+
+const displayThreads = computed(() =>
+  [...props.threads].sort((left, right) => {
+    if (left.id === props.currentThreadId || right.id === props.currentThreadId)
+      return left.id === props.currentThreadId ? -1 : 1
+    if (left.is_pinned !== right.is_pinned) return left.is_pinned ? -1 : 1
+    return (
+      Date.parse(right.updated_at || right.created_at || '') -
+      Date.parse(left.updated_at || left.created_at || '')
+    )
+  })
+)
 
 function getThreadTitle(thread: ChatThread) {
   return thread.title || '来文咨询'
@@ -211,7 +224,7 @@ onBeforeUnmount(() => hideTitleTooltip())
       </div>
       <template v-else>
         <div
-          v-for="thread in threads"
+          v-for="thread in displayThreads"
           :key="thread.id"
           class="thread-option"
           :class="{
@@ -220,7 +233,8 @@ onBeforeUnmount(() => hideTitleTooltip())
           }"
         >
           <span class="thread-icon">
-            <MessageSquare :size="16" />
+            <Clock3 v-if="thread.thread_kind === 'scheduled_run'" :size="16" />
+            <MessageSquare v-else :size="16" />
           </span>
           <button
             type="button"
@@ -250,7 +264,12 @@ onBeforeUnmount(() => hideTitleTooltip())
                 <PinOff v-if="thread.is_pinned" :size="15" />
                 <Pin v-else :size="15" />
               </button>
-              <button type="button" title="删除" @click.stop="requestDeleteThread(thread.id)">
+              <button
+                v-if="thread.thread_kind !== 'scheduled_run'"
+                type="button"
+                title="删除"
+                @click.stop="requestDeleteThread(thread.id)"
+              >
                 <Trash2 :size="15" />
               </button>
             </template>

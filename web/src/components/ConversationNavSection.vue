@@ -14,8 +14,14 @@
             class="conversation-item"
             :class="{ active: currentChatId === chat.id }"
             @click="$emit('select-chat', chat.id)"
-            @click.middle="$emit('delete-chat', chat.id)"
+            @click.middle="chat.thread_kind !== 'scheduled_run' && $emit('delete-chat', chat.id)"
           >
+            <Clock3
+              v-if="chat.thread_kind === 'scheduled_run'"
+              :size="15"
+              class="thread-kind-icon"
+            />
+            <MessageSquare v-else :size="15" class="thread-kind-icon" />
             <a-tooltip
               placement="rightTop"
               :mouse-enter-delay="0.35"
@@ -61,6 +67,7 @@
                       重命名
                     </a-menu-item>
                     <a-menu-item
+                      v-if="chat.thread_kind !== 'scheduled_run'"
                       key="delete"
                       :icon="h(Trash2, { size: 14 })"
                       @click.stop="$emit('delete-chat', chat.id)"
@@ -98,7 +105,16 @@
 <script setup>
 import { computed, h, ref } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { ChevronDown, MoreVertical, Pin, PinOff, SquarePen, Trash2 } from 'lucide-vue-next'
+import {
+  ChevronDown,
+  Clock3,
+  MessageSquare,
+  MoreVertical,
+  Pin,
+  PinOff,
+  SquarePen,
+  Trash2
+} from 'lucide-vue-next'
 import { formatDateTime, parseToShanghai } from '@/utils/time'
 
 const props = defineProps({
@@ -167,6 +183,9 @@ const handleTitleFocus = (chatId, event) => {
 
 const sortedChats = computed(() => {
   return [...props.chatsList].sort((a, b) => {
+    if (a.id === props.currentChatId || b.id === props.currentChatId) {
+      return a.id === props.currentChatId ? -1 : 1
+    }
     if (a.is_pinned !== b.is_pinned) {
       return a.is_pinned ? -1 : 1
     }
@@ -241,6 +260,18 @@ const renameChat = async (chatId) => {
     outline: 2px solid color-mix(in srgb, var(--main-color) 45%, transparent);
     outline-offset: 2px;
   }
+}
+
+.thread-kind-icon {
+  width: 15px;
+  height: 15px;
+  margin-right: 7px;
+  flex: 0 0 15px;
+  color: var(--gray-500);
+}
+
+.conversation-item.active .thread-kind-icon {
+  color: var(--main-color);
 }
 
 .history-panel {

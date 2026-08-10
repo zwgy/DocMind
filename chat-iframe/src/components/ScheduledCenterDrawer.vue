@@ -6,9 +6,11 @@ import {
   CalendarClock,
   CircleCheck,
   CheckCheck,
+  Eye,
   Inbox,
   MessageCircleMore,
   Pause,
+  Paperclip,
   Play,
   RefreshCw,
   Repeat2,
@@ -38,7 +40,11 @@ const props = defineProps<{
   unreadCounts?: InboxUnreadCounts
   inboxNavigation?: { key: number; category: 'notification' | 'task' } | null
 }>()
-const emit = defineEmits<{ close: []; unreadChanged: [counts: InboxUnreadCounts] }>()
+const emit = defineEmits<{
+  close: []
+  unreadChanged: [counts: InboxUnreadCounts]
+  openResult: [payload: { jobId: string; runId: string; threadId: string }]
+}>()
 const datePickerActionRow = { selectBtnLabel: '确定', cancelBtnLabel: '取消' }
 const datePickerInputAttrs = { clearable: false }
 const datePickerTimeConfig = { enableSeconds: false, is24: true }
@@ -190,14 +196,50 @@ function unread(item: InboxItem) {
   return isTaskItem(item) ? item.unread_update_count > 0 : !item.is_read
 }
 
-function taskTrigger(item: TaskInboxItem) {
-  return item.job.next_run_at
-    ? `下一次触发：${formatTime(item.job.next_run_at, item.job.timezone)}`
-    : `最近状态：${formatTime(item.latest_update?.created_at || item.sort_at)}`
-}
-
 function taskAction(item: TaskInboxItem) {
   return item.job.agent_slug ? `执行 Agent · ${item.job.agent_slug}` : '执行 Agent'
+}
+
+function taskRun(item: TaskInboxItem) {
+  return item.latest_unread_run || item.latest_run
+}
+
+function taskResultContent(item: TaskInboxItem) {
+  return taskRun(item)?.result_preview || item.latest_update?.content || '暂无状态更新'
+}
+
+function taskRunStatus(item: TaskInboxItem) {
+  const status = taskRun(item)?.status || ''
+  return (
+    {
+      queued: '排队中',
+      running: '执行中',
+      succeeded: '已完成',
+      failed: '失败',
+      cancelled: '已取消'
+    }[status] || status
+  )
+}
+
+function canViewTaskResult(item: TaskInboxItem) {
+  const run = taskRun(item)
+  return Boolean(
+    run?.conversation_thread_id && ['succeeded', 'failed', 'cancelled'].includes(run.status)
+  )
+}
+
+function inboxItemTime(item: InboxItem) {
+  return isTaskItem(item) ? item.latest_update?.created_at || item.sort_at : item.created_at
+}
+
+function openTaskResult(item: TaskInboxItem) {
+  const run = taskRun(item)
+  if (!run?.conversation_thread_id) return
+  emit('openResult', {
+    jobId: item.job.id,
+    runId: run.id,
+    threadId: run.conversation_thread_id
+  })
 }
 
 async function refresh({ reset = true }: { reset?: boolean } = {}) {
@@ -356,7 +398,7 @@ async function saveEditor() {
 }
 
 async function mark(item: InboxItem) {
-  if (!unread(item) || !props.token) return
+  if (isTaskItem(item) || !unread(item) || !props.token) return
   try {
     await inboxApi.markRead(inboxCategory.value, itemId(item), props.token)
     await refresh()
@@ -543,12 +585,13 @@ onMounted(() => {
         </article>
       </template>
       <template v-else>
-        <button
+        <component
           v-for="item in inboxItems"
+          :is="isTaskItem(item) ? 'article' : 'button'"
           :key="itemId(item)"
-          type="button"
+          :type="isTaskItem(item) ? undefined : 'button'"
           class="inbox-card"
-          :class="{ unread: unread(item) }"
+          :class="{ unread: unread(item), clickable: !isTaskItem(item) }"
           @click="mark(item)"
         >
           <div class="card-icon" :class="isTaskItem(item) ? 'agent' : 'notification'">
@@ -564,17 +607,31 @@ onMounted(() => {
             <div class="card-meta">
               <span>{{ notificationType(item) }}</span
               ><span v-if="isTaskItem(item)">{{ taskAction(item) }}</span>
+              <span v-if="isTaskItem(item) && taskRun(item)">{{ taskRunStatus(item) }}</span>
             </div>
             <p class="inbox-content">
-              {{ isTaskItem(item) ? item.latest_update?.content || '暂无状态更新' : item.content }}
+              {{ isTaskItem(item) ? taskResultContent(item) : item.content }}
             </p>
-            <div class="trigger">
-              <CalendarClock :size="14" />{{
-                isTaskItem(item) ? taskTrigger(item) : `触发时间：${formatTime(item.created_at)}`
-              }}
+            <div v-if="isTaskItem(item) && taskRun(item)" class="task-run-meta">
+              <span>{{ formatTime(taskRun(item)?.finished_at || taskRun(item)?.started_at) }}</span>
+              <span><Paperclip :size="13" />{{ taskRun(item)?.artifact_count || 0 }} 个产物</span>
+              <span v-if="item.unread_run_count > 1"
+                >另有 {{ item.unread_run_count - 1 }} 次未读运行</span
+              >
             </div>
+            <div v-else class="trigger">
+              <CalendarClock :size="14" />{{ `触发时间：${formatTime(inboxItemTime(item))}` }}
+            </div>
+            <button
+              v-if="isTaskItem(item) && canViewTaskResult(item)"
+              type="button"
+              class="view-result"
+              @click.stop="openTaskResult(item)"
+            >
+              <Eye :size="14" />查看结果
+            </button>
           </div>
-        </button>
+        </component>
       </template>
     </section>
     <div
@@ -958,7 +1015,7 @@ onMounted(() => {
   border-radius: 8px;
   text-align: left;
 }
-.inbox-card {
+.inbox-card.clickable {
   cursor: pointer;
 }
 .inbox-card:hover,
@@ -993,6 +1050,30 @@ onMounted(() => {
   min-width: 0;
   flex: 1;
   gap: 6px;
+}
+.task-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--gray-600);
+  font-size: 12px;
+}
+.task-run-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.view-result {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 4px;
+  padding: 3px 0;
+  color: var(--main-700);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
 }
 .card-title {
   justify-content: space-between;

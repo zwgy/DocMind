@@ -11,6 +11,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - `web-dev`、`chat-iframe-dev`：由 Vite 构建、Nginx 托管的静态前端；开发联调不加载 HMR 客户端，前端修改后重建对应服务。
 - `api-dev`：FastAPI API 服务，挂载 `backend/server` 和 `backend/package` 并热重载。
 - `worker-dev`：ARQ 后台任务 worker，处理智能体运行等异步任务。
+- `scheduler`、`dispatcher`：前者从 PostgreSQL 生成到期业务运行，后者认领动作、投递通知或 Agent Run，并对账无人值守 Agent 的运行终态。
 - `sandbox-provisioner`：为智能体工具执行提供沙盒环境。
 - `postgres`、`redis`、`minio`、`milvus`、`graph`：分别承载业务/知识库元数据、运行事件与队列状态、对象存储、向量检索、Neo4j 图谱。
 - `mineru-*`、`paddlex`：按 `all` profile 启动的文档解析/OCR 能力。
@@ -33,6 +34,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - `knowledge` 是知识库和图谱领域。`KnowledgeBaseManager` 根据知识库类型分发到具体实现；`implementations` 放 Milvus、Dify 等知识库实现；`graphs` 放 Milvus 知识库图谱适配与构建服务；`chunking` 放文档分块策略。
 - `knowledge/parser` 是文档解析边界，统一封装 MinerU、PaddleX、RapidOCR、DeepSeek OCR 等解析实现。
 - `models` 封装 chat、embedding、rerank 模型适配；`config` 维护应用配置和内置模型信息；`utils` 放跨领域但足够通用的工具。
+- `scheduled_jobs` 定义业务定时任务的动作、时间规则和独立进程入口；任务定义、单次运行和收件事件持久化在 PostgreSQL，`services/scheduled_job_*` 负责编排，`repositories/scheduled_job_repository.py` 与 `inbox_repository.py` 负责状态迁移和查询。
 
 测试代码放在 `backend/test`，按 `unit`、`integration`、`e2e` 分层组织。新增或修改后端行为时，测试应落在最能覆盖风险的那一层。
 
@@ -60,6 +62,8 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 6. 运行事件写入 Redis，最终状态和业务记录写入 Postgres；文件和产物落到 `saves`、MinIO 或沙盒用户数据目录。
 7. 前端通过 SSE/轮询消费运行事件，渲染消息、工具调用、引用来源、产物卡片和文件预览。
 
+定时 Agent 运行复用同一条 Agent Run/Worker 链路，但每次触发先创建独立 Conversation。Worker 终态同步是结果投影快路径，Dispatcher 定期对账是恢复路径；收件箱只保存状态事件和摘要，完整消息及产物始终以 Conversation 为事实来源。Web 与 chat-iframe 通过同一会话列表接口平铺普通和定时会话，定时会话跨当前 Agent/scope 对任务所有者可见。
+
 ## 架构不变量
 
 - Docker Compose 是开发环境的事实来源。开发时优先检查容器和日志；后端依靠挂载源码热重载，前端依靠重建静态镜像更新，不要默认要求本地裸跑服务。
@@ -69,6 +73,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - LITE 模式必须允许跳过知识库、图谱、评估等重依赖能力；新增相关接口或初始化逻辑时要尊重这个边界。
 - 沙盒虚拟路径以 `SANDBOX_VIRTUAL_PATH_PREFIX` 为边界，用户可见路径与宿主机真实路径不要混用。
 - 面向用户或外部系统的输入在边界校验；内部服务之间优先信任已有类型、仓储和框架约束，避免为了假设场景堆叠防御代码。
+- 定时通知和定时 Agent 是不同动作：通知不得创建 Conversation；Agent 每次运行创建独立 Conversation，运行结果会话不得通过通用会话删除接口删除。
 
 ## 跨切面关注点
 

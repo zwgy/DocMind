@@ -55,7 +55,8 @@ class AgentAction(_StrictModel):
     """无人值守执行仅允许选择可见的顶层 Agent，能力由该 Agent 的持久化配置决定。"""
 
     type: Literal["agent"] = "agent"
-    agent_slug: str = Field(min_length=1, max_length=80)
+    # 创建请求允许省略，领域服务会在持久化前固化当时的默认顶层 Agent。
+    agent_slug: str | None = Field(default=None, min_length=1, max_length=80)
     instruction: str = Field(min_length=1, max_length=8000)
     timeout_seconds: int = Field(default=900, ge=60, le=3600)
 

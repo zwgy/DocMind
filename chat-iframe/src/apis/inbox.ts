@@ -27,8 +27,22 @@ export type TaskInboxItem = {
     status: string
   }
   latest_update: { title: string; content: string; created_at: string | null } | null
+  latest_run: TaskRunSummary | null
+  latest_unread_run: TaskRunSummary | null
   unread_update_count: number
+  unread_run_count: number
   sort_at: string | null
+}
+
+export type TaskRunSummary = {
+  id: string
+  status: string
+  started_at: string | null
+  finished_at: string | null
+  conversation_thread_id: string | null
+  final_message_id: string | null
+  result_preview: string | null
+  artifact_count: number
 }
 
 export type InboxItem = NotificationInboxItem | TaskInboxItem
@@ -70,6 +84,12 @@ export const inboxApi = {
   markRead: (category: InboxCategory, id: string, token?: string) =>
     request<MarkReadResponse>(
       `/api/inbox/${category === 'task' ? `tasks/${encodeURIComponent(id)}` : `notifications/${encodeURIComponent(id)}`}/read`,
+      token,
+      { method: 'POST', body: '{}' }
+    ),
+  markRunRead: (jobId: string, runId: string, token?: string) =>
+    request<MarkReadResponse>(
+      `/api/inbox/tasks/${encodeURIComponent(jobId)}/runs/${encodeURIComponent(runId)}/read`,
       token,
       { method: 'POST', body: '{}' }
     ),
