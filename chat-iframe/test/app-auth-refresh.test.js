@@ -46,6 +46,14 @@ test('conversation selection requests bottom positioning after history has loade
   assert.match(source, /:history-scroll-request="historyScrollRequest"/)
 })
 
+test('reopening the conversation sidebar preserves loaded pagination', () => {
+  assert.match(
+    source,
+    /function openSidebar\(\) \{\s*showSidebar\.value = true\s*\/\/[^\n]*\n\s*if \(chat\.threads\.length\) return\s*void chat\.refreshThreads\(/
+  )
+  assert.match(source, /@refresh="\s*chat\.refreshThreads\(/)
+})
+
 test('restoring a hidden assistant requests bottom positioning after layout becomes visible', () => {
   assert.match(
     source,

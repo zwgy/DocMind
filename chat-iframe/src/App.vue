@@ -44,6 +44,9 @@ const currentTokenUsage = computed(() => {
 
 function openSidebar() {
   showSidebar.value = true
+  // 重新打开抽屉时保留已加载的分页，否则首屏刷新会移除后续页中的当前会话，导致无法定位。
+  if (chat.threads.length) return
+
   void chat.refreshThreads(
     context.config.token,
     context.config.agentId,
