@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
   Clock3,
@@ -50,18 +50,6 @@ const titleTooltip = ref<{
   width: number
 } | null>(null)
 let titleTooltipTimer: number | undefined
-
-const displayThreads = computed(() =>
-  [...props.threads].sort((left, right) => {
-    if (left.id === props.currentThreadId || right.id === props.currentThreadId)
-      return left.id === props.currentThreadId ? -1 : 1
-    if (left.is_pinned !== right.is_pinned) return left.is_pinned ? -1 : 1
-    return (
-      Date.parse(right.updated_at || right.created_at || '') -
-      Date.parse(left.updated_at || left.created_at || '')
-    )
-  })
-)
 
 function getThreadTitle(thread: ChatThread) {
   return thread.title || '来文咨询'
@@ -224,7 +212,7 @@ onBeforeUnmount(() => hideTitleTooltip())
       </div>
       <template v-else>
         <div
-          v-for="thread in displayThreads"
+          v-for="thread in threads"
           :key="thread.id"
           class="thread-option"
           :class="{
