@@ -18,6 +18,12 @@ export function sanitizeRedirect(value) {
   return '/'
 }
 
+export function resolveAuthenticatedRedirect(value) {
+  const redirect = sanitizeRedirect(value)
+  // 根路径会无条件跳到登录页；已登录用户若再回到根路径，会在全局守卫中形成重定向循环并导致白屏。
+  return redirect === '/' ? '/agent' : redirect
+}
+
 // 检查是否已经尝试过自动触发 OIDC（同一会话内，避免无限循环）
 export function hasAutoStartAttempted() {
   return sessionStorage.getItem(AUTO_START_KEY) === '1'

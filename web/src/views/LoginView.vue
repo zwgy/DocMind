@@ -213,7 +213,7 @@ import {
   Key as KeyIcon,
   AlertCircle as ExclamationCircleIcon
 } from 'lucide-vue-next'
-import { tryAutoStartOIDC, sanitizeRedirect } from '@/utils/oidcAutoStart'
+import { tryAutoStartOIDC, resolveAuthenticatedRedirect } from '@/utils/oidcAutoStart'
 import { MIN_PASSWORD_LENGTH } from '@/utils/passwordValidation'
 
 const router = useRouter()
@@ -492,7 +492,7 @@ const checkServerHealth = async () => {
 onMounted(async () => {
   // 如果已登录，按 redirect 参数跳转（不固定跳首页）
   if (userStore.isLoggedIn) {
-    router.push(sanitizeRedirect(route.query.redirect))
+    router.push(resolveAuthenticatedRedirect(route.query.redirect))
     return
   }
 

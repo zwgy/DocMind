@@ -6,6 +6,10 @@
 
 ## v0.7.1 (current)
 
+### Web 登录
+
+- 修复已登录用户直接访问根路径时在 `/` 与 `/login` 之间循环重定向、导致页面白屏的问题；缺少明确业务跳转时统一进入 `/agent`，合法的站内 `redirect` 仍保持原路径。
+
 ### 定时任务（阶段 2，来文候选）
 
 - 完成定时任务第二版 Agent 自动执行闭环：新增受控 `agent` 动作、独立会话与 Agent Run/ARQ 投递、`queued / running / succeeded / failed / cancelled` 运行状态和终态未读任务事件。目标 Agent 必须对任务所有者可见且不能是 SubAgent；动作载荷拒绝工具、知识库、Skills 等运行时覆盖字段，任务也不再持久化 Agent 的能力快照，实际能力始终按管理员保存的目标 Agent 当前配置装配。既有 `scheduled-task` 工具以同一幂等与身份边界支持明确的 Agent 动作，信息不完整时要求模型反问；Web 任务编辑器可选择 Agent、设置指令和 60 至 3600 秒超时，并在运行历史中展示关联的 Agent Run。

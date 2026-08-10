@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useUserStore } from '@/stores/user'
 import { useAgentStore } from '@/stores/agent'
-import { sanitizeRedirect } from '@/utils/oidcAutoStart'
+import { resolveAuthenticatedRedirect } from '@/utils/oidcAutoStart'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -232,7 +232,7 @@ router.beforeEach(async (to) => {
 
   // 如果用户已登录但访问登录页，按 redirect 参数跳转
   if (to.path === '/login' && isLoggedIn) {
-    return sanitizeRedirect(to.query.redirect)
+    return resolveAuthenticatedRedirect(to.query.redirect)
   }
 
   // 其他情况正常导航
