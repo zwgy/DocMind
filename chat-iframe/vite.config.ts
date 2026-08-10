@@ -32,6 +32,10 @@ export default defineConfig(({ mode }) => {
         '@': fileURLToPath(new URL('./src', import.meta.url))
       }
     },
+    build: {
+      // 嵌入页只面向现代浏览器；关闭兼容脚本可避免跨文档初始化时观察到失效的 document。
+      modulePreload: { polyfill: false }
+    },
     server: {
       proxy: {
         '^/api': {
