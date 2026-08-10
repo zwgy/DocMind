@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from yuxi.agents.middlewares.skills import resolve_skill_gated_tools
 from yuxi.agents.toolkits.scheduled_tasks import tools
@@ -65,6 +66,7 @@ def _agent_request():
 def test_scheduled_task_tool_schema_never_exposes_owner_or_recipient_uid():
     for task_tool in (
         tools.create_personal_scheduled_task,
+        tools.list_scheduled_task_agents,
         tools.list_personal_scheduled_tasks,
         tools.set_personal_scheduled_task_status,
         tools.cancel_personal_scheduled_task,
@@ -89,11 +91,23 @@ def test_personal_task_tool_schema_accepts_agent_action_without_capability_overr
     assert "mcp" not in schema_text
 
 
+def test_personal_task_tool_requires_explicit_action_type():
+    schema = tools.create_personal_scheduled_task.tool_call_schema
+    payload = _request()
+    payload.pop("action_type")
+
+    with pytest.raises(ValidationError):
+        schema.model_validate(payload)
+
+    assert "action_type" in schema.model_json_schema()["required"]
+
+
 def test_scheduled_task_tools_are_only_resolved_after_skill_is_readable():
     dependency_map = {
         "scheduled-task": {
             "tools": [
                 "create_personal_scheduled_task",
+                "list_scheduled_task_agents",
                 "list_personal_scheduled_tasks",
                 "set_personal_scheduled_task_status",
                 "cancel_personal_scheduled_task",
@@ -105,6 +119,50 @@ def test_scheduled_task_tools_are_only_resolved_after_skill_is_readable():
 
     assert resolve_skill_gated_tools(before) == []
     assert {tool.name for tool in resolve_skill_gated_tools(after)} == set(dependency_map["scheduled-task"]["tools"])
+
+
+@pytest.mark.asyncio
+async def test_list_scheduled_task_agents_returns_only_repository_visible_top_level_agents(monkeypatch):
+    owner = SimpleNamespace(uid="user-1")
+
+    class FakeDb:
+        async def scalar(self, _statement):
+            return owner
+
+    @asynccontextmanager
+    async def fake_db_context():
+        yield FakeDb()
+
+    class FakeAgentRepository:
+        def __init__(self, db):
+            assert isinstance(db, FakeDb)
+
+        async def list_visible(self, *, user):
+            assert user is owner
+            return [
+                SimpleNamespace(
+                    slug="daily-assistant",
+                    name="日常助手",
+                    description="整理日常工作",
+                    is_default=True,
+                )
+            ]
+
+    monkeypatch.setattr(tools.pg_manager, "get_async_session_context", fake_db_context)
+    monkeypatch.setattr(tools, "AgentRepository", FakeAgentRepository)
+
+    result = await _tool_callable(tools.list_scheduled_task_agents)(runtime=_runtime())
+
+    assert result == {
+        "items": [
+            {
+                "agent_slug": "daily-assistant",
+                "name": "日常助手",
+                "description": "整理日常工作",
+                "is_default": True,
+            }
+        ]
+    }
 
 
 def test_scheduled_task_skill_provides_canonical_local_model_create_payload():
@@ -229,6 +287,41 @@ async def test_periodic_task_without_clock_time_asks_before_creating(monkeypatch
 
     assert result == {"status": "needs_clarification", "answer": {"answer": "周五下午五点"}}
     assert questions[0]["questions"][0]["question_id"] == "scheduled_task_time"
+
+
+@pytest.mark.asyncio
+async def test_agent_task_creation_reaches_service_as_agent_action(monkeypatch):
+    calls = []
+    job = _job()
+    job.action_data = {
+        "type": "agent",
+        "agent_slug": "daily-assistant",
+        "instruction": "整理今天待办并给出优先级。",
+        "timeout_seconds": 300,
+    }
+
+    @asynccontextmanager
+    async def fake_session_context():
+        yield object()
+
+    class FakeService:
+        def __init__(self, db):
+            assert db is not None
+
+        async def create_personal_job(self, **kwargs):
+            calls.append(kwargs)
+            return job
+
+    monkeypatch.setattr(tools.pg_manager, "get_async_session_context", fake_session_context)
+    monkeypatch.setattr(tools, "ScheduledJobService", FakeService)
+
+    result = await _tool_callable(tools.create_personal_scheduled_task)(
+        **_agent_request(), tool_call_id="call-agent-1", runtime=_runtime()
+    )
+
+    assert result["action"]["type"] == "agent"
+    assert calls[0]["request"].action.type == "agent"
+    assert calls[0]["request"].action.agent_slug == "daily-assistant"
 
 
 @pytest.mark.asyncio

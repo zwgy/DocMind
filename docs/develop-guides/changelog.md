@@ -12,6 +12,7 @@
 
 ### 定时任务（阶段 2，来文候选）
 
+- 修正个人定时通知与 Agent 执行型任务的创建边界：`create_personal_scheduled_task` 不再把缺失的动作类型默认成通知，模型必须显式选择 `notification`（只到点提醒）或 `agent`（到点进入独立会话和 Agent Run 执行）。新增按当前用户权限查询可执行顶层 Agent 的 Skill 工具；未指定 Agent 时先查询并在多选项下反问，避免因不知道 `agent_slug` 而无法创建执行型任务。
 - 完成定时任务第二版 Agent 自动执行闭环：新增受控 `agent` 动作、独立会话与 Agent Run/ARQ 投递、`queued / running / succeeded / failed / cancelled` 运行状态和终态未读任务事件。目标 Agent 必须对任务所有者可见且不能是 SubAgent；动作载荷拒绝工具、知识库、Skills 等运行时覆盖字段，任务也不再持久化 Agent 的能力快照，实际能力始终按管理员保存的目标 Agent 当前配置装配。既有 `scheduled-task` 工具以同一幂等与身份边界支持明确的 Agent 动作，信息不完整时要求模型反问；Web 任务编辑器可选择 Agent、设置指令和 60 至 3600 秒超时，并在运行历史中展示关联的 Agent Run。
 - 优化本地模型的个人定时任务创建调用：`qwen3.6:35b` 对嵌套判别联合参数的字段层级不稳定，`create_personal_scheduled_task` 改为仅向模型暴露扁平的调度和动作字段，工具内部仍重建并执行原有严格联合 Schema 校验；不改变 HTTP API、权限、幂等、动作白名单或 Agent 能力边界。浏览器验收确认，在管理员显式配置 `scheduled-task` 后模型可一次调用成功创建任务。
 - 收紧本地模型的周期任务歧义处理：创建工具复核当前会话的用户原文，`cron` 或 `interval` 任务缺少可识别钟点时直接复用 `ask_user_question` 追问，并停止本次创建，防止模型为“每周提醒我写周报”等指令臆测默认时间；完整 HTTP 载荷接口和既有调度 Schema 不受影响。

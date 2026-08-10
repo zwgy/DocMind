@@ -13,12 +13,15 @@ from langchain.tools import InjectedToolCallId
 from langchain_core.tools import ToolException
 from langgraph.prebuilt.tool_node import ToolRuntime
 from pydantic import Field
+from sqlalchemy import select
 
 from yuxi.agents.toolkits.buildin.tools import ask_user_question
 from yuxi.agents.toolkits.registry import tool
+from yuxi.repositories.agent_repository import AgentRepository
 from yuxi.scheduled_jobs.schemas import PersonalScheduledJobRequest
 from yuxi.services.scheduled_job_service import ScheduledJobDomainError, ScheduledJobService
 from yuxi.storage.postgres.manager import pg_manager
+from yuxi.storage.postgres.models_business import User
 
 SCHEDULED_TASK_TOOL_CONFIG_GUIDE = "由定时任务 Skill 按需加载，不作为 Agent 基础工具直接配置。"
 _SCHEDULE_TIME_QUESTION_ID = "scheduled_task_time"
@@ -198,6 +201,10 @@ async def create_personal_scheduled_task(
     name: Annotated[str, Field(min_length=1, max_length=100, description="任务名称")],
     timezone: Annotated[str, Field(description="IANA 时区，例如 Asia/Shanghai")],
     schedule_kind: Annotated[Literal["at", "interval", "cron"], Field(description="调度类型")],
+    action_type: Annotated[
+        Literal["notification", "agent"],
+        Field(description="必填；notification 仅到点提醒，agent 到点后执行指令"),
+    ],
     tool_call_id: Annotated[str, InjectedToolCallId],
     run_at: Annotated[
         datetime | None, Field(description="单次任务的未来触发时间，schedule_kind 为 at 时必填")
@@ -211,7 +218,6 @@ async def create_personal_scheduled_task(
     cron_expression: Annotated[
         str | None, Field(description="五段 Cron 表达式，schedule_kind 为 cron 时必填")
     ] = None,
-    action_type: Annotated[Literal["notification", "agent"], Field(description="动作类型")] = "notification",
     title: Annotated[
         str | None, Field(max_length=100, description="通知标题，action_type 为 notification 时必填")
     ] = None,
@@ -219,7 +225,7 @@ async def create_personal_scheduled_task(
         str | None, Field(max_length=4000, description="通知正文，action_type 为 notification 时必填")
     ] = None,
     agent_slug: Annotated[
-        str | None, Field(max_length=80, description="目标顶层 Agent，action_type 为 agent 时必填")
+        str | None, Field(max_length=80, description="目标顶层 Agent；省略时使用当前默认顶层 Agent")
     ] = None,
     instruction: Annotated[
         str | None, Field(max_length=8000, description="Agent 执行指令，action_type 为 agent 时必填")
@@ -229,7 +235,7 @@ async def create_personal_scheduled_task(
     ] = None,
     runtime: ToolRuntime = None,
 ) -> dict[str, Any]:
-    """为当前用户创建站内通知或指定顶层 Agent 的定时任务。"""
+    """为当前用户创建站内通知或由指定/默认顶层 Agent 执行的定时任务。"""
     owner_uid = _owner_uid(runtime)
     if _needs_periodic_time_clarification(schedule_kind, runtime):
         return _ask_periodic_schedule_time(schedule_kind)
@@ -260,6 +266,33 @@ async def create_personal_scheduled_task(
             return _job_payload(job)
     except ScheduledJobDomainError as exc:
         raise ToolException(str(exc)) from exc
+
+
+@tool(
+    category="scheduled_task",
+    tags=["定时任务"],
+    display_name="查询可执行定时任务的 Agent",
+    config_guide=SCHEDULED_TASK_TOOL_CONFIG_GUIDE,
+)
+async def list_scheduled_task_agents(runtime: ToolRuntime = None) -> dict[str, Any]:
+    """查询当前用户有权用于无人值守定时执行的顶层 Agent。"""
+    owner_uid = _owner_uid(runtime)
+    async with pg_manager.get_async_session_context() as db:
+        owner = await db.scalar(select(User).where(User.uid == owner_uid, User.is_deleted == 0))
+        if owner is None:
+            raise ToolException("当前用户不存在或已删除")
+        agents = await AgentRepository(db).list_visible(user=owner)
+        return {
+            "items": [
+                {
+                    "agent_slug": agent.slug,
+                    "name": agent.name,
+                    "description": agent.description,
+                    "is_default": bool(agent.is_default),
+                }
+                for agent in agents
+            ]
+        }
 
 
 @tool(
