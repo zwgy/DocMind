@@ -125,11 +125,13 @@ test('scheduled history and inbox cleanup use explicit confirmed delete actions'
     /inboxApi\.remove\(inboxCategory\.value, itemId\(item\), props\.token\)/
   )
   assert.match(drawerSource, /inboxApi\.clearRead\(inboxCategory\.value, props\.token\)/)
-  assert.match(drawerSource, /清空已读/)
+  assert.match(drawerSource, /删除已读/)
   assert.match(drawerSource, /任务定义和运行历史将被删除，已经生成的结果会话仍会保留/)
-  assert.match(drawerSource, /未读记录不会受影响，关联的结果会话也会保留/)
-  assert.match(drawerSource, /<ListX :size="14" \/>清空已读/)
-  assert.doesNotMatch(drawerSource, /class="mark-all danger"/)
+  assert.match(drawerSource, /未读记录和关联的结果会话不会受影响/)
+  assert.match(drawerSource, /class="inbox-bulk-actions"/)
+  assert.match(drawerSource, /<CheckCheck :size="14" \/>全部已读/)
+  assert.match(drawerSource, /class="mark-all delete-read"/)
+  assert.match(drawerSource, /<Trash2 :size="14" \/>删除已读/)
 })
 
 test('task inbox keeps result, source and cleanup actions in one consistent row', () => {

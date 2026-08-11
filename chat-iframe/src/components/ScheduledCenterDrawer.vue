@@ -8,7 +8,6 @@ import {
   CheckCheck,
   Eye,
   Inbox,
-  ListX,
   MessageCircleMore,
   MessageSquareText,
   Pause,
@@ -467,10 +466,10 @@ async function clearReadItems() {
   try {
     await inboxApi.clearRead(inboxCategory.value, props.token)
     clearingRead.value = false
-    successMessage.value = '已读记录已清空'
+    successMessage.value = '已读记录已删除'
     await refresh()
   } catch (value) {
-    error.value = value instanceof Error ? value.message : '清空已读失败'
+    error.value = value instanceof Error ? value.message : '删除已读失败'
   }
 }
 
@@ -562,24 +561,26 @@ onMounted(() => {
           }}</span>
         </button>
       </div>
-      <button
-        v-if="hasUnreadInboxItems"
-        type="button"
-        class="mark-all"
-        :disabled="loading"
-        @click="markAll"
-      >
-        <CheckCheck :size="14" />全部已读
-      </button>
-      <button
-        v-if="hasReadInboxItems"
-        type="button"
-        class="mark-all"
-        :disabled="loading"
-        @click="clearingRead = true"
-      >
-        <ListX :size="14" />清空已读
-      </button>
+      <div class="inbox-bulk-actions">
+        <button
+          v-if="hasUnreadInboxItems"
+          type="button"
+          class="mark-all"
+          :disabled="loading"
+          @click="markAll"
+        >
+          <CheckCheck :size="14" />全部已读
+        </button>
+        <button
+          v-if="hasReadInboxItems"
+          type="button"
+          class="mark-all delete-read"
+          :disabled="loading"
+          @click="clearingRead = true"
+        >
+          <Trash2 :size="14" />删除已读
+        </button>
+      </div>
     </div>
 
     <p v-if="successMessage" class="feedback-banner success" role="status">
@@ -791,13 +792,13 @@ onMounted(() => {
     </div>
 
     <div v-if="clearingRead" class="dialog-mask confirm-mask">
-      <section class="confirm-dialog" role="dialog" aria-modal="true" aria-label="清空已读记录">
+      <section class="confirm-dialog" role="dialog" aria-modal="true" aria-label="删除已读记录">
         <span class="confirm-icon" aria-hidden="true"><TriangleAlert :size="22" /></span>
-        <h3>清空当前分类的已读记录吗？</h3>
-        <p>未读记录不会受影响，关联的结果会话也会保留。</p>
+        <h3>删除当前分类的已读记录吗？</h3>
+        <p>只会删除当前分类的已读记录，未读记录和关联的结果会话不会受影响。</p>
         <div class="confirm-actions">
-          <button type="button" class="secondary" @click="clearingRead = false">暂不清空</button
-          ><button type="button" class="danger" @click="clearReadItems">确认清空</button>
+          <button type="button" class="secondary" @click="clearingRead = false">暂不删除</button
+          ><button type="button" class="danger" @click="clearReadItems">确认删除</button>
         </div>
       </section>
     </div>
@@ -1026,6 +1027,7 @@ onMounted(() => {
 }
 .secondary-tabs {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   min-height: 39px;
@@ -1058,6 +1060,13 @@ onMounted(() => {
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
+.inbox-bulk-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
 .mark-all {
   display: inline-flex;
   align-items: center;
@@ -1069,6 +1078,12 @@ onMounted(() => {
 }
 .mark-all:hover {
   background: var(--main-50);
+}
+.mark-all.delete-read {
+  color: var(--color-error-700) !important;
+}
+.mark-all.delete-read:hover {
+  background: var(--color-error-50);
 }
 .mark-all:disabled,
 .card-actions button:disabled {

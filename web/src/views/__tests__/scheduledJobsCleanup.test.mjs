@@ -21,13 +21,15 @@ test('web separates personal and incoming management cleanup semantics', () => {
   assert.match(scheduledApi, /job\.source_type === 'personal'/)
 })
 
-test('web inbox exposes confirmed single cleanup and clear-read actions', () => {
-  assert.match(inboxDrawer, />清空已读</)
-  assert.match(inboxDrawer, /未读记录不会受影响/)
+test('web inbox exposes confirmed single cleanup and delete-read actions', () => {
+  assert.match(inboxDrawer, />删除已读</)
+  assert.match(inboxDrawer, /未读记录和结果会话不会受影响/)
   assert.match(inboxDrawer, /@confirm="removeItem\(item\)"/)
   assert.match(inboxDrawer, /@confirm="clearRead"/)
-  assert.match(inboxDrawer, /<ListX :size="15" \/>清空已读/)
-  assert.doesNotMatch(inboxDrawer, /size="small" danger :disabled="!hasReadItems"/)
+  assert.match(inboxDrawer, /class="drawer-actions"/)
+  assert.match(inboxDrawer, /<CheckCheck :size="15" \/>全部已读/)
+  assert.match(inboxDrawer, /class="delete-read-button"/)
+  assert.match(inboxDrawer, /<Trash2 :size="15" \/>删除已读/)
 })
 
 test('web task inbox keeps result, source and cleanup actions in one consistent row', () => {

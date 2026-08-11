@@ -5,7 +5,6 @@ import {
   CheckCheck,
   Clock3,
   Eye,
-  ListX,
   Mail,
   MessageSquareText,
   Paperclip,
@@ -110,9 +109,9 @@ async function removeItem(item) {
 async function clearRead() {
   try {
     await store.clearRead()
-    message.success('已读记录已清空')
+    message.success('已读记录已删除')
   } catch (error) {
-    message.error(error?.message || '清空已读失败')
+    message.error(error?.message || '删除已读失败')
   }
 }
 watch(
@@ -153,13 +152,13 @@ watch(
         ><CheckCheck :size="15" />全部已读</a-button
       >
       <a-popconfirm
-        title="确认清空当前分类的已读记录？未读记录不会受影响。"
-        ok-text="清空"
+        title="删除当前分类的已读记录？未读记录和结果会话不会受影响。"
+        ok-text="删除"
         cancel-text="返回"
         @confirm="clearRead"
       >
-        <a-button size="small" :disabled="!hasReadItems"
-          ><ListX :size="15" />清空已读</a-button
+        <a-button class="delete-read-button" size="small" :disabled="!hasReadItems"
+          ><Trash2 :size="15" />删除已读</a-button
         >
       </a-popconfirm>
     </div>
@@ -243,6 +242,14 @@ watch(
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+.drawer-actions :deep(.delete-read-button:not(:disabled)) {
+  border-color: var(--color-error-100);
+  color: var(--color-error-700);
+  background: var(--color-error-50);
+}
+.drawer-actions :deep(.delete-read-button:not(:disabled):hover) {
+  border-color: var(--color-error-500);
 }
 .inbox-list {
   border-top: 1px solid var(--gray-150);
