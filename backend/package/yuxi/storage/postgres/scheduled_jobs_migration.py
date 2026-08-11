@@ -44,8 +44,8 @@ UPGRADE_STATEMENTS = (
     ),
     (
         "UPDATE conversations AS conversation SET extra_metadata = jsonb_set("
-        "COALESCE(conversation.extra_metadata, '{}'::jsonb), '{scheduled_source_type}', "
-        "to_jsonb(job.source_type), true) FROM scheduled_job_runs AS run, scheduled_jobs AS job "
+        "COALESCE(conversation.extra_metadata::jsonb, '{}'::jsonb), '{scheduled_source_type}', "
+        "to_jsonb(job.source_type), true)::json FROM scheduled_job_runs AS run, scheduled_jobs AS job "
         "WHERE run.conversation_id = conversation.id::text AND job.id = run.scheduled_job_id "
         "AND conversation.extra_metadata->>'source' = 'scheduled_job' "
         "AND conversation.extra_metadata->>'scheduled_source_type' IS NULL"

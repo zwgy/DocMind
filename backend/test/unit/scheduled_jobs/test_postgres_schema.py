@@ -63,7 +63,9 @@ def test_scheduled_jobs_migration_has_idempotent_upgrade_and_manual_downgrade_sq
     assert any("hidden_at TIMESTAMPTZ" in statement for statement in UPGRADE_STATEMENTS)
     assert any("ck_sj_source_owner" in statement for statement in UPGRADE_STATEMENTS)
     assert any("ck_sj_incoming_notification_only" in statement for statement in UPGRADE_STATEMENTS)
-    assert any("scheduled_source_type" in statement for statement in UPGRADE_STATEMENTS)
+    conversation_backfill = next(statement for statement in UPGRADE_STATEMENTS if "scheduled_source_type" in statement)
+    assert "extra_metadata::jsonb" in conversation_backfill
+    assert "true)::json" in conversation_backfill
     assert any("ADD COLUMN IF NOT EXISTS version" in statement for statement in UPGRADE_STATEMENTS)
     assert any("conversation_thread_id VARCHAR(64)" in statement for statement in UPGRADE_STATEMENTS)
     assert any("uq_sjr_conversation_thread_id" in statement for statement in UPGRADE_STATEMENTS)
