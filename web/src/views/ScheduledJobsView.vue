@@ -313,7 +313,19 @@ onMounted(async () => {
               ><span>{{ actionSummary(job) }}</span
               ><span>{{ scheduleSummary(job) }}</span>
             </div>
-            <p class="job-content" :title="actionContent(job)">{{ actionContent(job) }}</p>
+            <p
+              v-if="
+                !(
+                  store.sourceType === 'personal' &&
+                  store.activeView === 'history' &&
+                  job.action_type === 'notification'
+                )
+              "
+              class="job-content"
+              :title="actionContent(job)"
+            >
+              {{ actionContent(job) }}
+            </p>
             <div class="job-next"><CalendarClock :size="14" />{{ triggerSummary(job) }}</div>
           </div>
           <div class="job-actions">

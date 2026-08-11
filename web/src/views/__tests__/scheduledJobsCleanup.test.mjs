@@ -27,3 +27,10 @@ test('web inbox exposes confirmed single cleanup and clear-read actions', () => 
   assert.match(inboxDrawer, /@confirm="removeItem\(item\)"/)
   assert.match(inboxDrawer, /@confirm="clearRead"/)
 })
+
+test('web personal notification history omits body content duplicated in inbox', () => {
+  assert.match(
+    scheduledView,
+    /store\.sourceType === 'personal'[\s\S]*store\.activeView === 'history'[\s\S]*job\.action_type === 'notification'/
+  )
+})

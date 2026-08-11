@@ -606,7 +606,13 @@ onMounted(() => {
             <div v-if="job.action_type === 'agent'" class="card-meta">
               <span>{{ jobAction(job) }}</span>
             </div>
-            <p class="job-content" :title="jobContent(job)">{{ jobContent(job) }}</p>
+            <p
+              v-if="scheduleView !== 'history' || job.action_type === 'agent'"
+              class="job-content"
+              :title="jobContent(job)"
+            >
+              {{ jobContent(job) }}
+            </p>
             <div class="trigger"><CalendarClock :size="14" />{{ jobTrigger(job) }}</div>
             <div class="card-actions">
               <button

@@ -173,3 +173,10 @@ test('ticker state is owned by App rather than a conversation component', () => 
   )
   assert.match(appSource, /watch\(\s*\(\) => context\.config\.token,[\s\S]*resetInboxSnapshot\(\)/)
 })
+
+test('personal notification history omits body content duplicated in inbox', () => {
+  assert.match(
+    drawerSource,
+    /v-if="scheduleView !== 'history' \|\| job\.action_type === 'agent'"/
+  )
+})
