@@ -56,6 +56,9 @@ const tickerDistance = ref(0)
 const tickerDuration = ref('12s')
 const tickerIsOverflowing = ref(false)
 const tickerMotionReduced = ref(false)
+const tickerShouldMove = computed(
+  () => !tickerMotionReduced.value && (tickerItems.value.length === 1 || tickerIsOverflowing.value)
+)
 const inboxNavigation = ref<{ key: number; category: 'notification' | 'task' } | null>(null)
 const draggingWindow = ref(false)
 const historyScrollRequest = ref(0)
@@ -121,8 +124,11 @@ function tickerItemsSignature(items: TickerItem[]) {
 function measureTickerTrack() {
   const viewportWidth = tickerViewport.value?.clientWidth || 0
   const groupWidth = tickerGroup.value?.scrollWidth || 0
-  tickerDistance.value = groupWidth
-  tickerDuration.value = `${Math.max(groupWidth / TICKER_SPEED_PX_PER_SECOND, 12).toFixed(2)}s`
+  // 单条短通知也参与轮播，但循环间距至少占满视窗，避免复制内容同时露出。
+  const cycleWidth =
+    tickerItems.value.length === 1 ? Math.max(groupWidth, viewportWidth) : groupWidth
+  tickerDistance.value = cycleWidth
+  tickerDuration.value = `${Math.max(cycleWidth / TICKER_SPEED_PX_PER_SECOND, 12).toFixed(2)}s`
   tickerIsOverflowing.value = groupWidth > viewportWidth + 1
 }
 
@@ -146,12 +152,7 @@ function queueTickerItems(items: TickerItem[]) {
     pendingTickerItems = null
     return
   }
-  if (
-    !tickerItems.value.length ||
-    !items.length ||
-    !tickerIsOverflowing.value ||
-    tickerMotionReduced.value
-  ) {
+  if (!tickerItems.value.length || !items.length || !tickerShouldMove.value) {
     applyTickerItems(items)
     return
   }
@@ -737,11 +738,11 @@ function resumeVisiblePage() {
 
     <section class="chat-body">
       <section v-if="tickerItems.length" class="notification-ticker" aria-label="未读消息轮播">
-        <div ref="tickerViewport" class="ticker-marquee">
+        <div ref="tickerViewport" class="ticker-marquee" :class="{ 'is-moving': tickerShouldMove }">
           <div
             :key="tickerCycleKey"
             class="ticker-track"
-            :class="{ 'is-moving': tickerIsOverflowing && !tickerMotionReduced }"
+            :class="{ 'is-moving': tickerShouldMove }"
             :style="{
               '--ticker-distance': `${tickerDistance}px`,
               '--ticker-duration': tickerDuration
@@ -763,11 +764,7 @@ function resumeVisiblePage() {
                 <span class="ticker-content">{{ item.content }}</span>
               </button>
             </div>
-            <div
-              v-if="tickerIsOverflowing && !tickerMotionReduced"
-              class="ticker-group"
-              aria-hidden="true"
-            >
+            <div v-if="tickerShouldMove" class="ticker-group" aria-hidden="true">
               <button
                 v-for="item in tickerItems"
                 :key="`duplicate:${item.key}`"

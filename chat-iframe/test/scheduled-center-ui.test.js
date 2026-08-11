@@ -59,6 +59,9 @@ test('global ticker scrolls one icon-separated batch and opens each matching inb
   assert.doesNotMatch(appSource, /4500/)
   assert.match(appSource, /pendingTickerItems = items/)
   assert.match(appSource, /@animationiteration="commitPendingTickerItems"/)
+  assert.match(appSource, /tickerItems\.value\.length === 1 \|\| tickerIsOverflowing\.value/)
+  assert.match(appSource, /Math\.max\(groupWidth, viewportWidth\)/)
+  assert.match(appSource, /v-if="tickerShouldMove"/)
   assert.match(appSource, /window\.addEventListener\('focus', refreshVisibleInbox\)/)
   assert.match(appSource, /await inboxApi\.markRead\(item\.category, item\.id/)
   assert.match(appSource, /openScheduledCenter\(item\.category\)/)
@@ -69,7 +72,15 @@ test('global ticker scrolls one icon-separated batch and opens each matching inb
   )
   assert.match(
     styles,
-    /\.notification-ticker \{[\s\S]*width: calc\(100% - 24px\);[\s\S]*margin: 6px 12px 0;[\s\S]*background: var\(--gray-50\)/
+    /\.notification-ticker \{[\s\S]*width: 100%;[\s\S]*margin: 6px 0 0;[\s\S]*border-block: 1px solid var\(--gray-200\);[\s\S]*border-inline: 0;[\s\S]*background: var\(--gray-50\)/
+  )
+  assert.match(
+    styles,
+    /\.ticker-marquee\.is-moving \{[\s\S]*#000 24px,[\s\S]*#000 calc\(100% - 24px\)/
+  )
+  assert.match(
+    styles,
+    /\.ticker-track\.is-moving \.ticker-group \{[\s\S]*min-width: var\(--ticker-distance\)/
   )
   assert.match(styles, /grid-template-rows: auto minmax\(0, 1fr\)/)
   assert.match(styles, /\.chat-body > \.workbench \{\s*grid-row: 2/)

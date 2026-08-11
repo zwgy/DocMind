@@ -101,11 +101,11 @@
 }
 
 .notification-ticker {
-  width: calc(100% - 24px);
+  width: 100%;
   min-height: 34px;
-  margin: 6px 12px 0;
-  border: 1px solid var(--gray-200);
-  border-radius: 6px;
+  margin: 6px 0 0;
+  border-block: 1px solid var(--gray-200);
+  border-inline: 0;
   background: var(--gray-50);
   overflow: hidden;
 }
@@ -117,9 +117,18 @@
 .ticker-marquee {
   width: 100%;
   min-width: 0;
-  padding: 0 8px;
+  padding: 0 16px;
   overflow: hidden;
-  mask-image: linear-gradient(to right, transparent, #000 8px, #000 calc(100% - 8px), transparent);
+}
+
+.ticker-marquee.is-moving {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 24px,
+    #000 calc(100% - 24px),
+    transparent
+  );
 }
 
 .ticker-track {
@@ -132,6 +141,10 @@
 .ticker-track.is-moving {
   will-change: transform;
   animation: ticker-marquee var(--ticker-duration) linear infinite;
+}
+
+.ticker-track.is-moving .ticker-group {
+  min-width: var(--ticker-distance);
 }
 
 .ticker-group {
