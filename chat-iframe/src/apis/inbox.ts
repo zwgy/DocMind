@@ -17,6 +17,10 @@ export type TaskInboxItem = {
     name: string
     action_type: 'agent'
     agent_slug: string | null
+    source_snapshot: {
+      entry_point: 'web_agent' | 'chat_iframe' | 'http_api'
+      thread_id: string | null
+    }
     timezone: string
     schedule_kind: 'at' | 'interval' | 'cron'
     run_at: string | null

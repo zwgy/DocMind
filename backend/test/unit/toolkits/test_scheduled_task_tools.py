@@ -21,6 +21,25 @@ def _runtime(user_message: str | None = None):
     )
 
 
+def test_source_snapshot_marks_chat_iframe_and_keeps_current_thread():
+    runtime = _runtime()
+    runtime.config = {"configurable": {"iframe_context": {"source_system": "oa"}}}
+
+    snapshot = tools._source_snapshot(runtime)
+
+    assert snapshot.entry_point == "chat_iframe"
+    assert snapshot.thread_id == "thread-1"
+
+
+def test_source_snapshot_uses_visible_parent_thread_for_subagent():
+    runtime = _runtime()
+    runtime.context.file_thread_id = "visible-parent-thread"
+
+    snapshot = tools._source_snapshot(runtime)
+
+    assert snapshot.thread_id == "visible-parent-thread"
+
+
 def _job():
     return SimpleNamespace(
         id="sj-1",
@@ -166,10 +185,7 @@ async def test_list_scheduled_task_agents_returns_only_repository_visible_top_le
 
 
 def test_scheduled_task_skill_provides_canonical_local_model_create_payload():
-    skill_path = (
-        Path(__file__).resolve().parents[3]
-        / "package/yuxi/agents/skills/buildin/scheduled-task/SKILL.md"
-    )
+    skill_path = Path(__file__).resolve().parents[3] / "package/yuxi/agents/skills/buildin/scheduled-task/SKILL.md"
     content = skill_path.read_text(encoding="utf-8")
 
     assert '"schedule_kind": "at"' in content
@@ -322,6 +338,8 @@ async def test_agent_task_creation_reaches_service_as_agent_action(monkeypatch):
     assert result["action"]["type"] == "agent"
     assert calls[0]["request"].action.type == "agent"
     assert calls[0]["request"].action.agent_slug == "daily-assistant"
+    assert calls[0]["source_snapshot"].entry_point == "web_agent"
+    assert calls[0]["source_snapshot"].thread_id == "thread-1"
 
 
 @pytest.mark.asyncio

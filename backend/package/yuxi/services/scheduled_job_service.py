@@ -16,7 +16,7 @@ from yuxi.repositories.scheduled_job_repository import ScheduledJobRepository
 from yuxi.repositories.agent_repository import AgentRepository
 from yuxi.repositories.agent_run_repository import AgentRunRepository
 from yuxi.scheduled_jobs.ids import new_scheduled_job_id
-from yuxi.scheduled_jobs.schemas import AgentAction, PersonalScheduledJobRequest
+from yuxi.scheduled_jobs.schemas import AgentAction, PersonalScheduledJobRequest, PersonalSourceSnapshot
 from yuxi.scheduled_jobs.timing import next_run_at
 from yuxi.storage.postgres.models_business import User
 from yuxi.storage.postgres.models_scheduled_jobs import (
@@ -58,7 +58,12 @@ class ScheduledJobService:
         self.cancelled_agent_run_ids: list[str] = []
 
     async def create_personal_job(
-        self, *, owner_uid: str, request: PersonalScheduledJobRequest, idempotency_key: str
+        self,
+        *,
+        owner_uid: str,
+        request: PersonalScheduledJobRequest,
+        idempotency_key: str,
+        source_snapshot: PersonalSourceSnapshot,
     ) -> ScheduledJob:
         if not idempotency_key or len(idempotency_key) > 128:
             raise ScheduledJobDomainError("Idempotency-Key 必须为 1 到 128 个字符")
@@ -82,7 +87,7 @@ class ScheduledJobService:
             source_type="personal",
             create_request_key=idempotency_key,
             create_request_hash=request_hash,
-            source_snapshot={"entry_point": "http_api", "thread_id": None},
+            source_snapshot=source_snapshot.model_dump(mode="json"),
             name=request.name,
             schedule_kind=request.schedule.kind,
             run_at=getattr(request.schedule, "run_at", None),

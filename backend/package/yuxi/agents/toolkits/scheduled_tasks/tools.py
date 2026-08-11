@@ -18,7 +18,7 @@ from sqlalchemy import select
 from yuxi.agents.toolkits.buildin.tools import ask_user_question
 from yuxi.agents.toolkits.registry import tool
 from yuxi.repositories.agent_repository import AgentRepository
-from yuxi.scheduled_jobs.schemas import PersonalScheduledJobRequest
+from yuxi.scheduled_jobs.schemas import PersonalScheduledJobRequest, PersonalSourceSnapshot
 from yuxi.services.scheduled_job_service import ScheduledJobDomainError, ScheduledJobService
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_business import User
@@ -61,6 +61,30 @@ def _creation_key(runtime: ToolRuntime | None, tool_call_id: str) -> str:
     return f"agent-v1-{digest}"
 
 
+def _source_snapshot(runtime: ToolRuntime | None) -> PersonalSourceSnapshot:
+    """保存创建任务的真实会话，结果页只据此提供来源导航，不复用其可变上下文。"""
+    # 子 Agent 使用独立检查点线程执行，但用户可见的来源仍是顶层会话。
+    thread_id = _runtime_value(runtime, "file_thread_id") or _runtime_value(runtime, "thread_id")
+    if not thread_id:
+        raise ToolException("当前运行时缺少 thread_id，不能创建个人定时任务")
+
+    config = getattr(runtime, "config", None)
+    configurable = config.get("configurable", {}) if isinstance(config, Mapping) else {}
+    sources = (configurable, getattr(runtime, "context", None), getattr(runtime, "state", None))
+    is_chat_iframe = False
+    for source in sources:
+        iframe_context = (
+            source.get("iframe_context") if isinstance(source, Mapping) else getattr(source, "iframe_context", None)
+        )
+        if isinstance(iframe_context, Mapping):
+            is_chat_iframe = True
+            break
+    return PersonalSourceSnapshot(
+        entry_point="chat_iframe" if is_chat_iframe else "web_agent",
+        thread_id=thread_id,
+    )
+
+
 def _latest_user_message(runtime: ToolRuntime | None) -> str:
     """只从当前会话状态读取用户原文，避免把模型臆测的时间当成用户已确认的信息。"""
     state = getattr(runtime, "state", None)
@@ -72,10 +96,7 @@ def _latest_user_message(runtime: ToolRuntime | None) -> str:
         if isinstance(content, str):
             return content.strip()
         if isinstance(content, list):
-            return "".join(
-                item.get("text", "") if isinstance(item, Mapping) else str(item)
-                for item in content
-            ).strip()
+            return "".join(item.get("text", "") if isinstance(item, Mapping) else str(item) for item in content).strip()
     return ""
 
 
@@ -102,11 +123,7 @@ def _current_request_structured_user_answer(runtime: ToolRuntime | None) -> Mapp
     messages = state.get("messages", []) if isinstance(state, Mapping) else getattr(state, "messages", [])
     messages = list(messages or [])
     latest_user_index = next(
-        (
-            index
-            for index in range(len(messages) - 1, -1, -1)
-            if getattr(messages[index], "type", None) == "human"
-        ),
+        (index for index in range(len(messages) - 1, -1, -1) if getattr(messages[index], "type", None) == "human"),
         None,
     )
     if latest_user_index is None:
@@ -206,18 +223,14 @@ async def create_personal_scheduled_task(
         Field(description="必填；notification 仅到点提醒，agent 到点后执行指令"),
     ],
     tool_call_id: Annotated[str, InjectedToolCallId],
-    run_at: Annotated[
-        datetime | None, Field(description="单次任务的未来触发时间，schedule_kind 为 at 时必填")
-    ] = None,
+    run_at: Annotated[datetime | None, Field(description="单次任务的未来触发时间，schedule_kind 为 at 时必填")] = None,
     interval_seconds: Annotated[
         int | None, Field(ge=60, multiple_of=60, description="间隔秒数，schedule_kind 为 interval 时必填")
     ] = None,
     anchor_at: Annotated[
         datetime | None, Field(description="间隔任务首次触发时间，schedule_kind 为 interval 时必填")
     ] = None,
-    cron_expression: Annotated[
-        str | None, Field(description="五段 Cron 表达式，schedule_kind 为 cron 时必填")
-    ] = None,
+    cron_expression: Annotated[str | None, Field(description="五段 Cron 表达式，schedule_kind 为 cron 时必填")] = None,
     title: Annotated[
         str | None, Field(max_length=100, description="通知标题，action_type 为 notification 时必填")
     ] = None,
@@ -262,6 +275,7 @@ async def create_personal_scheduled_task(
                 owner_uid=owner_uid,
                 request=request,
                 idempotency_key=_creation_key(runtime, tool_call_id),
+                source_snapshot=_source_snapshot(runtime),
             )
             return _job_payload(job)
     except ScheduledJobDomainError as exc:
@@ -306,8 +320,8 @@ async def list_personal_scheduled_tasks(
         list[Literal["active", "paused", "completed", "cancelled"]] | None,
         Field(description="按状态过滤；省略时查询 active 和 paused 任务", max_length=4),
     ] = None,
-    cursor: Annotated[str | None, Field(description="上一页返回的游标")]=None,
-    limit: Annotated[int, Field(ge=1, le=50, description="返回数量，最大 50")]=20,
+    cursor: Annotated[str | None, Field(description="上一页返回的游标")] = None,
+    limit: Annotated[int, Field(ge=1, le=50, description="返回数量，最大 50")] = 20,
     runtime: ToolRuntime = None,
 ) -> dict[str, Any]:
     """查询当前用户拥有的个人定时任务。"""
@@ -355,7 +369,7 @@ async def set_personal_scheduled_task_status(
 async def cancel_personal_scheduled_task(
     job_id: Annotated[str, Field(min_length=1, max_length=64, description="任务 ID")],
     version: Annotated[int, Field(ge=1, description="查询结果中的任务版本，用于避免覆盖并发修改")],
-    reason: Annotated[str | None, Field(max_length=500, description="可选取消原因")]=None,
+    reason: Annotated[str | None, Field(max_length=500, description="可选取消原因")] = None,
     runtime: ToolRuntime = None,
 ) -> dict[str, Any]:
     """取消当前用户尚未终止的定时任务。"""

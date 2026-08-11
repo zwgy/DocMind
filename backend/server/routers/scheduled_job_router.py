@@ -12,7 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.utils.auth_middleware import get_admin_user, get_db, get_required_user
 from yuxi.repositories.scheduled_job_repository import ScheduledJobRepository
-from yuxi.scheduled_jobs.schemas import AtSchedule, PersonalScheduledJobRequest, Schedule, ScheduledJobDraft
+from yuxi.scheduled_jobs.schemas import (
+    AtSchedule,
+    PersonalScheduledJobRequest,
+    PersonalSourceSnapshot,
+    Schedule,
+    ScheduledJobDraft,
+)
 from yuxi.scheduled_jobs.timing import next_run_at
 from yuxi.services.scheduled_job_service import (
     IdempotencyKeyReusedError,
@@ -154,6 +160,7 @@ async def create_scheduled_job(
             owner_uid=current_user.uid,
             request=payload,
             idempotency_key=idempotency_key,
+            source_snapshot=PersonalSourceSnapshot(entry_point="http_api", thread_id=None),
         )
         await db.commit()
     except ScheduledJobDomainError as error:

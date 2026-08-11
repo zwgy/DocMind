@@ -8,7 +8,9 @@ import {
   CheckCheck,
   Eye,
   Inbox,
+  ListX,
   MessageCircleMore,
+  MessageSquareText,
   Pause,
   Paperclip,
   Play,
@@ -44,6 +46,7 @@ const emit = defineEmits<{
   close: []
   unreadChanged: [counts: InboxUnreadCounts]
   openResult: [payload: { jobId: string; runId: string; threadId: string }]
+  openSource: [threadId: string]
 }>()
 const datePickerActionRow = { selectBtnLabel: '确定', cancelBtnLabel: '取消' }
 const datePickerInputAttrs = { clearable: false }
@@ -244,6 +247,15 @@ function openTaskResult(item: TaskInboxItem) {
     runId: run.id,
     threadId: run.conversation_thread_id
   })
+}
+
+function sourceThreadId(item: TaskInboxItem) {
+  return item.job.source_snapshot?.thread_id?.trim() || ''
+}
+
+function openTaskSource(item: TaskInboxItem) {
+  const threadId = sourceThreadId(item)
+  if (threadId) emit('openSource', threadId)
 }
 
 async function refresh({ reset = true }: { reset?: boolean } = {}) {
@@ -562,11 +574,11 @@ onMounted(() => {
       <button
         v-if="hasReadInboxItems"
         type="button"
-        class="mark-all danger"
+        class="mark-all"
         :disabled="loading"
         @click="clearingRead = true"
       >
-        <Trash2 :size="14" />清空已读
+        <ListX :size="14" />清空已读
       </button>
     </div>
 
@@ -696,21 +708,25 @@ onMounted(() => {
             <div v-else class="trigger">
               <CalendarClock :size="14" />{{ `触发时间：${formatTime(inboxItemTime(item))}` }}
             </div>
-            <button
-              v-if="isTaskItem(item) && canViewTaskResult(item)"
-              type="button"
-              class="view-result"
-              @click.stop="openTaskResult(item)"
-            >
-              <Eye :size="14" />查看结果
-            </button>
-            <button
-              type="button"
-              class="view-result danger"
-              @click.stop="deletingInboxItem = item"
-            >
-              <Trash2 :size="14" />删除
-            </button>
+            <div class="card-actions inbox-actions">
+              <button
+                v-if="isTaskItem(item) && canViewTaskResult(item)"
+                type="button"
+                @click.stop="openTaskResult(item)"
+              >
+                <Eye :size="14" />查看结果
+              </button>
+              <button
+                v-if="isTaskItem(item) && sourceThreadId(item)"
+                type="button"
+                @click.stop="openTaskSource(item)"
+              >
+                <MessageSquareText :size="14" />查看来源
+              </button>
+              <button type="button" class="danger" @click.stop="deletingInboxItem = item">
+                <Trash2 :size="14" />删除
+              </button>
+            </div>
           </div>
         </article>
       </template>
@@ -1054,10 +1070,6 @@ onMounted(() => {
 .mark-all:hover {
   background: var(--main-50);
 }
-.mark-all.danger,
-.view-result.danger {
-  color: var(--color-error-700) !important;
-}
 .mark-all:disabled,
 .card-actions button:disabled {
   color: var(--gray-400) !important;
@@ -1192,17 +1204,6 @@ onMounted(() => {
   align-items: center;
   gap: 3px;
 }
-.view-result {
-  display: inline-flex;
-  align-items: center;
-  justify-self: start;
-  gap: 4px;
-  padding: 3px 0;
-  color: var(--main-700);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
 .card-title {
   justify-content: space-between;
   gap: 8px;
@@ -1295,6 +1296,9 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 2px;
+}
+.inbox-actions {
+  margin-top: 4px;
 }
 .card-actions button {
   display: inline-flex;

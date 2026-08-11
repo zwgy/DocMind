@@ -423,6 +423,17 @@ async function openScheduledResult(payload: { jobId: string; runId: string; thre
   }
 }
 
+async function openScheduledSource(threadId: string) {
+  try {
+    await chat.locateThread(threadId, context.config.token)
+    historyScrollRequest.value += 1
+    showScheduledCenter.value = false
+    showSidebar.value = false
+  } catch (err) {
+    chat.error = err instanceof Error ? err.message : '创建任务的会话已不存在'
+  }
+}
+
 async function submitInterrupt(answer: unknown) {
   try {
     await chat.submitInterrupt(
@@ -691,6 +702,7 @@ function resumeVisiblePage() {
       @close="showScheduledCenter = false"
       @unread-changed="handleUnreadChanged"
       @open-result="openScheduledResult"
+      @open-source="openScheduledSource"
     />
     <Transition name="sidebar-slide">
       <aside v-if="showSidebar" class="conversation-drawer">

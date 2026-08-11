@@ -115,6 +115,59 @@ async def test_create_scheduled_job_maps_reused_idempotency_key_to_conflict(monk
     assert exc_info.value.detail == "idempotency_key_reused"
 
 
+async def test_create_scheduled_job_records_http_source_without_thread(monkeypatch):
+    captured = {}
+
+    class FakeService:
+        def __init__(self, _db):
+            pass
+
+        async def create_personal_job(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                id="sj_1",
+                name="monthly review",
+                source_type="personal",
+                schedule_kind="at",
+                run_at=None,
+                anchor_at=None,
+                interval_seconds=None,
+                cron_expression=None,
+                timezone="Asia/Shanghai",
+                next_run_at=None,
+                action_type="notification",
+                action_data={"title": "review", "content": "prepare report"},
+                status="active",
+                version=1,
+                last_run_at=None,
+                paused_at=None,
+                cancelled_at=None,
+                created_at=None,
+                updated_at=None,
+            )
+
+    monkeypatch.setattr(scheduled_job_router, "ScheduledJobService", FakeService)
+    payload = PersonalScheduledJobRequest.model_validate(
+        {
+            "name": "monthly review",
+            "schedule": {"kind": "at", "run_at": "2030-01-02T09:00:00+08:00"},
+            "action": {"type": "notification", "title": "review", "content": "prepare report"},
+            "timezone": "Asia/Shanghai",
+        }
+    )
+
+    response = await scheduled_job_router.create_scheduled_job(
+        payload,
+        idempotency_key="request-1",
+        current_user=SimpleNamespace(uid="alice"),
+        db=_FakeDb(),
+    )
+
+    assert response["job"]["id"] == "sj_1"
+    assert captured["source_snapshot"].entry_point == "http_api"
+    assert captured["source_snapshot"].thread_id is None
+
+
 async def test_scheduled_job_routes_require_authenticated_user():
     app = FastAPI()
     app.include_router(scheduled_job_router.scheduled_jobs, prefix="/api")

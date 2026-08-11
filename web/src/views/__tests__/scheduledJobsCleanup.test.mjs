@@ -26,6 +26,16 @@ test('web inbox exposes confirmed single cleanup and clear-read actions', () => 
   assert.match(inboxDrawer, /未读记录不会受影响/)
   assert.match(inboxDrawer, /@confirm="removeItem\(item\)"/)
   assert.match(inboxDrawer, /@confirm="clearRead"/)
+  assert.match(inboxDrawer, /<ListX :size="15" \/>清空已读/)
+  assert.doesNotMatch(inboxDrawer, /size="small" danger :disabled="!hasReadItems"/)
+})
+
+test('web task inbox keeps result, source and cleanup actions in one consistent row', () => {
+  assert.match(inboxDrawer, /function sourceThreadId\(item\)/)
+  assert.match(inboxDrawer, /class="inbox-actions"/)
+  assert.match(inboxDrawer, /<MessageSquareText :size="14" \/>查看来源/)
+  assert.match(inboxDrawer, /router\.push\(\{ name: 'AgentCompWithThreadId'/)
+  assert.match(inboxDrawer, /type="text" size="small" danger/)
 })
 
 test('web personal notification history omits body content duplicated in inbox', () => {

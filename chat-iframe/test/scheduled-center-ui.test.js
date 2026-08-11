@@ -7,6 +7,7 @@ const drawerSource = readFileSync(
   new URL('../src/components/ScheduledCenterDrawer.vue', import.meta.url),
   'utf8'
 )
+const inboxApiSource = readFileSync(new URL('../src/apis/inbox.ts', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/assets/css/app.css', import.meta.url), 'utf8')
 
 test('scheduled editor restores wall-clock time and submits local values with the task timezone', () => {
@@ -127,6 +128,17 @@ test('scheduled history and inbox cleanup use explicit confirmed delete actions'
   assert.match(drawerSource, /清空已读/)
   assert.match(drawerSource, /任务定义和运行历史将被删除，已经生成的结果会话仍会保留/)
   assert.match(drawerSource, /未读记录不会受影响，关联的结果会话也会保留/)
+  assert.match(drawerSource, /<ListX :size="14" \/>清空已读/)
+  assert.doesNotMatch(drawerSource, /class="mark-all danger"/)
+})
+
+test('task inbox keeps result, source and cleanup actions in one consistent row', () => {
+  assert.match(inboxApiSource, /source_snapshot:[\s\S]*thread_id: string \| null/)
+  assert.match(drawerSource, /function sourceThreadId\(item: TaskInboxItem\)/)
+  assert.match(drawerSource, /class="card-actions inbox-actions"/)
+  assert.match(drawerSource, /<MessageSquareText :size="14" \/>查看来源/)
+  assert.match(appSource, /@open-source="openScheduledSource"/)
+  assert.doesNotMatch(appSource, /openScheduledSource[\s\S]{0,500}markRunRead/)
 })
 
 test('inbox cards keep their border despite the drawer button reset', () => {

@@ -1,7 +1,17 @@
 <script setup>
 import { computed, watch } from 'vue'
 import { message } from 'ant-design-vue'
-import { CheckCheck, Clock3, Eye, Mail, Paperclip, RefreshCw, Trash2 } from 'lucide-vue-next'
+import {
+  CheckCheck,
+  Clock3,
+  Eye,
+  ListX,
+  Mail,
+  MessageSquareText,
+  Paperclip,
+  RefreshCw,
+  Trash2
+} from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useInboxStore } from '@/stores/inbox'
 import { useChatThreadsStore } from '@/stores/chatThreads'
@@ -71,6 +81,20 @@ async function openResult(item) {
     message.error(error?.message || '加载任务结果失败')
   }
 }
+function sourceThreadId(item) {
+  return item.job?.source_snapshot?.thread_id?.trim() || ''
+}
+async function openSource(item) {
+  const threadId = sourceThreadId(item)
+  if (!threadId) return
+  try {
+    await chatThreadsStore.locateThread(threadId)
+    store.setOpen(false)
+    await router.push({ name: 'AgentCompWithThreadId', params: { thread_id: threadId } })
+  } catch (error) {
+    message.error(error?.message || '创建任务的会话已不存在')
+  }
+}
 function handleItem(item) {
   if (store.category === 'notification' && !item.is_read)
     void store.markRead('notification', item.id)
@@ -134,8 +158,8 @@ watch(
         cancel-text="返回"
         @confirm="clearRead"
       >
-        <a-button size="small" danger :disabled="!hasReadItems"
-          ><Trash2 :size="15" />清空已读</a-button
+        <a-button size="small" :disabled="!hasReadItems"
+          ><ListX :size="15" />清空已读</a-button
         >
       </a-popconfirm>
     </div>
@@ -176,24 +200,29 @@ watch(
               >另有 {{ item.unread_run_count - 1 }} 次未读运行</span
             ></span
           ><time v-else>{{ formatTime(item.created_at) }}</time
-          ><button
-            v-if="store.category === 'task' && canViewResult(item)"
-            type="button"
-            class="view-result"
-            @click.stop="openResult(item)"
-          >
-            <Eye :size="14" />查看结果
-          </button>
-          <a-popconfirm
-            title="确认删除这条记录？"
-            ok-text="删除"
-            cancel-text="返回"
-            @confirm="removeItem(item)"
-          >
-            <button type="button" class="delete-item" @click.stop>
-              <Trash2 :size="14" />删除
-            </button>
-          </a-popconfirm></span
+          ><span class="inbox-actions"
+            ><a-button
+              v-if="store.category === 'task' && canViewResult(item)"
+              type="text"
+              size="small"
+              @click.stop="openResult(item)"
+              ><Eye :size="14" />查看结果</a-button
+            ><a-button
+              v-if="store.category === 'task' && sourceThreadId(item)"
+              type="text"
+              size="small"
+              @click.stop="openSource(item)"
+              ><MessageSquareText :size="14" />查看来源</a-button
+            ><a-popconfirm
+              title="确认删除这条记录？"
+              ok-text="删除"
+              cancel-text="返回"
+              @confirm="removeItem(item)"
+              ><a-button type="text" size="small" danger @click.stop
+                ><Trash2 :size="14" />删除</a-button
+              ></a-popconfirm
+            ></span
+          ></span
         ><i v-if="unread(item)" class="unread-dot" />
       </article>
     </div>
@@ -266,27 +295,20 @@ time {
   align-items: center;
   gap: 3px;
 }
-.view-result {
-  display: inline-flex;
+.inbox-actions {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-self: start;
   gap: 4px;
-  padding: 3px 0;
-  color: var(--main-700);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
+  margin-top: 2px;
+  overflow: visible;
+  white-space: normal;
 }
-.delete-item {
+.inbox-actions :deep(.ant-btn) {
   display: inline-flex;
   align-items: center;
-  justify-self: start;
   gap: 4px;
-  padding: 3px 0;
-  color: var(--color-error-700);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
 }
 .unread-dot {
   display: inline-block;
