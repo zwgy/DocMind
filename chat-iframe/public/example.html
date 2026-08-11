@@ -158,7 +158,8 @@
       <!-- 2. DocMindChatIframe 完整调用示例（页面内可见） -->
       <section class="card">
         <h2 class="card-title"><span>💻</span> DocMindChatIframe 完整调用示例</h2>
-        <pre><code><span class="tk-com">// 1. 构造悬浮助手：SDK 会从自身脚本地址推导 iframe 与 API 地址。</span>
+        <pre><code><span class="tk-com">// 1. 在其他系统页面中引入当前部署的 DocMind SDK。</span>
+&lt;script src=<span class="tk-str">"http://192.168.1.220:5174/chat-iframe/docmind-chat-iframe-parent.js"</span>&gt;&lt;/script&gt;
 
 <span class="tk-com">// 业务上下文：用于生成当前业务的独立会话 scope。</span>
 <span class="tk-key">const</span> businessContext = {
@@ -189,12 +190,15 @@
 }
 
 <span class="tk-key">const</span> chat = <span class="tk-key">new</span> DocMindChatIframe({
+  <span class="tk-com">// 当前 5174 Nginx 已代理 /api，因此只需填写 iframe 地址，不要填写 apiBaseUrl。</span>
+  <span class="tk-key">iframeSrc</span>: <span class="tk-str">'http://192.168.1.220:5174/chat-iframe/'</span>,
   ...businessContext,
   <span class="tk-key">incoming_document_metadata</span>: incomingDocumentMetadata,
 })
 
 <span class="tk-com">// 可选参数速查（按需启用，未列出的使用默认值；详见 docmind-chat-iframe-parent.js 构造函数）：</span>
-<span class="tk-com">//   apiBaseUrl:         'http://api.example.com'        // 仅 iframe 与 API 不同域时覆盖</span>
+<span class="tk-com">//   iframeSrc:          'http://192.168.1.220:5174/chat-iframe/' // iframe 完整入口；SDK 也从该地址加载时可省略</span>
+<span class="tk-com">//   apiBaseUrl:         当前部署无需填写                         // 默认使用 iframe origin，经 5174 的 /api 代理访问后端</span>
 <span class="tk-com">//   agentId:            'default-chatbot'               // 后端智能体 ID</span>
 <span class="tk-com">//   tokenExchangeUrl:   '/api/chat-iframe/token'        // 信任后端换 token 直连地址（绕过同源代理）</span>
 <span class="tk-com">//   position:           'bottom-right'                  // 悬浮位置：bottom-right/left、top-right/left</span>
@@ -291,6 +295,9 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
       }
 
       const chat = new DocMindChatIframe({
+        // 当前示例会从 SDK 地址自动推导 iframe；嵌入其他系统时可显式填写下面的地址。
+        // iframeSrc: 'http://192.168.1.220:5174/chat-iframe/',
+        // apiBaseUrl 无需填写：5174 Nginx 已代理 /api。
         ...businessContext,
         incoming_document_metadata: incomingDocumentMetadata,
       })

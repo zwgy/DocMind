@@ -413,6 +413,17 @@ test('local example starts minimized so users open the assistant explicitly', ()
     /<span class="tk-key">source_file_id<\/span>:\s*<span class="tk-str">'202010200206'/
   )
   assert.match(example, /source_file_id:\s*'202010200206'/)
+  assert.match(
+    example,
+    /http:\/\/192\.168\.1\.220:5174\/chat-iframe\/docmind-chat-iframe-parent\.js/
+  )
+  assert.match(
+    example,
+    /<span class="tk-key">iframeSrc<\/span>:\s*<span class="tk-str">'http:\/\/192\.168\.1\.220:5174\/chat-iframe\/'/
+  )
+  assert.doesNotMatch(example, /<span class="tk-key">apiBaseUrl<\/span>:/)
+  assert.match(example, /不要填写 apiBaseUrl/)
+  assert.match(example, /apiBaseUrl 无需填写：5174 Nginx 已代理 \/api/)
 })
 
 test('local example bypasses parent SDK responses cached before no-store', () => {
