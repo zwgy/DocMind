@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { CalendarClock, Eye, Paperclip, Pause, Pencil, Play, RefreshCw, X } from 'lucide-vue-next'
+import { CalendarClock, Eye, Paperclip, Pause, Pencil, Play, RefreshCw, Trash2, X } from 'lucide-vue-next'
 import { message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import { useScheduledJobsStore } from '@/stores/scheduledJobs'
@@ -17,14 +17,19 @@ const userStore = useUserStore()
 const chatThreadsStore = useChatThreadsStore()
 const router = useRouter()
 const page = computed(() => store.currentPage)
-const tabs = [
-  { value: 'ongoing', label: '进行中', empty: '暂无进行中的任务' },
-  { value: 'paused', label: '已暂停', empty: '暂无已暂停任务' },
-  { value: 'history', label: '历史', empty: '暂无历史任务' }
-]
-if (userStore.isAdmin)
-  tabs.splice(1, 0, { value: 'pending_confirmation', label: '待确认', empty: '' })
-const currentTab = computed(() => tabs.find((item) => item.value === store.activeView) || tabs[0])
+const tabs = computed(() => {
+  const values = [
+    { value: 'ongoing', label: '进行中', empty: '暂无进行中的任务' },
+    { value: 'paused', label: '已暂停', empty: '暂无已暂停任务' },
+    { value: 'history', label: '历史', empty: '暂无历史任务' }
+  ]
+  if (userStore.isAdmin && store.sourceType === 'personal')
+    values.splice(1, 0, { value: 'pending_confirmation', label: '待确认', empty: '' })
+  return values
+})
+const currentTab = computed(
+  () => tabs.value.find((item) => item.value === store.activeView) || tabs.value[0]
+)
 const detail = ref(null)
 const runs = ref([])
 const detailLoading = ref(false)
@@ -161,11 +166,21 @@ async function handleAction(job, action) {
   await store.changeStatus(job, action)
 }
 
+async function removeJob(job) {
+  try {
+    await store.remove(job)
+    if (detail.value?.id === job.id) detail.value = null
+  } catch (error) {
+    message.error(error?.message || '删除任务失败')
+  }
+}
+
 async function openDetail(job) {
   detail.value = job
   detailLoading.value = true
   try {
-    runs.value = (await scheduledJobApi.runs(job.id, { limit: 20 }))?.items || []
+    const runMethod = job.source_type === 'incoming' ? scheduledJobApi.incomingRuns : scheduledJobApi.runs
+    runs.value = (await runMethod(job.id, { limit: 20 }))?.items || []
   } finally {
     detailLoading.value = false
   }
@@ -259,10 +274,22 @@ onMounted(async () => {
     </PageHeader>
     <main class="scheduled-jobs-content">
       <p class="page-intro">集中查看和管理个人及来文产生的定时通知与 Agent 任务。</p>
+      <a-segmented
+        v-if="userStore.isAdmin"
+        class="source-switch"
+        :value="store.sourceType"
+        :options="[
+          { label: '我的定时', value: 'personal' },
+          { label: '来文任务', value: 'incoming' }
+        ]"
+        @change="store.setSourceType"
+      />
       <a-tabs :active-key="store.activeView" @change="store.setActiveView">
         <a-tab-pane v-for="tab in tabs" :key="tab.value" :tab="tab.label" />
       </a-tabs>
-      <CandidateList v-if="store.activeView === 'pending_confirmation'" />
+      <CandidateList
+        v-if="store.sourceType === 'personal' && store.activeView === 'pending_confirmation'"
+      />
       <a-alert
         v-if="page.error"
         class="load-error"
@@ -292,7 +319,7 @@ onMounted(async () => {
           <div class="job-actions">
             <a-button type="link" @click="openDetail(job)">详情</a-button>
             <a-button
-              v-if="['active', 'paused'].includes(job.status)"
+              v-if="job.source_type === 'personal' && ['active', 'paused'].includes(job.status)"
               type="text"
               @click="openEditor(job)"
               ><Pencil :size="16" />编辑</a-button
@@ -319,6 +346,21 @@ onMounted(async () => {
               @confirm="handleAction(job, 'cancel')"
             >
               <a-button type="text" danger :loading="page.loading"><X :size="16" />取消</a-button>
+            </a-popconfirm>
+            <a-popconfirm
+              v-if="job.source_type === 'personal' || ['completed', 'cancelled'].includes(job.status)"
+              :title="
+                job.source_type === 'incoming'
+                  ? '删除后仅对当前账号隐藏，确认继续？'
+                  : '确认删除此任务记录？结果会话不会被删除。'
+              "
+              ok-text="删除"
+              cancel-text="返回"
+              @confirm="removeJob(job)"
+            >
+              <a-button type="text" danger :loading="page.loading"
+                ><Trash2 :size="16" />删除</a-button
+              >
             </a-popconfirm>
           </div>
         </article>

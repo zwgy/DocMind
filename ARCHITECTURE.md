@@ -62,7 +62,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 6. 运行事件写入 Redis，最终状态和业务记录写入 Postgres；文件和产物落到 `saves`、MinIO 或沙盒用户数据目录。
 7. 前端通过 SSE/轮询消费运行事件，渲染消息、工具调用、引用来源、产物卡片和文件预览。
 
-定时 Agent 运行复用同一条 Agent Run/Worker 链路，但每次触发先创建独立 Conversation。Worker 终态同步是结果投影快路径，Dispatcher 定期对账是恢复路径；收件箱只保存状态事件和摘要，完整消息及产物始终以 Conversation 为事实来源。Web 与 chat-iframe 通过同一会话列表接口平铺普通和定时会话，定时会话跨当前 Agent/scope 对任务所有者可见。
+定时 Agent 运行复用同一条 Agent Run/Worker 链路，但每次触发先创建独立 Conversation。Worker 终态同步是结果投影快路径，Dispatcher 定期对账是恢复路径；收件箱只保存状态事件和摘要，完整消息及产物始终以 Conversation 为事实来源。Web 与 chat-iframe 通过同一会话列表接口平铺普通和定时会话，定时会话跨当前 Agent/scope 对任务所有者可见。个人任务与结果 Conversation 生命周期独立：删除任务域历史不删除 Conversation，个人结果 Conversation 也可由用户单独删除。
 
 ## 架构不变量
 
@@ -73,7 +73,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - LITE 模式必须允许跳过知识库、图谱、评估等重依赖能力；新增相关接口或初始化逻辑时要尊重这个边界。
 - 沙盒虚拟路径以 `SANDBOX_VIRTUAL_PATH_PREFIX` 为边界，用户可见路径与宿主机真实路径不要混用。
 - 面向用户或外部系统的输入在边界校验；内部服务之间优先信任已有类型、仓储和框架约束，避免为了假设场景堆叠防御代码。
-- 定时通知和定时 Agent 是不同动作：通知不得创建 Conversation；Agent 每次运行创建独立 Conversation，运行结果会话不得通过通用会话删除接口删除。
+- 定时通知和定时 Agent 是不同动作：通知不得创建 Conversation；个人 Agent 每次运行创建独立 Conversation。个人任务只由所有者管理并可物理删除任务域历史；来文任务只允许通知，由管理员管理全局生命周期，用户“删除”来文历史时只隐藏自己的列表状态。
 
 ## 跨切面关注点
 

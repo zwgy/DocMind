@@ -68,5 +68,12 @@ export const scheduledJobApi = {
       token,
       { method: 'PATCH', body: JSON.stringify(payload) }
     )
+  },
+  remove(jobId: string, version: number, token?: string) {
+    return request<{ deleted_id: string }>(
+      `/api/scheduled-jobs/${encodeURIComponent(jobId)}?version=${encodeURIComponent(version)}`,
+      token,
+      { method: 'DELETE' }
+    )
   }
 }

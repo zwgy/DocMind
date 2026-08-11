@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from './base'
+import { apiDelete, apiGet, apiPost } from './base'
 
 function queryString(params = {}) {
   const query = new URLSearchParams()
@@ -33,5 +33,13 @@ export const inboxApi = {
   },
   markAllRead(category) {
     return apiPost('/api/inbox/read-all', { category })
+  },
+  remove(category, id) {
+    return apiDelete(
+      `/api/inbox/${category === 'task' ? 'tasks' : 'notifications'}/${encodeURIComponent(id)}`
+    )
+  },
+  clearRead(category) {
+    return apiPost('/api/inbox/clear-read', { category })
   }
 }

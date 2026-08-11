@@ -1,7 +1,7 @@
 <script setup>
 import { computed, watch } from 'vue'
 import { message } from 'ant-design-vue'
-import { CheckCheck, Clock3, Eye, Mail, Paperclip, RefreshCw } from 'lucide-vue-next'
+import { CheckCheck, Clock3, Eye, Mail, Paperclip, RefreshCw, Trash2 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useInboxStore } from '@/stores/inbox'
 import { useChatThreadsStore } from '@/stores/chatThreads'
@@ -14,6 +14,9 @@ const tabs = [
   { value: 'notification', label: '通知' },
   { value: 'task', label: '任务' }
 ]
+const hasReadItems = computed(() =>
+  page.value.items.some((item) => (store.category === 'task' ? !unread(item) : item.is_read))
+)
 function formatTime(value) {
   return value
     ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(
@@ -72,6 +75,22 @@ function handleItem(item) {
   if (store.category === 'notification' && !item.is_read)
     void store.markRead('notification', item.id)
 }
+async function removeItem(item) {
+  try {
+    await store.remove(store.category, itemId(item))
+    message.success('记录已删除')
+  } catch (error) {
+    message.error(error?.message || '删除失败')
+  }
+}
+async function clearRead() {
+  try {
+    await store.clearRead()
+    message.success('已读记录已清空')
+  } catch (error) {
+    message.error(error?.message || '清空已读失败')
+  }
+}
 watch(
   () => store.open,
   (open) => {
@@ -109,6 +128,16 @@ watch(
         @click="store.markAllRead()"
         ><CheckCheck :size="15" />全部已读</a-button
       >
+      <a-popconfirm
+        title="确认清空当前分类的已读记录？未读记录不会受影响。"
+        ok-text="清空"
+        cancel-text="返回"
+        @confirm="clearRead"
+      >
+        <a-button size="small" danger :disabled="!hasReadItems"
+          ><Trash2 :size="15" />清空已读</a-button
+        >
+      </a-popconfirm>
     </div>
     <a-alert
       v-if="page.error"
@@ -154,7 +183,17 @@ watch(
             @click.stop="openResult(item)"
           >
             <Eye :size="14" />查看结果
-          </button></span
+          </button>
+          <a-popconfirm
+            title="确认删除这条记录？"
+            ok-text="删除"
+            cancel-text="返回"
+            @confirm="removeItem(item)"
+          >
+            <button type="button" class="delete-item" @click.stop>
+              <Trash2 :size="14" />删除
+            </button>
+          </a-popconfirm></span
         ><i v-if="unread(item)" class="unread-dot" />
       </article>
     </div>
@@ -168,6 +207,7 @@ watch(
 .drawer-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin: -4px 0 12px;
 }
 .drawer-actions :deep(.ant-btn) {
@@ -233,6 +273,17 @@ time {
   gap: 4px;
   padding: 3px 0;
   color: var(--main-700);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.delete-item {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 4px;
+  padding: 3px 0;
+  color: var(--color-error-700);
   background: transparent;
   border: 0;
   cursor: pointer;

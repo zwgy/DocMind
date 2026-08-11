@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from yuxi.scheduled_jobs.schemas import PersonalScheduledJobRequest
-from yuxi.services.scheduled_job_service import JobAlreadyTriggeredError, ScheduledJobService
+from yuxi.services.scheduled_job_service import (
+    JobAlreadyTriggeredError,
+    JobRunInProgressError,
+    ScheduledJobService,
+)
+from yuxi.storage.postgres.models_scheduled_jobs import ScheduledJobUserState
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 
@@ -129,3 +134,50 @@ async def test_agent_action_without_slug_freezes_visible_default_agent(monkeypat
     )
 
     assert action_data["agent_slug"] == "default-chatbot"
+
+
+async def test_delete_personal_job_rejects_in_flight_run_without_deleting_data():
+    db = SimpleNamespace(scalar=AsyncMock(return_value="sjr_running"), execute=AsyncMock(), flush=AsyncMock())
+    service = ScheduledJobService(db)
+    service._lock_owned_job = AsyncMock(return_value=SimpleNamespace(id="sj_personal"))
+
+    with pytest.raises(JobRunInProgressError, match="排队或执行"):
+        await service.delete_personal_job(job_id="sj_personal", owner_uid="alice", version=1)
+
+    db.execute.assert_not_awaited()
+
+
+async def test_delete_personal_job_removes_domain_rows_but_not_conversation():
+    job = SimpleNamespace(id="sj_personal")
+    db = SimpleNamespace(
+        scalar=AsyncMock(return_value=None),
+        execute=AsyncMock(),
+        delete=AsyncMock(),
+        flush=AsyncMock(),
+    )
+    service = ScheduledJobService(db)
+    service._lock_owned_job = AsyncMock(return_value=job)
+
+    await service.delete_personal_job(job_id=job.id, owner_uid="alice", version=3)
+
+    assert db.execute.await_count == 5
+    db.delete.assert_awaited_once_with(job)
+    db.flush.assert_awaited_once()
+
+
+async def test_hide_incoming_job_creates_state_for_current_admin_only():
+    job = SimpleNamespace(id="sj_incoming", status="completed")
+    db = SimpleNamespace(
+        scalar=AsyncMock(side_effect=[job, None, None]),
+        add=Mock(),
+        flush=AsyncMock(),
+    )
+    service = ScheduledJobService(db)
+    hidden_at = datetime(2030, 1, 2, tzinfo=UTC)
+    service.repository.database_now = AsyncMock(return_value=hidden_at)
+
+    await service.hide_incoming_job(job_id=job.id, user_uid="admin-a")
+
+    state = db.add.call_args.args[0]
+    assert isinstance(state, ScheduledJobUserState)
+    assert (state.scheduled_job_id, state.user_uid, state.hidden_at) == (job.id, "admin-a", hidden_at)

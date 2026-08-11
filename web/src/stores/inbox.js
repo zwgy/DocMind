@@ -60,6 +60,14 @@ export const useInboxStore = defineStore('inbox', () => {
     await inboxApi.markAllRead(target)
     await refresh(target)
   }
+  async function remove(target, id) {
+    await inboxApi.remove(target, id)
+    await refresh(target)
+  }
+  async function clearRead(target = category.value) {
+    await inboxApi.clearRead(target)
+    await refresh(target)
+  }
   function setCategory(target) {
     if (!pages.value[target]) return
     category.value = target
@@ -94,6 +102,8 @@ export const useInboxStore = defineStore('inbox', () => {
     markRead,
     markRunRead,
     markAllRead,
+    remove,
+    clearRead,
     setCategory,
     setOpen,
     startPolling,

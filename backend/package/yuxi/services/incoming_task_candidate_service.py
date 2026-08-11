@@ -451,7 +451,8 @@ class IncomingTaskCandidateService:
         source_snapshot = self._source_snapshot(document=document, candidate=candidate)
         job = ScheduledJob(
             id=new_scheduled_job_id("sj_"),
-            owner_uid=candidate.owner_uid,
+            # 上传者只是来源操作者，来文任务由管理员管理，不能借 owner_uid 进入个人任务接口。
+            owner_uid=None,
             source_type="incoming",
             source_candidate_id=candidate.id,
             source_snapshot=source_snapshot,
@@ -527,13 +528,13 @@ class IncomingTaskCandidateService:
                 return [], resolution, [self._error("recipients", "empty_recipient_scope", "全体人员范围为空")]
             return users, resolution, []
 
-        names = list(
-            dict.fromkeys(name.strip() for name in (candidate.raw_recipient_names or []) if name.strip())
-        )
+        names = list(dict.fromkeys(name.strip() for name in (candidate.raw_recipient_names or []) if name.strip()))
         if not names:
-            return [], {"scope": "named", "names": []}, [
-                self._error("recipients", "recipient_missing", "缺少接收人姓名")
-            ]
+            return (
+                [],
+                {"scope": "named", "names": []},
+                [self._error("recipients", "recipient_missing", "缺少接收人姓名")],
+            )
         recipients: list[User] = []
         details: list[dict[str, Any]] = []
         errors: list[dict[str, str]] = []

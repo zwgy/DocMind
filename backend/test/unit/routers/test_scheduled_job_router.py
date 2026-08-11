@@ -248,10 +248,25 @@ async def test_update_scheduled_job_uses_current_owner_and_version(monkeypatch):
         async def update_personal_job(self, **kwargs):
             calls.append(kwargs)
             return SimpleNamespace(
-                id="sj_1", name="updated", source_type="personal", schedule_kind="at", run_at=None,
-                anchor_at=None, interval_seconds=None, cron_expression=None, timezone="Asia/Shanghai",
-                next_run_at=None, action_type="notification", action_data={}, status="active", version=2,
-                last_run_at=None, paused_at=None, cancelled_at=None, created_at=None, updated_at=None,
+                id="sj_1",
+                name="updated",
+                source_type="personal",
+                schedule_kind="at",
+                run_at=None,
+                anchor_at=None,
+                interval_seconds=None,
+                cron_expression=None,
+                timezone="Asia/Shanghai",
+                next_run_at=None,
+                action_type="notification",
+                action_data={},
+                status="active",
+                version=2,
+                last_run_at=None,
+                paused_at=None,
+                cancelled_at=None,
+                created_at=None,
+                updated_at=None,
             )
 
     monkeypatch.setattr(scheduled_job_router, "ScheduledJobService", FakeService)
@@ -269,3 +284,43 @@ async def test_update_scheduled_job_uses_current_owner_and_version(monkeypatch):
     assert response["job"]["version"] == 2
     assert calls[0]["owner_uid"] == "alice"
     assert calls[0]["version"] == 1
+
+
+async def test_delete_scheduled_job_uses_current_owner_and_version(monkeypatch):
+    captured = {}
+
+    class FakeService:
+        def __init__(self, _db):
+            pass
+
+        async def delete_personal_job(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(scheduled_job_router, "ScheduledJobService", FakeService)
+
+    response = await scheduled_job_router.delete_scheduled_job(
+        "sj_1", version=7, current_user=SimpleNamespace(uid="alice"), db=_FakeDb()
+    )
+
+    assert response == {"deleted_id": "sj_1"}
+    assert captured == {"job_id": "sj_1", "owner_uid": "alice", "version": 7}
+
+
+async def test_hide_incoming_scheduled_job_uses_current_admin_only(monkeypatch):
+    captured = {}
+
+    class FakeService:
+        def __init__(self, _db):
+            pass
+
+        async def hide_incoming_job(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(scheduled_job_router, "ScheduledJobService", FakeService)
+
+    response = await scheduled_job_router.hide_incoming_scheduled_job(
+        "sj_incoming", current_user=SimpleNamespace(uid="admin-a"), db=_FakeDb()
+    )
+
+    assert response == {"deleted_id": "sj_incoming"}
+    assert captured == {"job_id": "sj_incoming", "user_uid": "admin-a"}

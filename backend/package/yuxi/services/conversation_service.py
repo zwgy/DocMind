@@ -18,6 +18,7 @@ from yuxi.repositories.conversation_repository import ConversationRepository
 from yuxi.services.mention_search_service import invalidate_mention_cache
 from yuxi.storage.minio import StorageError, get_minio_client
 from yuxi.storage.postgres.models_business import User
+from yuxi.storage.postgres.models_scheduled_jobs import ScheduledJob
 from yuxi.utils.datetime_utils import utc_isoformat
 from yuxi.utils.logging_config import logger
 from yuxi.utils.paths import VIRTUAL_PATH_UPLOADS
@@ -511,8 +512,15 @@ async def delete_thread_view(
 ) -> dict:
     conv_repo = ConversationRepository(db)
     conversation = await require_user_conversation(conv_repo, thread_id, str(current_uid))
-    if (conversation.extra_metadata or {}).get("source") == "scheduled_job":
-        raise HTTPException(status_code=409, detail="scheduled_run_conversation_protected")
+    metadata = conversation.extra_metadata or {}
+    if metadata.get("source") == "scheduled_job":
+        source_type = metadata.get("scheduled_source_type")
+        if source_type is None and metadata.get("scheduled_job_id"):
+            source_type = await db.scalar(
+                select(ScheduledJob.source_type).where(ScheduledJob.id == metadata["scheduled_job_id"])
+            )
+        if source_type != "personal":
+            raise HTTPException(status_code=409, detail="scheduled_run_conversation_protected")
     deleted = await conv_repo.delete_conversation(thread_id, soft_delete=True)
     if not deleted:
         raise HTTPException(status_code=404, detail="对话线程不存在")

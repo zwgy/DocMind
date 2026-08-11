@@ -72,12 +72,9 @@ test('global ticker scrolls one icon-separated batch and opens each matching inb
   )
   assert.match(
     styles,
-    /\.notification-ticker \{[\s\S]*width: 100%;[\s\S]*margin: 6px 0 0;[\s\S]*border-block: 1px solid var\(--gray-200\);[\s\S]*border-inline: 0;[\s\S]*background: var\(--gray-50\)/
+    /\.notification-ticker \{[\s\S]*width: 100%;[\s\S]*margin: 6px 0 0;[\s\S]*border-block: 1px solid var\(--gray-200\);[\s\S]*border-inline: 0;[\s\S]*background: var\(--gray-50\);[\s\S]*#000 5%,[\s\S]*#000 95%/
   )
-  assert.match(
-    styles,
-    /\.ticker-marquee\.is-moving \{[\s\S]*#000 24px,[\s\S]*#000 calc\(100% - 24px\)/
-  )
+  assert.doesNotMatch(styles, /\.ticker-marquee\.is-moving/)
   assert.match(
     styles,
     /\.ticker-track\.is-moving \.ticker-group \{[\s\S]*min-width: var\(--ticker-distance\)/
@@ -118,6 +115,18 @@ test('cancel confirmation is centered and uses equal modern actions', () => {
     drawerSource,
     /\.confirm-dialog \.danger \{[\s\S]*background: var\(--color-error-700\)/
   )
+})
+
+test('scheduled history and inbox cleanup use explicit confirmed delete actions', () => {
+  assert.match(drawerSource, /scheduledJobApi\.remove\(job\.id, job\.version, props\.token\)/)
+  assert.match(
+    drawerSource,
+    /inboxApi\.remove\(inboxCategory\.value, itemId\(item\), props\.token\)/
+  )
+  assert.match(drawerSource, /inboxApi\.clearRead\(inboxCategory\.value, props\.token\)/)
+  assert.match(drawerSource, /清空已读/)
+  assert.match(drawerSource, /任务定义和运行历史将被删除，已经生成的结果会话仍会保留/)
+  assert.match(drawerSource, /未读记录不会受影响，关联的结果会话也会保留/)
 })
 
 test('inbox cards keep their border despite the drawer button reset', () => {

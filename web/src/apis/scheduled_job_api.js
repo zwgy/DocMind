@@ -1,4 +1,4 @@
-import { apiGet, apiPatch, apiPost } from './base'
+import { apiDelete, apiGet, apiPatch, apiPost } from './base'
 
 function queryString(params = {}) {
   const query = new URLSearchParams()
@@ -13,6 +13,10 @@ export const scheduledJobApi = {
     const query = queryString(params)
     return apiGet(`/api/scheduled-jobs${query ? `?${query}` : ''}`)
   },
+  listIncoming(params = {}) {
+    const query = queryString(params)
+    return apiGet(`/api/scheduled-jobs/incoming${query ? `?${query}` : ''}`)
+  },
   get(jobId) {
     return apiGet(`/api/scheduled-jobs/${encodeURIComponent(jobId)}`)
   },
@@ -22,11 +26,23 @@ export const scheduledJobApi = {
   changeStatus(jobId, payload) {
     return apiPost(`/api/scheduled-jobs/${encodeURIComponent(jobId)}/status`, payload)
   },
+  changeIncomingStatus(jobId, payload) {
+    return apiPost(`/api/scheduled-jobs/incoming/${encodeURIComponent(jobId)}/status`, payload)
+  },
   update(jobId, payload) {
     return apiPatch(`/api/scheduled-jobs/${encodeURIComponent(jobId)}`, payload)
   },
   runs(jobId, params = {}) {
     const query = queryString(params)
     return apiGet(`/api/scheduled-jobs/${encodeURIComponent(jobId)}/runs${query ? `?${query}` : ''}`)
+  },
+  incomingRuns(jobId, params = {}) {
+    const query = queryString(params)
+    return apiGet(`/api/scheduled-jobs/incoming/${encodeURIComponent(jobId)}/runs${query ? `?${query}` : ''}`)
+  },
+  remove(job) {
+    const prefix = job.source_type === 'incoming' ? '/api/scheduled-jobs/incoming' : '/api/scheduled-jobs'
+    const query = job.source_type === 'personal' ? `?version=${encodeURIComponent(job.version)}` : ''
+    return apiDelete(`${prefix}/${encodeURIComponent(job.id)}${query}`)
   }
 }

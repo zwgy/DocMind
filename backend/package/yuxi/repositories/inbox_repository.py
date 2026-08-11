@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Select, and_, case, func, or_, select, update
+from sqlalchemy import Select, and_, case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,6 +60,7 @@ class InboxRepository:
         statement: Select = select(InboxItem).where(
             InboxItem.recipient_uid == recipient_uid,
             InboxItem.category == "notification",
+            InboxItem.hidden_at.is_(None),
         )
         if cursor is not None:
             is_read, created_at, item_id = cursor
@@ -102,7 +103,11 @@ class InboxRepository:
                 )
                 .label("row_number"),
             )
-            .where(InboxItem.recipient_uid == owner_uid, InboxItem.category == "task")
+            .where(
+                InboxItem.recipient_uid == owner_uid,
+                InboxItem.category == "task",
+                InboxItem.hidden_at.is_(None),
+            )
             .cte("task_events")
         )
         latest_event = (
@@ -124,6 +129,7 @@ class InboxRepository:
                 InboxItem.recipient_uid == owner_uid,
                 InboxItem.category == "task",
                 InboxItem.is_read.is_(False),
+                InboxItem.hidden_at.is_(None),
             )
             .group_by(InboxItem.scheduled_job_id)
             .cte("unread_task_events")
@@ -141,10 +147,11 @@ class InboxRepository:
                 has_unread,
                 sort_at,
             )
-            .outerjoin(latest_event, latest_event.c.scheduled_job_id == ScheduledJob.id)
+            .join(latest_event, latest_event.c.scheduled_job_id == ScheduledJob.id)
             .outerjoin(unread_events, unread_events.c.scheduled_job_id == ScheduledJob.id)
             .where(
                 ScheduledJob.owner_uid == owner_uid,
+                ScheduledJob.source_type == "personal",
                 ScheduledJob.action_type == "agent",
             )
         )
@@ -168,6 +175,7 @@ class InboxRepository:
                 InboxItem.recipient_uid == recipient_uid,
                 InboxItem.category == "notification",
                 InboxItem.is_read.is_(False),
+                InboxItem.hidden_at.is_(None),
             )
         )
         task_count = await self.db.scalar(
@@ -177,7 +185,9 @@ class InboxRepository:
                 InboxItem.recipient_uid == recipient_uid,
                 InboxItem.category == "task",
                 InboxItem.is_read.is_(False),
+                InboxItem.hidden_at.is_(None),
                 ScheduledJob.owner_uid == recipient_uid,
+                ScheduledJob.source_type == "personal",
                 ScheduledJob.action_type == "agent",
             )
         )
@@ -219,6 +229,7 @@ class InboxRepository:
                 InboxItem.recipient_uid == owner_uid,
                 InboxItem.category == "task",
                 InboxItem.is_read.is_(False),
+                InboxItem.hidden_at.is_(None),
                 InboxItem.scheduled_job_id.in_(job_ids),
                 InboxItem.scheduled_job_run_id.is_not(None),
             )
@@ -258,6 +269,7 @@ class InboxRepository:
                     InboxItem.id == item_id,
                     InboxItem.recipient_uid == recipient_uid,
                     InboxItem.category == "notification",
+                    InboxItem.hidden_at.is_(None),
                 )
             )
         )
@@ -268,6 +280,7 @@ class InboxRepository:
                 select(ScheduledJob.id).where(
                     ScheduledJob.id == job_id,
                     ScheduledJob.owner_uid == owner_uid,
+                    ScheduledJob.source_type == "personal",
                     ScheduledJob.action_type == "agent",
                 )
             )
@@ -282,6 +295,7 @@ class InboxRepository:
                     ScheduledJobRun.id == run_id,
                     ScheduledJobRun.scheduled_job_id == job_id,
                     ScheduledJob.owner_uid == owner_uid,
+                    ScheduledJob.source_type == "personal",
                     ScheduledJob.action_type == "agent",
                 )
             )
@@ -295,6 +309,7 @@ class InboxRepository:
                 InboxItem.recipient_uid == recipient_uid,
                 InboxItem.category == "notification",
                 InboxItem.is_read.is_(False),
+                InboxItem.hidden_at.is_(None),
             )
             .values(is_read=True, read_at=func.now())
         )
@@ -308,6 +323,7 @@ class InboxRepository:
                 InboxItem.recipient_uid == owner_uid,
                 InboxItem.category == "task",
                 InboxItem.is_read.is_(False),
+                InboxItem.hidden_at.is_(None),
             )
             .values(is_read=True, read_at=func.now())
         )
@@ -322,6 +338,7 @@ class InboxRepository:
                 InboxItem.recipient_uid == owner_uid,
                 InboxItem.category == "task",
                 InboxItem.is_read.is_(False),
+                InboxItem.hidden_at.is_(None),
             )
             .values(is_read=True, read_at=func.now())
         )
@@ -332,15 +349,72 @@ class InboxRepository:
             InboxItem.recipient_uid == recipient_uid,
             InboxItem.category == category,
             InboxItem.is_read.is_(False),
+            InboxItem.hidden_at.is_(None),
         )
         if category == "task":
             statement = statement.where(
                 InboxItem.scheduled_job_id.in_(
                     select(ScheduledJob.id).where(
                         ScheduledJob.owner_uid == recipient_uid,
+                        ScheduledJob.source_type == "personal",
                         ScheduledJob.action_type == "agent",
                     )
                 )
             )
         result = await self.db.execute(statement.values(is_read=True, read_at=func.now()))
         return int(result.rowcount or 0)
+
+    async def delete_notification(self, *, item_id: str, recipient_uid: str) -> int:
+        row = (
+            await self.db.execute(
+                select(InboxItem, ScheduledJob.source_type)
+                .join(ScheduledJob, ScheduledJob.id == InboxItem.scheduled_job_id)
+                .where(
+                    InboxItem.id == item_id,
+                    InboxItem.recipient_uid == recipient_uid,
+                    InboxItem.category == "notification",
+                    InboxItem.hidden_at.is_(None),
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return 0
+        item, source_type = row
+        if source_type == "personal":
+            await self.db.delete(item)
+        else:
+            item.hidden_at = func.now()
+        await self.db.flush()
+        return 1
+
+    async def delete_task_events(self, *, job_id: str, owner_uid: str) -> int:
+        if not await self.task_exists_for_owner(job_id=job_id, owner_uid=owner_uid):
+            return 0
+        result = await self.db.execute(
+            delete(InboxItem).where(
+                InboxItem.scheduled_job_id == job_id,
+                InboxItem.recipient_uid == owner_uid,
+                InboxItem.category == "task",
+                InboxItem.hidden_at.is_(None),
+            )
+        )
+        return int(result.rowcount or 0)
+
+    async def clear_read(self, *, recipient_uid: str, category: str) -> int:
+        personal_jobs = select(ScheduledJob.id).where(ScheduledJob.source_type == "personal")
+        incoming_jobs = select(ScheduledJob.id).where(ScheduledJob.source_type == "incoming")
+        common_filters = (
+            InboxItem.recipient_uid == recipient_uid,
+            InboxItem.category == category,
+            InboxItem.is_read.is_(True),
+            InboxItem.hidden_at.is_(None),
+        )
+        deleted = await self.db.execute(
+            delete(InboxItem).where(*common_filters, InboxItem.scheduled_job_id.in_(personal_jobs))
+        )
+        hidden = await self.db.execute(
+            update(InboxItem)
+            .where(*common_filters, InboxItem.scheduled_job_id.in_(incoming_jobs))
+            .values(hidden_at=func.now())
+        )
+        return int(deleted.rowcount or 0) + int(hidden.rowcount or 0)

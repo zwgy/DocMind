@@ -10,13 +10,14 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.utils.auth_middleware import get_db, get_required_user
+from server.utils.auth_middleware import get_admin_user, get_db, get_required_user
 from yuxi.repositories.scheduled_job_repository import ScheduledJobRepository
 from yuxi.scheduled_jobs.schemas import AtSchedule, PersonalScheduledJobRequest, Schedule, ScheduledJobDraft
 from yuxi.scheduled_jobs.timing import next_run_at
 from yuxi.services.scheduled_job_service import (
     IdempotencyKeyReusedError,
     JobAlreadyTriggeredError,
+    JobRunInProgressError,
     JobVersionConflictError,
     ScheduledJobDomainError,
     ScheduledJobService,
@@ -108,6 +109,8 @@ def _raise_domain_error(error: ScheduledJobDomainError) -> None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="version_conflict") from error
     if isinstance(error, JobAlreadyTriggeredError):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="job_already_triggered") from error
+    if isinstance(error, JobRunInProgressError):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
 
 
@@ -197,6 +200,84 @@ async def list_scheduled_jobs(
     return {"items": [_serialize_job(job) for job in jobs], "next_cursor": next_cursor}
 
 
+@scheduled_jobs.get("/incoming")
+async def list_incoming_scheduled_jobs(
+    current_user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+    view: Literal["ongoing", "paused", "history"] = Query(default="ongoing"),
+    cursor: str | None = Query(default=None, max_length=512),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    statuses = {
+        "ongoing": ("active",),
+        "paused": ("paused",),
+        "history": ("completed", "cancelled"),
+    }[view]
+    try:
+        jobs, next_cursor = await ScheduledJobService(db).list_incoming_jobs(
+            viewer_uid=current_user.uid,
+            statuses=statuses,
+            cursor=cursor,
+            limit=limit,
+        )
+    except ScheduledJobDomainError as error:
+        _raise_domain_error(error)
+    return {"items": [_serialize_job(job) for job in jobs], "next_cursor": next_cursor}
+
+
+@scheduled_jobs.get("/incoming/{job_id}/runs")
+async def list_incoming_scheduled_job_runs(
+    job_id: str,
+    current_user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+    cursor: str | None = Query(default=None, max_length=512),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    del current_user
+    try:
+        runs, next_cursor = await ScheduledJobService(db).list_incoming_runs(job_id=job_id, cursor=cursor, limit=limit)
+    except ScheduledJobDomainError as error:
+        _raise_domain_error(error)
+    return {"items": [_serialize_run(run) for run in runs], "next_cursor": next_cursor}
+
+
+@scheduled_jobs.post("/incoming/{job_id}/status")
+async def change_incoming_scheduled_job_status(
+    job_id: str,
+    payload: StatusChangeRequest,
+    current_user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        job = await ScheduledJobService(db).change_incoming_status(
+            job_id=job_id,
+            actor_uid=current_user.uid,
+            version=payload.version,
+            action=payload.action,
+            reason=payload.reason,
+        )
+        await db.commit()
+    except ScheduledJobDomainError as error:
+        await db.rollback()
+        _raise_domain_error(error)
+    return {"job": _serialize_job(job)}
+
+
+@scheduled_jobs.delete("/incoming/{job_id}")
+async def hide_incoming_scheduled_job(
+    job_id: str,
+    current_user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await ScheduledJobService(db).hide_incoming_job(job_id=job_id, user_uid=current_user.uid)
+        await db.commit()
+    except ScheduledJobDomainError as error:
+        await db.rollback()
+        _raise_domain_error(error)
+    return {"deleted_id": job_id}
+
+
 @scheduled_jobs.get("/{job_id}")
 async def get_scheduled_job(
     job_id: str,
@@ -272,3 +353,19 @@ async def change_scheduled_job_status(
         await db.rollback()
         _raise_domain_error(error)
     return {"job": _serialize_job(job)}
+
+
+@scheduled_jobs.delete("/{job_id}")
+async def delete_scheduled_job(
+    job_id: str,
+    version: int = Query(ge=1),
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await ScheduledJobService(db).delete_personal_job(job_id=job_id, owner_uid=current_user.uid, version=version)
+        await db.commit()
+    except ScheduledJobDomainError as error:
+        await db.rollback()
+        _raise_domain_error(error)
+    return {"deleted_id": job_id}

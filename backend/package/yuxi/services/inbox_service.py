@@ -90,6 +90,23 @@ class InboxService:
     async def mark_all_read(self, *, recipient_uid: str, category: Literal["notification", "task"]) -> int:
         return await self.repository.mark_all_read(recipient_uid=recipient_uid, category=category)
 
+    async def delete_notification(self, *, item_id: str, recipient_uid: str) -> int:
+        deleted_count = await self.repository.delete_notification(item_id=item_id, recipient_uid=recipient_uid)
+        if deleted_count == 0:
+            raise InboxItemNotFoundError("收件箱条目不存在")
+        return deleted_count
+
+    async def delete_task(self, *, job_id: str, owner_uid: str) -> int:
+        if not await self.repository.task_exists_for_owner(job_id=job_id, owner_uid=owner_uid):
+            raise InboxItemNotFoundError("任务不存在")
+        deleted_count = await self.repository.delete_task_events(job_id=job_id, owner_uid=owner_uid)
+        if deleted_count == 0:
+            raise InboxItemNotFoundError("收件箱条目不存在")
+        return deleted_count
+
+    async def clear_read(self, *, recipient_uid: str, category: Literal["notification", "task"]) -> int:
+        return await self.repository.clear_read(recipient_uid=recipient_uid, category=category)
+
     @staticmethod
     def _serialize_notification(item: InboxItem) -> dict:
         return {

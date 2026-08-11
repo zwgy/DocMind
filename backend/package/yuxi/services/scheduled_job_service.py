@@ -8,7 +8,7 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from binascii import Error as BinasciiError
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,10 +20,12 @@ from yuxi.scheduled_jobs.schemas import AgentAction, PersonalScheduledJobRequest
 from yuxi.scheduled_jobs.timing import next_run_at
 from yuxi.storage.postgres.models_business import User
 from yuxi.storage.postgres.models_scheduled_jobs import (
+    InboxItem,
     ScheduledJob,
     ScheduledJobAuditLog,
     ScheduledJobRecipient,
     ScheduledJobRun,
+    ScheduledJobUserState,
 )
 
 
@@ -40,6 +42,10 @@ class JobVersionConflictError(ScheduledJobDomainError):
 
 
 class JobAlreadyTriggeredError(ScheduledJobDomainError):
+    pass
+
+
+class JobRunInProgressError(ScheduledJobDomainError):
     pass
 
 
@@ -119,7 +125,10 @@ class ScheduledJobService:
         cursor: str | None,
         limit: int = 20,
     ) -> tuple[list[ScheduledJob], str | None]:
-        statement = select(ScheduledJob).where(ScheduledJob.owner_uid == owner_uid)
+        statement = select(ScheduledJob).where(
+            ScheduledJob.owner_uid == owner_uid,
+            ScheduledJob.source_type == "personal",
+        )
         statement = statement.where(ScheduledJob.status.in_(statuses))
         if cursor:
             cursor_updated_at, cursor_id = self._decode_cursor(cursor)
@@ -139,7 +148,11 @@ class ScheduledJobService:
 
     async def get_owned_job(self, *, job_id: str, owner_uid: str) -> ScheduledJob | None:
         return await self.db.scalar(
-            select(ScheduledJob).where(ScheduledJob.id == job_id, ScheduledJob.owner_uid == owner_uid)
+            select(ScheduledJob).where(
+                ScheduledJob.id == job_id,
+                ScheduledJob.owner_uid == owner_uid,
+                ScheduledJob.source_type == "personal",
+            )
         )
 
     async def pause(self, *, job_id: str, owner_uid: str, version: int) -> ScheduledJob:
@@ -285,9 +298,180 @@ class ScheduledJobService:
         page = rows[:limit]
         return page, self._encode_cursor(page[-1]) if len(rows) > limit else None
 
+    async def delete_personal_job(self, *, job_id: str, owner_uid: str, version: int) -> None:
+        """删除任务域数据；Conversation 是独立用户内容，不能被任务清理级联。"""
+        job = await self._lock_owned_job(job_id=job_id, owner_uid=owner_uid, version=version)
+        in_flight = await self.db.scalar(
+            select(ScheduledJobRun.id)
+            .where(
+                ScheduledJobRun.scheduled_job_id == job.id,
+                ScheduledJobRun.status.in_(("pending", "dispatching", "queued", "running")),
+            )
+            .limit(1)
+        )
+        if in_flight is not None:
+            raise JobRunInProgressError("任务正在排队或执行，请先取消并等待运行结束后再删除")
+
+        await self.db.execute(delete(InboxItem).where(InboxItem.scheduled_job_id == job.id))
+        await self.db.execute(delete(ScheduledJobUserState).where(ScheduledJobUserState.scheduled_job_id == job.id))
+        await self.db.execute(delete(ScheduledJobAuditLog).where(ScheduledJobAuditLog.scheduled_job_id == job.id))
+        await self.db.execute(delete(ScheduledJobRecipient).where(ScheduledJobRecipient.scheduled_job_id == job.id))
+        await self.db.execute(delete(ScheduledJobRun).where(ScheduledJobRun.scheduled_job_id == job.id))
+        await self.db.delete(job)
+        await self.db.flush()
+
+    async def list_incoming_jobs(
+        self,
+        *,
+        viewer_uid: str,
+        statuses: tuple[str, ...],
+        cursor: str | None,
+        limit: int = 20,
+    ) -> tuple[list[ScheduledJob], str | None]:
+        statement = (
+            select(ScheduledJob)
+            .outerjoin(
+                ScheduledJobUserState,
+                and_(
+                    ScheduledJobUserState.scheduled_job_id == ScheduledJob.id,
+                    ScheduledJobUserState.user_uid == viewer_uid,
+                ),
+            )
+            .where(
+                ScheduledJob.source_type == "incoming",
+                ScheduledJob.status.in_(statuses),
+                ScheduledJobUserState.hidden_at.is_(None),
+            )
+        )
+        if cursor:
+            cursor_updated_at, cursor_id = self._decode_cursor(cursor)
+            statement = statement.where(
+                or_(
+                    ScheduledJob.updated_at < cursor_updated_at,
+                    and_(ScheduledJob.updated_at == cursor_updated_at, ScheduledJob.id < cursor_id),
+                )
+            )
+        rows = list(
+            (
+                await self.db.scalars(
+                    statement.order_by(ScheduledJob.updated_at.desc(), ScheduledJob.id.desc()).limit(limit + 1)
+                )
+            ).all()
+        )
+        page = rows[:limit]
+        return page, self._encode_cursor(page[-1]) if len(rows) > limit else None
+
+    async def get_incoming_job(self, *, job_id: str) -> ScheduledJob | None:
+        return await self.db.scalar(
+            select(ScheduledJob).where(ScheduledJob.id == job_id, ScheduledJob.source_type == "incoming")
+        )
+
+    async def list_incoming_runs(
+        self, *, job_id: str, cursor: str | None, limit: int
+    ) -> tuple[list[ScheduledJobRun], str | None]:
+        if await self.get_incoming_job(job_id=job_id) is None:
+            raise ScheduledJobDomainError("任务不存在")
+        statement = select(ScheduledJobRun).where(ScheduledJobRun.scheduled_job_id == job_id)
+        if cursor:
+            created_at, run_id = self._decode_cursor(cursor)
+            statement = statement.where(
+                or_(
+                    ScheduledJobRun.created_at < created_at,
+                    and_(ScheduledJobRun.created_at == created_at, ScheduledJobRun.id < run_id),
+                )
+            )
+        rows = list(
+            (
+                await self.db.scalars(
+                    statement.order_by(ScheduledJobRun.created_at.desc(), ScheduledJobRun.id.desc()).limit(limit + 1)
+                )
+            ).all()
+        )
+        page = rows[:limit]
+        return page, self._encode_cursor(page[-1]) if len(rows) > limit else None
+
+    async def change_incoming_status(
+        self, *, job_id: str, actor_uid: str, version: int, action: str, reason: str | None = None
+    ) -> ScheduledJob:
+        job = await self._lock_incoming_job(job_id=job_id, version=version)
+        now = await self.repository.database_now()
+        before = {"status": job.status}
+        if action == "pause":
+            if job.schedule_kind == "at" or job.status != "active":
+                raise ScheduledJobDomainError("只有活动中的周期任务可以暂停")
+            job.status = "paused"
+            job.paused_at = now
+            job.next_run_at = None
+            audit_action = "paused"
+        elif action == "resume":
+            if job.status != "paused":
+                raise ScheduledJobDomainError("只有已暂停任务可以恢复")
+            job.status = "active"
+            job.paused_at = None
+            job.next_run_at = next_run_at(self.repository._schedule_from_job(job), job.timezone, now, inclusive=False)
+            audit_action = "resumed"
+        else:
+            if job.status not in {"active", "paused"}:
+                raise ScheduledJobDomainError("当前状态不能取消任务")
+            job.status = "cancelled"
+            job.cancelled_at = now
+            job.cancelled_reason = reason or "admin_cancelled"
+            job.next_run_at = None
+            audit_action = "cancelled"
+        job.version += 1
+        self._audit(
+            job=job,
+            actor_uid=actor_uid,
+            action=audit_action,
+            before_data=before,
+            after_data={"status": job.status},
+            reason=job.cancelled_reason if action == "cancel" else None,
+        )
+        await self.db.flush()
+        return job
+
+    async def hide_incoming_job(self, *, job_id: str, user_uid: str) -> None:
+        job = await self.db.scalar(
+            select(ScheduledJob)
+            .where(ScheduledJob.id == job_id, ScheduledJob.source_type == "incoming")
+            .with_for_update()
+        )
+        if job is None:
+            raise ScheduledJobDomainError("任务不存在")
+        if job.status not in {"completed", "cancelled"}:
+            raise ScheduledJobDomainError("请先取消任务，进入历史后再删除")
+        in_flight = await self.db.scalar(
+            select(ScheduledJobRun.id)
+            .where(
+                ScheduledJobRun.scheduled_job_id == job.id,
+                ScheduledJobRun.status.in_(("pending", "dispatching", "queued", "running")),
+            )
+            .limit(1)
+        )
+        if in_flight is not None:
+            raise JobRunInProgressError("任务仍有运行正在处理，请等待结束后再删除")
+        state = await self.db.scalar(
+            select(ScheduledJobUserState).where(
+                ScheduledJobUserState.scheduled_job_id == job.id,
+                ScheduledJobUserState.user_uid == user_uid,
+            )
+        )
+        now = await self.repository.database_now()
+        if state is None:
+            self.db.add(ScheduledJobUserState(scheduled_job_id=job.id, user_uid=user_uid, hidden_at=now))
+        else:
+            state.hidden_at = now
+        await self.db.flush()
+
     async def _lock_owned_job(self, *, job_id: str, owner_uid: str, version: int) -> ScheduledJob:
         job = await self.db.scalar(
-            select(ScheduledJob).where(ScheduledJob.id == job_id, ScheduledJob.owner_uid == owner_uid).with_for_update()
+            select(ScheduledJob)
+            .where(
+                ScheduledJob.id == job_id,
+                ScheduledJob.owner_uid == owner_uid,
+                ScheduledJob.source_type == "personal",
+            )
+            .with_for_update()
         )
         if job is None:
             raise ScheduledJobDomainError("任务不存在")
@@ -299,9 +483,22 @@ class ScheduledJobService:
         return await self.db.scalar(
             select(ScheduledJob).where(
                 ScheduledJob.owner_uid == owner_uid,
+                ScheduledJob.source_type == "personal",
                 ScheduledJob.create_request_key == request_key,
             )
         )
+
+    async def _lock_incoming_job(self, *, job_id: str, version: int) -> ScheduledJob:
+        job = await self.db.scalar(
+            select(ScheduledJob)
+            .where(ScheduledJob.id == job_id, ScheduledJob.source_type == "incoming")
+            .with_for_update()
+        )
+        if job is None:
+            raise ScheduledJobDomainError("任务不存在")
+        if job.version != version:
+            raise JobVersionConflictError("任务已被其他操作更新")
+        return job
 
     @staticmethod
     def _request_hash(request: PersonalScheduledJobRequest) -> str:

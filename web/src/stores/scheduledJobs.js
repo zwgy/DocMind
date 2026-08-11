@@ -12,6 +12,7 @@ function createPage() {
 export const useScheduledJobsStore = defineStore('scheduledJobs', () => {
   const pages = ref(Object.fromEntries(VIEWS.map((view) => [view, createPage()])))
   const activeView = ref('ongoing')
+  const sourceType = ref('personal')
 
   const currentPage = computed(() => pages.value[activeView.value])
 
@@ -24,7 +25,8 @@ export const useScheduledJobsStore = defineStore('scheduledJobs', () => {
     else page.loadingMore = true
     page.error = null
     try {
-      const response = await scheduledJobApi.list({
+      const listMethod = sourceType.value === 'incoming' ? scheduledJobApi.listIncoming : scheduledJobApi.list
+      const response = await listMethod({
         view,
         cursor: reset ? undefined : page.cursor,
         limit: 20
@@ -51,7 +53,10 @@ export const useScheduledJobsStore = defineStore('scheduledJobs', () => {
 
   async function changeStatus(job, action, reason) {
     try {
-      await scheduledJobApi.changeStatus(job.id, { action, version: job.version, ...(reason ? { reason } : {}) })
+      const changeMethod = job.source_type === 'incoming'
+        ? scheduledJobApi.changeIncomingStatus
+        : scheduledJobApi.changeStatus
+      await changeMethod(job.id, { action, version: job.version, ...(reason ? { reason } : {}) })
       message.success(action === 'pause' ? '任务已暂停' : action === 'resume' ? '任务已恢复' : '任务已取消')
       await Promise.all([refresh(activeView.value), refresh('ongoing'), refresh('paused'), refresh('history')])
     } catch (error) {
@@ -66,6 +71,20 @@ export const useScheduledJobsStore = defineStore('scheduledJobs', () => {
     return response?.job
   }
 
+  async function remove(job) {
+    await scheduledJobApi.remove(job)
+    message.success('记录已删除')
+    await refresh(activeView.value)
+  }
+
+  function setSourceType(value) {
+    if (!['personal', 'incoming'].includes(value) || sourceType.value === value) return
+    sourceType.value = value
+    activeView.value = 'ongoing'
+    pages.value = Object.fromEntries(VIEWS.map((view) => [view, createPage()]))
+    void refresh('ongoing')
+  }
+
   function setActiveView(view) {
     if (!VIEWS.includes(view)) return
     activeView.value = view
@@ -73,5 +92,17 @@ export const useScheduledJobsStore = defineStore('scheduledJobs', () => {
     if (!page.items.length && !page.loading) void refresh(view)
   }
 
-  return { activeView, currentPage, pages, load, refresh, changeStatus, update, setActiveView }
+  return {
+    activeView,
+    sourceType,
+    currentPage,
+    pages,
+    load,
+    refresh,
+    changeStatus,
+    update,
+    remove,
+    setActiveView,
+    setSourceType
+  }
 })

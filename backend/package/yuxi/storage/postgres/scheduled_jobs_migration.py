@@ -43,6 +43,14 @@ UPGRADE_STATEMENTS = (
         "AND job.id = run.scheduled_job_id AND conversation.uid = job.owner_uid"
     ),
     (
+        "UPDATE conversations AS conversation SET extra_metadata = jsonb_set("
+        "COALESCE(conversation.extra_metadata, '{}'::jsonb), '{scheduled_source_type}', "
+        "to_jsonb(job.source_type), true) FROM scheduled_job_runs AS run, scheduled_jobs AS job "
+        "WHERE run.conversation_id = conversation.id::text AND job.id = run.scheduled_job_id "
+        "AND conversation.extra_metadata->>'source' = 'scheduled_job' "
+        "AND conversation.extra_metadata->>'scheduled_source_type' IS NULL"
+    ),
+    (
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_sjr_conversation_thread_id "
         "ON scheduled_job_runs(conversation_thread_id) WHERE conversation_thread_id IS NOT NULL"
     ),
@@ -59,10 +67,32 @@ UPGRADE_STATEMENTS = (
     "ALTER TABLE IF EXISTS scheduled_job_candidates ALTER COLUMN notification_content DROP NOT NULL",
     "ALTER TABLE IF EXISTS scheduled_job_candidates ALTER COLUMN owner_uid DROP NOT NULL",
     "ALTER TABLE IF EXISTS scheduled_job_candidates ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE IF EXISTS inbox_items ADD COLUMN IF NOT EXISTS hidden_at TIMESTAMPTZ",
+    (
+        "CREATE INDEX IF NOT EXISTS ix_ibi_recipient_category_hidden_read_created "
+        "ON inbox_items(recipient_uid, category, hidden_at, is_read, created_at DESC, id DESC)"
+    ),
+    "ALTER TABLE IF EXISTS scheduled_jobs ALTER COLUMN owner_uid DROP NOT NULL",
+    (
+        "UPDATE scheduled_jobs SET owner_uid = NULL "
+        "WHERE source_type = 'incoming' AND action_type = 'notification' AND owner_uid IS NOT NULL"
+    ),
+    "ALTER TABLE IF EXISTS scheduled_jobs DROP CONSTRAINT IF EXISTS ck_sj_source_owner",
+    (
+        "ALTER TABLE IF EXISTS scheduled_jobs ADD CONSTRAINT ck_sj_source_owner CHECK ("
+        "(source_type = 'personal' AND owner_uid IS NOT NULL) OR "
+        "(source_type = 'incoming' AND action_type = 'notification' AND owner_uid IS NULL) OR "
+        "(source_type = 'incoming' AND action_type = 'agent' AND owner_uid IS NOT NULL)) NOT VALID"
+    ),
     "ALTER TABLE IF EXISTS scheduled_jobs DROP CONSTRAINT IF EXISTS ck_sj_action_type",
     (
         "ALTER TABLE IF EXISTS scheduled_jobs ADD CONSTRAINT ck_sj_action_type "
         "CHECK (action_type IN ('notification', 'agent'))"
+    ),
+    "ALTER TABLE IF EXISTS scheduled_jobs DROP CONSTRAINT IF EXISTS ck_sj_incoming_notification_only",
+    (
+        "ALTER TABLE IF EXISTS scheduled_jobs ADD CONSTRAINT ck_sj_incoming_notification_only "
+        "CHECK (source_type <> 'incoming' OR action_type = 'notification') NOT VALID"
     ),
     "ALTER TABLE IF EXISTS scheduled_job_runs DROP CONSTRAINT IF EXISTS ck_sjr_status",
     (
@@ -83,6 +113,7 @@ UPGRADE_STATEMENTS = (
 # 保留为显式 SQL，避免业务代码在运行时执行不可逆删除。
 DOWNGRADE_SQL = """
 DROP TABLE IF EXISTS scheduled_service_heartbeats;
+DROP TABLE IF EXISTS scheduled_job_user_states;
 DROP TABLE IF EXISTS scheduled_job_audit_logs;
 DROP TABLE IF EXISTS inbox_items;
 DROP TABLE IF EXISTS scheduled_job_runs;

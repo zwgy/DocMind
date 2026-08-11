@@ -59,6 +59,7 @@ export type InboxUnreadCounts = {
 }
 
 type MarkReadResponse = { marked_count: number }
+type DeleteResponse = { deleted_count: number }
 
 async function request<T>(path: string, token?: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(apiUrl(path), {
@@ -95,6 +96,17 @@ export const inboxApi = {
     ),
   markAllRead: (category: InboxCategory, token?: string) =>
     request<MarkReadResponse>('/api/inbox/read-all', token, {
+      method: 'POST',
+      body: JSON.stringify({ category })
+    }),
+  remove: (category: InboxCategory, id: string, token?: string) =>
+    request<DeleteResponse>(
+      `/api/inbox/${category === 'task' ? 'tasks' : 'notifications'}/${encodeURIComponent(id)}`,
+      token,
+      { method: 'DELETE' }
+    ),
+  clearRead: (category: InboxCategory, token?: string) =>
+    request<DeleteResponse>('/api/inbox/clear-read', token, {
       method: 'POST',
       body: JSON.stringify({ category })
     })

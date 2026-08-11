@@ -161,3 +161,45 @@ async def test_notification_cursor_rejects_wrong_category_payload():
 
     with pytest.raises(InboxDomainError, match="cursor 无效"):
         InboxService._decode_notification_cursor(cursor)
+
+
+async def test_delete_notification_scopes_cleanup_to_current_recipient(monkeypatch):
+    captured = {}
+
+    class FakeService:
+        def __init__(self, _db):
+            pass
+
+        async def delete_notification(self, **kwargs):
+            captured.update(kwargs)
+            return 1
+
+    monkeypatch.setattr(inbox_router, "InboxService", FakeService)
+
+    response = await inbox_router.delete_notification("ibi-1", current_user=SimpleNamespace(uid="alice"), db=_FakeDb())
+
+    assert response == {"deleted_count": 1}
+    assert captured == {"item_id": "ibi-1", "recipient_uid": "alice"}
+
+
+async def test_clear_read_keeps_category_and_current_recipient(monkeypatch):
+    captured = {}
+
+    class FakeService:
+        def __init__(self, _db):
+            pass
+
+        async def clear_read(self, **kwargs):
+            captured.update(kwargs)
+            return 3
+
+    monkeypatch.setattr(inbox_router, "InboxService", FakeService)
+
+    response = await inbox_router.clear_read(
+        inbox_router.ReadAllRequest(category="notification"),
+        current_user=SimpleNamespace(uid="alice"),
+        db=_FakeDb(),
+    )
+
+    assert response == {"deleted_count": 3}
+    assert captured == {"recipient_uid": "alice", "category": "notification"}

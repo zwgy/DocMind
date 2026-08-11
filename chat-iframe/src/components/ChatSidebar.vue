@@ -55,6 +55,12 @@ function getThreadTitle(thread: ChatThread) {
   return thread.title || '来文咨询'
 }
 
+function canDeleteThread(thread: ChatThread) {
+  return (
+    thread.thread_kind !== 'scheduled_run' || thread.metadata?.scheduled_source_type === 'personal'
+  )
+}
+
 function formatThreadUpdatedAt(value?: string) {
   if (!value) return '-'
   const date = new Date(value)
@@ -253,7 +259,7 @@ onBeforeUnmount(() => hideTitleTooltip())
                 <Pin v-else :size="15" />
               </button>
               <button
-                v-if="thread.thread_kind !== 'scheduled_run'"
+                v-if="canDeleteThread(thread)"
                 type="button"
                 title="删除"
                 @click.stop="requestDeleteThread(thread.id)"

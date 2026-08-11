@@ -120,3 +120,48 @@ async def mark_all_read(
         await db.rollback()
         _raise_inbox_error(error)
     return {"marked_count": marked_count}
+
+
+@inbox.delete("/notifications/{item_id}")
+async def delete_notification(
+    item_id: str,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        deleted_count = await InboxService(db).delete_notification(item_id=item_id, recipient_uid=current_user.uid)
+        await db.commit()
+    except InboxDomainError as error:
+        await db.rollback()
+        _raise_inbox_error(error)
+    return {"deleted_count": deleted_count}
+
+
+@inbox.delete("/tasks/{job_id}")
+async def delete_task(
+    job_id: str,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        deleted_count = await InboxService(db).delete_task(job_id=job_id, owner_uid=current_user.uid)
+        await db.commit()
+    except InboxDomainError as error:
+        await db.rollback()
+        _raise_inbox_error(error)
+    return {"deleted_count": deleted_count}
+
+
+@inbox.post("/clear-read")
+async def clear_read(
+    payload: ReadAllRequest,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        deleted_count = await InboxService(db).clear_read(recipient_uid=current_user.uid, category=payload.category)
+        await db.commit()
+    except InboxDomainError as error:
+        await db.rollback()
+        _raise_inbox_error(error)
+    return {"deleted_count": deleted_count}

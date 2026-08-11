@@ -88,7 +88,7 @@ async def test_agent_action_creates_isolated_run_from_current_visible_agent_conf
         "timeout_seconds": 300,
     }
     run = SimpleNamespace(id="sjr-1", action_snapshot=action)
-    job = SimpleNamespace(id="sj-1", owner_uid="user-1", name="每日待办")
+    job = SimpleNamespace(id="sj-1", owner_uid="user-1", source_type="personal", name="每日待办")
 
     class FakeRepository:
         def __init__(self):
@@ -140,7 +140,12 @@ async def test_agent_action_creates_isolated_run_from_current_visible_agent_conf
         "uid": "user-1",
         "agent_id": "daily-assistant",
         "title": "定时任务：每日待办",
-        "metadata": {"source": "scheduled_job", "scheduled_job_id": "sj-1", "scheduled_job_run_id": "sjr-1"},
+        "metadata": {
+            "source": "scheduled_job",
+            "scheduled_source_type": "personal",
+            "scheduled_job_id": "sj-1",
+            "scheduled_job_run_id": "sjr-1",
+        },
         "commit": False,
     }
     assert created["agent_run"] == {

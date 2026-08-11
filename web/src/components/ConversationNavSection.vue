@@ -14,7 +14,7 @@
             class="conversation-item"
             :class="{ active: currentChatId === chat.id }"
             @click="$emit('select-chat', chat.id)"
-            @click.middle="chat.thread_kind !== 'scheduled_run' && $emit('delete-chat', chat.id)"
+            @click.middle="canDeleteChat(chat) && $emit('delete-chat', chat.id)"
           >
             <Clock3
               v-if="chat.thread_kind === 'scheduled_run'"
@@ -67,7 +67,7 @@
                       重命名
                     </a-menu-item>
                     <a-menu-item
-                      v-if="chat.thread_kind !== 'scheduled_run'"
+                      v-if="canDeleteChat(chat)"
                       key="delete"
                       :icon="h(Trash2, { size: 14 })"
                       @click.stop="$emit('delete-chat', chat.id)"
@@ -143,6 +143,10 @@ const props = defineProps({
     default: true
   }
 })
+
+function canDeleteChat(chat) {
+  return chat.thread_kind !== 'scheduled_run' || chat.metadata?.scheduled_source_type === 'personal'
+}
 
 const emit = defineEmits([
   'select-chat',

@@ -65,6 +65,9 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const actingJobId = ref<string | null>(null)
 const cancellingJob = ref<ScheduledJob | null>(null)
+const deletingJob = ref<ScheduledJob | null>(null)
+const deletingInboxItem = ref<InboxItem | null>(null)
+const clearingRead = ref(false)
 const editingJob = ref<ScheduledJob | null>(null)
 const editForm = ref(createEditForm())
 const saving = ref(false)
@@ -86,6 +89,7 @@ const currentItems = computed(() =>
   section.value === 'scheduled' ? currentScheduledPage.value.items : inboxItems.value
 )
 const hasUnreadInboxItems = computed(() => inboxItems.value.some(unread))
+const hasReadInboxItems = computed(() => inboxItems.value.some((item) => !unread(item)))
 const scheduleTypeLabel = computed(() =>
   editingJob.value?.action_type === 'agent' ? '执行方式' : '提醒方式'
 )
@@ -307,6 +311,22 @@ async function changeStatus(job: ScheduledJob, action: 'pause' | 'resume' | 'can
   }
 }
 
+async function deleteJob() {
+  const job = deletingJob.value
+  if (!job || !props.token) return
+  actingJobId.value = job.id
+  try {
+    await scheduledJobApi.remove(job.id, job.version, props.token)
+    deletingJob.value = null
+    successMessage.value = '定时记录已删除'
+    await refreshScheduledPages()
+  } catch (value) {
+    error.value = value instanceof Error ? value.message : '删除任务失败'
+  } finally {
+    actingJobId.value = null
+  }
+}
+
 function openEditor(job: ScheduledJob) {
   const cronEditor = parseCronEditor(job.cron_expression)
   error.value = ''
@@ -417,6 +437,31 @@ async function markAll() {
   }
 }
 
+async function deleteInboxItem() {
+  const item = deletingInboxItem.value
+  if (!item || !props.token) return
+  try {
+    await inboxApi.remove(inboxCategory.value, itemId(item), props.token)
+    deletingInboxItem.value = null
+    successMessage.value = '收件记录已删除'
+    await refresh()
+  } catch (value) {
+    error.value = value instanceof Error ? value.message : '删除收件记录失败'
+  }
+}
+
+async function clearReadItems() {
+  if (!props.token) return
+  try {
+    await inboxApi.clearRead(inboxCategory.value, props.token)
+    clearingRead.value = false
+    successMessage.value = '已读记录已清空'
+    await refresh()
+  } catch (value) {
+    error.value = value instanceof Error ? value.message : '清空已读失败'
+  }
+}
+
 watch(
   () => [props.open, props.token, section.value, scheduleView.value, inboxCategory.value],
   ([open]) => {
@@ -514,6 +559,15 @@ onMounted(() => {
       >
         <CheckCheck :size="14" />全部已读
       </button>
+      <button
+        v-if="hasReadInboxItems"
+        type="button"
+        class="mark-all danger"
+        :disabled="loading"
+        @click="clearingRead = true"
+      >
+        <Trash2 :size="14" />清空已读
+      </button>
     </div>
 
     <p v-if="successMessage" class="feedback-banner success" role="status">
@@ -554,8 +608,15 @@ onMounted(() => {
             </div>
             <p class="job-content" :title="jobContent(job)">{{ jobContent(job) }}</p>
             <div class="trigger"><CalendarClock :size="14" />{{ jobTrigger(job) }}</div>
-            <div v-if="['active', 'paused'].includes(job.status)" class="card-actions">
-              <button type="button" title="编辑任务" @click="openEditor(job)">编辑</button>
+            <div class="card-actions">
+              <button
+                v-if="['active', 'paused'].includes(job.status)"
+                type="button"
+                title="编辑任务"
+                @click="openEditor(job)"
+              >
+                编辑
+              </button>
               <button
                 v-if="job.status === 'active' && job.schedule_kind !== 'at'"
                 type="button"
@@ -573,23 +634,30 @@ onMounted(() => {
                 <Play :size="14" />恢复
               </button>
               <button
+                v-if="['active', 'paused'].includes(job.status)"
                 type="button"
                 class="danger"
                 :disabled="actingJobId === job.id"
                 @click="cancellingJob = job"
               >
-                <Trash2 :size="14" />取消
+                <X :size="14" />取消
+              </button>
+              <button
+                type="button"
+                class="danger"
+                :disabled="actingJobId === job.id"
+                @click="deletingJob = job"
+              >
+                <Trash2 :size="14" />删除
               </button>
             </div>
           </div>
         </article>
       </template>
       <template v-else>
-        <component
+        <article
           v-for="item in inboxItems"
-          :is="isTaskItem(item) ? 'article' : 'button'"
           :key="itemId(item)"
-          :type="isTaskItem(item) ? undefined : 'button'"
           class="inbox-card"
           :class="{ unread: unread(item), clickable: !isTaskItem(item) }"
           @click="mark(item)"
@@ -630,8 +698,15 @@ onMounted(() => {
             >
               <Eye :size="14" />查看结果
             </button>
+            <button
+              type="button"
+              class="view-result danger"
+              @click.stop="deletingInboxItem = item"
+            >
+              <Trash2 :size="14" />删除
+            </button>
           </div>
-        </component>
+        </article>
       </template>
     </section>
     <div
@@ -658,6 +733,49 @@ onMounted(() => {
           >
             确认取消
           </button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="deletingJob" class="dialog-mask confirm-mask">
+      <section class="confirm-dialog" role="dialog" aria-modal="true" aria-label="删除定时任务">
+        <span class="confirm-icon" aria-hidden="true"><TriangleAlert :size="22" /></span>
+        <h3>删除“{{ deletingJob.name }}”吗？</h3>
+        <p>任务定义和运行历史将被删除，已经生成的结果会话仍会保留。</p>
+        <div class="confirm-actions">
+          <button type="button" class="secondary" @click="deletingJob = null">暂不删除</button
+          ><button
+            type="button"
+            class="danger"
+            :disabled="actingJobId === deletingJob.id"
+            @click="deleteJob"
+          >
+            确认删除
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="deletingInboxItem" class="dialog-mask confirm-mask">
+      <section class="confirm-dialog" role="dialog" aria-modal="true" aria-label="删除收件记录">
+        <span class="confirm-icon" aria-hidden="true"><TriangleAlert :size="22" /></span>
+        <h3>删除这条收件记录吗？</h3>
+        <p>删除只清理当前账号的列表记录，不会删除关联的结果会话。</p>
+        <div class="confirm-actions">
+          <button type="button" class="secondary" @click="deletingInboxItem = null">暂不删除</button
+          ><button type="button" class="danger" @click="deleteInboxItem">确认删除</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="clearingRead" class="dialog-mask confirm-mask">
+      <section class="confirm-dialog" role="dialog" aria-modal="true" aria-label="清空已读记录">
+        <span class="confirm-icon" aria-hidden="true"><TriangleAlert :size="22" /></span>
+        <h3>清空当前分类的已读记录吗？</h3>
+        <p>未读记录不会受影响，关联的结果会话也会保留。</p>
+        <div class="confirm-actions">
+          <button type="button" class="secondary" @click="clearingRead = false">暂不清空</button
+          ><button type="button" class="danger" @click="clearReadItems">确认清空</button>
         </div>
       </section>
     </div>
@@ -929,6 +1047,10 @@ onMounted(() => {
 }
 .mark-all:hover {
   background: var(--main-50);
+}
+.mark-all.danger,
+.view-result.danger {
+  color: var(--color-error-700) !important;
 }
 .mark-all:disabled,
 .card-actions button:disabled {

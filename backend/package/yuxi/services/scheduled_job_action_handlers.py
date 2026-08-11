@@ -58,7 +58,12 @@ class AgentActionHandler:
             uid=job.owner_uid,
             agent_id=action.agent_slug,
             title=f"定时任务：{job.name}",
-            metadata={"source": "scheduled_job", "scheduled_job_id": job.id, "scheduled_job_run_id": run.id},
+            metadata={
+                "source": "scheduled_job",
+                "scheduled_source_type": job.source_type,
+                "scheduled_job_id": job.id,
+                "scheduled_job_run_id": run.id,
+            },
             commit=False,
         )
         agent_run, _ = await create_agent_run(

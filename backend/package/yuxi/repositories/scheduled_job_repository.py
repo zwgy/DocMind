@@ -369,6 +369,8 @@ class ScheduledJobRepository:
     async def _write_agent_task_event(
         self, *, job: ScheduledJob, run: ScheduledJobRun, status: Literal["succeeded", "failed", "cancelled"]
     ) -> None:
+        if not job.owner_uid:
+            raise ValueError("Agent 定时任务缺少个人所有者")
         if status == "succeeded":
             title = "定时 Agent 任务已完成"
             content = (run.result_data or {}).get("result_preview") or f"任务“{job.name}”已完成。"
@@ -409,7 +411,8 @@ class ScheduledJobRepository:
             title = "定时任务执行失败"
             content = error_message or f"任务“{job.name}”执行失败，请查看运行记录。"
         await InboxRepository(self.db).insert_event_if_absent(
-            recipient_uid=job.owner_uid,
+            # 来文没有个人所有者，异常只通知实际启用任务的管理员，不据此授予任何管理权限。
+            recipient_uid=job.owner_uid or job.created_by_uid,
             scheduled_job_id=job.id,
             scheduled_job_run_id=run.id,
             category="notification",

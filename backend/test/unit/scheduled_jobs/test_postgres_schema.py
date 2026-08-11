@@ -2,7 +2,13 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from yuxi.storage.postgres.models_knowledge import IncomingDocument
-from yuxi.storage.postgres.models_scheduled_jobs import InboxItem, ScheduledJob, ScheduledJobCandidate, ScheduledJobRun
+from yuxi.storage.postgres.models_scheduled_jobs import (
+    InboxItem,
+    ScheduledJob,
+    ScheduledJobCandidate,
+    ScheduledJobRun,
+    ScheduledJobUserState,
+)
 from yuxi.storage.postgres.scheduled_jobs_migration import DOWNGRADE_SQL, UPGRADE_STATEMENTS
 
 
@@ -16,6 +22,9 @@ def test_scheduled_job_postgres_ddl_has_schedule_and_idempotency_guards():
     assert "ck_sj_schedule_fields" in ddl
     assert "ck_sj_request_idempotency_pair" in ddl
     assert "ck_sj_source_candidate_type" in ddl
+    assert "ck_sj_source_owner" in ddl
+    assert "ck_sj_incoming_notification_only" in ddl
+    assert "owner_uid VARCHAR(64) NOT NULL" not in ddl
     assert "WHERE source_candidate_id IS NOT NULL" in indexes
     assert "WHERE status = 'active' AND next_run_at IS NOT NULL" in indexes
 
@@ -28,6 +37,7 @@ def test_run_and_inbox_postgres_ddl_protect_lease_and_event_idempotency():
     inbox_indexes = "\n".join(
         str(CreateIndex(index).compile(dialect=postgresql.dialect())) for index in InboxItem.__table__.indexes
     )
+    user_state_ddl = str(CreateTable(ScheduledJobUserState.__table__).compile(dialect=postgresql.dialect()))
 
     assert "ck_sjr_dispatching_lease" in run_ddl
     assert "ck_sjr_terminal_finished_at" in run_ddl
@@ -39,6 +49,10 @@ def test_run_and_inbox_postgres_ddl_protect_lease_and_event_idempotency():
     assert "CREATE INDEX ix_sjr_agent_reconcile" in run_indexes
     assert "WHERE action_type = 'agent' AND status IN ('queued', 'running')" in run_indexes
     assert "CREATE UNIQUE INDEX uq_ibi_recipient_event_key ON inbox_items (recipient_uid, event_key)" in inbox_indexes
+    assert "hidden_at TIMESTAMP WITH TIME ZONE" in str(
+        CreateTable(InboxItem.__table__).compile(dialect=postgresql.dialect())
+    )
+    assert "PRIMARY KEY (scheduled_job_id, user_uid)" in user_state_ddl
 
 
 def test_scheduled_jobs_migration_has_idempotent_upgrade_and_manual_downgrade_sql():
@@ -46,6 +60,10 @@ def test_scheduled_jobs_migration_has_idempotent_upgrade_and_manual_downgrade_sq
     assert any("notification_title" in statement for statement in UPGRADE_STATEMENTS)
     assert any("notification_content DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
     assert any("owner_uid DROP NOT NULL" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("hidden_at TIMESTAMPTZ" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("ck_sj_source_owner" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("ck_sj_incoming_notification_only" in statement for statement in UPGRADE_STATEMENTS)
+    assert any("scheduled_source_type" in statement for statement in UPGRADE_STATEMENTS)
     assert any("ADD COLUMN IF NOT EXISTS version" in statement for statement in UPGRADE_STATEMENTS)
     assert any("conversation_thread_id VARCHAR(64)" in statement for statement in UPGRADE_STATEMENTS)
     assert any("uq_sjr_conversation_thread_id" in statement for statement in UPGRADE_STATEMENTS)
@@ -70,10 +88,11 @@ def test_scheduled_jobs_migration_has_idempotent_upgrade_and_manual_downgrade_sq
         or "IF NOT EXISTS" in statement
         or "DROP NOT NULL" in statement
         or "ADD CONSTRAINT" in statement
-        or statement.startswith("UPDATE scheduled_job_runs")
+        or statement.startswith("UPDATE ")
         for statement in UPGRADE_STATEMENTS
     )
     assert "DROP TABLE IF EXISTS scheduled_jobs" in DOWNGRADE_SQL
+    assert "DROP TABLE IF EXISTS scheduled_job_user_states" in DOWNGRADE_SQL
     assert "DROP COLUMN IF EXISTS archived_at" in DOWNGRADE_SQL
 
 

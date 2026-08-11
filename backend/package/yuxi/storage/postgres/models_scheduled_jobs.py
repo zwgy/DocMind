@@ -85,7 +85,7 @@ class ScheduledJob(Base):
     __tablename__ = "scheduled_jobs"
 
     id = Column(String(64), primary_key=True)
-    owner_uid = Column(String(64), ForeignKey("users.uid", ondelete="RESTRICT"), nullable=False)
+    owner_uid = Column(String(64), ForeignKey("users.uid", ondelete="RESTRICT"))
     source_type = Column(String(16), nullable=False)
     source_candidate_id = Column(String(64), ForeignKey("scheduled_job_candidates.id", ondelete="RESTRICT"))
     create_request_key = Column(String(128))
@@ -114,12 +114,22 @@ class ScheduledJob(Base):
     __table_args__ = (
         CheckConstraint("source_type IN ('incoming', 'personal')", name="ck_sj_source_type"),
         CheckConstraint(
+            "(source_type = 'personal' AND owner_uid IS NOT NULL) OR "
+            "(source_type = 'incoming' AND action_type = 'notification' AND owner_uid IS NULL) OR "
+            "(source_type = 'incoming' AND action_type = 'agent' AND owner_uid IS NOT NULL)",
+            name="ck_sj_source_owner",
+        ),
+        CheckConstraint(
             "(source_type = 'incoming' AND source_candidate_id IS NOT NULL) OR "
             "(source_type = 'personal' AND source_candidate_id IS NULL)",
             name="ck_sj_source_candidate_type",
         ),
         CheckConstraint("schedule_kind IN ('at', 'interval', 'cron')", name="ck_sj_schedule_kind"),
         CheckConstraint("action_type IN ('notification', 'agent')", name="ck_sj_action_type"),
+        CheckConstraint(
+            "source_type <> 'incoming' OR action_type = 'notification'",
+            name="ck_sj_incoming_notification_only",
+        ),
         CheckConstraint("status IN ('active', 'paused', 'completed', 'cancelled')", name="ck_sj_status"),
         CheckConstraint("version > 0", name="ck_sj_version"),
         CheckConstraint(
@@ -254,6 +264,7 @@ class InboxItem(Base):
     content_snapshot = Column(Text, nullable=False)
     is_read = Column(Boolean, nullable=False, default=False)
     read_at = Column(DateTime(timezone=True))
+    hidden_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
 
@@ -274,6 +285,20 @@ class InboxItem(Base):
         ),
         Index("ix_ibi_recipient_job_category_read", "recipient_uid", "scheduled_job_id", "category", "is_read"),
     )
+
+
+class ScheduledJobUserState(Base):
+    """共享来文任务的列表可见状态；隐藏只影响当前用户。"""
+
+    __tablename__ = "scheduled_job_user_states"
+
+    scheduled_job_id = Column(String(64), ForeignKey("scheduled_jobs.id", ondelete="RESTRICT"), primary_key=True)
+    user_uid = Column(String(64), ForeignKey("users.uid", ondelete="RESTRICT"), primary_key=True)
+    hidden_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (Index("ix_sjus_user_hidden_at", "user_uid", "hidden_at"),)
 
 
 class ScheduledJobAuditLog(Base):
