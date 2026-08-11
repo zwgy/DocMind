@@ -146,6 +146,7 @@ watch(
     </a-tabs>
     <div class="drawer-actions">
       <a-button
+        class="mark-all-read-button"
         size="small"
         :disabled="!store.counts[`${store.category}_unread_count`]"
         @click="store.markAllRead()"
@@ -242,6 +243,14 @@ watch(
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+.drawer-actions :deep(.mark-all-read-button:not(:disabled)) {
+  border-color: var(--main-100);
+  color: var(--main-700);
+  background: var(--main-50);
+}
+.drawer-actions :deep(.mark-all-read-button:not(:disabled):hover) {
+  border-color: var(--main-500);
 }
 .drawer-actions :deep(.delete-read-button:not(:disabled)) {
   border-color: var(--color-error-100);

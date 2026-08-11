@@ -27,6 +27,7 @@ test('web inbox exposes confirmed single cleanup and delete-read actions', () =>
   assert.match(inboxDrawer, /@confirm="removeItem\(item\)"/)
   assert.match(inboxDrawer, /@confirm="clearRead"/)
   assert.match(inboxDrawer, /class="drawer-actions"/)
+  assert.match(inboxDrawer, /class="mark-all-read-button"/)
   assert.match(inboxDrawer, /<CheckCheck :size="15" \/>全部已读/)
   assert.match(inboxDrawer, /class="delete-read-button"/)
   assert.match(inboxDrawer, /<Trash2 :size="15" \/>删除已读/)
