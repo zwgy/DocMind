@@ -1,15 +1,17 @@
 import os
 
+import httpx
 import pytest
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 
 from yuxi.models.providers.builtin import BUILTIN_PROVIDERS
 from yuxi.models.providers.service import (
-    check_credential_status,
     _normalize_payload,
     _normalize_remote_model,
+    check_credential_status,
     fetch_remote_models,
+    probe_model_context_length,
 )
 
 
@@ -41,6 +43,7 @@ def test_normalize_payload_normalizes_model_context_length():
     )
 
     assert payload["enabled_models"][0]["context_length"] == 32768
+    assert payload["enabled_models"][0]["context_length_source"] == "manual"
 
 
 def test_normalize_payload_normalizes_chat_context_budget_limits():
@@ -134,9 +137,7 @@ def test_normalize_payload_rejects_invalid_chat_context_budget_limits(field_name
                 "provider_id": "ollama-local",
                 "display_name": "Ollama Local",
                 "base_url": "http://localhost:11434/v1",
-                "enabled_models": [
-                    {"id": "qwen3.6:35b", "type": "chat", field_name: value}
-                ],
+                "enabled_models": [{"id": "qwen3.6:35b", "type": "chat", field_name: value}],
             }
         )
 
@@ -155,6 +156,59 @@ def test_normalize_payload_removes_context_length_from_non_chat_models(model_typ
     assert "context_length" not in payload["enabled_models"][0]
 
 
+def test_normalize_payload_removes_derived_context_fields():
+    payload = _normalize_payload(
+        {
+            "provider_id": "local-models",
+            "display_name": "Local Models",
+            "base_url": "https://example.com/v1",
+            "enabled_models": [
+                {
+                    "id": "test-model",
+                    "type": "chat",
+                    "effective_context_length": 32768,
+                    "effective_context_length_source": "default",
+                }
+            ],
+        }
+    )
+
+    model = payload["enabled_models"][0]
+    assert "effective_context_length" not in model
+    assert "effective_context_length_source" not in model
+
+
+def test_normalize_payload_rejects_invalid_context_length_source():
+    with pytest.raises(ValueError, match="context_length_source 必须是"):
+        _normalize_payload(
+            {
+                "provider_id": "local-models",
+                "display_name": "Local Models",
+                "base_url": "https://example.com/v1",
+                "enabled_models": [
+                    {
+                        "id": "test-model",
+                        "type": "chat",
+                        "context_length": 32768,
+                        "context_length_source": "default",
+                    }
+                ],
+            }
+        )
+
+
+def test_normalize_payload_validates_context_against_system_reserves():
+    with pytest.raises(ValueError, match="context_length 必须大于"):
+        _normalize_payload(
+            {
+                "provider_id": "local-models",
+                "display_name": "Local Models",
+                "base_url": "https://example.com/v1",
+                "enabled_models": [{"id": "test-model", "type": "chat", "context_length": 4096}],
+            }
+        )
+
+
 @pytest.mark.parametrize("context_length", [0, -1, 1.5, True, "invalid"])
 def test_normalize_payload_rejects_invalid_model_context_length(context_length):
     with pytest.raises(ValueError, match="context_length 必须是正整数"):
@@ -163,9 +217,7 @@ def test_normalize_payload_rejects_invalid_model_context_length(context_length):
                 "provider_id": "ollama-local",
                 "display_name": "Ollama Local",
                 "base_url": "http://localhost:11434/v1",
-                "enabled_models": [
-                    {"id": "qwen3.6:35b", "type": "chat", "context_length": context_length}
-                ],
+                "enabled_models": [{"id": "qwen3.6:35b", "type": "chat", "context_length": context_length}],
             }
         )
 
@@ -216,6 +268,8 @@ def test_normalize_remote_model_preserves_detailed_model_config():
     assert model["id"] == "xiaomi/mimo-v2-omni"
     assert model["display_name"] == "Xiaomi: MiMo-V2-Omni"
     assert model["type"] == "chat"
+    assert model["context_length"] == 262144
+    assert model["context_length_source"] == "models_api"
     assert model["input_modalities"] == ["text", "audio", "image", "video"]
     assert "max_completion_tokens" not in model
     assert model["raw_metadata"]["supported_parameters"] == ["temperature", "tools"]
@@ -226,6 +280,80 @@ def test_normalize_remote_model_uses_endpoint_model_type():
 
     assert model["id"] == "BAAI/bge-m3"
     assert model["type"] == "embedding"
+
+
+def test_normalize_remote_model_prefers_vllm_max_model_len():
+    model = _normalize_remote_model(
+        {
+            "id": "Qwen/Qwen3-32B",
+            "max_model_len": "65536",
+            "context_length": 32768,
+        }
+    )
+
+    assert model["context_length"] == 65536
+    assert model["context_length_source"] == "models_api"
+
+
+@pytest.mark.asyncio
+async def test_probe_model_context_length_matches_exact_model_id(monkeypatch):
+    requested = {}
+
+    class FakeAsyncClient:
+        def __init__(self, *, timeout):
+            requested["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_value, traceback):
+            return False
+
+        async def get(self, url, *, headers):
+            requested["url"] = url
+            requested["headers"] = headers
+            request = httpx.Request("GET", url)
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "data": [
+                        {"id": "Qwen/Qwen3-32B-AWQ", "max_model_len": 131072},
+                        {"id": "Qwen/Qwen3-32B", "max_model_len": 65536},
+                    ]
+                },
+            )
+
+    monkeypatch.setattr("yuxi.models.providers.service.httpx.AsyncClient", FakeAsyncClient)
+
+    class Provider:
+        provider_type = "openai"
+        models_endpoint = "/models"
+        base_url = "https://example.com/v1"
+        headers_json = {"X-Test": "1"}
+        api_key = "sk-test"
+        api_key_env = None
+
+    result = await probe_model_context_length(Provider(), "Qwen/Qwen3-32B")
+
+    assert result == {"context_length": 65536, "context_length_source": "models_api"}
+    assert requested["url"] == "https://example.com/v1/models"
+    assert requested["headers"]["Authorization"] == "Bearer sk-test"
+
+
+@pytest.mark.asyncio
+async def test_probe_model_context_length_skips_ollama_without_request(monkeypatch):
+    monkeypatch.setattr(
+        "yuxi.models.providers.service.httpx.AsyncClient",
+        lambda **_kwargs: pytest.fail("Ollama 不应调用 OpenAI-compatible 探测"),
+    )
+
+    class Provider:
+        provider_type = "ollama"
+        models_endpoint = "/models"
+        base_url = "http://localhost:11434/v1"
+
+    assert await probe_model_context_length(Provider(), "qwen3:32b") is None
 
 
 @pytest.mark.asyncio

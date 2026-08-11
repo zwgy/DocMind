@@ -30,6 +30,7 @@ def _chat_model_info(
     model_id: str,
     provider_type: str = "openai",
     context_length: int | None = None,
+    context_length_source: str | None = None,
     min_output_reserve_tokens: int | None = None,
     context_safety_tokens: int | None = None,
     extra: dict | None = None,
@@ -43,6 +44,7 @@ def _chat_model_info(
         base_url="https://example.com/v1",
         provider_type=provider_type,
         context_length=context_length,
+        context_length_source=context_length_source,
         min_output_reserve_tokens=min_output_reserve_tokens,
         context_safety_tokens=context_safety_tokens,
         extra=extra or {},
@@ -200,6 +202,7 @@ def test_load_chat_model_keeps_non_siliconflow_openai_streaming(monkeypatch):
                 "openai-compatible",
                 "namespace/chat-model",
                 context_length=32768,
+                context_length_source="models_api",
                 min_output_reserve_tokens=4096,
                 context_safety_tokens=512,
             )
@@ -216,11 +219,29 @@ def test_load_chat_model_keeps_non_siliconflow_openai_streaming(monkeypatch):
     assert model.disable_streaming is False
     assert "max_completion_tokens" not in model._default_params
     assert model.profile["max_input_tokens"] == 32768
+    assert model.profile["context_length_source"] == "models_api"
     assert model.profile["min_output_reserve_tokens"] == 4096
     assert model.profile["context_safety_tokens"] == 512
     assert explicit.disable_streaming is True
     assert lower_output._default_params["max_completion_tokens"] == 1024
     assert higher_output._default_params["max_completion_tokens"] == 8192
+
+
+def test_load_chat_model_uses_default_context_window_for_unknown_profile(monkeypatch):
+    monkeypatch.setattr(
+        "yuxi.agents.models.model_cache.get_model_info",
+        lambda spec: (
+            _chat_model_info("openai-compatible", "unknown-local-model")
+            if spec == "openai-compatible:unknown-local-model"
+            else None
+        ),
+    )
+    monkeypatch.setattr("yuxi.agents.models.sys_config.default_context_window", 32768)
+
+    model = load_chat_model("openai-compatible:unknown-local-model")
+
+    assert model.profile["max_input_tokens"] == 32768
+    assert model.profile["context_length_source"] == "default"
 
 
 def test_load_chat_model_applies_model_parameters_and_allows_explicit_override(monkeypatch):

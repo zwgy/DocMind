@@ -123,5 +123,13 @@ export const modelProviderApi = {
     return apiAdminGet(
       `/api/system/model-providers/${encodeURIComponent(providerId)}/remote-models`
     )
+  },
+
+  probeModelContextLength: async (providerId, modelId, baseUrlOverride = null) => {
+    const params = new URLSearchParams({ model_id: modelId })
+    if (baseUrlOverride) params.set('base_url_override', baseUrlOverride)
+    return apiAdminGet(
+      `/api/system/model-providers/${encodeURIComponent(providerId)}/context-length/probe?${params.toString()}`
+    )
   }
 }

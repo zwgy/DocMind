@@ -62,6 +62,9 @@ const editingModel = ref({
   protocol_override: null,
   base_url_override: null,
   context_length: null,
+  context_length_source: null,
+  effective_context_length: null,
+  effective_context_length_source: null,
   min_output_reserve_tokens: null,
   context_safety_tokens: null,
   dimension: null,
@@ -135,6 +138,29 @@ const formatContextLength = (len) => {
   if (len >= 1000000) return `${(len / 1000000).toFixed(1)}M`
   if (len >= 1000) return `${(len / 1000).toFixed(0)}K`
   return len.toString()
+}
+
+const contextLengthSourceLabels = {
+  manual: '手动配置',
+  models_api: '模型服务',
+  langchain_profile: '模型资料',
+  default: '默认值'
+}
+
+const getContextLengthSourceLabel = (source) => contextLengthSourceLabels[source] || '未知来源'
+
+const getEffectiveContextLength = (model) =>
+  model.effective_context_length || model.context_length || null
+
+const getEffectiveContextLengthSource = (model) =>
+  model.effective_context_length_source ||
+  model.context_length_source ||
+  (model.context_length ? 'manual' : null)
+
+const markContextLengthManual = (value) => {
+  editingModel.value.context_length_source = value ? 'manual' : null
+  editingModel.value.effective_context_length = value || null
+  editingModel.value.effective_context_length_source = value ? 'manual' : null
 }
 
 const formatMtokenPrice = (pricing) => {
@@ -464,6 +490,9 @@ const normalizeModel = (model = {}) => ({
   protocol_override: model.protocol_override || null,
   base_url_override: model.base_url_override || null,
   context_length: model.context_length || null,
+  context_length_source: model.context_length_source || (model.context_length ? 'manual' : null),
+  effective_context_length: model.effective_context_length || null,
+  effective_context_length_source: model.effective_context_length_source || null,
   min_output_reserve_tokens: model.min_output_reserve_tokens || null,
   context_safety_tokens: model.context_safety_tokens || null,
   dimension: model.dimension || null,
@@ -474,6 +503,41 @@ const normalizeModel = (model = {}) => ({
     parameters: { ...(model.extra?.parameters || {}) }
   }
 })
+
+const toPersistedModel = (model) => {
+  const persisted = normalizeModel(model)
+  delete persisted.effective_context_length
+  delete persisted.effective_context_length_source
+  return persisted
+}
+
+const probeContextLengthIfMissing = async (providerId, model) => {
+  if (model.type !== 'chat' || model.context_length) return false
+  try {
+    const result = await modelProviderApi.probeModelContextLength(
+      providerId,
+      model.id,
+      model.base_url_override
+    )
+    if (!result.data?.context_length) return false
+    model.context_length = result.data.context_length
+    model.context_length_source = result.data.context_length_source || 'models_api'
+    return true
+  } catch {
+    // 探测是保存前的增强能力；失败后仍交给 profile 和系统默认值完成解析。
+    return false
+  }
+}
+
+const warnIfDefaultContextIsEffective = (providerId, modelId) => {
+  const provider = providers.value.find((item) => item.provider_id === providerId)
+  const model = provider?.enabled_models?.find((item) => item.id === modelId)
+  if (model?.effective_context_length_source === 'default') {
+    message.warning(
+      `未获取到可靠的模型上下文长度，当前使用 ${model.effective_context_length} Token 默认值；建议按部署参数手动核对。`
+    )
+  }
+}
 
 const stringifyModelParameters = (parameters) => JSON.stringify(parameters || {}, null, 2)
 
@@ -531,9 +595,10 @@ const addModelFromRemote = async (providerId, remoteModel) => {
     return
   }
 
-  const newModel = normalizeModel(remoteModel)
+  const newModel = toPersistedModel(remoteModel)
   newModel.source = 'remote' // 远端拉取的模型显式标注，避免后续被误判为旧数据
   newModel.enabled = true
+  await probeContextLengthIfMissing(providerId, newModel)
   const newEnabledModels = [...enabledModels, newModel]
 
   try {
@@ -544,6 +609,7 @@ const addModelFromRemote = async (providerId, remoteModel) => {
     if (currentProviderForModels.value?.provider_id === providerId) {
       currentProviderForModels.value = providers.value.find((p) => p.provider_id === providerId)
     }
+    warnIfDefaultContextIsEffective(providerId, newModel.id)
   } catch (error) {
     message.error(error.message || '添加模型失败')
   }
@@ -570,6 +636,9 @@ const openCreateModal = (provider) => {
     protocol_override: null,
     base_url_override: null,
     context_length: null,
+    context_length_source: null,
+    effective_context_length: null,
+    effective_context_length_source: null,
     min_output_reserve_tokens: null,
     context_safety_tokens: null,
     dimension: null,
@@ -586,30 +655,32 @@ const saveModelConfig = async () => {
   if (!currentProviderForModels.value) return
   saving.value = true
   try {
-    const provider = providers.value.find(
-      (p) => p.provider_id === currentProviderForModels.value.provider_id
-    )
+    const providerId = currentProviderForModels.value.provider_id
+    const provider = providers.value.find((p) => p.provider_id === providerId)
     if (!provider) return
 
-    const modelToSave = normalizeModel(editingModel.value)
+    const modelToSave = toPersistedModel(editingModel.value)
     if (modelToSave.type === 'chat') {
       const parameters = parseModelParameters()
       if (parameters === null) return
       modelToSave.extra.parameters = parameters
     }
-
-    let enabledModels
     if (isCreating.value) {
-      const newId = (modelToSave.id || '').trim()
-      if (!newId) {
+      modelToSave.id = (modelToSave.id || '').trim()
+      if (!modelToSave.id) {
         message.error('请填写模型 ID')
         return
       }
-      if ((provider.enabled_models || []).some((m) => m.id === newId)) {
+      if ((provider.enabled_models || []).some((m) => m.id === modelToSave.id)) {
         message.error('模型 ID 已存在')
         return
       }
-      const newModel = { ...modelToSave, id: newId, source: 'manual', enabled: true }
+    }
+    await probeContextLengthIfMissing(providerId, modelToSave)
+
+    let enabledModels
+    if (isCreating.value) {
+      const newModel = { ...modelToSave, source: 'manual', enabled: true }
       enabledModels = [...(provider.enabled_models || []), newModel]
     } else {
       enabledModels = (provider.enabled_models || []).map((m) =>
@@ -617,7 +688,7 @@ const saveModelConfig = async () => {
       )
     }
 
-    await modelProviderApi.updateProvider(currentProviderForModels.value.provider_id, {
+    await modelProviderApi.updateProvider(providerId, {
       enabled_models: enabledModels
     })
     message.success(isCreating.value ? '模型已添加' : '模型配置已保存')
@@ -625,9 +696,8 @@ const saveModelConfig = async () => {
     isCreating.value = false
     await loadProviders()
     // Refresh current provider reference
-    currentProviderForModels.value = providers.value.find(
-      (p) => p.provider_id === currentProviderForModels.value.provider_id
-    )
+    currentProviderForModels.value = providers.value.find((p) => p.provider_id === providerId)
+    warnIfDefaultContextIsEffective(providerId, modelToSave.id)
   } catch (error) {
     message.error(error.message || '保存失败')
   } finally {
@@ -945,7 +1015,21 @@ defineExpose({
                   <LayersPlus :size="12" />
                 </span>
               </span>
-              <span class="col-context">{{ formatContextLength(model.context_length) }}</span>
+              <span class="col-context">
+                <span>{{ formatContextLength(getEffectiveContextLength(model)) }}</span>
+                <span
+                  v-if="getEffectiveContextLengthSource(model)"
+                  class="context-source-tag"
+                  :class="getEffectiveContextLengthSource(model)"
+                  :title="
+                    getEffectiveContextLengthSource(model) === 'default'
+                      ? '未获得可靠的实例配置，建议按部署参数手动核对'
+                      : '当前生效的上下文长度来源'
+                  "
+                >
+                  {{ getContextLengthSourceLabel(getEffectiveContextLengthSource(model)) }}
+                </span>
+              </span>
               <span class="col-dim">
                 <span
                   v-if="model.type === 'embedding' && !model.dimension"
@@ -1119,9 +1203,15 @@ defineExpose({
               :precision="0"
               :step="1024"
               placeholder="例如 32768"
+              @change="markContextLengthManual"
             />
             <small class="context-length-help">
-              填写推理服务实际部署上限；远端模型上下文显示“-”时请手动填写。
+              留空时尝试从模型服务获取，再使用模型资料，仍无结果则按系统默认值（初始为 32768
+              Token）兜底。自动结果可能与部署实例不一致，建议按部署参数手动核对。
+            </small>
+            <small v-if="editingModel.effective_context_length" class="effective-context-hint">
+              当前生效：{{ formatContextLength(editingModel.effective_context_length) }} ·
+              {{ getContextLengthSourceLabel(editingModel.effective_context_length_source) }}
             </small>
           </label>
         </div>
@@ -1172,20 +1262,19 @@ defineExpose({
             <p>此处填写“推理服务部署上限”，单位为 Token，不填写模型宣传的理论上限。</p>
             <ul>
               <li>
-                Ollama：先运行 <code>ollama ps</code> 确认模型已加载，再从
-                <code>GET /api/ps</code> 对应模型的 <code>context_length</code> 读取实际值；<code
-                  >ollama show</code
-                >
-                只作模型架构参考。
+                Ollama：开发测试时运行
+                <code>ollama ps</code> 查看已加载实例的上下文长度；本系统不调用 Ollama
+                专用探测接口。
               </li>
               <li>
                 GPUStack：查看部署的后端参数：vLLM 使用 <code>--max-model-len</code>、SGLang 使用
                 <code>--context-length</code>、MindIE 使用 <code>--max-seq-len</code>、llama-box
-                使用 <code>--ctx-size</code>。
+                使用 <code>--ctx-size</code>。本次不读取 GPUStack Route Meta。
               </li>
               <li>
-                其他 OpenAI 兼容服务：仅在确认
-                <code>/models</code> 返回值代表实际部署配置时采用；否则按服务部署参数手动填写。
+                OpenAI 兼容服务：系统会读取
+                <code>/models</code> 中常见扩展字段；标准协议并不保证提供这些字段，
+                因此无法探测时会继续使用模型资料或默认值。
               </li>
             </ul>
           </div>
@@ -1294,7 +1383,7 @@ defineExpose({
 .table-head,
 .table-row {
   display: grid;
-  grid-template-columns: 1fr 80px 70px 60px 150px;
+  grid-template-columns: 1fr 80px 130px 60px 150px;
   gap: 8px;
   align-items: center;
 }
@@ -1357,6 +1446,27 @@ defineExpose({
 .col-dim {
   color: var(--gray-600);
   font-size: 12px;
+}
+
+.col-context {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.context-source-tag {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--gray-100);
+  color: var(--gray-600);
+  font-size: 10px;
+  line-height: 1.4;
+
+  &.default {
+    background: var(--color-warning-50);
+    color: var(--color-warning-700);
+  }
 }
 
 .col-ops {
@@ -1556,6 +1666,11 @@ defineExpose({
   color: var(--gray-500);
   font-size: 12px;
   line-height: 1.6;
+}
+
+.effective-context-hint {
+  color: var(--main-700);
+  font-size: 12px;
 }
 
 .context-length-guide {

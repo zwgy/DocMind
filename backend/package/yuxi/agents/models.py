@@ -3,6 +3,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
 from yuxi import config as sys_config
+from yuxi.models.context_length import resolve_context_length
 from yuxi.models.providers.cache import model_cache
 from yuxi.utils import get_docker_safe_url
 from yuxi.utils.logging_config import logger
@@ -90,9 +91,7 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
     except (TypeError, ValueError):
         context_length = None
     try:
-        min_output_reserve_tokens = (
-            int(info.min_output_reserve_tokens) if info.min_output_reserve_tokens else None
-        )
+        min_output_reserve_tokens = int(info.min_output_reserve_tokens) if info.min_output_reserve_tokens else None
     except (TypeError, ValueError):
         min_output_reserve_tokens = None
     try:
@@ -195,9 +194,15 @@ def load_chat_model(fully_specified_name: str | None, **kwargs) -> BaseChatModel
         )
 
     profile = dict(model.profile or {})
-    if context_length and context_length > 0:
-        # 本地配置描述的是服务实例实际可接收的完整窗口，不能按摘要比例改写为输入窗口。
-        profile["max_input_tokens"] = context_length
+    resolved_context = resolve_context_length(
+        configured_value=context_length,
+        configured_source=info.context_length_source,
+        profile_value=profile.get("max_input_tokens"),
+        default_value=sys_config.default_context_window,
+    )
+    # 运行时只消费最终窗口；同时保留来源供管理界面解释当前生效值。
+    profile["max_input_tokens"] = resolved_context.value
+    profile["context_length_source"] = resolved_context.source
     # 预留只决定何时收缩输入；普通调用不把它转成模型输出上限，避免复杂任务被截断。
     profile["min_output_reserve_tokens"] = min_output_reserve_tokens or sys_config.min_output_reserve_tokens
     if context_safety_tokens and context_safety_tokens > 0:

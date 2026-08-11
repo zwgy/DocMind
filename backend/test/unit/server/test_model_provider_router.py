@@ -1,7 +1,35 @@
+from types import SimpleNamespace
+
 import pytest
 
 from server.routers import model_provider_router
 from server.routers.model_provider_router import ModelProviderPayload
+
+
+def test_provider_response_exposes_effective_profile_context_without_persisting_it(monkeypatch):
+    class Provider:
+        provider_id = "openai-compatible"
+        is_enabled = True
+
+        def to_dict(self):
+            return {
+                "provider_id": self.provider_id,
+                "enabled_models": [{"id": "profiled-model", "type": "chat"}],
+            }
+
+    monkeypatch.setattr(
+        "yuxi.agents.models.load_chat_model",
+        lambda _spec: SimpleNamespace(
+            profile={"max_input_tokens": 65536, "context_length_source": "langchain_profile"}
+        ),
+    )
+
+    data = model_provider_router._provider_response(Provider())
+
+    model = data["enabled_models"][0]
+    assert model["effective_context_length"] == 65536
+    assert model["effective_context_length_source"] == "langchain_profile"
+    assert "context_length" not in model
 
 
 def test_model_provider_payload_accepts_embedding_and_rerank_urls():

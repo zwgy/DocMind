@@ -15,6 +15,7 @@ from yuxi.models.providers.service import (
     fetch_remote_models,
     get_all_model_providers,
     get_model_provider_by_id,
+    probe_model_context_length,
     test_model_status_by_spec,
     update_provider_config,
 )
@@ -36,6 +37,45 @@ async def _refresh_model_cache() -> None:
             logger.info(f"Model cache refreshed: {len(model_cache.get_all_specs())} models loaded")
     except Exception as e:
         logger.error(f"Failed to refresh model cache: {e}")
+
+
+def _provider_response(provider) -> dict[str, Any]:
+    """补充只读的生效上下文信息，避免把 profile 或兜底值误存为人工配置。"""
+    from yuxi import config as sys_config
+    from yuxi.agents.models import load_chat_model
+    from yuxi.models.context_length import resolve_context_length
+
+    data = provider.to_dict()
+    if "enabled_models" not in data:
+        return data
+    enabled_models = []
+    for raw_model in data.get("enabled_models") or []:
+        model = dict(raw_model)
+        if model.get("type") == "chat":
+            profile_value = None
+            profile_source = None
+            if not model.get("context_length") and provider.is_enabled:
+                try:
+                    loaded_model = load_chat_model(f"{provider.provider_id}:{model.get('id')}")
+                    profile = dict(loaded_model.profile or {})
+                    profile_value = profile.get("max_input_tokens")
+                    profile_source = profile.get("context_length_source")
+                except Exception as exc:
+                    logger.warning(
+                        f"解析模型上下文长度失败，使用系统默认值: {provider.provider_id}:{model.get('id')}: {exc}"
+                    )
+
+            resolved = resolve_context_length(
+                configured_value=model.get("context_length"),
+                configured_source=model.get("context_length_source"),
+                profile_value=(profile_value if profile_source == "langchain_profile" else None),
+                default_value=sys_config.default_context_window,
+            )
+            model["effective_context_length"] = resolved.value
+            model["effective_context_length_source"] = resolved.source
+        enabled_models.append(model)
+    data["enabled_models"] = enabled_models
+    return data
 
 
 class ModelProviderPayload(BaseModel):
@@ -68,7 +108,7 @@ async def list_providers(
     providers = await get_all_model_providers(db)
     data = []
     for p in providers:
-        d = p.to_dict()
+        d = _provider_response(p)
         d["credential_status"] = check_credential_status(p)
         data.append(d)
     return {"success": True, "data": data}
@@ -89,7 +129,7 @@ async def create_provider(
         )
         await db.commit()
         await _refresh_model_cache()
-        return {"success": True, "data": provider.to_dict()}
+        return {"success": True, "data": _provider_response(provider)}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -107,7 +147,7 @@ async def get_provider(
     provider = await get_model_provider_by_id(db, provider_id)
     if provider is None:
         raise HTTPException(status_code=404, detail=f"供应商 {provider_id} 不存在")
-    data = provider.to_dict()
+    data = _provider_response(provider)
     data["credential_status"] = check_credential_status(provider)
     return {"success": True, "data": data}
 
@@ -141,7 +181,7 @@ async def update_provider(
             raise HTTPException(status_code=404, detail=f"供应商 {provider_id} 不存在")
         await db.commit()
         await _refresh_model_cache()
-        return {"success": True, "data": provider.to_dict()}
+        return {"success": True, "data": _provider_response(provider)}
     except HTTPException:
         raise
     except ValueError as e:
@@ -190,6 +230,30 @@ async def get_remote_models(
         raise HTTPException(status_code=400, detail=f"拉取远端模型失败: {e}")
 
 
+@model_providers.get("/{provider_id}/context-length/probe")
+async def probe_context_length(
+    provider_id: str,
+    model_id: str,
+    base_url_override: str | None = None,
+    current_user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """保存模型前按精确模型 ID 探测 OpenAI-compatible 扩展字段。"""
+    provider = await get_model_provider_by_id(db, provider_id)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=f"供应商 {provider_id} 不存在")
+    try:
+        result = await probe_model_context_length(
+            provider,
+            model_id,
+            base_url_override=base_url_override,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        logger.warning(f"探测模型上下文长度失败 {provider_id}:{model_id}: {e}")
+        raise HTTPException(status_code=400, detail=f"探测模型上下文长度失败: {e}")
+
+
 @model_providers.post("/models/cache/refresh")
 async def refresh_model_cache(
     current_user: User = Depends(get_admin_user),
@@ -234,7 +298,7 @@ async def get_v2_models(
                     "batch_size": m.batch_size,
                 }
                 for m in models
-            ]
+            ],
         }
 
     return {"success": True, "data": result}

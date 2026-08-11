@@ -85,6 +85,8 @@ def test_model_cache_merges_provider_and_model_runtime_parameters(monkeypatch):
             {
                 "id": "qwen3.6:35b",
                 "type": "chat",
+                "context_length": 32768,
+                "context_length_source": "models_api",
                 "extra": {"parameters": {"reasoning_effort": "none"}},
             }
         ]
@@ -98,6 +100,7 @@ def test_model_cache_merges_provider_and_model_runtime_parameters(monkeypatch):
         "timeout": 60,
         "parameters": {"temperature": 0.2, "reasoning_effort": "none"},
     }
+    assert saved_cache["ollama-local:qwen3.6:35b"].context_length_source == "models_api"
 
 
 def test_model_cache_loads_from_redis_and_uses_local_ttl(monkeypatch: pytest.MonkeyPatch):

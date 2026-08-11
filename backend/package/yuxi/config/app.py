@@ -48,6 +48,11 @@ class Config(BaseModel):
         description="内容审查LLM模型",
     )
 
+    default_context_window: int = Field(
+        default=32768,
+        gt=0,
+        description="模型配置与资料均未提供上下文长度时使用的兜底 Token 窗口",
+    )
     context_safety_tokens: int = Field(
         default=1024,
         gt=0,

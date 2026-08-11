@@ -49,6 +49,7 @@
 
 ### 上下文预算（重构 P1.1）
 
+- 修复未配置上下文长度的本地模型在 chat-iframe 切换后无法运行：新增手动配置、OpenAI-compatible `/models` 常见扩展字段、LangChain profile、系统默认 32768 的统一解析顺序，并在模型管理页显示“手动配置 / 模型服务 / 模型资料 / 默认值”四种当前来源。保存前探测使用精确模型 ID、5 秒有界请求且失败不阻止保存；运行时不发起探测。当前版本不接入 Ollama 专用 API、GPUStack Route Meta 或 GPUStack 管理 API。
 - 新增第一阶段响应式输出恢复：普通请求继续沿用 Provider 默认输出策略，仅在明确 `finish_reason=length` 后提高输出上限。带正文的截断会保留已生成内容并最多断点续写一次；空正文但有正数 output/reasoning usage 时按原请求重试一次；单用户请求最多两次恢复动作。恢复后的调用重新经过 L1/L2/L3/L5，输出上限按当前额度翻倍并受窗口四分之一、8K～16K 阶段护栏、固定上下文硬上限共同限制。截断工具调用与缺失 usage 的不可验证截断仍明确失败，不自动重试。私有续写消息只存在于请求副本，不进入摘要、用户台账、客户端流或最终 checkpoint；新增不含正文的 `output_recovery` 诊断事件。常态小输出上限和截断工具调用重试保留为后续阶段，不在本次实施。
 - 为显式原生 `ollama` Provider 补齐 `langchain-ollama` 完成元数据适配：将依赖库已读取但仅保存在 `generation_info` 的 `done_reason` 同步到普通与流式消息的 `response_metadata`，使 `length` 截断可被现有 TokenUsage 与输出恢复链路可靠识别；不改变 OpenAI 兼容 Provider 的请求参数、流式行为或默认模型配置。
 - 单个工具结果内联上限不再由管理员按 Agent 手工配置，统一按当前模型 `prompt_budget` 使用 `clamp(prompt_budget / 16, 3K, 16K)` 自动解析；主 Agent、SubAgent、文件读取和知识文档窗口复用同一运行时值，旧 JSON 中残留字段直接忽略。32K 保留已验证的 3K 保守下限，64K/128K/256K 分别扩展到约 3.7K/7.8K/15.7K，减少大窗口部署中不必要的落盘和重读；完整请求仍由 L1～L5 预算门禁保证。

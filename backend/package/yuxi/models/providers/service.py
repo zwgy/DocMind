@@ -8,6 +8,13 @@ from typing import Any
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yuxi import config as sys_config
+from yuxi.models.context_length import (
+    CONTEXT_LENGTH_SOURCE_MANUAL,
+    CONTEXT_LENGTH_SOURCE_MODELS_API,
+    PERSISTED_CONTEXT_LENGTH_SOURCES,
+    positive_int_or_none,
+)
 from yuxi.models.providers.builtin import BUILTIN_PROVIDERS
 from yuxi.models.providers.repository import (
     create_model_provider,
@@ -77,9 +84,12 @@ def _normalize_model_item(model: dict[str, Any]) -> dict[str, Any]:
 
     # 仅 Chat 模型保留上下文预算。非 Chat 模型没有生成阶段，保留这些字段会让运行时误认为可调用。
     context_budget_fields = ("context_length", "min_output_reserve_tokens", "context_safety_tokens")
+    normalized.pop("effective_context_length", None)
+    normalized.pop("effective_context_length_source", None)
     if model_type != "chat":
         for field_name in context_budget_fields:
             normalized.pop(field_name, None)
+        normalized.pop("context_length_source", None)
         normalized.pop("max_completion_tokens", None)
     else:
         # 旧字段曾被错误地命名为最大输出。手工模型保存时迁移为输入压缩预留，
@@ -98,16 +108,22 @@ def _normalize_model_item(model: dict[str, Any]) -> dict[str, Any]:
                     field_name=field_name,
                     model_id=model_id,
                 )
+            else:
+                normalized.pop(field_name, None)
 
         context_length = normalized.get("context_length")
-        min_output_reserve_tokens = normalized.get("min_output_reserve_tokens")
-        context_safety_tokens = normalized.get("context_safety_tokens")
-        if (
-            context_length is not None
-            and min_output_reserve_tokens is not None
-            and context_safety_tokens is not None
-            and context_length <= min_output_reserve_tokens + context_safety_tokens
-        ):
+        context_length_source = normalized.get("context_length_source")
+        if context_length is None:
+            normalized.pop("context_length_source", None)
+        elif context_length_source in (None, ""):
+            # 兼容升级前已经保存的显式上下文长度，其语义等同于手动配置。
+            normalized["context_length_source"] = CONTEXT_LENGTH_SOURCE_MANUAL
+        elif context_length_source not in PERSISTED_CONTEXT_LENGTH_SOURCES:
+            raise ValueError(f"模型 {model_id} 的 context_length_source 必须是 manual 或 models_api")
+
+        min_output_reserve_tokens = normalized.get("min_output_reserve_tokens", sys_config.min_output_reserve_tokens)
+        context_safety_tokens = normalized.get("context_safety_tokens", sys_config.context_safety_tokens)
+        if context_length is not None and context_length <= min_output_reserve_tokens + context_safety_tokens:
             raise ValueError(
                 f"模型 {model_id} 的 context_length 必须大于 min_output_reserve_tokens 与 context_safety_tokens 之和"
             )
@@ -246,15 +262,31 @@ def _models_url(base_url: str, endpoint: str | None = None) -> str:
     return f"{base}/{endpoint.lstrip('/')}"
 
 
+def _remote_context_length(raw_model: dict[str, Any]) -> int | None:
+    """读取常见 OpenAI-compatible 扩展字段；不解析 GPUStack Route Meta。"""
+    top_provider = _normalize_dict(raw_model.get("top_provider"))
+    candidates = (
+        raw_model.get("max_model_len"),
+        raw_model.get("context_length"),
+        raw_model.get("max_context_length"),
+        raw_model.get("max_input_tokens"),
+        top_provider.get("context_length"),
+    )
+    for candidate in candidates:
+        if (context_length := positive_int_or_none(candidate)) is not None:
+            return context_length
+    return None
+
+
 def _normalize_remote_model(raw_model: dict[str, Any], model_type: str = "chat") -> dict[str, Any]:
     model_id = str(raw_model.get("id") or "").strip()
     if not model_id:
         return {}
 
     architecture = _normalize_dict(raw_model.get("architecture"))
-    top_provider = _normalize_dict(raw_model.get("top_provider"))
     raw_type = raw_model.get("type")
     normalized_type = raw_type if raw_type in VALID_MODEL_TYPES else model_type
+    context_length = _remote_context_length(raw_model) if normalized_type == "chat" else None
     normalized = {
         "id": model_id,
         "object": raw_model.get("object"),
@@ -263,7 +295,8 @@ def _normalize_remote_model(raw_model: dict[str, Any], model_type: str = "chat")
         "type": normalized_type,
         "display_name": raw_model.get("name") or model_id,
         "description": raw_model.get("description"),
-        "context_length": raw_model.get("context_length") or top_provider.get("context_length"),
+        "context_length": context_length,
+        "context_length_source": CONTEXT_LENGTH_SOURCE_MODELS_API if context_length else None,
         "input_modalities": architecture.get("input_modalities") or [],
         "output_modalities": architecture.get("output_modalities") or [],
         "supported_parameters": raw_model.get("supported_parameters") or [],
@@ -273,6 +306,48 @@ def _normalize_remote_model(raw_model: dict[str, Any], model_type: str = "chat")
         "extra": {},
     }
     return {key: value for key, value in normalized.items() if value is not None}
+
+
+async def probe_model_context_length(
+    provider: ModelProvider,
+    model_id: str,
+    *,
+    base_url_override: str | None = None,
+) -> dict[str, Any] | None:
+    """从单次 OpenAI-compatible 模型列表响应探测指定模型的上下文长度。"""
+    model_id = model_id.strip()
+    if not model_id or provider.provider_type not in {"openai", "openrouter"}:
+        return None
+    if not provider.models_endpoint:
+        return None
+
+    headers = dict(provider.headers_json or {})
+    api_key = resolve_api_key(provider)
+    if api_key:
+        headers.setdefault("Authorization", f"Bearer {api_key}")
+
+    base_url = (base_url_override or provider.base_url).strip()
+    timeout = httpx.Timeout(5.0, connect=2.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.get(_models_url(base_url, provider.models_endpoint), headers=headers)
+        response.raise_for_status()
+        payload = response.json()
+
+    raw_models = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(raw_models, list):
+        raise ValueError("Models 响应必须是列表或包含 data 列表")
+
+    for raw_model in raw_models:
+        if not isinstance(raw_model, dict) or str(raw_model.get("id") or "").strip() != model_id:
+            continue
+        context_length = _remote_context_length(raw_model)
+        if context_length is None:
+            return None
+        return {
+            "context_length": context_length,
+            "context_length_source": CONTEXT_LENGTH_SOURCE_MODELS_API,
+        }
+    return None
 
 
 async def get_all_model_providers(db: AsyncSession) -> list[ModelProvider]:
