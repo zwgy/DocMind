@@ -21,7 +21,8 @@
 - 不固定附件服务器 host 或路径；接入方提供 DocMind 后端可访问的绝对 HTTP/HTTPS 地址。相对地址由父 SDK 按嵌入页面补全。
 - 不改变现有来文持久化和解析流程；multipart 直接上传继续兼容。
 - 宿主页面刷新不会中断已经提交到 DocMind 的下载和解析；返回页面后由抽取查询结果恢复状态。尚未成功提交的请求则按查询结果重新发起。
-- 嵌入系统通过 `document_metadata.source_doc_id` 标识来文，同一来文的附件分别使用 `source_file_id`；未传来文 ID 时仅为旧接入兼容而使用 `business_id` 兜底。
+- 嵌入系统通过 `document_metadata.source_doc_id` 标识来文，同一来文的附件分别使用 `source_file_id`；未传来文 ID 时允许使用页面 `business_id` 兼容一页一来文的旧接入。
+- 页面会话身份为 `source_system + source_function_id + business_id`；来文解析身份为 `source_system + source_doc_id`，附件身份为 `source_system + source_doc_id + source_file_id`。同一来文出现在不同模块或业务页面时复用解析结果，聊天历史仍按页面隔离。
 
 ## 交互选择
 

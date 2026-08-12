@@ -129,7 +129,7 @@ function attachmentNames(files: IncomingPageFile[]) {
 
 function filesAreOnCurrentPage(files: IncomingPageFile[]) {
   const fileKey = (file: IncomingPageFile) =>
-    [file.source_system, file.source_function_id, file.source_doc_id, file.source_file_id]
+    [file.source_system || 'production', file.source_doc_id, file.source_file_id]
       .map((value) => String(value || '').trim())
       .join('\u0000')
   const currentKeys = new Set(context.files.map(fileKey))
@@ -423,8 +423,8 @@ function updateSelectedPageFiles(files: IncomingPageFile[]) {
 
 function filesForSelectedDocuments(selectedFiles: IncomingPageFile[]) {
   const documentKey = (file: IncomingPageFile) =>
-    file.source_function_id && file.source_doc_id
-      ? `${file.source_system || 'production'}\u0000${file.source_function_id}\u0000${file.source_doc_id}`
+    file.source_doc_id
+      ? `${file.source_system || 'production'}\u0000${file.source_doc_id}`
       : ''
   const selectedKeys = new Set(selectedFiles.map(documentKey).filter(Boolean))
   const candidates = [

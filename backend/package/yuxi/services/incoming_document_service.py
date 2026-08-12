@@ -17,7 +17,6 @@ class IncomingPageFile(BaseModel):
     size_bytes: int | None = None
     source_url: str | None = None
     source_file_id: str
-    source_function_id: str | None = None
     source_doc_id: str | None = None
     source_system: str | None = None
     onclick: str | None = None
@@ -53,17 +52,15 @@ class IncomingDocumentService:
             "name": incoming.name,
             "source_url": incoming.source_url,
             "source_file_id": incoming.source_file_id,
-            "source_function_id": incoming.source_function_id,
             "source_doc_id": incoming.source_doc_id,
             "matchStatus": "not_found",
             "processingStatus": "not_found",
             "extractionStatus": "not_found",
         }
-        if not incoming.source_function_id or not incoming.source_doc_id:
-            return base | {"reason": "source_function_id/source_doc_id is required"}
+        if not incoming.source_doc_id:
+            return base | {"reason": "source_doc_id is required"}
         match = await self.incoming_repo.get_file_for_source(
             source_system=incoming.source_system or "production",
-            source_function_id=incoming.source_function_id,
             source_document_id=incoming.source_doc_id,
             source_file_id=incoming.source_file_id,
         )

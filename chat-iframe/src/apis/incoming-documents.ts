@@ -85,32 +85,33 @@ export async function ingestIncomingDocument(
   const first = files[0]
   if (!first) throw new Error('附件不能为空')
   const sourceDocId = first.source_doc_id
-  const sourceFunctionId = first.source_function_id
+  const sourceSystem = first.source_system || options.source_system || 'production'
   if (!sourceDocId) throw new Error('附件缺少 source_doc_id')
-  if (!sourceFunctionId) throw new Error('附件缺少 source_function_id')
   if (
     files.some(
-      (file) => file.source_doc_id !== sourceDocId || file.source_function_id !== sourceFunctionId
+      (file) =>
+        file.source_doc_id !== sourceDocId ||
+        (file.source_system || options.source_system || 'production') !== sourceSystem
     )
   ) {
     throw new Error('一次只能同步同一份来文的附件')
   }
   if (files.some((file) => !file.source_url)) throw new Error('附件缺少下载地址')
+  const documentMetadata = first.document_metadata || {
+    source_doc_id: sourceDocId,
+    document_number: first.document_number,
+    title: first.title,
+    incoming_type: first.incoming_type,
+    source_unit: first.source_unit,
+    incoming_date: first.incoming_date
+  }
   headers['Content-Type'] = 'application/json'
   const response = await fetch(apiUrl('/api/incoming-documents/ingest'), {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      source_doc_id: sourceDocId,
-      source_function_id: sourceFunctionId,
-      source_system: first.source_system || options.source_system || 'production',
-      document_metadata: first.document_metadata || {
-        document_number: first.document_number,
-        title: first.title,
-        incoming_type: first.incoming_type,
-        source_unit: first.source_unit,
-        incoming_date: first.incoming_date
-      },
+      source_system: sourceSystem,
+      document_metadata: { ...documentMetadata, source_doc_id: sourceDocId },
       files: files.map((file) => ({
         source_file_id: file.source_file_id,
         filename: file.name,

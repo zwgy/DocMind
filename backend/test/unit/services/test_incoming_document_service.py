@@ -7,10 +7,12 @@ class FakeIncomingRepo:
     def __init__(self, match=None, files=None):
         self.match = match
         self.files = files or []
+        self.query = None
 
-    async def get_file_for_source(self, **_kwargs):
+    async def get_file_for_source(self, **kwargs):
+        self.query = kwargs
         if isinstance(self.match, dict):
-            return self.match.get(_kwargs["source_file_id"])
+            return self.match.get(kwargs["source_file_id"])
         return self.match
 
     async def list_files(self, _incoming_id):
@@ -95,21 +97,18 @@ async def test_query_returns_each_selected_main_and_attachment():
                 "name": "主文件.pdf",
                 "source_file_id": "main",
                 "source_system": "oa",
-                "source_function_id": "incoming",
                 "source_doc_id": "DOC-1",
             },
             {
                 "name": "风险清单.xlsx",
                 "source_file_id": "attachment",
                 "source_system": "oa",
-                "source_function_id": "incoming",
                 "source_doc_id": "DOC-1",
             },
             {
                 "name": "检查记录.xlsx",
                 "source_file_id": "attachment-2",
                 "source_system": "oa",
-                "source_function_id": "incoming",
                 "source_doc_id": "DOC-1",
             },
         ]
@@ -134,10 +133,11 @@ async def test_query_returns_each_selected_main_and_attachment():
 
 
 async def test_query_returns_pending_sync_when_attachment_is_not_ingested():
-    service = IncomingDocumentService(incoming_repo=FakeIncomingRepo(), extraction_repo=FakeExtractionRepo())
+    incoming_repo = FakeIncomingRepo()
+    service = IncomingDocumentService(incoming_repo=incoming_repo, extraction_repo=FakeExtractionRepo())
 
     result = await service.query_extractions(
-        [{"name": "附件.pdf", "source_file_id": "file-1", "source_function_id": "incoming", "source_doc_id": "DOC-1"}]
+        [{"name": "附件.pdf", "source_file_id": "file-1", "source_doc_id": "DOC-1"}]
     )
 
     assert result["items"] == [
@@ -146,7 +146,6 @@ async def test_query_returns_pending_sync_when_attachment_is_not_ingested():
             "name": "附件.pdf",
             "source_url": None,
             "source_file_id": "file-1",
-            "source_function_id": "incoming",
             "source_doc_id": "DOC-1",
             "matchStatus": "pending_sync",
             "processingStatus": "not_found",
@@ -154,6 +153,11 @@ async def test_query_returns_pending_sync_when_attachment_is_not_ingested():
             "reason": "source_file_id not found",
         }
     ]
+    assert incoming_repo.query == {
+        "source_system": "production",
+        "source_document_id": "DOC-1",
+        "source_file_id": "file-1",
+    }
 
 
 async def test_query_returns_selected_attachment_summary_without_main_items():
@@ -196,7 +200,6 @@ async def test_query_returns_selected_attachment_summary_without_main_items():
                 "name": "风险清单.xlsx",
                 "source_file_id": "attachment",
                 "source_system": "oa",
-                "source_function_id": "incoming",
                 "source_doc_id": "DOC-1",
             }
         ]
@@ -234,7 +237,7 @@ async def test_query_hides_previous_extraction_while_document_is_not_ready():
     )
 
     result = await service.query_extractions(
-        [{"name": "主文件.pdf", "source_file_id": "main", "source_function_id": "incoming", "source_doc_id": "DOC-1"}]
+        [{"name": "主文件.pdf", "source_file_id": "main", "source_doc_id": "DOC-1"}]
     )
 
     assert result["items"][0]["runId"] is None

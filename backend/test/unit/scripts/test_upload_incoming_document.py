@@ -18,7 +18,10 @@ def _load_script():
 def test_upload_script_uses_document_metadata_and_explicit_main_file():
     script = _load_script()
 
-    assert json.loads(script["INGEST_METADATA"]["document_metadata"])["document_number"]
+    document_metadata = json.loads(script["INGEST_METADATA"]["document_metadata"])
+    assert document_metadata["source_doc_id"] == "37908"
+    assert document_metadata["document_number"]
+    assert "source_doc_id" not in script["INGEST_METADATA"]
     metas = json.loads(script["build_file_metas"](script["UPLOAD_ITEMS"]))
     assert [item["is_main_file"] for item in metas] == [True, False, False]
 
@@ -54,9 +57,7 @@ def test_upload_script_rewinds_files_before_retry(tmp_path, monkeypatch):
         items=[upload_item],
         metadata={
             "source_system": "oa",
-            "source_function_id": "incoming",
-            "source_doc_id": "DOC-1",
-            "document_metadata": "{}",
+            "document_metadata": '{"source_doc_id":"DOC-1"}',
         },
         max_retries=1,
     )

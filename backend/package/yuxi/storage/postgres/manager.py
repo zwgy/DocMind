@@ -347,7 +347,6 @@ class PostgresManager(metaclass=SingletonMeta):
                 id SERIAL PRIMARY KEY,
                 incoming_id VARCHAR(64) NOT NULL UNIQUE,
                 source_system VARCHAR(64) NOT NULL,
-                source_function_id VARCHAR(128) NOT NULL,
                 source_document_id VARCHAR(256) NOT NULL,
                 document_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
                 status VARCHAR(32) DEFAULT 'uploaded',
@@ -369,9 +368,8 @@ class PostgresManager(metaclass=SingletonMeta):
                 updated_by VARCHAR(64),
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
-                CONSTRAINT uq_incoming_documents_source_identity UNIQUE (
+                CONSTRAINT uq_incoming_documents_source_document_identity UNIQUE (
                     source_system,
-                    source_function_id,
                     source_document_id
                 )
             )
@@ -400,9 +398,12 @@ class PostgresManager(metaclass=SingletonMeta):
                 CONSTRAINT uq_incoming_document_files_source_file_identity UNIQUE (incoming_id, source_file_id)
             )
             """,
+            "ALTER TABLE IF EXISTS incoming_documents DROP CONSTRAINT IF EXISTS uq_incoming_documents_source_identity",
+            "DROP INDEX IF EXISTS ix_incoming_documents_source_function_id",
+            "ALTER TABLE IF EXISTS incoming_documents DROP COLUMN IF EXISTS source_function_id",
             (
-                "CREATE INDEX IF NOT EXISTS ix_incoming_documents_source_function_id "
-                "ON incoming_documents(source_function_id)"
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_incoming_documents_source_document_identity "
+                "ON incoming_documents(source_system, source_document_id)"
             ),
             "CREATE INDEX IF NOT EXISTS ix_incoming_documents_status ON incoming_documents(status)",
             (

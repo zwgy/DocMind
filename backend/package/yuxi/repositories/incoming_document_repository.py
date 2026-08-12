@@ -37,7 +37,6 @@ class IncomingDocumentRepository:
 
     _document_fields = {
         "source_system",
-        "source_function_id",
         "source_document_id",
         "document_metadata",
         "status",
@@ -81,19 +80,6 @@ class IncomingDocumentRepository:
         if sanitized:
             sanitized["updated_at"] = utc_now_naive()
         return sanitized
-
-    async def get_by_source_identity(
-        self, source_system: str, source_function_id: str, source_document_id: str
-    ) -> IncomingDocument | None:
-        async with pg_manager.get_async_session_context() as session:
-            result = await session.execute(
-                select(IncomingDocument).where(
-                    IncomingDocument.source_system == source_system,
-                    IncomingDocument.source_function_id == source_function_id,
-                    IncomingDocument.source_document_id == source_document_id,
-                )
-            )
-            return result.scalar_one_or_none()
 
     async def get_by_incoming_id(self, incoming_id: str) -> IncomingDocument | None:
         async with pg_manager.get_async_session_context() as session:
@@ -218,7 +204,7 @@ class IncomingDocumentRepository:
             return list(result.scalars().all())
 
     async def get_file_for_source(
-        self, *, source_system: str, source_function_id: str, source_document_id: str, source_file_id: str
+        self, *, source_system: str, source_document_id: str, source_file_id: str
     ) -> tuple[IncomingDocument, IncomingDocumentFile] | None:
         async with pg_manager.get_async_session_context() as session:
             result = await session.execute(
@@ -226,7 +212,6 @@ class IncomingDocumentRepository:
                 .join(IncomingDocumentFile, IncomingDocumentFile.incoming_id == IncomingDocument.incoming_id)
                 .where(
                     IncomingDocument.source_system == source_system,
-                    IncomingDocument.source_function_id == source_function_id,
                     IncomingDocument.source_document_id == source_document_id,
                     IncomingDocumentFile.source_file_id == source_file_id,
                 )

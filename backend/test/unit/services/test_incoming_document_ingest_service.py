@@ -108,6 +108,15 @@ class FakeContext:
         return None
 
 
+def test_incoming_id_uses_source_system_and_global_source_doc_id():
+    first_module = IncomingDocumentIngestService._incoming_id("oa", "DOC-1")
+    same_document = IncomingDocumentIngestService._incoming_id("oa", "DOC-1")
+    another_system = IncomingDocumentIngestService._incoming_id("erp", "DOC-1")
+
+    assert first_module == same_document
+    assert first_module != another_system
+
+
 class CancellationContext(FakeContext):
     cancellation_reason = "timeout"
 
@@ -142,7 +151,6 @@ async def test_ingest_creates_one_document_and_multiple_files_then_queues_one_ta
 
     result = await service.ingest_files(
         source_system="oa",
-        source_function_id="incoming",
         source_doc_id="DOC-1",
         document_metadata={"title": "专项检查通知", "incoming_date": "2026-07-17"},
         files=[
@@ -504,7 +512,6 @@ async def test_ingest_rejects_two_main_files():
     with pytest.raises(ValueError, match="only one main file"):
         await service.ingest_files(
             source_system="oa",
-            source_function_id="incoming",
             source_doc_id="DOC-1",
             document_metadata={},
             files=[
@@ -522,7 +529,6 @@ async def test_incremental_attachment_preserves_existing_main_file():
     service = IncomingDocumentIngestService(incoming_repo=repo, tasker=FakeTasker(), upload_file=fake_upload)
     await service.ingest_files(
         source_system="oa",
-        source_function_id="incoming",
         source_doc_id="DOC-1",
         document_metadata={"title": "通知"},
         files=[{"source_file_id": "main", "filename": "main.pdf", "content": b"main"}],
@@ -530,7 +536,6 @@ async def test_incremental_attachment_preserves_existing_main_file():
 
     await service.ingest_files(
         source_system="oa",
-        source_function_id="incoming",
         source_doc_id="DOC-1",
         document_metadata={"title": "通知"},
         files=[{"source_file_id": "attachment", "filename": "attachment.pdf", "content": b"attachment"}],
@@ -542,6 +547,35 @@ async def test_incremental_attachment_preserves_existing_main_file():
     ]
 
 
+async def test_same_source_document_is_reused():
+    async def fake_upload(*, filename, content, **_kwargs):
+        return {
+            "minio_url": f"minio://documents/{filename}",
+            "content_hash": hashlib.sha256(content).hexdigest(),
+            "size": len(content),
+        }
+
+    repo = FakeIncomingRepo()
+    service = IncomingDocumentIngestService(incoming_repo=repo, tasker=FakeTasker(), upload_file=fake_upload)
+    await service.ingest_files(
+        source_system="oa",
+        source_doc_id="DOC-1",
+        document_metadata={"source_doc_id": "DOC-1", "title": "通知"},
+        files=[{"source_file_id": "main", "filename": "main.pdf", "content": b"main"}],
+    )
+    repo.document.status = "ready"
+
+    result = await service.ingest_files(
+        source_system="oa",
+        source_doc_id="DOC-1",
+        document_metadata={"source_doc_id": "DOC-1", "title": "通知"},
+        files=[{"source_file_id": "main", "filename": "main.pdf", "content": b"main"}],
+    )
+
+    assert result["incomingId"] == IncomingDocumentIngestService._incoming_id("oa", "DOC-1")
+    assert result["status"] == "ready"
+
+
 async def test_explicit_new_main_file_replaces_existing_main_file():
     async def fake_upload(*, filename, **_kwargs):
         return {"minio_url": f"minio://documents/{filename}", "content_hash": filename, "size": 10}
@@ -550,7 +584,6 @@ async def test_explicit_new_main_file_replaces_existing_main_file():
     service = IncomingDocumentIngestService(incoming_repo=repo, tasker=FakeTasker(), upload_file=fake_upload)
     await service.ingest_files(
         source_system="oa",
-        source_function_id="incoming",
         source_doc_id="DOC-1",
         document_metadata={"title": "通知"},
         files=[{"source_file_id": "main", "filename": "main.pdf", "content": b"main"}],
@@ -558,7 +591,6 @@ async def test_explicit_new_main_file_replaces_existing_main_file():
 
     await service.ingest_files(
         source_system="oa",
-        source_function_id="incoming",
         source_doc_id="DOC-1",
         document_metadata={"title": "通知"},
         files=[
@@ -590,7 +622,6 @@ async def test_unchanged_upload_does_not_reset_or_enqueue_again():
     service = IncomingDocumentIngestService(incoming_repo=repo, tasker=tasker, upload_file=fake_upload)
     request = {
         "source_system": "oa",
-        "source_function_id": "incoming",
         "source_doc_id": "DOC-1",
         "document_metadata": {"title": "通知"},
         "files": [{"source_file_id": "main", "filename": "main.pdf", "content": b"main"}],
@@ -619,7 +650,6 @@ async def test_changed_upload_clears_stale_document_results():
     service = IncomingDocumentIngestService(incoming_repo=repo, tasker=FakeTasker(), upload_file=fake_upload)
     request = {
         "source_system": "oa",
-        "source_function_id": "incoming",
         "source_doc_id": "DOC-1",
         "document_metadata": {"title": "通知"},
         "files": [{"source_file_id": "main", "filename": "main.pdf", "content": b"v1"}],
@@ -666,7 +696,6 @@ async def test_partial_reupload_invalidates_old_ready_result_before_file_failure
     service = IncomingDocumentIngestService(incoming_repo=repo, tasker=FakeTasker(), upload_file=fake_upload)
     request = {
         "source_system": "oa",
-        "source_function_id": "incoming",
         "source_doc_id": "DOC-1",
         "document_metadata": {"title": "通知"},
         "files": [
@@ -702,7 +731,6 @@ async def test_indexed_document_allows_idempotent_upload_but_rejects_content_cha
     service = IncomingDocumentIngestService(incoming_repo=repo, tasker=tasker, upload_file=fake_upload)
     request = {
         "source_system": "oa",
-        "source_function_id": "incoming",
         "source_doc_id": "DOC-1",
         "document_metadata": {"title": "通知"},
         "files": [{"source_file_id": "main", "filename": "main.pdf", "content": b"v1"}],
@@ -841,7 +869,7 @@ async def test_knowledge_import_enqueue_failure_restores_failed_state():
 async def test_ingest_rejects_attachment_change_while_document_is_processing():
     repo = FakeIncomingRepo()
     repo.document = SimpleNamespace(
-        incoming_id=IncomingDocumentIngestService._incoming_id("oa", "incoming", "DOC-1"),
+        incoming_id=IncomingDocumentIngestService._incoming_id("oa", "DOC-1"),
         status="parsing",
         document_metadata={"title": "通知"},
     )
@@ -850,7 +878,6 @@ async def test_ingest_rejects_attachment_change_while_document_is_processing():
     with pytest.raises(ValueError, match="being processed"):
         await service.ingest_files(
             source_system="oa",
-            source_function_id="incoming",
             source_doc_id="DOC-1",
             document_metadata={"title": "通知"},
             files=[{"source_file_id": "new", "filename": "new.pdf", "content": b"new"}],

@@ -99,8 +99,6 @@ UPLOAD_ITEMS: tuple[UploadItem, ...] = (
 # 来文身份是固定 multipart 字段；业务元数据统一放入 document_metadata JSON。
 #
 #   source_system       系统
-#   source_function_id  功能 id
-#   source_doc_id       业务 id / 来文 id（必填，幂等键）
 #   document_number     来文编号
 #   title               来文标题
 #   incoming_type       来文类别
@@ -108,10 +106,9 @@ UPLOAD_ITEMS: tuple[UploadItem, ...] = (
 #   incoming_date       来文日期 YYYY-MM-DD
 INGEST_METADATA: dict[str, str] = {
     "source_system": "oa",
-    "source_function_id": "incomingDocument",
-    "source_doc_id": "37908",
     "document_metadata": json.dumps(
         {
+            "source_doc_id": "37908",
             "document_number": "上铁辆〔2020〕316号",
             "title": (
                 "中国铁路上海局集团有限公司关于重新印发《中国铁路上海局集团有限公司路用客车检修运用管理办法》的通知"
@@ -240,7 +237,7 @@ def upload(
                 attempt,
                 total_attempts,
                 len(items),
-                metadata.get("source_doc_id"),
+                json.loads(metadata["document_metadata"]).get("source_doc_id"),
             )
             started = time.monotonic()
             try:

@@ -13,7 +13,6 @@ export type IncomingPageFile = {
   size_text?: string
   size_bytes?: number
   source_url?: string
-  source_function_id?: string
   source_doc_id?: string
   source_system?: string
   document_metadata?: Record<string, unknown>

@@ -86,17 +86,14 @@ class IncomingDocument(Base):
         UniqueConstraint("incoming_id", name="uq_incoming_documents_incoming_id"),
         UniqueConstraint(
             "source_system",
-            "source_function_id",
             "source_document_id",
-            name="uq_incoming_documents_source_identity",
+            name="uq_incoming_documents_source_document_identity",
         ),
-        Index("ix_incoming_documents_source_function_id", "source_function_id"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     incoming_id = Column(String(64), unique=True, nullable=False, index=True)
     source_system = Column(String(64), nullable=False, index=True)
-    source_function_id = Column(String(128), nullable=False)
     source_document_id = Column(String(256), nullable=False)
     document_metadata = Column(JSON_VALUE, nullable=False, default=dict)
     status = Column(String(32), default="uploaded", index=True)

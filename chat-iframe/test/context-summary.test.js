@@ -122,7 +122,7 @@ test('buildContextSummaryMessage supports a stable id for each selected attachme
 test('groupIncomingDocumentFiles combines a document into one card and keeps every attachment', () => {
   const groups = groupIncomingDocumentFiles([
     {
-      file: { name: '附件4.xls', source_file_id: 'S004', source_doc_id: 'DOC-1', source_function_id: 'incoming' },
+      file: { name: '附件4.xls', source_file_id: 'S004', source_doc_id: 'DOC-1' },
       result: {
         incomingId: 'inc-1',
         matchStatus: 'matched',
@@ -135,7 +135,7 @@ test('groupIncomingDocumentFiles combines a document into one card and keeps eve
       }
     },
     {
-      file: { name: '主附件.docx', source_file_id: 'S001', source_doc_id: 'DOC-1', source_function_id: 'incoming' },
+      file: { name: '主附件.docx', source_file_id: 'S001', source_doc_id: 'DOC-1' },
       result: {
         incomingId: 'inc-1',
         matchStatus: 'matched',

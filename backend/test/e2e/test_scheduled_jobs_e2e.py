@@ -195,7 +195,6 @@ async def test_pending_candidate_is_only_visible_to_admin_review_api(e2e_client)
                 IncomingDocument(
                     incoming_id=incoming_id,
                     source_system="e2e-test",
-                    source_function_id="scheduled-jobs",
                     source_document_id=suffix,
                     document_metadata={"title": "候选隔离验收"},
                     status="extracted",

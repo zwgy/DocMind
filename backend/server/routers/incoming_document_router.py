@@ -57,12 +57,12 @@ class IncomingIngestFileMeta(BaseModel):
     is_main_file: bool | None = None
 
 
-class IncomingIngestMultipartFields(BaseModel):
-    """multipart 非文件字段；二进制文件通过重复的 files 字段传入。"""
+class IncomingIngestSourceFields(BaseModel):
+    """来文来源字段；JSON 与 multipart 上传共用。"""
 
-    source_doc_id: str
-    source_function_id: str
     source_system: str = "production"
+
+    model_config = {"extra": "forbid"}
 
 
 class IncomingSourceFile(BaseModel):
@@ -71,8 +71,10 @@ class IncomingSourceFile(BaseModel):
     source_url: str
     is_main_file: bool | None = None
 
+    model_config = {"extra": "forbid"}
 
-class IncomingSourceIngestRequest(IncomingIngestMultipartFields):
+
+class IncomingSourceIngestRequest(IncomingIngestSourceFields):
     document_metadata: dict
     files: list[IncomingSourceFile]
 
@@ -203,22 +205,23 @@ async def ingest_incoming_document(request: Request, current_user: User = Depend
         service = IncomingDocumentIngestService()
         if request.headers.get("content-type", "").startswith("application/json"):
             payload = IncomingSourceIngestRequest.model_validate(await request.json())
-            fields = IncomingIngestMultipartFields(
-                source_doc_id=payload.source_doc_id,
-                source_function_id=payload.source_function_id,
-                source_system=payload.source_system,
-            )
+            fields = IncomingIngestSourceFields(source_system=payload.source_system)
             document_metadata = _validate_document_metadata(payload.document_metadata)
             files = await service.download_source_files([item.model_dump() for item in payload.files])
         else:
             form = await request.form()
+            if "source_doc_id" in form:
+                raise ValueError("source_doc_id must be provided in document_metadata")
+            context_fields = {"source_function_id", "business_id", "external_user_id", "external_user_name"}
+            if any(field in form for field in context_fields):
+                raise ValueError(
+                    "page and user context fields do not belong to incoming document ingestion"
+                )
             # 外部系统直接传文件内容；原文长期存 MinIO，数据库只保存地址和来文元数据。
             uploads = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
             if not uploads:
                 raise ValueError("files is required")
-            fields = IncomingIngestMultipartFields(
-                source_doc_id=str(form.get("source_doc_id") or "").strip(),
-                source_function_id=str(form.get("source_function_id") or "").strip(),
+            fields = IncomingIngestSourceFields(
                 source_system=str(form.get("source_system") or "production").strip() or "production",
             )
             document_metadata = _parse_document_metadata(form.get("document_metadata"))
@@ -245,8 +248,8 @@ async def ingest_incoming_document(request: Request, current_user: User = Depend
                 )
 
         result = await service.ingest_files(
-            source_doc_id=fields.source_doc_id,
-            source_function_id=fields.source_function_id,
+            # 外部契约只在 document_metadata 声明来文 ID；服务层再将其规范化为独立索引字段。
+            source_doc_id=_source_doc_id_from_metadata(document_metadata),
             document_metadata=document_metadata,
             source_system=fields.source_system,
             files=files,
@@ -435,6 +438,8 @@ def _parse_document_metadata(raw_value) -> dict:
 
 
 def _validate_document_metadata(metadata: dict) -> dict:
+    metadata = dict(metadata)
+    metadata["source_doc_id"] = _source_doc_id_from_metadata(metadata)
     incoming_date = metadata.get("incoming_date")
     if incoming_date is not None:
         try:
@@ -443,6 +448,13 @@ def _validate_document_metadata(metadata: dict) -> dict:
         except ValueError as exc:
             raise ValueError("document_metadata.incoming_date must be YYYY-MM-DD") from exc
     return metadata
+
+
+def _source_doc_id_from_metadata(metadata: dict) -> str:
+    source_doc_id = metadata.get("source_doc_id")
+    if not isinstance(source_doc_id, str) or not source_doc_id.strip():
+        raise ValueError("document_metadata.source_doc_id is required")
+    return source_doc_id.strip()
 
 
 def _incoming_document_payload(record, *, detail: bool, capabilities: dict | None = None) -> dict:
@@ -468,7 +480,6 @@ def _incoming_document_payload(record, *, detail: bool, capabilities: dict | Non
     payload = {
         "incomingId": record.incoming_id,
         "sourceSystem": record.source_system,
-        "sourceFunctionId": getattr(record, "source_function_id", None),
         "sourceDocumentId": record.source_document_id,
         "documentMetadata": metadata,
         "documentNumber": metadata.get("document_number"),

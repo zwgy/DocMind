@@ -274,7 +274,7 @@ docMind backend
 iframe 内部会话列表采用按需左侧抽屉展示，默认不占用聊天区域；点击顶部对话列表按钮后再展开历史会话和新建聊天入口。
 底部输入区的“问文件”会打开页面附件选择弹窗，显示当前页面识别到的附件名称，可多选/取消；未选择任何附件时会自动取消文件上下文，不再把附件摘要拼入提问。模型选择采用输入框右下角的模型按钮和搜索弹窗。左下角回形针按钮参考主站 `AttachmentOptionsComponent`，先弹出“添加附件 / 上传图片”小菜单；添加附件再打开拖拽上传弹窗，确认后进入当前消息的待发送附件列表。
 
-父脚本不自动解析宿主页面 DOM。接入方需要在初始化后调用 `setFiles()` 显式传入附件列表，避免不同业务系统的页面结构差异导致误识别。来文级 `source_doc_id` 放在初始化参数的 `document_metadata` 中，只需声明一次；附件对象提供 `name/source_url/source_file_id`，其中 `source_file_id` 标识具体附件。`source_system/source_function_id` 由初始化参数补齐。SDK 会把 `document_metadata.source_doc_id` 转换为查询和入库接口所需的文档身份。待入库附件的 `source_url` 必须是 DocMind 后端可访问的 HTTP/HTTPS 地址；相对地址会由 SDK 按宿主页面补成绝对地址，浏览器不再读取附件内容，因此不要求附件服务为嵌入页面开放 CORS。为兼容旧的“一页一来文”接入，未传 `source_doc_id` 时 SDK 会暂用当前 `business_id` 兜底，但 `business_id` 是页面会话作用域，二者语义不同，新接入不应依赖该兜底。
+父脚本不自动解析宿主页面 DOM。接入方需要在初始化后调用 `setFiles()` 显式传入附件列表，避免不同业务系统的页面结构差异导致误识别。来文级 `source_doc_id` 放在初始化参数的 `document_metadata` 中，只需声明一次；附件对象提供 `name/source_url/source_file_id`，其中 `source_file_id` 标识具体附件。`source_system` 由初始化参数补齐，`source_function_id` 只用于页面会话 scope，不进入来文上传和查询身份。SDK 会把 `document_metadata.source_doc_id` 转换为查询所需的文档身份。待入库附件的 `source_url` 必须是 DocMind 后端可访问的 HTTP/HTTPS 地址；相对地址会由 SDK 按宿主页面补成绝对地址，浏览器不再读取附件内容，因此不要求附件服务为嵌入页面开放 CORS。`business_id` 主要用于页面会话隔离；兼容旧的一页一来文接入时，仅在未提供 `document_metadata.source_doc_id` 时作为来文 ID 兜底。
 
 宿主 SPA 切换业务页面时，应先调用 `setPageContext()`，再重新调用 `setPageContent()` 和 `setFiles()`：
 
@@ -292,6 +292,8 @@ chat.setFiles(nextPageFiles)
 ```
 
 页面身份只由 `source_system + source_function_id + business_id` 决定。`setPageContext()` 会中止并清空上一页面的 SDK 附件任务、重载 iframe 以清空旧会话和附件状态；页面内的来文由 `source_doc_id` 区分，同一来文下的附件再由 `source_file_id` 区分。
+
+来文解析身份由 `source_system + source_doc_id` 决定，不包含 `source_function_id` 和 `business_id`。前提是接入系统保证 `source_doc_id` 在该系统内唯一；同一来文出现在不同模块或业务页面时共享一份解析结果，不同页面的聊天历史仍由页面身份隔离。
 
 ## 8. 父页面参数
 
@@ -320,7 +322,7 @@ const chat = new DocMindChatIframe({
 | `apiBaseUrl` | iframe 的 origin | docMind API 基础地址；仅 iframe 与 API 不同域时覆盖 |
 | `tokenExchangeUrl` | `null` | 外部系统后端换票地址；为空时父脚本直接调用 `/api/chat-iframe/token` |
 | `source_system` | `''` | 外部系统 ID，只允许字母和数字 |
-| `function_id` | `''` | 外部系统功能 ID，对应附件字段 `source_function_id`，用于生成业务会话 scope |
+| `function_id` | `''` | 外部系统功能 ID，仅用于生成业务会话 scope |
 | `business_id` | `''` | 当前业务页面 ID，用于生成业务会话 scope |
 | `document_metadata` | `null` | 来文级公共元数据；`source_doc_id` 在此声明一次，SDK 内部用于来文查询和上传身份 |
 | `external_user_id` | `''` | 外部系统用户 ID，只允许字母和数字 |
@@ -348,6 +350,53 @@ const chat = new DocMindChatIframe({
 | `setFiles(files)` | 覆盖附件列表 |
 | `addFile(file)` | 追加附件 |
 | `on(event, callback)` | 监听 `stateChange`、`conversationCreated`、`messageSent` 等事件 |
+
+## 9.1 来文主动入库接口
+
+嵌入系统在收到上级来文时，可由后端使用 API Key 主动调用同一个接口。接口不接收 `business_id`、`external_user_id` 或 `external_user_name`；这些字段属于小助手页面与用户上下文，不属于来文解析身份。
+
+JSON 下载地址方式适合 DocMind 可以访问附件服务器的场景：
+
+```http
+POST /api/incoming-documents/ingest
+Authorization: Bearer yxkey_xxx
+Content-Type: application/json
+```
+
+```json
+{
+  "source_system": "oa",
+  "document_metadata": {
+    "source_doc_id": "37908",
+    "document_number": "上铁辆〔2020〕316号",
+    "title": "来文标题",
+    "incoming_type": "集团公司文件",
+    "source_unit": "安全科",
+    "incoming_date": "2020-10-20"
+  },
+  "files": [
+    {
+      "source_file_id": "202608110001",
+      "filename": "上铁辆〔2020〕316号.pdf",
+      "source_url": "http://attachments.example/download?fileid=202608110001",
+      "is_main_file": true
+    }
+  ]
+}
+```
+
+multipart 文件方式适合 DocMind 无法访问附件服务器的场景。普通字段为 `source_system`、`document_metadata` 和 `file_metas`，二进制文件通过重复的 `files` 字段按 `file_metas` 相同顺序提交：
+
+```bash
+curl -X POST "$DOCMIND_BASE_URL/api/incoming-documents/ingest" \
+  -H "Authorization: Bearer $DOCMIND_API_KEY" \
+  -F 'source_system=oa' \
+  -F 'document_metadata={"source_doc_id":"37908","document_number":"上铁辆〔2020〕316号","title":"来文标题","incoming_type":"集团公司文件","source_unit":"安全科","incoming_date":"2020-10-20"}' \
+  -F 'file_metas=[{"source_file_id":"202608110001","filename":"上铁辆〔2020〕316号.pdf","is_main_file":true}]' \
+  -F 'files=@上铁辆〔2020〕316号.pdf'
+```
+
+入库和查询按 `source_system + source_doc_id` 识别来文，按 `source_system + source_doc_id + source_file_id` 识别附件。主动上传接口不接收 `source_function_id` 或 `business_id`；它们只用于嵌入页面的会话隔离。接入系统必须保证 `source_doc_id` 在本系统内全局唯一。
 
 ## 10. 通信协议
 
@@ -411,7 +460,7 @@ corepack pnpm test
 父页面脚本的附件传入契约：
 
 - 只通过 `setFiles()` 接收附件列表
-- 自动补齐 `source_system/source_function_id` 和后端文档级标识
+- 自动补齐 `source_system` 和后端文档级标识
 - 多附件默认选中第一项
 
 聊天链路的最小契约：
@@ -469,4 +518,5 @@ CHAT_IFRAME_TOKEN_RATE_LIMIT_PER_MINUTE=60
 - “问网页”开启时，iframe 会把父页面传入的 `title/url/text/html` 放入 `iframe_context.page`。后端优先使用已解析文本；只有 HTML 时会先解析为 Markdown。短页面直接进入系统提示，长页面会写入当前线程沙箱文件，并在提示中给出 `read_file` 可读取路径。
 - “问文件”开启时，iframe 会把本轮选中的全部页面附件放入 `iframe_context.files`，而不是只传第一个附件。已匹配知识库且有摘要的附件会携带摘要、`kbId/fileId`；摘要不足时，模型可按提示使用 `open_kb_document` 读取全文。
 - 如果附件没有摘要但父页面提供了 `source_url`，iframe 会用 JSON 调用现有 `POST /api/incoming-documents/ingest`，由 DocMind 后端下载文件并统一交给 `ingest_files()`。iframe 展示下载和解析状态，并在解析完成前阻止发送本轮文件问题、保留输入。multipart 直接上传仍兼容；`source_url` 只需能被 DocMind 后端访问，不要求浏览器跨域读取。
+- `/api/incoming-documents/ingest` 的 JSON 与 multipart 两种请求都把 `source_doc_id` 放在 `document_metadata` 中；顶层或独立表单字段不再接受该参数。后端会将其规范化到独立索引列，不要求附件项重复携带。
 - 兼容过渡期仍保留 `meta.page_content`、`meta.selected_file`、`meta.extraction_result` 字段，但新的问答上下文应以 `iframe_context` 为准。

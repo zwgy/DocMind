@@ -197,9 +197,6 @@
               <a-descriptions-item label="来源系统">{{
                 detail.sourceSystem || '-'
               }}</a-descriptions-item>
-              <a-descriptions-item label="功能 ID">{{
-                detail.sourceFunctionId || '-'
-              }}</a-descriptions-item>
               <a-descriptions-item label="外部单号">{{
                 detail.sourceDocumentId || '-'
               }}</a-descriptions-item>
@@ -715,7 +712,6 @@ const importForm = reactive({
 const columns = [
   { title: '来文', key: 'filename', dataIndex: 'title', width: 260, fixed: 'left' },
   { title: '来源系统', key: 'sourceSystem', dataIndex: 'sourceSystem', width: 120 },
-  { title: '功能 ID', key: 'sourceFunctionId', dataIndex: 'sourceFunctionId', width: 140 },
   { title: '外部单号', key: 'sourceDocumentId', dataIndex: 'sourceDocumentId', width: 180 },
   { title: '分类', key: 'classification', dataIndex: 'classification', width: 140 },
   { title: '处理状态', key: 'status', dataIndex: 'status', width: 120 },

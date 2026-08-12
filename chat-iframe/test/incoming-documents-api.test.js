@@ -54,9 +54,9 @@ test('ingestIncomingDocument asks DocMind to download source urls', async () => 
         name: 'incoming.pdf',
         source_url: 'https://oa.example.test/incoming.pdf',
         source_doc_id: 'DOC001',
-        source_function_id: 'incomingDocument',
         source_file_id: 'S001',
         document_metadata: {
+          source_doc_id: 'DOC001',
           document_number: '来文〔2026〕1号',
           title: '风险整改通知',
           incoming_type: '安全管理',
@@ -75,15 +75,14 @@ test('ingestIncomingDocument asks DocMind to download source urls', async () => 
   assert.equal(calls[0].options.headers.Authorization, 'Bearer token-1')
   assert.equal(calls[0].options.headers['Content-Type'], 'application/json')
   assert.deepEqual(JSON.parse(calls[0].options.body), {
-    source_doc_id: 'DOC001',
-    source_function_id: 'incomingDocument',
     source_system: 'oa',
     document_metadata: {
-    document_number: '来文〔2026〕1号',
-    title: '风险整改通知',
-    incoming_type: '安全管理',
-    source_unit: '安监部',
-    incoming_date: '2026-07-09'
+      source_doc_id: 'DOC001',
+      document_number: '来文〔2026〕1号',
+      title: '风险整改通知',
+      incoming_type: '安全管理',
+      source_unit: '安监部',
+      incoming_date: '2026-07-09'
     },
     files: [
       {
@@ -109,15 +108,15 @@ test('ingestIncomingDocument uses source_file_id as the source file key', async 
       name: 'incoming.pdf',
       source_file_id: 'S001',
       source_url: 'https://oa.example.test/incoming.pdf',
-      source_function_id: 'incomingDocument',
       source_doc_id: 'DOC001'
     }
   ])
 
   const body = JSON.parse(calls[0].options.body)
   assert.equal(calls.length, 1)
-  assert.equal(body.source_doc_id, 'DOC001')
-  assert.equal(body.source_function_id, 'incomingDocument')
+  assert.equal(body.source_doc_id, undefined)
+  assert.equal(body.document_metadata.source_doc_id, 'DOC001')
+  assert.equal(body.source_function_id, undefined)
   assert.equal(body.source_system, 'production')
   assert.deepEqual(body.files, [
     {
@@ -127,6 +126,29 @@ test('ingestIncomingDocument uses source_file_id as the source file key', async 
       is_main_file: false
     }
   ])
+})
+
+test('ingestIncomingDocument rejects files from different source systems', async () => {
+  await assert.rejects(
+    () =>
+      ingestIncomingDocument([
+        {
+          name: 'oa.pdf',
+          source_system: 'oa',
+          source_doc_id: 'DOC001',
+          source_file_id: 'S001',
+          source_url: 'https://oa.example.test/oa.pdf'
+        },
+        {
+          name: 'erp.pdf',
+          source_system: 'erp',
+          source_doc_id: 'DOC001',
+          source_file_id: 'S002',
+          source_url: 'https://erp.example.test/erp.pdf'
+        }
+      ]),
+    /同一份来文/
+  )
 })
 
 test('queryIncomingDocumentExtractions returns local mock data when enabled by url', async () => {

@@ -18,7 +18,6 @@ def _document():
     return SimpleNamespace(
         incoming_id="inc-1",
         source_system="production",
-        source_function_id="received",
         source_document_id="doc-1",
         document_metadata={"title": "风险通知", "incoming_date": "2026-07-01"},
         confirmed_classification=None,

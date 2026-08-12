@@ -64,7 +64,6 @@ def _document_payload(document) -> dict[str, Any]:
     return {
         "incoming_id": document.incoming_id,
         "source_system": document.source_system,
-        "source_function_id": document.source_function_id,
         "source_document_id": document.source_document_id,
         "document_metadata": document.document_metadata or {},
         "classification": classification,

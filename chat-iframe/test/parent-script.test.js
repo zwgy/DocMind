@@ -282,6 +282,7 @@ test('setFiles and explicit requests send compatible iframe messages', () => {
     function_id: 'incomingDocument',
     business_id: '37906',
     document_metadata: {
+      source_doc_id: 'incoming-37906',
       document_number: '来文〔2026〕1号',
       title: '风险整改通知',
       incoming_type: '安全管理',
@@ -313,12 +314,13 @@ test('setFiles and explicit requests send compatible iframe messages', () => {
   assert.equal(sentMessages.at(-3).message.type, 'PAGE_FILES_UPDATED')
   assert.equal(sentMessages.at(-3).message.payload[0].source_url, 'https://oa/files/source-1')
   assert.equal(sentMessages.at(-3).message.payload[0].source_system, 'oa')
-  assert.equal(sentMessages.at(-3).message.payload[0].source_function_id, 'incomingDocument')
-  assert.equal(sentMessages.at(-3).message.payload[0].source_doc_id, '37906')
+  assert.equal(sentMessages.at(-3).message.payload[0].source_function_id, undefined)
+  assert.equal(sentMessages.at(-3).message.payload[0].source_doc_id, 'incoming-37906')
   assert.equal(sentMessages.at(-3).message.payload[0].id, undefined)
   assert.deepEqual(
     JSON.parse(JSON.stringify(sentMessages.at(-3).message.payload[0].document_metadata)),
     {
+      source_doc_id: 'incoming-37906',
       document_number: '来文〔2026〕1号',
       title: '风险整改通知',
       incoming_type: '安全管理',
@@ -386,6 +388,27 @@ test('explicit source_doc_id stays distinct from the page business_id', () => {
 
   assert.equal(chat.options.business_id, 'incomingDetail37908')
   assert.equal(chat.pageFiles[0].source_doc_id, '37908')
+  chat.destroy()
+})
+
+test('business_id is used only as a fallback source_doc_id', () => {
+  const { DocMindChatIframe } = parentHarness()
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    source_system: 'oa',
+    function_id: 'incomingDocument',
+    business_id: 'incomingDetail37908'
+  })
+
+  chat.setFiles([
+    {
+      source_file_id: '202010200206',
+      name: 'incoming.pdf',
+      source_url: 'https://oa/files/202010200206'
+    }
+  ])
+
+  assert.equal(chat.pageFiles[0].source_doc_id, 'incomingDetail37908')
   chat.destroy()
 })
 

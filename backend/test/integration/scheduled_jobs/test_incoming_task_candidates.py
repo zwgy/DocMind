@@ -92,7 +92,6 @@ async def _create_extraction(
             IncomingDocument(
                 incoming_id=incoming_id,
                 source_system="integration-test",
-                source_function_id="scheduled-jobs",
                 source_document_id=run_id,
                 document_metadata={"title": "候选任务验收"},
                 status="extracting",

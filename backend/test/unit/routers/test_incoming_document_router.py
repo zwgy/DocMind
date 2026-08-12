@@ -8,11 +8,18 @@ from server.routers import incoming_document_router
 
 
 def test_parse_document_metadata_requires_object_and_accepts_new_contract():
-    assert incoming_document_router._parse_document_metadata('{"title":"专项检查"}') == {"title": "专项检查"}
+    assert incoming_document_router._parse_document_metadata('{"source_doc_id":"DOC-1","title":"专项检查"}') == {
+        "source_doc_id": "DOC-1",
+        "title": "专项检查",
+    }
     with pytest.raises(ValueError, match="document_metadata"):
         incoming_document_router._parse_document_metadata("[]")
+    with pytest.raises(ValueError, match="document_metadata.source_doc_id"):
+        incoming_document_router._parse_document_metadata('{"title":"专项检查"}')
     with pytest.raises(ValueError, match="YYYY-MM-DD"):
-        incoming_document_router._parse_document_metadata('{"incoming_date":"2026-02-30"}')
+        incoming_document_router._parse_document_metadata(
+            '{"source_doc_id":"DOC-1","incoming_date":"2026-02-30"}'
+        )
 
 
 def test_parse_file_metas_reads_main_file_marker():
@@ -37,9 +44,11 @@ async def test_ingest_json_delegates_source_url_download_to_service(monkeypatch)
         async def json(self):
             return {
                 "source_system": "oa",
-                "source_function_id": "incomingDocument",
-                "source_doc_id": "DOC001",
-                "document_metadata": {"title": "会议纪要", "incoming_date": "2026-08-12"},
+                "document_metadata": {
+                    "source_doc_id": "DOC001",
+                    "title": "会议纪要",
+                    "incoming_date": "2026-08-12",
+                },
                 "files": [
                     {
                         "source_file_id": "S001",
@@ -76,9 +85,12 @@ async def test_ingest_json_delegates_source_url_download_to_service(monkeypatch)
     ]
     assert captured["ingest"] == {
         "source_doc_id": "DOC001",
-        "source_function_id": "incomingDocument",
         "source_system": "oa",
-        "document_metadata": {"title": "会议纪要", "incoming_date": "2026-08-12"},
+        "document_metadata": {
+            "source_doc_id": "DOC001",
+            "title": "会议纪要",
+            "incoming_date": "2026-08-12",
+        },
         "files": [
             {
                 "source_file_id": "S001",
@@ -91,6 +103,106 @@ async def test_ingest_json_delegates_source_url_download_to_service(monkeypatch)
         ],
         "operator_id": "user-1",
     }
+
+
+async def test_ingest_json_rejects_top_level_source_doc_id():
+    class FakeRequest:
+        headers = {"content-type": "application/json"}
+
+        async def json(self):
+            return {
+                "source_system": "oa",
+                "source_doc_id": "DOC001",
+                "document_metadata": {"source_doc_id": "DOC001"},
+                "files": [
+                    {
+                        "source_file_id": "S001",
+                        "filename": "会议纪要.pdf",
+                        "source_url": "http://attachments.test/download?id=S001",
+                    }
+                ],
+            }
+
+    with pytest.raises(HTTPException) as exc_info:
+        await incoming_document_router.ingest_incoming_document(
+            FakeRequest(), current_user=SimpleNamespace(uid="user-1")
+        )
+    assert exc_info.value.status_code == 400
+    assert "source_doc_id" in str(exc_info.value.detail)
+
+
+async def test_ingest_json_rejects_source_function_id():
+    class FakeRequest:
+        headers = {"content-type": "application/json"}
+
+        async def json(self):
+            return {
+                "source_system": "oa",
+                "source_function_id": "incomingDocument",
+                "document_metadata": {"source_doc_id": "DOC001"},
+                "files": [
+                    {
+                        "source_file_id": "S001",
+                        "filename": "会议纪要.pdf",
+                        "source_url": "http://attachments.test/download?id=S001",
+                    }
+                ],
+            }
+
+    with pytest.raises(HTTPException) as exc_info:
+        await incoming_document_router.ingest_incoming_document(
+            FakeRequest(), current_user=SimpleNamespace(uid="user-1")
+        )
+    assert exc_info.value.status_code == 400
+    assert "source_function_id" in str(exc_info.value.detail)
+
+
+async def test_ingest_multipart_rejects_separate_source_doc_id_field():
+    class FakeForm:
+        def __contains__(self, key):
+            return key == "source_doc_id"
+
+        def getlist(self, _key):
+            return []
+
+    class FakeRequest:
+        headers = {"content-type": "multipart/form-data; boundary=test"}
+
+        async def form(self):
+            return FakeForm()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await incoming_document_router.ingest_incoming_document(
+            FakeRequest(), current_user=SimpleNamespace(uid="user-1")
+        )
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "source_doc_id must be provided in document_metadata"
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["source_function_id", "business_id", "external_user_id", "external_user_name"],
+)
+async def test_ingest_multipart_rejects_page_context_fields(field_name):
+    class FakeForm:
+        def __contains__(self, key):
+            return key == field_name
+
+        def getlist(self, _key):
+            return []
+
+    class FakeRequest:
+        headers = {"content-type": "multipart/form-data; boundary=test"}
+
+        async def form(self):
+            return FakeForm()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await incoming_document_router.ingest_incoming_document(
+            FakeRequest(), current_user=SimpleNamespace(uid="user-1")
+        )
+    assert exc_info.value.status_code == 400
+    assert "page and user context" in exc_info.value.detail
 
 
 async def test_management_list_normalizes_classification_label(monkeypatch):
@@ -121,7 +233,6 @@ async def test_get_detail_returns_document_and_attachment_list(monkeypatch):
     document = SimpleNamespace(
         incoming_id="inc_1",
         source_system="oa",
-        source_function_id="incoming",
         source_document_id="DOC-1",
         document_metadata={"title": "专项检查"},
         status="ready",

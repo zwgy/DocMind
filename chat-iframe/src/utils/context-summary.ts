@@ -21,8 +21,8 @@ export function groupIncomingDocumentFiles(inputs: ContextSummaryInput[]) {
     const selectedInput = input as SelectedContextSummaryInput
     const file = selectedInput.file
     const key = input.result?.incomingId ||
-      (file.source_function_id && file.source_doc_id
-        ? `${file.source_system || 'production'}:${file.source_function_id}:${file.source_doc_id}`
+      (file.source_doc_id
+        ? `${file.source_system || 'production'}:${file.source_doc_id}`
         : file.source_file_id)
     documents.set(key, [...(documents.get(key) || []), selectedInput])
   }

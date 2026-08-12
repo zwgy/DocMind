@@ -71,12 +71,9 @@
         if (file.source_system) normalizedFile.source_system = file.source_system
         if (!normalizedFile.source_doc_id && documentSourceDocId)
           normalizedFile.source_doc_id = documentSourceDocId
-        // business_id 仅兼容“一页一来文”的旧接入作为最终兜底，不能替代来文元数据中的 source_doc_id。
+        // 兼容一页一来文的旧接入；显式来文 ID 始终优先，business_id 只在缺失时兜底。
         if (!normalizedFile.source_doc_id && options.business_id)
           normalizedFile.source_doc_id = options.business_id
-        if (file.source_function_id) normalizedFile.source_function_id = file.source_function_id
-        if (!normalizedFile.source_function_id && options.function_id)
-          normalizedFile.source_function_id = options.function_id
         if (!normalizedFile.source_system && options.source_system)
           normalizedFile.source_system = options.source_system
         normalizedFile.document_metadata = file.document_metadata || documentMetadata

@@ -158,17 +158,13 @@ class IncomingDocumentIngestService:
         self,
         *,
         source_doc_id: str,
-        source_function_id: str,
         document_metadata: dict[str, Any],
         source_system: str = "production",
         files: list[dict[str, Any]],
         operator_id: str | None = None,
     ) -> dict[str, Any]:
         source_system = (source_system or "production").strip() or "production"
-        source_function_id = (source_function_id or "").strip()
         source_document_id = (source_doc_id or "").strip()
-        if not source_function_id:
-            raise ValueError("source_function_id is required")
         if not source_document_id:
             raise ValueError("source_doc_id is required")
         if not isinstance(document_metadata, dict):
@@ -176,7 +172,7 @@ class IncomingDocumentIngestService:
         if not files:
             raise ValueError("files is required")
 
-        incoming_id = self._incoming_id(source_system, source_function_id, source_document_id)
+        incoming_id = self._incoming_id(source_system, source_document_id)
         normalized_files = self._validate_files(files)
         existing_document = await self.incoming_repo.get_by_incoming_id(incoming_id)
         if existing_document is not None and existing_document.status in {"parsing", "extracting"}:
@@ -233,7 +229,6 @@ class IncomingDocumentIngestService:
 
         document_data = {
             "source_system": source_system,
-            "source_function_id": source_function_id,
             "source_document_id": source_document_id,
             "document_metadata": document_metadata,
             "status": "uploaded",
@@ -1107,8 +1102,8 @@ class IncomingDocumentIngestService:
         )
 
     @staticmethod
-    def _incoming_id(source_system: str, source_function_id: str, source_document_id: str) -> str:
-        return f"inc_{hashstr(f'{source_system}:{source_function_id}:{source_document_id}', 16)}"
+    def _incoming_id(source_system: str, source_document_id: str) -> str:
+        return f"inc_{hashstr(f'{source_system}:{source_document_id}', 16)}"
 
     @staticmethod
     def _incoming_file_id(incoming_id: str, source_file_id: str) -> str:
