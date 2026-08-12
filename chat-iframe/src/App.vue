@@ -84,6 +84,7 @@ const inboxNavigation = ref<{ key: number; category: 'notification' | 'task' } |
 const draggingWindow = ref(false)
 const historyScrollRequest = ref(0)
 let extractionRefreshTimer: ReturnType<typeof setTimeout> | null = null
+const extractionRefreshPromises = new Map<string, Promise<boolean>>()
 let attachmentNoticeTimer: ReturnType<typeof setTimeout> | null = null
 let inboxRefreshTimer: number | null = null
 let inboxRefreshPromise: Promise<void> | null = null
@@ -434,7 +435,7 @@ function filesForSelectedDocuments(selectedFiles: IncomingPageFile[]) {
   return [...new Map(candidates.map((file) => [file.source_file_id, file])).values()]
 }
 
-async function refreshExtraction(
+async function refreshExtractionOnce(
   queryFiles: IncomingPageFile[] = selectedFile.value
     ? filesForSelectedDocuments([selectedFile.value])
     : [],
@@ -464,6 +465,16 @@ async function refreshExtraction(
     // 父页面可能先响应附件列表、后完成换票；这里等待 token 到达，避免无凭证请求把摘要卡片打成 401。
     refreshContextSummaries()
     return false
+  }
+  if (
+    queryFiles.every((candidate) => {
+      const result = results.value[candidate.source_file_id]
+      return result?.matchStatus === 'matched' && result.extractionStatus === 'ready'
+    })
+  ) {
+    // 摘要一旦 ready 就是当前页面可复用的终态；恢复可见或切换选中附件时不再重复请求后端。
+    refreshContextSummaries()
+    return true
   }
   loading.value = true
   error.value = ''
@@ -576,6 +587,30 @@ async function refreshExtraction(
       extractionRefreshTimer = setTimeout(() => void refreshExtraction(pollingFiles), 2000)
     }
   }
+}
+
+function refreshExtraction(
+  queryFiles: IncomingPageFile[] = selectedFile.value
+    ? filesForSelectedDocuments([selectedFile.value])
+    : [],
+  syncPending = true
+) {
+  // 首次打开、token 注入和页面恢复可见可能同时触发刷新；复用同批进行中请求，避免并发重复查询。
+  const key = `${syncPending}\u0000${queryFiles
+    .map((file) =>
+      [file.source_system || 'production', file.source_doc_id, file.source_file_id].join('\u0000')
+    )
+    .sort()
+    .join('\u0001')}`
+  const existing = extractionRefreshPromises.get(key)
+  if (existing) return existing
+
+  const operation = refreshExtractionOnce(queryFiles, syncPending)
+  const tracked = operation.finally(() => {
+    if (extractionRefreshPromises.get(key) === tracked) extractionRefreshPromises.delete(key)
+  })
+  extractionRefreshPromises.set(key, tracked)
+  return tracked
 }
 
 async function createChat() {
@@ -767,6 +802,7 @@ watch(
     if (!previousPageContextKey || pageContextKey === previousPageContextKey) return
     // 页面身份只由 source_system + source_function_id + business_id 决定；source_doc_id 仅归属页面内来文附件。
     attachmentPreparationPromises.clear()
+    extractionRefreshPromises.clear()
     results.value = {}
     selectedPageFiles.value = []
     error.value = ''
@@ -859,6 +895,7 @@ onUnmounted(() => {
   if (extractionRefreshTimer) clearTimeout(extractionRefreshTimer)
   if (attachmentNoticeTimer) clearTimeout(attachmentNoticeTimer)
   if (inboxRefreshTimer) clearInterval(inboxRefreshTimer)
+  extractionRefreshPromises.clear()
   tickerResizeObserver?.disconnect()
   tickerMotionQuery?.removeEventListener('change', handleTickerMotionPreference)
   document.removeEventListener('visibilitychange', resumeVisiblePage)

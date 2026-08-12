@@ -24,6 +24,23 @@ test('refreshExtraction waits for token before querying extraction api', () => {
   assert.match(source, /void refreshExtraction\(\)/)
 })
 
+test('concurrent extraction refreshes for the same document reuse one request', () => {
+  assert.match(source, /const extractionRefreshPromises = new Map<string, Promise<boolean>>\(\)/)
+  assert.match(source, /const existing = extractionRefreshPromises\.get\(key\)/)
+  assert.match(source, /if \(existing\) return existing/)
+  assert.match(source, /const operation = refreshExtractionOnce\(queryFiles, syncPending\)/)
+  assert.match(source, /extractionRefreshPromises\.set\(key, tracked\)/)
+  assert.match(source, /extractionRefreshPromises\.clear\(\)/)
+})
+
+test('ready extraction summaries are reused without querying again', () => {
+  assert.match(
+    source,
+    /result\?\.matchStatus === 'matched' && result\.extractionStatus === 'ready'/
+  )
+  assert.match(source, /摘要一旦 ready 就是当前页面可复用的终态/)
+})
+
 test('page attachments are downloaded by DocMind and block questions until parsing is ready', () => {
   assert.doesNotMatch(contextSource, /normalized\[0\]\.selected/)
   assert.doesNotMatch(inputSource, /if \(!next\.size && props\.selectedPageSourceFileId\)/)

@@ -11,15 +11,12 @@
 
 ## 接口信息
 
-```http
-POST /api/incoming-documents/ingest
-Authorization: Bearer yxkey_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
 生产环境的完整地址通常为：
 
 ```text
-https://<DocMind 域名>/api/incoming-documents/ingest
+POST /api/incoming-documents/ingest
+DOCMIND_API_KEY = yxkey_<请向 DocMind 管理员申请>
+DOCMIND_BASE_URL = https://192.168.1.220:5174
 ```
 
 API Key 由 DocMind 管理员创建，必须放在服务端配置或密钥管理系统中。不要把 API Key 写入浏览器代码、网页源码或 URL。API Key 的创建和认证规则见 [API Key 外部集成](./api-key-integration.md)。
@@ -41,8 +38,6 @@ API Key 由 DocMind 管理员创建，必须放在服务端配置或密钥管理
 | `document_metadata.source_doc_id` | 是 | 来源系统中的来文 ID；同一 `source_system` 内必须唯一 |
 | `source_file_id` | 是 | 当前来文下的附件 ID；同一来文内必须唯一 |
 
-`source_function_id` 和 `business_id` 用于嵌入页面的会话隔离，不属于来文身份，也不应传给本接口。`external_user_id` 和 `external_user_name` 同样不需要传入，API Key 已经提供调用身份。
-
 重复提交相同身份、相同内容和相同元数据时，DocMind 会复用已有记录，不会生成重复来文。相同身份下附件内容或元数据发生变化时，DocMind 会按新内容重新处理；如果来文正在解析，调用方应等待当前任务结束后再重试。
 
 ## 方式一：JSON 下载地址
@@ -50,12 +45,6 @@ API Key 由 DocMind 管理员创建，必须放在服务端配置或密钥管理
 当 DocMind 服务器能够访问附件下载地址时，推荐使用这种方式。附件由服务器之间直接传输，不经过用户浏览器，因此不受浏览器 CORS 限制。
 
 ### 请求示例
-
-```http
-POST /api/incoming-documents/ingest
-Authorization: Bearer yxkey_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-Content-Type: application/json
-```
 
 ```json
 {
@@ -93,6 +82,8 @@ curl -X POST "$DOCMIND_BASE_URL/api/incoming-documents/ingest" \
   -H "Content-Type: application/json" \
   --data-binary @incoming-document.json
 ```
+
+JSON 文件和请求体必须使用 UTF-8 编码；`source_url` 中包含中文文件名时，建议按 URL 规范进行百分号编码。否则后端可能收到乱码路径，表现为附件服务器返回 `403` 或 `404`。
 
 ### Python 示例
 
@@ -165,6 +156,24 @@ print(response.json())
 | `source_file_id` | 是 | 来源系统中的附件 ID |
 | `filename` | 是 | 文件名，建议包含正确扩展名 |
 | `is_main_file` | 否 | 是否为主文件；一份来文最多一个主文件 |
+
+### 常用文件 Content-Type
+
+multipart 上传时，建议在文件字段的 `type=` 中声明真实文件类型。DocMind 主要根据文件内容和扩展名解析，正确的 Content-Type 仍有助于网关、日志和其他 HTTP 客户端识别文件。
+
+| 文件格式 | Content-Type | curl 文件字段示例 |
+| --- | --- | --- |
+| PDF | `application/pdf` | `-F 'files=@来文.pdf;type=application/pdf'` |
+| Word `.doc` | `application/msword` | `-F 'files=@附件.doc;type=application/msword'` |
+| Word `.docx` | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | `-F 'files=@附件.docx;type=application/vnd.openxmlformats-officedocument.wordprocessingml.document'` |
+| Excel `.xls` | `application/vnd.ms-excel` | `-F 'files=@附件.xls;type=application/vnd.ms-excel'` |
+| Excel `.xlsx` | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | `-F 'files=@附件.xlsx;type=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'` |
+| PowerPoint `.ppt` | `application/vnd.ms-powerpoint` | `-F 'files=@附件.ppt;type=application/vnd.ms-powerpoint'` |
+| PowerPoint `.pptx` | `application/vnd.openxmlformats-officedocument.presentationml.presentation` | `-F 'files=@附件.pptx;type=application/vnd.openxmlformats-officedocument.presentationml.presentation'` |
+| ZIP | `application/zip` | `-F 'files=@附件.zip;type=application/zip'` |
+| 无法确定的二进制文件 | `application/octet-stream` | `-F 'files=@附件.bin;type=application/octet-stream'` |
+
+不要为了统一而全部填写 `application/octet-stream`；已知格式时应使用上表中的具体类型。
 
 ### curl 示例
 
@@ -242,6 +251,8 @@ print(response.json())
 ```
 
 `file_metas` 数组和重复的 `files` 字段必须数量相同、顺序一致。不要手工设置 multipart 的 `Content-Type` 请求头，HTTP 客户端会自动生成包含 boundary 的正确请求头。
+
+上述 curl 写法面向 Bash。Windows PowerShell 调用原生 `curl.exe` 时，内联 JSON 的双引号可能被命令行参数解析移除；建议改用本节 Python 示例，或把 `document_metadata`、`file_metas` 分别写入 UTF-8 JSON 文件后以 `-F "document_metadata=<metadata.json"`、`-F "file_metas=<file-metas.json"` 传入。
 
 ## 成功响应
 
