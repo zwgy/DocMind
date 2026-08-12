@@ -26,7 +26,7 @@ test('refreshExtraction waits for token before querying extraction api', () => {
 test('page attachments are prepared by the parent SDK and block questions until parsing is ready', () => {
   assert.doesNotMatch(contextSource, /normalized\[0\]\.selected/)
   assert.doesNotMatch(inputSource, /if \(!next\.size && props\.selectedPageSourceFileId\)/)
-  assert.match(source, /refreshExtraction\(filesForSelectedDocuments\(selectedPageFiles\), true\)/)
+  assert.match(source, /refreshExtraction\(selectedDocumentFiles, true\)/)
   assert.match(
     source,
     /context\.files\.filter\(\(file\) => selectedKeys\.has\(documentKey\(file\)\)\)/
@@ -34,6 +34,8 @@ test('page attachments are prepared by the parent SDK and block questions until 
   assert.match(source, /context\.config\.parentFileIngest/)
   assert.match(source, /requestFileIngest\(files/)
   assert.match(source, /fileIngestPromises\.set\(key, tracked\)/)
+  assert.match(source, /const selectedDocumentFiles = filesForSelectedDocuments\(selectedPageFiles\)/)
+  assert.match(source, /selectedPageFiles: selectedDocumentFiles/)
   assert.match(source, /attachmentPreparationNotice\.value\?\.message/)
   assert.match(source, /class="attachment-preparation-status"/)
   assert.match(source, /showAttachmentPreparation\('ready', related\)/)

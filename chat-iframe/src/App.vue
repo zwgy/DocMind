@@ -660,9 +660,10 @@ async function sendChat(payload: {
   restoreUploadDraft: (retry: { files: boolean; image: boolean; message: string }) => void
 }) {
   const selectedPageFiles = payload.selectedPageFiles || []
+  const selectedDocumentFiles = filesForSelectedDocuments(selectedPageFiles)
   if (
     selectedPageFiles.length &&
-    !(await refreshExtraction(filesForSelectedDocuments(selectedPageFiles), true))
+    !(await refreshExtraction(selectedDocumentFiles, true))
   ) {
     payload.restoreUploadDraft({
       files: false,
@@ -686,7 +687,9 @@ async function sendChat(payload: {
       pageContent: context.pageContent,
       selectedFile: selectedContextFile,
       extractionResult: selectedContextResult,
-      selectedPageFiles,
+      // 用户选择来文中的任一附件时，模型必须同时获得同一来文的完整附件清单，
+      // 否则只能看到主文件并为其他附件猜测 source_file_id。
+      selectedPageFiles: selectedDocumentFiles,
       extractionResults: results.value
     },
     context.config.token,
