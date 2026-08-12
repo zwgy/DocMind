@@ -168,15 +168,17 @@
   <span class="tk-com">// 外部系统功能 ID，用于生成业务会话 scope。</span>
   <span class="tk-key">function_id</span>:        <span class="tk-str">'incomingDocument'</span>,
   <span class="tk-com">// 当前业务页面 ID，用于生成业务会话 scope。</span>
-  <span class="tk-key">business_id</span>:        <span class="tk-str">'37908'</span>,
+  <span class="tk-key">business_id</span>:        <span class="tk-str">'incomingDetail37908'</span>,
   <span class="tk-com">// 外部系统用户 ID，只允许字母和数字。</span>
   <span class="tk-key">external_user_id</span>:   <span class="tk-str">'1001'</span>,
   <span class="tk-com">// 外部系统用户显示名，用于 docMind 后台识别。</span>
   <span class="tk-key">external_user_name</span>: <span class="tk-str">'张三'</span>,
 }
 
-<span class="tk-com">// 来文级公共元数据：同一来文的全部附件共享；未入库附件随消息自动上传时会提交这些字段。</span>
+<span class="tk-com">// 来文级公共元数据：同一来文的全部附件共享；首次打开助手触发未入库附件上传时会提交这些字段。</span>
 <span class="tk-key">const</span> incomingDocumentMetadata = {
+  <span class="tk-com">// 当前页面中的来文 ID；它与页面级 business_id 语义不同。</span>
+  <span class="tk-key">source_doc_id</span>:    <span class="tk-str">'37908'</span>,
   <span class="tk-com">// 来文编号。</span>
   <span class="tk-key">document_number</span>: <span class="tk-str">'上铁辆〔2020〕316号'</span>,
   <span class="tk-com">// 来文标题。</span>
@@ -206,10 +208,10 @@
 <span class="tk-com">//   initialState:       'minimized'                     // 初始状态：minimized / normal / maximized / closed</span>
 <span class="tk-com">//   offsetX / offsetY:  24 / 24                         // 距视口边缘偏移（像素）</span>
 <span class="tk-com">//   buttonHtml:         '<span>🤖</span>'               // 自定义悬浮按钮内容</span>
-<span class="tk-com">//   document_metadata: { ... }                          // 来文级公共元数据，选择询问的附件没有上传时与附件信息组合后上传服务器</span>
+<span class="tk-com">//   document_metadata: { source_doc_id, ... }           // 来文 ID 与公共元数据，首次打开助手发现未入库时提交</span>
 
 <span class="tk-com">// SPA 切换业务页面时先更新页面身份；该调用会清空上一页面的 SDK 任务与 iframe 状态。</span>
-<span class="tk-com">// chat.setPageContext({ source_system: 'oa', source_function_id: 'incomingDocument', business_id: '37909' })</span>
+<span class="tk-com">// chat.setPageContext({ source_system: 'oa', source_function_id: 'incomingDocument', business_id: 'incomingDetail37909', document_metadata: nextIncomingDocumentMetadata })</span>
 <span class="tk-com">// 随后为新页面重新调用 setPageContent() 和 setFiles()。</span>
 
 <span class="tk-com">// 2. 设置自定义页面内容（可选，设置后不再实时获取网页HTML，且不转markdown）</span>
@@ -268,7 +270,7 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
     <script src="/chat-iframe/docmind-chat-iframe-parent.js?v=0.7.1.1"></script>
     <script>
       // 允许通过 URL 参数注入测试数据，便于 e2e 场景覆盖不同业务身份。
-      // 例如：?source_system=oa&function_id=e2eIncoming&business_id=auto-sync-001
+      // 例如：?source_system=oa&function_id=e2eIncoming&business_id=page001&source_doc_id=doc001
       const params = new URLSearchParams(window.location.search)
       // 业务上下文：用于生成当前业务的独立会话 scope。
       const businessContext = {
@@ -277,15 +279,17 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
         // 外部系统功能 ID，用于生成业务会话 scope。
         function_id:        params.get('function_id')        || 'incomingDocument',
         // 当前业务页面 ID，用于生成业务会话 scope。
-        business_id:        params.get('business_id')        || '37908',
+        business_id:        params.get('business_id')        || 'incomingDetail37908',
         // 外部系统用户 ID，只允许字母和数字。
         external_user_id:   params.get('external_user_id')   || '1001',
         // 外部系统用户显示名，用于 docMind 后台识别。
         external_user_name: params.get('external_user_name') || '张三',
       }
 
-      // 来文级公共元数据：同一来文的全部附件共享；未入库附件随消息自动上传时会提交这些字段。
+      // 来文级公共元数据：同一来文的全部附件共享；首次打开助手触发未入库附件上传时会提交这些字段。
       const incomingDocumentMetadata = {
+        // 当前页面中的来文 ID；它与页面级 business_id 语义不同。
+        source_doc_id: params.get('source_doc_id') || '37908',
         // 来文编号。
         document_number: '上铁辆〔2020〕316号',
         // 来文标题。
@@ -307,13 +311,13 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
       })
 
       // SPA 切换业务页面时先调用：
-      // chat.setPageContext({ source_system: 'oa', source_function_id: 'incomingDocument', business_id: '37909' })
+      // chat.setPageContext({ source_system: 'oa', source_function_id: 'incomingDocument', business_id: 'incomingDetail37909', document_metadata: nextIncomingDocumentMetadata })
       // 随后为新页面重新调用 setPageContent() 和 setFiles()。
 
       // 设置自定义页面内容（可选，设置后不再实时获取网页HTML，且不转markdown）
       chat.setPageContent([
         '页面标题：' + document.title,
-        '来文 ID：37908；来文类别：集团公司通知；来文单位：供电部；来文日期：2020-10-20',
+        `来文 ID：${incomingDocumentMetadata.source_doc_id}；来文类别：集团公司通知；来文单位：供电部；来文日期：2020-10-20`,
         '主文件：上铁辆〔2020〕316号.pdf（428.76 KB）',
         '附件：附件4.xls',
         '附件：附件5.doc',

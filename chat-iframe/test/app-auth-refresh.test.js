@@ -18,6 +18,7 @@ const messagesSource = readFileSync(
 )
 
 test('refreshExtraction waits for token before querying extraction api', () => {
+  assert.match(source, /if \(!attachmentPreparationEnabled\.value\) \{/)
   assert.match(source, /if \(!context\.config\.token\) \{/)
   assert.match(source, /避免无凭证请求把摘要卡片打成 401/)
   assert.match(source, /void refreshExtraction\(\)/)
@@ -84,6 +85,29 @@ test('attachment status uses the flexible workbench row below an optional notifi
     appCssSource,
     /\.conversation-stage \{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\)/
   )
+  assert.match(
+    appCssSource,
+    /\.attachment-preparation-status \{[\s\S]*justify-content: center;[\s\S]*text-align: center;/
+  )
+})
+
+test('embedded attachment preparation starts only after the assistant first becomes visible', () => {
+  assert.match(contextSource, /windowStateInitialized: boolean/)
+  assert.match(contextSource, /windowStateInitialized: false/)
+  assert.match(contextSource, /this\.windowStateInitialized = true/)
+  assert.match(source, /const attachmentPreparationEnabled = ref\(false\)/)
+  assert.match(
+    source,
+    /\[\(\) => context\.windowStateInitialized, \(\) => context\.windowState\] as const/
+  )
+  assert.match(
+    source,
+    /if \(state !== 'normal' && state !== 'maximized'\) return[\s\S]*attachmentPreparationEnabled\.value = true[\s\S]*refreshVisibleAttachment\(\)/
+  )
+  assert.match(
+    source,
+    /if \(!context\.isEmbedded\) \{\s*attachmentPreparationEnabled\.value = true\s*void refreshExtraction\(\)/
+  )
 })
 
 test('structured extraction items are folded by default', () => {
@@ -107,9 +131,12 @@ test('reopening the conversation sidebar preserves loaded pagination', () => {
 test('restoring a hidden assistant requests bottom positioning after layout becomes visible', () => {
   assert.match(
     source,
-    /watch\(\s*\(\) => context\.windowState,[\s\S]*state !== 'normal' && state !== 'maximized'/
+    /watch\(\s*\[\(\) => context\.windowStateInitialized, \(\) => context\.windowState\][\s\S]*state !== 'normal' && state !== 'maximized'/
   )
-  assert.match(source, /previousState !== 'minimized' && previousState !== 'closed'/)
+  assert.match(
+    source,
+    /previousWindowStateInitialized[\s\S]*previousState !== 'minimized'[\s\S]*previousState !== 'closed'/
+  )
   assert.match(
     source,
     /requestAnimationFrame\(\(\) => \{\s*historyScrollRequest\.value \+= 1\s*\}\)/

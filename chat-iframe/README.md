@@ -82,7 +82,7 @@ VITE_API_URL=http://localhost:5050 corepack pnpm dev --host 0.0.0.0 --port 5174
 http://localhost:5174/chat-iframe/example.html
 ```
 
-`example.html` 会加载 `docmind-chat-iframe-parent.js`，模拟生产系统附件 DOM，并挂载 `public/关于做好2026年度供电6C系统评定工作的通知/` 下的真实来文附件作为默认附件。调试页填写 `source_system/function_id/business_id/external_user_id/external_user_name` 后实例化 `DocMindChatIframe`，父脚本会按 `tokenExchangeUrl` 或 `/api/chat-iframe/token` 自动换取 DocMind token。直接打开 `/chat-iframe/` 时没有父页面配置和业务上下文，调用受保护接口会返回“请登录后再访问”，模型列表也不会加载。
+`example.html` 会加载 `docmind-chat-iframe-parent.js`，模拟生产系统附件 DOM，并挂载 `public/关于做好2026年度供电6C系统评定工作的通知/` 下的真实来文附件作为默认附件。调试页填写页面级 `source_system/function_id/business_id`、来文级 `source_doc_id` 和外部用户信息后实例化 `DocMindChatIframe`，父脚本会按 `tokenExchangeUrl` 或 `/api/chat-iframe/token` 自动换取 DocMind token。直接打开 `/chat-iframe/` 时没有父页面配置和业务上下文，调用受保护接口会返回“请登录后再访问”，模型列表也不会加载。
 
 ```bash
 corepack pnpm typecheck
@@ -207,9 +207,9 @@ docMind backend
 1. iframe 加载完成，发送 `IFRAME_READY`。
 2. 父脚本发送 `INIT_CONFIG`、`PAGE_CONTENT`、`PAGE_FILES_UPDATED`。
 3. iframe 保存上下文。
-4. 多附件默认选中第一个，因为第一版要求打开助手后无需点击即可展示匹配状态。
-5. iframe 调用 `/api/incoming-documents/extractions/query`。
-6. 页面展示 `matched/multiple/pending_sync/not_found` 和 `ready/running/not_found/failed`。
+4. 多附件默认选中第一个，但最小化或关闭状态不查询、不上传附件。
+5. 用户第一次打开助手后，iframe 调用 `/api/incoming-documents/extractions/query`；未入库时再通知父页面 SDK 下载并上传整份来文的附件。
+6. 页面展示 `matched/multiple/pending_sync/not_found` 和 `ready/running/not_found/failed`；首次打开后再最小化或关闭不会中断已经开始的上传、解析和轮询。
 7. 用户提问时，iframe 创建或复用 `/api/chat/thread` 会话，调用 `/api/agent/runs` 创建运行任务，再读取 `/api/agent/runs/{runId}/events` 流式事件。
 8. “问网页/问文件”开启时，iframe 会把页面内容、选中附件、匹配结果和抽取摘要写入 `meta.iframe_context`，`query` 只保留用户原始问题；后端在运行任务时把该上下文渲染进系统提示。
 
@@ -224,6 +224,9 @@ docMind backend
     source_system: 'oa',
     function_id: 'contractApproval',
     business_id: 'contract-20260706-001',
+    document_metadata: {
+      source_doc_id: 'incoming-2026-001'
+    },
     external_user_id: '1001',
     external_user_name: '张三',
     agentId: 'default-chatbot',
@@ -239,7 +242,6 @@ docMind backend
 
   chat.setFiles([
     {
-      id: '202606100417',
       name: '来文文件名.docx',
       source_url: 'http://example/default.ashx?202606100417',
       source_file_id: '202606100417',
@@ -272,7 +274,7 @@ docMind backend
 iframe 内部会话列表采用按需左侧抽屉展示，默认不占用聊天区域；点击顶部对话列表按钮后再展开历史会话和新建聊天入口。
 底部输入区的“问文件”会打开页面附件选择弹窗，显示当前页面识别到的附件名称，可多选/取消；未选择任何附件时会自动取消文件上下文，不再把附件摘要拼入提问。模型选择采用输入框右下角的模型按钮和搜索弹窗。左下角回形针按钮参考主站 `AttachmentOptionsComponent`，先弹出“添加附件 / 上传图片”小菜单；添加附件再打开拖拽上传弹窗，确认后进入当前消息的待发送附件列表。
 
-父脚本不自动解析宿主页面 DOM。接入方需要在初始化后调用 `setFiles()` 显式传入附件列表，避免不同业务系统的页面结构差异导致误识别。文件对象只需提供 `name/source_url/source_file_id`；`source_system/source_function_id` 由初始化参数补齐，后端入库所需的文档级标识由 SDK 使用当前 `business_id` 自动生成，接入方无需传入。
+父脚本不自动解析宿主页面 DOM。接入方需要在初始化后调用 `setFiles()` 显式传入附件列表，避免不同业务系统的页面结构差异导致误识别。来文级 `source_doc_id` 放在初始化参数的 `document_metadata` 中，只需声明一次；附件对象提供 `name/source_url/source_file_id`，其中 `source_file_id` 标识具体附件。`source_system/source_function_id` 由初始化参数补齐。SDK 会把 `document_metadata.source_doc_id` 转换为查询和上传接口所需的文档身份。为兼容旧的“一页一来文”接入，未传 `source_doc_id` 时 SDK 会暂用当前 `business_id` 兜底，但 `business_id` 是页面会话作用域，二者语义不同，新接入不应依赖该兜底。
 
 宿主 SPA 切换业务页面时，应先调用 `setPageContext()`，再重新调用 `setPageContent()` 和 `setFiles()`：
 
@@ -280,13 +282,16 @@ iframe 内部会话列表采用按需左侧抽屉展示，默认不占用聊天�
 chat.setPageContext({
   source_system: 'oa',
   source_function_id: 'contractApproval',
-  business_id: 'contract-20260706-002'
+  business_id: 'contract-20260706-002',
+  document_metadata: {
+    source_doc_id: 'incoming-2026-002'
+  }
 })
 chat.setPageContent(nextPageContent)
 chat.setFiles(nextPageFiles)
 ```
 
-页面身份只由 `source_system + source_function_id + business_id` 决定。`setPageContext()` 会中止并清空上一页面的 SDK 附件任务、重载 iframe 以清空旧会话和附件状态；当前页面内的附件由 `source_file_id` 区分。
+页面身份只由 `source_system + source_function_id + business_id` 决定。`setPageContext()` 会中止并清空上一页面的 SDK 附件任务、重载 iframe 以清空旧会话和附件状态；页面内的来文由 `source_doc_id` 区分，同一来文下的附件再由 `source_file_id` 区分。
 
 ## 8. 父页面参数
 
@@ -317,6 +322,7 @@ const chat = new DocMindChatIframe({
 | `source_system` | `''` | 外部系统 ID，只允许字母和数字 |
 | `function_id` | `''` | 外部系统功能 ID，对应附件字段 `source_function_id`，用于生成业务会话 scope |
 | `business_id` | `''` | 当前业务页面 ID，用于生成业务会话 scope |
+| `document_metadata` | `null` | 来文级公共元数据；`source_doc_id` 在此声明一次，SDK 内部用于来文查询和上传身份 |
 | `external_user_id` | `''` | 外部系统用户 ID，只允许字母和数字 |
 | `external_user_name` | `''` | 外部系统用户显示名，用于 docMind 后台识别 |
 | `agentId` | `null` | 可选，聊天使用的智能体 ID；为空时 iframe 使用 `default-chatbot` |
@@ -337,7 +343,7 @@ const chat = new DocMindChatIframe({
 | `maximize()` | 最大化为全屏 |
 | `restore()` | 恢复普通窗口 |
 | `destroy()` | 移除 DOM、消息监听并中止附件任务；仅在彻底卸载小助手时调用 |
-| `setPageContext(context)` | SPA 切换业务页面；参数为 `source_system/source_function_id/business_id`，会清空旧页任务并重载 iframe |
+| `setPageContext(context)` | SPA 切换业务页面；参数为 `source_system/source_function_id/business_id/document_metadata`，会清空旧页任务并重载 iframe |
 | `setPageContent(content)` | 显式设置页面内容，支持字符串或对象 |
 | `setFiles(files)` | 覆盖附件列表 |
 | `addFile(file)` | 追加附件 |

@@ -52,6 +52,7 @@ type AttachmentPreparationNotice = {
   message: string
 }
 const attachmentPreparationNotice = ref<AttachmentPreparationNotice | null>(null)
+const attachmentPreparationEnabled = ref(false)
 const fileIngestPromises = new Map<string, Promise<void>>()
 const showSidebar = ref(false)
 const showScheduledCenter = ref(false)
@@ -450,6 +451,12 @@ async function refreshExtraction(
     extractionRefreshTimer = null
   }
   const file = selectedFile.value
+  // 嵌入页只在用户首次展开助手后准备附件，避免仅浏览业务页面就触发下载和上传。
+  // 首次展开后保持启用，保证最小化或关闭助手时后台解析与状态轮询仍能继续。
+  if (!attachmentPreparationEnabled.value) {
+    refreshContextSummaries()
+    return false
+  }
   if (!file) {
     refreshContextSummaries()
     return false
@@ -813,10 +820,17 @@ watch(
 )
 
 watch(
-  () => context.windowState,
-  (state, previousState) => {
+  [() => context.windowStateInitialized, () => context.windowState] as const,
+  ([windowStateInitialized, state], [previousWindowStateInitialized, previousState]) => {
+    if (!windowStateInitialized) return
     if (state !== 'normal' && state !== 'maximized') return
-    if (previousState !== 'minimized' && previousState !== 'closed') return
+    if (
+      previousWindowStateInitialized &&
+      previousState !== 'minimized' &&
+      previousState !== 'closed'
+    )
+      return
+    attachmentPreparationEnabled.value = true
     // 父页面在隐藏悬浮窗期间无法完成有效滚动；恢复尺寸后再等一帧通知消息区，
     // 保证首次展开已有长会话时以最后一条消息作为起点。
     requestAnimationFrame(() => {
@@ -829,7 +843,10 @@ watch(
 )
 
 onMounted(() => {
-  if (!context.files.length) refreshExtraction()
+  if (!context.isEmbedded) {
+    attachmentPreparationEnabled.value = true
+    void refreshExtraction()
+  }
   document.addEventListener('visibilitychange', resumeVisiblePage)
   window.addEventListener('focus', refreshVisibleInbox)
   resumeVisibleThread()
@@ -859,7 +876,12 @@ function refreshVisibleInbox() {
 }
 
 function refreshVisibleAttachment() {
-  if (document.visibilityState !== 'visible' || !context.config.token) return
+  if (
+    !attachmentPreparationEnabled.value ||
+    document.visibilityState !== 'visible' ||
+    !context.config.token
+  )
+    return
   const noticeFiles = attachmentPreparationNotice.value
     ? context.files.filter((file) =>
         attachmentPreparationNotice.value?.sourceFileIds.includes(file.source_file_id)

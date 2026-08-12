@@ -549,6 +549,31 @@ test('setFiles requires source_file_id as the current attachment key', () => {
   chat.destroy()
 })
 
+test('explicit source_doc_id stays distinct from the page business_id', () => {
+  const { DocMindChatIframe } = parentHarness()
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    source_system: 'oa',
+    function_id: 'incomingDocument',
+    business_id: 'incomingDetail37908',
+    document_metadata: {
+      source_doc_id: '37908'
+    }
+  })
+
+  chat.setFiles([
+    {
+      source_file_id: '202010200206',
+      name: 'incoming.pdf',
+      source_url: 'https://oa/files/202010200206'
+    }
+  ])
+
+  assert.equal(chat.options.business_id, 'incomingDetail37908')
+  assert.equal(chat.pageFiles[0].source_doc_id, '37908')
+  chat.destroy()
+})
+
 test('window control messages update state and emit optional chat callbacks', () => {
   const { container, DocMindChatIframe, listeners } = parentHarness()
   const chat = new DocMindChatIframe({
@@ -639,10 +664,20 @@ test('local example starts minimized so users open the assistant explicitly', ()
   assert.doesNotMatch(example, /incoming_document_metadata/)
   assert.match(example, /\.\.\.businessContext,/)
   assert.doesNotMatch(example, /\.\.\.incomingDocumentMetadata,/)
+  assert.match(example, /当前页面中的来文 ID；它与页面级 business_id 语义不同/)
+  const metadataBlock = example.match(
+    /const incomingDocumentMetadata = \{([\s\S]*?)\n\s*\}/
+  )?.[1]
+  assert.ok(metadataBlock)
+  assert.match(metadataBlock, /source_doc_id:\s*params\.get\('source_doc_id'\) \|\| '37908'/)
   assert.match(example, /source_file_id：来源系统内该附件的稳定唯一 ID/)
   assert.match(
     example,
     /name:\s*'上铁辆〔2020〕316号\.pdf',\s*source_file_id:\s*'202010200206',\s*source_url:/
+  )
+  assert.match(
+    example,
+    /<span class="tk-key">source_doc_id<\/span>:\s*<span class="tk-str">'37908'<\/span>/
   )
   assert.match(
     example,

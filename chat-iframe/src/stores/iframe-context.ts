@@ -7,6 +7,7 @@ type IframeContextState = {
   files: IncomingPageFile[]
   selectedSourceFileId: string
   windowState: WindowState
+  windowStateInitialized: boolean
   isEmbedded: boolean
 }
 
@@ -32,6 +33,7 @@ export const useIframeContextStore = defineStore('iframe-context', {
     files: [],
     selectedSourceFileId: '',
     windowState: 'normal',
+    windowStateInitialized: false,
     isEmbedded: false
   }),
   getters: {
@@ -56,6 +58,7 @@ export const useIframeContextStore = defineStore('iframe-context', {
     },
     setWindowState(state: WindowState) {
       this.windowState = state
+      this.windowStateInitialized = true
     }
   }
 })

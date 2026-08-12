@@ -686,6 +686,7 @@
 .attachment-preparation-status {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   margin: 8px 12px 0;
   padding: 8px 10px;
@@ -695,6 +696,7 @@
   background: var(--gray-50);
   font-size: 13px;
   line-height: 1.4;
+  text-align: center;
 }
 
 .attachment-preparation-status svg {

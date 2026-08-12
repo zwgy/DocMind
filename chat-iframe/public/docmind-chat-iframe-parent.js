@@ -51,6 +51,7 @@
     options = options || {}
     // 同一来文的元数据只传一份；附件不再复制业务字段。
     var documentMetadata = options.document_metadata || {}
+    var documentSourceDocId = stripText(documentMetadata.source_doc_id)
     var normalized = (files || [])
       .filter(function (file) {
         return file && isDocumentFile(file.name || file.source_url)
@@ -67,6 +68,9 @@
         }
         if (file.source_doc_id) normalizedFile.source_doc_id = file.source_doc_id
         if (file.source_system) normalizedFile.source_system = file.source_system
+        if (!normalizedFile.source_doc_id && documentSourceDocId)
+          normalizedFile.source_doc_id = documentSourceDocId
+        // business_id 仅兼容“一页一来文”的旧接入作为最终兜底，不能替代来文元数据中的 source_doc_id。
         if (!normalizedFile.source_doc_id && options.business_id)
           normalizedFile.source_doc_id = options.business_id
         if (file.source_function_id) normalizedFile.source_function_id = file.source_function_id
