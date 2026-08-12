@@ -208,6 +208,10 @@
 <span class="tk-com">//   buttonHtml:         '<span>🤖</span>'               // 自定义悬浮按钮内容</span>
 <span class="tk-com">//   incoming_document_metadata: { ... }                 // 来文级公共元数据，选择询问的附件没有上传时与附件信息组合后上传服务器</span>
 
+<span class="tk-com">// SPA 切换业务页面时先更新页面身份；该调用会清空上一页面的 SDK 任务与 iframe 状态。</span>
+<span class="tk-com">// chat.setPageContext({ source_system: 'oa', source_function_id: 'incomingDocument', business_id: '37909' })</span>
+<span class="tk-com">// 随后为新页面重新调用 setPageContent() 和 setFiles()。</span>
+
 <span class="tk-com">// 2. 设置自定义页面内容（可选，设置后不再实时获取网页HTML，且不转markdown）</span>
 chat.<span class="tk-fn">setPageContent</span>([
   <span class="tk-str">'页面标题：中国铁路上海局集团有限公司关于重新印发…的通知'</span>,
@@ -220,7 +224,7 @@ chat.<span class="tk-fn">setPageContent</span>([
 <span class="tk-com">// 3. 设置附件列表（被助手默认带入；selected: true 的项会被高亮选中）</span>
 <span class="tk-com">//   name：文件名，用于助手展示和上传时的文件名。</span>
 <span class="tk-com">//   source_file_id：来源系统内该附件的稳定唯一 ID，用于匹配与关联；请使用嵌入系统的文件 ID。</span>
-<span class="tk-com">//   source_url：附件下载地址；待入库时浏览器据此下载并自动上传，需可被当前页面访问（可选）。</span>
+<span class="tk-com">//   source_url：附件下载地址；待入库时父页面 SDK 会下载并上传 DocMind，需可被嵌入页面访问（可选）。</span>
 <span class="tk-com">//   selected：是否在助手中默认选中。</span>
 chat.<span class="tk-fn">setFiles</span>([
   {
@@ -261,7 +265,7 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
       </section>
     </main>
 
-    <script src="/chat-iframe/docmind-chat-iframe-parent.js?v=0.7.1"></script>
+    <script src="/chat-iframe/docmind-chat-iframe-parent.js?v=0.7.1.1"></script>
     <script>
       // 允许通过 URL 参数注入测试数据，便于 e2e 场景覆盖不同业务身份。
       // 例如：?source_system=oa&function_id=e2eIncoming&business_id=auto-sync-001
@@ -302,6 +306,10 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
         incoming_document_metadata: incomingDocumentMetadata,
       })
 
+      // SPA 切换业务页面时先调用：
+      // chat.setPageContext({ source_system: 'oa', source_function_id: 'incomingDocument', business_id: '37909' })
+      // 随后为新页面重新调用 setPageContent() 和 setFiles()。
+
       // 设置自定义页面内容（可选，设置后不再实时获取网页HTML，且不转markdown）
       chat.setPageContent([
         '页面标题：' + document.title,
@@ -314,7 +322,7 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
       // 设置附件列表（被助手默认带入；selected: true 的项会被高亮选中）
       //   name：文件名，用于助手展示和上传时的文件名。
       //   source_file_id：来源系统内该附件的稳定唯一 ID，用于匹配与关联；请使用嵌入系统的文件 ID。
-      //   source_url：附件下载地址；待入库时浏览器据此下载并自动上传，需可被当前页面访问（可选）。
+      //   source_url：附件下载地址；待入库时父页面 SDK 会下载并上传 DocMind，需可被嵌入页面访问（可选）。
       //   selected：是否在助手中默认选中。
       chat.setFiles([
         {

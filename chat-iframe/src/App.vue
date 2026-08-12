@@ -1,6 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Bell, Bot, Clock3, Maximize2, Menu, Minimize2, Minus, X } from 'lucide-vue-next'
+import {
+  Bell,
+  Bot,
+  CircleCheck,
+  Clock3,
+  LoaderCircle,
+  Maximize2,
+  Menu,
+  Minimize2,
+  Minus,
+  TriangleAlert,
+  X
+} from 'lucide-vue-next'
 import { ingestIncomingDocument, queryIncomingDocumentExtractions } from '@/apis/incoming-documents'
 import { inboxApi } from '@/apis/inbox'
 import type { InboxUnreadCounts, NotificationInboxItem, TaskInboxItem } from '@/apis/inbox'
@@ -12,7 +24,7 @@ import ScheduledCenterDrawer from '@/components/ScheduledCenterDrawer.vue'
 import { useIframeBridge } from '@/composables/useIframeBridge'
 import { useChatStore } from '@/stores/chat'
 import { useIframeContextStore } from '@/stores/iframe-context'
-import type { ExtractionResult, IncomingPageFile } from '@/types'
+import type { ExtractionResult, FileIngestStage, IncomingPageFile } from '@/types'
 
 const context = useIframeContextStore()
 const {
@@ -25,13 +37,22 @@ const {
   notifyWindowDragEnd,
   notifyWindowDragMove,
   notifyWindowDragStart,
-  notifyUnreadCountChanged
+  notifyUnreadCountChanged,
+  requestFileIngest
 } = useIframeBridge()
 const chat = useChatStore()
 const loading = ref(false)
 const error = ref('')
 const results = ref<Record<string, ExtractionResult>>({})
 const selectedPageFiles = ref<IncomingPageFile[]>([])
+type AttachmentPreparationStage = FileIngestStage | 'parsing' | 'ready'
+type AttachmentPreparationNotice = {
+  stage: AttachmentPreparationStage
+  sourceFileIds: string[]
+  message: string
+}
+const attachmentPreparationNotice = ref<AttachmentPreparationNotice | null>(null)
+const fileIngestPromises = new Map<string, Promise<void>>()
 const showSidebar = ref(false)
 const showScheduledCenter = ref(false)
 const unreadCounts = ref<InboxUnreadCounts>({
@@ -62,8 +83,8 @@ const tickerShouldMove = computed(
 const inboxNavigation = ref<{ key: number; category: 'notification' | 'task' } | null>(null)
 const draggingWindow = ref(false)
 const historyScrollRequest = ref(0)
-const ingestingFileIds = new Set<string>()
 let extractionRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let attachmentNoticeTimer: ReturnType<typeof setTimeout> | null = null
 let inboxRefreshTimer: number | null = null
 let inboxRefreshPromise: Promise<void> | null = null
 let pendingTickerItems: TickerItem[] | null = null
@@ -71,6 +92,11 @@ let tickerResizeObserver: ResizeObserver | null = null
 let tickerMotionQuery: MediaQueryList | null = null
 
 const selectedFile = computed(() => context.selectedFile)
+const attachmentNoticeKind = computed(() => {
+  if (attachmentPreparationNotice.value?.stage === 'failed') return 'error'
+  if (attachmentPreparationNotice.value?.stage === 'ready') return 'success'
+  return 'working'
+})
 const currentTokenUsage = computed(() => {
   const usage = chat.agentState?.token_usage
   return usage && typeof usage === 'object' && !Array.isArray(usage)
@@ -92,6 +118,115 @@ function openSidebar() {
 
 function displayCount(value: number) {
   return value > 99 ? '99+' : String(value)
+}
+
+function attachmentNames(files: IncomingPageFile[]) {
+  const names = files.map((file) => file.name).filter(Boolean)
+  if (!names.length) return '附件'
+  if (names.length === 1) return `附件“${names[0]}”`
+  return `${names.length} 个附件`
+}
+
+function filesAreOnCurrentPage(files: IncomingPageFile[]) {
+  const fileKey = (file: IncomingPageFile) =>
+    [file.source_system, file.source_function_id, file.source_doc_id, file.source_file_id]
+      .map((value) => String(value || '').trim())
+      .join('\u0000')
+  const currentKeys = new Set(context.files.map(fileKey))
+  return files.length > 0 && files.every((file) => currentKeys.has(fileKey(file)))
+}
+
+function clearAttachmentPreparation() {
+  if (attachmentNoticeTimer) clearTimeout(attachmentNoticeTimer)
+  attachmentNoticeTimer = null
+  attachmentPreparationNotice.value = null
+}
+
+function showAttachmentPreparation(
+  stage: AttachmentPreparationStage,
+  files: IncomingPageFile[],
+  errorMessage = ''
+) {
+  // 异步状态可能在页面数据更新后才返回，旧附件回调不能覆盖当前页面的展示。
+  if (!filesAreOnCurrentPage(files)) return
+  if (attachmentNoticeTimer) {
+    clearTimeout(attachmentNoticeTimer)
+    attachmentNoticeTimer = null
+  }
+  const subject = attachmentNames(files)
+  const messages: Record<AttachmentPreparationStage, string> = {
+    downloading: `正在从当前系统下载${subject}…`,
+    uploading: `正在将${subject}上传到 DocMind…`,
+    completed: `${subject}已上传，正在等待解析…`,
+    parsing: `${subject}已上传，正在解析内容…`,
+    ready: `${subject}解析完成，可以开始提问`,
+    failed: errorMessage || `${subject}准备失败，请稍后重试`
+  }
+  attachmentPreparationNotice.value = {
+    stage,
+    sourceFileIds: files.map((file) => file.source_file_id),
+    message: messages[stage]
+  }
+  if (stage === 'ready') {
+    attachmentNoticeTimer = setTimeout(() => {
+      attachmentPreparationNotice.value = null
+      attachmentNoticeTimer = null
+    }, 5000)
+  }
+}
+
+function fileIngestKey(files: IncomingPageFile[]) {
+  return files
+    .map((file) => file.source_file_id)
+    .sort()
+    .join('\u0000')
+}
+
+async function preparePendingFiles(files: IncomingPageFile[]) {
+  const key = fileIngestKey(files)
+  const existing = fileIngestPromises.get(key)
+  if (existing) return existing
+
+  // 新 SDK 在父页面复用宿主下载权限；旧 SDK 和独立打开场景保留原直传路径。
+  const operation = context.config.parentFileIngest
+    ? requestFileIngest(files, (stage, stageError) => {
+        showAttachmentPreparation(stage === 'completed' ? 'parsing' : stage, files, stageError)
+      })
+    : (async () => {
+        showAttachmentPreparation('downloading', files)
+        await ingestIncomingDocument(files, context.config.token)
+        showAttachmentPreparation('parsing', files)
+      })()
+  const tracked = operation.finally(() => {
+    // 同一页面可能已为同一批附件创建新的监听，旧 Promise 不能误删新监听。
+    if (fileIngestPromises.get(key) === tracked) fileIngestPromises.delete(key)
+  })
+  fileIngestPromises.set(key, tracked)
+  return tracked
+}
+
+function refreshAttachmentPreparation(files: IncomingPageFile[]) {
+  const notice = attachmentPreparationNotice.value
+  if (!notice) return
+  const related = files.filter((file) => notice.sourceFileIds.includes(file.source_file_id))
+  if (!related.length || related.length !== notice.sourceFileIds.length) return
+  const relatedResults = related
+    .map((file) => results.value[file.source_file_id])
+    .filter((result): result is ExtractionResult => Boolean(result))
+  if (relatedResults.some((result) => result.extractionStatus === 'failed')) {
+    showAttachmentPreparation('failed', related, '附件解析失败，请稍后重试')
+    return
+  }
+  if (
+    relatedResults.length === related.length &&
+    relatedResults.every((result) => result.extractionStatus === 'ready')
+  ) {
+    if (notice.stage !== 'ready') showAttachmentPreparation('ready', related)
+    return
+  }
+  if (notice.stage === 'completed' || notice.stage === 'parsing') {
+    showAttachmentPreparation('parsing', related)
+  }
 }
 
 function applyUnreadCounts(counts: InboxUnreadCounts) {
@@ -306,7 +441,7 @@ function filesForSelectedDocuments(selectedFiles: IncomingPageFile[]) {
 
 async function refreshExtraction(
   queryFiles: IncomingPageFile[] = selectedFile.value ? [selectedFile.value] : [],
-  syncPending = false
+  syncPending = true
 ) {
   if (extractionRefreshTimer) {
     clearTimeout(extractionRefreshTimer)
@@ -330,9 +465,11 @@ async function refreshExtraction(
   loading.value = true
   error.value = ''
   refreshContextSummaries({ loading: true })
+  let transferAttempted = false
   try {
     let response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
     cacheExtractionResults(queryFiles, response.items || [])
+    refreshAttachmentPreparation(queryFiles)
     const pendingCandidates = syncPending
       ? queryFiles.filter(
           (file) => results.value[file.source_file_id]?.matchStatus === 'pending_sync'
@@ -344,18 +481,28 @@ async function refreshExtraction(
         `以下附件缺少下载地址，无法形成完整来文：${missingSourceFiles.map((file) => file.name).join('、')}`
       )
     }
-    const pendingFiles = pendingCandidates.filter(
-      (file) => !ingestingFileIds.has(file.source_file_id)
-    )
-    if (pendingFiles.length) {
-      pendingFiles.forEach((file) => ingestingFileIds.add(file.source_file_id))
-      try {
-        await ingestIncomingDocument(pendingFiles, context.config.token)
-      } finally {
-        pendingFiles.forEach((file) => ingestingFileIds.delete(file.source_file_id))
-      }
+    if (pendingCandidates.length) {
+      transferAttempted = true
+      await preparePendingFiles(pendingCandidates)
       response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
       cacheExtractionResults(queryFiles, response.items || [])
+      refreshAttachmentPreparation(queryFiles)
+    }
+    const failedFiles = queryFiles.filter(
+      (candidate) => results.value[candidate.source_file_id]?.extractionStatus === 'failed'
+    )
+    if (failedFiles.length) throw new Error('附件解析失败，请稍后重试')
+    const preparingFiles = queryFiles.filter((candidate) => {
+      const result = results.value[candidate.source_file_id]
+      return (
+        result?.matchStatus === 'pending_sync' ||
+        (result?.matchStatus === 'matched' && result.extractionStatus !== 'ready')
+      )
+    })
+    if (preparingFiles.length) {
+      showAttachmentPreparation('parsing', preparingFiles)
+      refreshContextSummaries({ loading: true })
+      return false
     }
     if (
       queryFiles.some(
@@ -365,7 +512,34 @@ async function refreshExtraction(
       refreshContextSummaries()
     return true
   } catch (err) {
+    if (transferAttempted && filesAreOnCurrentPage(queryFiles)) {
+      try {
+        // 上传响应可能因刷新或网络中断丢失；先以后端状态对账，避免把已入库附件再次上传。
+        const reconciled = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
+        cacheExtractionResults(queryFiles, reconciled.items || [])
+        const reconciledResults = queryFiles.map(
+          (candidate) => results.value[candidate.source_file_id]
+        )
+        if (
+          reconciledResults.length === queryFiles.length &&
+          reconciledResults.every((result) => result?.matchStatus === 'matched') &&
+          !reconciledResults.some((result) => result.extractionStatus === 'failed')
+        ) {
+          const ready = reconciledResults.every((result) => result.extractionStatus === 'ready')
+          showAttachmentPreparation(ready ? 'ready' : 'parsing', queryFiles)
+          refreshContextSummaries(ready ? {} : { loading: true })
+          return ready
+        }
+      } catch {
+        // 对账失败时保留原始传输错误，避免用二次查询异常覆盖真正失败原因。
+      }
+    }
     error.value = err instanceof Error ? err.message : '查询失败'
+    const pendingNoticeFiles = queryFiles.filter((file) =>
+      attachmentPreparationNotice.value?.sourceFileIds.includes(file.source_file_id)
+    )
+    if (pendingNoticeFiles.length)
+      showAttachmentPreparation('failed', pendingNoticeFiles, error.value)
     if (
       queryFiles.some(
         (candidate) => candidate.source_file_id === selectedFile.value?.source_file_id
@@ -375,14 +549,28 @@ async function refreshExtraction(
     return false
   } finally {
     loading.value = false
-    const currentFile = selectedFile.value
-    const currentResult = currentFile ? results.value[currentFile.source_file_id] : null
+    const noticeFiles = attachmentPreparationNotice.value
+      ? context.files.filter((file) =>
+          attachmentPreparationNotice.value?.sourceFileIds.includes(file.source_file_id)
+        )
+      : []
+    // 多附件必须整组轮询，否则主附件先完成时会让界面过早显示“可以提问”。
+    const pollingFiles = noticeFiles.length
+      ? filesForSelectedDocuments(noticeFiles)
+      : selectedFile.value
+        ? [selectedFile.value]
+        : []
     if (
-      currentFile &&
-      currentResult?.matchStatus === 'matched' &&
-      !['ready', 'failed'].includes(currentResult.extractionStatus)
+      pollingFiles.some((candidate) => {
+        const result = results.value[candidate.source_file_id]
+        return (
+          result?.matchStatus === 'matched' &&
+          !['ready', 'failed'].includes(result.extractionStatus)
+        )
+      })
     ) {
-      extractionRefreshTimer = setTimeout(() => void refreshExtraction(), 2000)
+      if (extractionRefreshTimer) clearTimeout(extractionRefreshTimer)
+      extractionRefreshTimer = setTimeout(() => void refreshExtraction(pollingFiles), 2000)
     }
   }
 }
@@ -479,7 +667,10 @@ async function sendChat(payload: {
     payload.restoreUploadDraft({
       files: false,
       image: false,
-      message: error.value || '来文附件尚未准备完成，请稍后重试'
+      message:
+        attachmentPreparationNotice.value?.message ||
+        error.value ||
+        '来文附件尚未准备完成，请稍后重试'
     })
     return
   }
@@ -551,6 +742,37 @@ watch(
 )
 
 watch(
+  () => JSON.stringify(context.files.map((file) => [file.source_file_id, file.source_url]).sort()),
+  () => {
+    const notice = attachmentPreparationNotice.value
+    if (
+      notice &&
+      !notice.sourceFileIds.every((sourceFileId) =>
+        context.files.some((file) => file.source_file_id === sourceFileId)
+      )
+    ) {
+      clearAttachmentPreparation()
+    }
+  }
+)
+
+watch(
+  () => context.config.conversationScopeKey,
+  (pageContextKey, previousPageContextKey) => {
+    if (!previousPageContextKey || pageContextKey === previousPageContextKey) return
+    // 页面身份只由 source_system + source_function_id + business_id 决定；source_doc_id 仅归属页面内来文附件。
+    fileIngestPromises.clear()
+    results.value = {}
+    selectedPageFiles.value = []
+    error.value = ''
+    if (extractionRefreshTimer) clearTimeout(extractionRefreshTimer)
+    extractionRefreshTimer = null
+    clearAttachmentPreparation()
+    chat.setContextSummaries([])
+  }
+)
+
+watch(
   () => selectedFile.value?.source_file_id,
   () => {
     refreshContextSummaries()
@@ -597,6 +819,7 @@ watch(
       historyScrollRequest.value += 1
     })
     void refreshInboxSnapshot()
+    refreshVisibleAttachment()
   },
   { flush: 'post' }
 )
@@ -619,6 +842,7 @@ onMounted(() => {
 onUnmounted(() => {
   endWindowDrag()
   if (extractionRefreshTimer) clearTimeout(extractionRefreshTimer)
+  if (attachmentNoticeTimer) clearTimeout(attachmentNoticeTimer)
   if (inboxRefreshTimer) clearInterval(inboxRefreshTimer)
   tickerResizeObserver?.disconnect()
   tickerMotionQuery?.removeEventListener('change', handleTickerMotionPreference)
@@ -630,9 +854,25 @@ function refreshVisibleInbox() {
   if (document.visibilityState === 'visible' && context.config.token) void refreshInboxSnapshot()
 }
 
+function refreshVisibleAttachment() {
+  if (document.visibilityState !== 'visible' || !context.config.token) return
+  const noticeFiles = attachmentPreparationNotice.value
+    ? context.files.filter((file) =>
+        attachmentPreparationNotice.value?.sourceFileIds.includes(file.source_file_id)
+      )
+    : []
+  const queryFiles = noticeFiles.length
+    ? filesForSelectedDocuments(noticeFiles)
+    : selectedFile.value
+      ? [selectedFile.value]
+      : []
+  if (queryFiles.length) void refreshExtraction(queryFiles)
+}
+
 function resumeVisiblePage() {
   resumeVisibleThread()
   refreshVisibleInbox()
+  refreshVisibleAttachment()
 }
 </script>
 
@@ -795,18 +1035,36 @@ function resumeVisiblePage() {
         </div>
       </section>
       <section class="workbench">
-        <ChatMessages
-          :messages="chat.displayMessages"
-          :loading="chat.isLoading"
-          :streaming="chat.isStreaming"
-          :compacting="chat.isCompacting"
-          :show-run-progress="chat.showRunTodos"
-          :agent-state="chat.agentState"
-          :thread-id="chat.currentThreadId"
-          :token="context.config.token"
-          :history-scroll-request="historyScrollRequest"
-          @feedback="submitFeedback"
-        />
+        <section class="conversation-stage">
+          <p
+            v-if="attachmentPreparationNotice"
+            class="attachment-preparation-status"
+            :class="attachmentNoticeKind"
+            :role="attachmentNoticeKind === 'error' ? 'alert' : 'status'"
+            aria-live="polite"
+          >
+            <LoaderCircle
+              v-if="attachmentNoticeKind === 'working'"
+              class="attachment-status-spinner"
+              :size="16"
+            />
+            <CircleCheck v-else-if="attachmentNoticeKind === 'success'" :size="16" />
+            <TriangleAlert v-else :size="16" />
+            <span>{{ attachmentPreparationNotice.message }}</span>
+          </p>
+          <ChatMessages
+            :messages="chat.displayMessages"
+            :loading="chat.isLoading"
+            :streaming="chat.isStreaming"
+            :compacting="chat.isCompacting"
+            :show-run-progress="chat.showRunTodos"
+            :agent-state="chat.agentState"
+            :thread-id="chat.currentThreadId"
+            :token="context.config.token"
+            :history-scroll-request="historyScrollRequest"
+            @feedback="submitFeedback"
+          />
+        </section>
         <RunInterruptCard
           v-if="chat.pendingInterrupt"
           :interrupt="chat.pendingInterrupt"

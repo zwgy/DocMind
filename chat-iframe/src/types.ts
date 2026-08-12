@@ -33,6 +33,16 @@ export type IframeConfig = {
   agentId?: string
   conversationScopeKey?: string
   authError?: string
+  parentFileIngest?: boolean
+}
+
+export type FileIngestStage = 'downloading' | 'uploading' | 'completed' | 'failed'
+
+export type FileIngestStatePayload = {
+  requestId: string
+  source_file_ids: string[]
+  stage: FileIngestStage
+  error?: string
 }
 
 export type ParentMessage =
@@ -40,6 +50,7 @@ export type ParentMessage =
   | { type: 'PAGE_CONTENT'; payload?: PageContent }
   | { type: 'FILE_LIST'; payload?: IncomingPageFile[] }
   | { type: 'PAGE_FILES_UPDATED'; payload?: IncomingPageFile[] }
+  | { type: 'FILE_INGEST_STATE'; payload?: FileIngestStatePayload }
   | { type: 'WINDOW_STATE'; payload?: { state?: WindowState } }
   | { type: string; payload?: unknown }
 

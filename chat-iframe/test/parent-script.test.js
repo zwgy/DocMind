@@ -22,8 +22,16 @@ function loadScript(overrides = {}) {
     window: sandboxWindow,
     document: sandboxDocument,
     location: sandboxWindow.location,
+    URL,
+    Blob,
+    FormData,
+    AbortController,
     console
   }
+  sandboxWindow.URL = URL
+  sandboxWindow.Blob = Blob
+  sandboxWindow.FormData = FormData
+  sandboxWindow.AbortController = AbortController
   vm.runInNewContext(source, sandbox)
   return sandbox.window.DocMindChatIframe
 }
@@ -207,10 +215,237 @@ test('fetches docMind iframe token and sends conversation scope to iframe', asyn
     external_user_name: '张三'
   })
   assert.equal(sentMessages[0].message.payload.token, 'iframe-token')
+  assert.equal(sentMessages[0].message.payload.parentFileIngest, true)
   assert.equal(
     sentMessages[0].message.payload.conversationScopeKey,
     'oa:contractApproval:contract-20260706-001'
   )
+  chat.destroy()
+})
+
+test('downloads source_url in the parent page and uploads attachments to DocMind', async () => {
+  const requests = []
+  const { DocMindChatIframe, listeners, sentMessages } = parentHarness({
+    fetch: async (url, options = {}) => {
+      requests.push({ url, options })
+      if (url === 'https://production.example.com/files/source-1') {
+        return { ok: true, blob: async () => new Blob(['attachment']) }
+      }
+      if (url === 'https://docmind.example.com/api/chat-iframe/token') {
+        return { ok: true, json: async () => ({ access_token: 'iframe-token' }) }
+      }
+      if (url === 'https://docmind.example.com/api/incoming-documents/ingest') {
+        return { ok: true }
+      }
+      throw new Error(`unexpected request: ${url}`)
+    }
+  })
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    source_system: 'generic-system',
+    function_id: 'incomingDocument',
+    business_id: 'doc-1',
+    external_user_id: '1001',
+    external_user_name: '张三'
+  })
+  chat.setFiles([
+    {
+      source_file_id: 'source-1',
+      name: 'incoming.txt',
+      source_url: '/files/source-1',
+      is_main_file: true
+    }
+  ])
+  sentMessages.length = 0
+
+  listeners.message({
+    origin: 'https://docmind.example.com',
+    data: {
+      type: 'FILE_INGEST_REQUEST',
+      payload: { requestId: 'request-1', source_file_ids: ['source-1'] }
+    }
+  })
+  listeners.message({
+    origin: 'https://docmind.example.com',
+    data: {
+      type: 'FILE_INGEST_REQUEST',
+      payload: { requestId: 'request-2', source_file_ids: ['source-1'] }
+    }
+  })
+  assert.equal(
+    requests.filter((request) => request.url === 'https://production.example.com/files/source-1')
+      .length,
+    1
+  )
+  assert.equal(sentMessages.at(-1).message.payload.requestId, 'request-2')
+  assert.equal(sentMessages.at(-1).message.payload.stage, 'downloading')
+  await tick()
+  await tick()
+
+  const downloadRequest = requests.find(
+    (request) => request.url === 'https://production.example.com/files/source-1'
+  )
+  assert.equal(downloadRequest.options.credentials, 'include')
+  assert.equal(downloadRequest.options.cache, 'no-store')
+  assert.equal(downloadRequest.options.signal.aborted, false)
+  const uploadRequest = requests.find(
+    (request) => request.url === 'https://docmind.example.com/api/incoming-documents/ingest'
+  )
+  assert.equal(
+    sentMessages.at(-1).message.payload.stage,
+    'completed',
+    sentMessages.at(-1).message.payload.error
+  )
+  assert.equal(uploadRequest.options.method, 'POST')
+  assert.equal(uploadRequest.options.headers.Authorization, 'Bearer iframe-token')
+  assert.equal(uploadRequest.options.body.get('source_doc_id'), 'doc-1')
+  assert.equal(uploadRequest.options.body.get('source_function_id'), 'incomingDocument')
+  assert.equal(uploadRequest.options.body.get('source_system'), 'generic-system')
+  assert.deepEqual(JSON.parse(uploadRequest.options.body.get('file_metas')), [
+    { source_file_id: 'source-1', filename: 'incoming.txt', is_main_file: true }
+  ])
+  assert.deepEqual(
+    sentMessages
+      .filter(
+        (item) =>
+          item.message.type === 'FILE_INGEST_STATE' &&
+          item.message.payload.requestId === 'request-1'
+      )
+      .map((item) => item.message.payload.stage),
+    ['downloading', 'uploading', 'completed']
+  )
+  assert.deepEqual(
+    sentMessages
+      .filter(
+        (item) =>
+          item.message.type === 'FILE_INGEST_STATE' &&
+          item.message.payload.requestId === 'request-2'
+      )
+      .map((item) => item.message.payload.stage),
+    ['downloading', 'uploading', 'completed']
+  )
+
+  const requestCount = requests.length
+  listeners.message({
+    origin: 'https://docmind.example.com',
+    data: {
+      type: 'FILE_INGEST_REQUEST',
+      payload: { requestId: 'request-3', source_file_ids: ['source-1'] }
+    }
+  })
+  assert.equal(requests.length, requestCount)
+  assert.equal(sentMessages.at(-1).message.payload.requestId, 'request-3')
+  assert.equal(sentMessages.at(-1).message.payload.stage, 'completed')
+  chat.destroy()
+})
+
+test('setPageContext clears and aborts the previous business page attachment operation', async () => {
+  let downloadSignal
+  const { DocMindChatIframe, listeners, sentMessages } = parentHarness({
+    fetch: (url, options = {}) => {
+      if (url !== 'https://production.example.com/files/source-1') {
+        throw new Error(`unexpected request: ${url}`)
+      }
+      downloadSignal = options.signal
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new Error('aborted')))
+      })
+    }
+  })
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    source_system: 'generic-system',
+    function_id: 'incomingDocument',
+    business_id: 'doc-1'
+  })
+  chat.setFiles([
+    { source_file_id: 'source-1', name: 'incoming.txt', source_url: '/files/source-1' }
+  ])
+  sentMessages.length = 0
+  listeners.message({
+    origin: 'https://docmind.example.com',
+    data: {
+      type: 'FILE_INGEST_REQUEST',
+      payload: { requestId: 'request-1', source_file_ids: ['source-1'] }
+    }
+  })
+  assert.equal(downloadSignal.aborted, false)
+
+  chat.setFiles([
+    {
+      source_file_id: 'source-2',
+      source_system: 'generic-system',
+      source_function_id: 'incomingDocument',
+      name: 'another.txt',
+      source_url: '/files/source-2'
+    }
+  ])
+  assert.equal(downloadSignal.aborted, false)
+
+  chat.setPageContext({
+    source_system: 'generic-system',
+    source_function_id: 'incomingDocument',
+    business_id: 'page-2'
+  })
+  await tick()
+
+  assert.equal(downloadSignal.aborted, true)
+  assert.equal(chat.options.function_id, 'incomingDocument')
+  assert.equal(chat.options.business_id, 'page-2')
+  assert.equal(chat.pageFiles.length, 0)
+  assert.deepEqual(Object.keys(chat.fileIngestOperations), [])
+  assert.equal(
+    sentMessages.filter(
+      (item) =>
+        item.message.type === 'FILE_INGEST_STATE' &&
+        item.message.payload.requestId === 'request-1' &&
+        item.message.payload.stage === 'failed'
+    ).length,
+    0
+  )
+  chat.destroy()
+})
+
+test('reports parent attachment download failures and allows retry', async () => {
+  let downloadAttempts = 0
+  const { DocMindChatIframe, listeners, sentMessages } = parentHarness({
+    fetch: async (url) => {
+      if (url === 'https://production.example.com/files/source-1') {
+        downloadAttempts += 1
+        return { ok: false, status: 403 }
+      }
+      throw new Error(`unexpected request: ${url}`)
+    }
+  })
+  const chat = new DocMindChatIframe({
+    iframeSrc: 'https://docmind.example.com/chat-iframe/',
+    source_system: 'generic-system',
+    function_id: 'incomingDocument',
+    business_id: 'doc-1'
+  })
+  chat.setFiles([
+    { source_file_id: 'source-1', name: 'incoming.txt', source_url: '/files/source-1' }
+  ])
+  sentMessages.length = 0
+
+  const request = (requestId) =>
+    listeners.message({
+      origin: 'https://docmind.example.com',
+      data: {
+        type: 'FILE_INGEST_REQUEST',
+        payload: { requestId, source_file_ids: ['source-1'] }
+      }
+    })
+  request('request-1')
+  await tick()
+  assert.equal(sentMessages.at(-1).message.payload.stage, 'failed')
+  assert.match(sentMessages.at(-1).message.payload.error, /403/)
+
+  request('request-2')
+  await tick()
+  assert.equal(downloadAttempts, 2)
+  assert.equal(sentMessages.at(-1).message.payload.requestId, 'request-2')
+  assert.equal(sentMessages.at(-1).message.payload.stage, 'failed')
   chat.destroy()
 })
 

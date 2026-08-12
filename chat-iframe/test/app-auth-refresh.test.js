@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const source = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
+const appCssSource = readFileSync(new URL('../src/assets/css/app.css', import.meta.url), 'utf8')
 const contextSource = readFileSync(
   new URL('../src/stores/iframe-context.ts', import.meta.url),
   'utf8'
@@ -22,7 +23,7 @@ test('refreshExtraction waits for token before querying extraction api', () => {
   assert.match(source, /void refreshExtraction\(\)/)
 })
 
-test('page attachments are synchronized only after the user selects them for a sent question', () => {
+test('page attachments are prepared by the parent SDK and block questions until parsing is ready', () => {
   assert.doesNotMatch(contextSource, /normalized\[0\]\.selected/)
   assert.doesNotMatch(inputSource, /if \(!next\.size && props\.selectedPageSourceFileId\)/)
   assert.match(source, /refreshExtraction\(filesForSelectedDocuments\(selectedPageFiles\), true\)/)
@@ -30,10 +31,51 @@ test('page attachments are synchronized only after the user selects them for a s
     source,
     /context\.files\.filter\(\(file\) => selectedKeys\.has\(documentKey\(file\)\)\)/
   )
-  assert.match(source, /ingestingFileIds\.delete\(file\.source_file_id\)/)
+  assert.match(source, /context\.config\.parentFileIngest/)
+  assert.match(source, /requestFileIngest\(files/)
+  assert.match(source, /fileIngestPromises\.set\(key, tracked\)/)
+  assert.match(source, /attachmentPreparationNotice\.value\?\.message/)
+  assert.match(source, /class="attachment-preparation-status"/)
+  assert.match(source, /showAttachmentPreparation\('ready', related\)/)
   assert.doesNotMatch(source, /ingestIncomingDocument\([\s\S]*?\.catch\(\(\) => null\)/)
   assert.match(source, /以下附件缺少下载地址，无法形成完整来文/)
   assert.match(source, /来文附件尚未准备完成，请稍后重试/)
+})
+
+test('attachment status stays scoped to the current business page and can reattach after switching back', () => {
+  assert.match(source, /function filesAreOnCurrentPage\(files: IncomingPageFile\[\]\)/)
+  assert.match(source, /if \(!filesAreOnCurrentPage\(files\)\) return/)
+  assert.match(source, /context\.config\.conversationScopeKey/)
+  assert.match(source, /\(pageContextKey, previousPageContextKey\) =>/)
+  assert.match(source, /pageContextKey === previousPageContextKey/)
+  assert.match(source, /results\.value = \{\}/)
+  assert.match(source, /selectedPageFiles\.value = \[\]/)
+  assert.match(source, /fileIngestPromises\.get\(key\) === tracked/)
+  assert.match(
+    source,
+    /function resumeVisiblePage\(\) \{[\s\S]*refreshVisibleAttachment\(\)[\s\S]*\}/
+  )
+  assert.match(
+    source,
+    /state !== 'normal' && state !== 'maximized'[\s\S]*refreshVisibleAttachment\(\)/
+  )
+})
+
+test('an uncertain upload result is reconciled against backend state before showing failure', () => {
+  assert.match(source, /let transferAttempted = false/)
+  assert.match(source, /if \(transferAttempted && filesAreOnCurrentPage\(queryFiles\)\)/)
+  assert.match(source, /上传响应可能因刷新或网络中断丢失/)
+  assert.match(source, /result\?\.matchStatus === 'matched'/)
+})
+
+test('attachment status uses the flexible workbench row below an optional notification ticker', () => {
+  assert.match(source, /<section v-if="tickerItems\.length" class="notification-ticker"/)
+  assert.match(source, /<section class="workbench">\s*<section class="conversation-stage">/)
+  assert.match(appCssSource, /\.chat-body \{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\)/)
+  assert.match(
+    appCssSource,
+    /\.conversation-stage \{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\)/
+  )
 })
 
 test('structured extraction items are folded by default', () => {
