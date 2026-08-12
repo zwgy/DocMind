@@ -95,45 +95,29 @@ export async function ingestIncomingDocument(
   ) {
     throw new Error('一次只能同步同一份来文的附件')
   }
-  const downloaded = await Promise.all(
-    files.map(async (file) => {
-      if (!file.source_url) throw new Error('附件缺少下载地址')
-      const response = await fetch(file.source_url, { cache: 'no-store' })
-      if (!response.ok) throw new Error(`附件下载失败：${response.status}`)
-      return { file, blob: await response.blob() }
-    })
-  )
-  const form = new FormData()
-  form.append('source_doc_id', sourceDocId)
-  form.append('source_function_id', sourceFunctionId)
-  form.append('source_system', first.source_system || options.source_system || 'production')
-  form.append(
-    'document_metadata',
-    JSON.stringify(
-      first.document_metadata || {
+  if (files.some((file) => !file.source_url)) throw new Error('附件缺少下载地址')
+  headers['Content-Type'] = 'application/json'
+  const response = await fetch(apiUrl('/api/incoming-documents/ingest'), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      source_doc_id: sourceDocId,
+      source_function_id: sourceFunctionId,
+      source_system: first.source_system || options.source_system || 'production',
+      document_metadata: first.document_metadata || {
         document_number: first.document_number,
         title: first.title,
         incoming_type: first.incoming_type,
         source_unit: first.source_unit,
         incoming_date: first.incoming_date
-      }
-    )
-  )
-  downloaded.forEach(({ file, blob }) => form.append('files', blob, file.name))
-  form.append(
-    'file_metas',
-    JSON.stringify(
-      downloaded.map(({ file }) => ({
+      },
+      files: files.map((file) => ({
         source_file_id: file.source_file_id,
         filename: file.name,
+        source_url: file.source_url,
         is_main_file: file.is_main_file === true
       }))
-    )
-  )
-  const response = await fetch(apiUrl('/api/incoming-documents/ingest'), {
-    method: 'POST',
-    headers,
-    body: form
+    })
   })
   return parseApiResponse<Record<string, unknown>>(response, `入库失败：${response.status}`)
 }

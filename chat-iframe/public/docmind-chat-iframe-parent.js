@@ -58,6 +58,7 @@
       })
       .map(function (file) {
         var sourceUrl = file.source_url || ''
+        if (sourceUrl) sourceUrl = new global.URL(sourceUrl, global.location.href).toString()
         var sourceFileId = stripText(file.source_file_id)
         if (!sourceFileId) throw new Error('附件缺少 source_file_id')
         var normalizedFile = {
@@ -132,7 +133,6 @@
     this.messageHandler = null
     this.tokenPromise = null
     this.resolvedToken = null
-    this.fileIngestOperations = {}
     this.pointerMoveHandler = null
     this.pointerUpHandler = null
     this.pointerCancelHandler = null
@@ -173,7 +173,6 @@
     }
 
     var sourceChanged = sourceSystem !== stripText(this.options.source_system)
-    this._resetFileIngestOperations()
     this.options.source_system = sourceSystem
     this.options.function_id = sourceFunctionId
     this.options.business_id = businessId
@@ -235,7 +234,6 @@
     this.pointerUpHandler = null
     this.pointerCancelHandler = null
     this.windowBlurHandler = null
-    this._resetFileIngestOperations()
   }
 
   DocMindChatIframe.prototype.on = function (name, callback) {
@@ -445,9 +443,6 @@
       case 'REQUEST_FILE_LIST':
         this._sendToIframe('FILE_LIST', this.pageFiles)
         break
-      case 'FILE_INGEST_REQUEST':
-        this._handleFileIngestRequest(message.payload)
-        break
       case 'MINIMIZE':
         this.minimize()
         break
@@ -565,205 +560,12 @@
     return this.tokenPromise
   }
 
-  DocMindChatIframe.prototype._sendFileIngestState = function (operation, requestId) {
-    if (operation.stale) return
-    var self = this
-    var requestIds = requestId ? [requestId] : Object.keys(operation.requestIds)
-    requestIds.forEach(function (id) {
-      var payload = {
-        requestId: id,
-        source_file_ids: operation.sourceFileIds,
-        stage: operation.stage
-      }
-      if (operation.error) payload.error = operation.error
-      self._sendToIframe('FILE_INGEST_STATE', payload)
-    })
-  }
-
-  DocMindChatIframe.prototype._setFileIngestStage = function (operation, stage, error) {
-    if (operation.stale) return
-    operation.stage = stage
-    operation.error = error || ''
-    this._sendFileIngestState(operation)
-  }
-
-  DocMindChatIframe.prototype._handleFileIngestRequest = function (payload) {
-    var requestId = stripText(payload && payload.requestId)
-    var sourceFileIds = Array.isArray(payload && payload.source_file_ids)
-      ? payload.source_file_ids.map(stripText).filter(Boolean)
-      : []
-    if (!requestId || !sourceFileIds.length) return
-
-    var requestedIds = {}
-    sourceFileIds.forEach(function (id) {
-      requestedIds[id] = true
-    })
-    var files = this.pageFiles.filter(function (file) {
-      return requestedIds[file.source_file_id]
-    })
-    if (files.length !== Object.keys(requestedIds).length) {
-      this._sendToIframe('FILE_INGEST_STATE', {
-        requestId: requestId,
-        source_file_ids: sourceFileIds,
-        stage: 'failed',
-        error: '附件列表已更新，请重新选择后再试'
-      })
-      return
-    }
-
-    var operationKey = JSON.stringify([
-      this._conversationScopeKey(),
-      files
-        .map(function (file) {
-          return [file.source_doc_id, file.source_file_id, file.source_url]
-        })
-        .sort()
-    ])
-    // iframe 可能因用户重复提问或状态轮询再次请求，同一批附件只允许一个父页面任务执行。
-    var operation = this.fileIngestOperations[operationKey]
-    if (operation) {
-      operation.requestIds[requestId] = true
-      this._sendFileIngestState(operation, requestId)
-      return
-    }
-
-    operation = {
-      requestIds: {},
-      sourceFileIds: files.map(function (file) {
-        return file.source_file_id
-      }),
-      stage: 'downloading',
-      error: '',
-      stale: false,
-      controller: global.AbortController ? new global.AbortController() : null
-    }
-    operation.requestIds[requestId] = true
-    this.fileIngestOperations[operationKey] = operation
-    this._sendFileIngestState(operation)
-
-    var self = this
-    operation.promise = this._downloadAndIngestFiles(files, operation)
-      .then(function () {
-        self._setFileIngestStage(operation, 'completed')
-      })
-      .catch(function (error) {
-        if (operation.stale) return
-        self._setFileIngestStage(
-          operation,
-          'failed',
-          error && error.message ? error.message : '附件准备失败'
-        )
-        if (self.fileIngestOperations[operationKey] === operation) {
-          delete self.fileIngestOperations[operationKey]
-        }
-      })
-  }
-
-  DocMindChatIframe.prototype._resetFileIngestOperations = function () {
-    Object.keys(this.fileIngestOperations).forEach(
-      function (key) {
-        var operation = this.fileIngestOperations[key]
-        operation.stale = true
-        if (operation.controller) operation.controller.abort()
-      }.bind(this)
-    )
-    this.fileIngestOperations = {}
-  }
-
-  DocMindChatIframe.prototype._downloadAndIngestFiles = function (files, operation) {
-    var self = this
-    var first = files[0]
-    var sourceDocId = stripText(first && first.source_doc_id)
-    var sourceFunctionId = stripText(first && first.source_function_id)
-    if (!sourceDocId) return Promise.reject(new Error('附件缺少 source_doc_id'))
-    if (!sourceFunctionId) return Promise.reject(new Error('附件缺少 source_function_id'))
-    if (
-      files.some(function (file) {
-        return (
-          stripText(file.source_doc_id) !== sourceDocId ||
-          stripText(file.source_function_id) !== sourceFunctionId
-        )
-      })
-    ) {
-      return Promise.reject(new Error('一次只能同步同一份来文的附件'))
-    }
-
-    var fetchImpl = global.fetch || (typeof fetch !== 'undefined' ? fetch : null)
-    if (!fetchImpl) return Promise.reject(new Error('当前浏览器不支持 fetch，无法下载附件'))
-    return Promise.all(
-      files.map(function (file) {
-        if (!file.source_url) throw new Error('附件缺少下载地址：' + file.name)
-        // source_url 属于嵌入系统；相对地址必须以父页面为基准，不能交给 DocMind iframe 解析。
-        var sourceUrl = new global.URL(file.source_url, global.location.href).toString()
-        var downloadOptions = { credentials: 'include', cache: 'no-store' }
-        if (operation.controller) downloadOptions.signal = operation.controller.signal
-        return fetchImpl(sourceUrl, downloadOptions).then(function (response) {
-          if (!response.ok) throw new Error('附件下载失败：' + response.status)
-          return response.blob().then(function (blob) {
-            return { file: file, blob: blob }
-          })
-        })
-      })
-    ).then(function (downloaded) {
-      self._setFileIngestStage(operation, 'uploading')
-      return self._resolveToken().then(function (token) {
-        var form = new global.FormData()
-        form.append('source_doc_id', sourceDocId)
-        form.append('source_function_id', sourceFunctionId)
-        form.append(
-          'source_system',
-          first.source_system || self.options.source_system || 'production'
-        )
-        form.append(
-          'document_metadata',
-          JSON.stringify(first.document_metadata || self.options.document_metadata || {})
-        )
-        downloaded.forEach(function (item) {
-          form.append('files', item.blob, item.file.name)
-        })
-        form.append(
-          'file_metas',
-          JSON.stringify(
-            downloaded.map(function (item) {
-              return {
-                source_file_id: item.file.source_file_id,
-                filename: item.file.name,
-                is_main_file: item.file.is_main_file === true
-              }
-            })
-          )
-        )
-        var uploadOptions = {
-          method: 'POST',
-          headers: { Authorization: 'Bearer ' + token },
-          body: form
-        }
-        if (operation.controller) uploadOptions.signal = operation.controller.signal
-        return fetchImpl(
-          joinApiUrl(self.apiBaseUrl, '/api/incoming-documents/ingest'),
-          uploadOptions
-        ).then(function (response) {
-          if (response.ok) return response
-          return response
-            .json()
-            .catch(function () {
-              return {}
-            })
-            .then(function (data) {
-              throw new Error(data.detail || data.message || '附件上传失败：' + response.status)
-            })
-        })
-      })
-    })
-  }
-
   DocMindChatIframe.prototype._configPayload = function (token, authError) {
     var payload = {
       token: token || null,
       apiBaseUrl: this.apiBaseUrl,
       agentId: this.options.agentId,
-      conversationScopeKey: this._conversationScopeKey(),
-      parentFileIngest: true
+      conversationScopeKey: this._conversationScopeKey()
     }
     if (authError) payload.authError = authError
     return payload

@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from yuxi.services import incoming_document_ingest_service as ingest_module
@@ -157,6 +158,94 @@ async def test_ingest_creates_one_document_and_multiple_files_then_queues_one_ta
     assert [file.is_main_file for file in repo.files] == [True, False]
     assert len(tasker.enqueued) == 1
     assert tasker.enqueued[0]["task_type"] == "incoming_document_process"
+
+
+async def test_download_source_files_returns_ingest_file_data(monkeypatch):
+    requests = []
+
+    def handle_request(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "application/pdf", "Content-Length": "7"},
+            content=b"pdf-data",
+        )
+
+    real_async_client = httpx.AsyncClient
+
+    def create_client(**kwargs):
+        return real_async_client(transport=httpx.MockTransport(handle_request), **kwargs)
+
+    monkeypatch.setattr(ingest_module.httpx, "AsyncClient", create_client)
+    repo = FakeIncomingRepo()
+    tasker = FakeTasker()
+    service = IncomingDocumentIngestService(incoming_repo=repo, tasker=tasker)
+
+    files = await service.download_source_files(
+        files=[
+            {
+                "source_file_id": "S001",
+                "filename": "会议纪要.pdf",
+                "source_url": "http://attachments.test/download?id=S001",
+                "is_main_file": True,
+            }
+        ],
+    )
+
+    assert len(requests) == 1
+    assert requests[0].url == httpx.URL("http://attachments.test/download?id=S001")
+    assert files == [
+        {
+            "source_file_id": "S001",
+            "filename": "会议纪要.pdf",
+            "source_url": "http://attachments.test/download?id=S001",
+            "is_main_file": True,
+            "mime_type": "application/pdf",
+            "content": b"pdf-data",
+        }
+    ]
+    assert repo.document is None
+    assert repo.files == []
+    assert tasker.enqueued == []
+
+
+async def test_download_source_files_rejects_html_login_page(monkeypatch):
+    real_async_client = httpx.AsyncClient
+
+    def create_client(**kwargs):
+        transport = httpx.MockTransport(
+            lambda _request: httpx.Response(200, headers={"Content-Type": "text/html"}, text="login")
+        )
+        return real_async_client(transport=transport, **kwargs)
+
+    monkeypatch.setattr(ingest_module.httpx, "AsyncClient", create_client)
+    service = IncomingDocumentIngestService(incoming_repo=FakeIncomingRepo(), tasker=FakeTasker())
+
+    with pytest.raises(ValueError, match="HTML"):
+        await service.download_source_files(
+            files=[
+                {
+                    "source_file_id": "S001",
+                    "filename": "会议纪要.pdf",
+                    "source_url": "http://attachments.test/download?id=S001",
+                }
+            ],
+        )
+
+
+async def test_download_source_files_rejects_non_http_url():
+    service = IncomingDocumentIngestService(incoming_repo=FakeIncomingRepo(), tasker=FakeTasker())
+
+    with pytest.raises(ValueError, match="absolute HTTP or HTTPS"):
+        await service.download_source_files(
+            files=[
+                {
+                    "source_file_id": "S001",
+                    "filename": "会议纪要.pdf",
+                    "source_url": "file:///etc/passwd",
+                }
+            ],
+        )
 
 
 async def test_process_reads_all_attachments_and_extracts_one_document_result():

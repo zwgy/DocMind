@@ -5,6 +5,9 @@ from asyncio import gather
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+
+import httpx
 
 from yuxi.document_extraction import (
     BusinessExtractionService,
@@ -45,6 +48,7 @@ BuildCandidatesFn = Callable[..., Awaitable[None]]
 EnsureBatchRebuildableFn = Callable[[str], Awaitable[None]]
 INCOMING_DOCUMENT_PROCESS_TASK_TYPE = "incoming_document_process"
 MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.8
+REMOTE_FILE_DOWNLOAD_TIMEOUT_SECONDS = 60.0
 
 
 async def _noop_batch_rebuild_check(_incoming_id: str) -> None:
@@ -101,14 +105,54 @@ class IncomingDocumentIngestService:
         self.summarize_attachment = summarize_attachment or summarize_incoming_attachment
         self.business_extraction_service = business_extraction_service or BusinessExtractionService()
         self.build_candidates = build_candidates or self._build_candidates
-        self.ensure_candidate_batch_rebuildable = (
-            ensure_candidate_batch_rebuildable
-            or (
-                self._ensure_candidate_batch_rebuildable
-                if self._uses_database_candidate_workflows
-                else _noop_batch_rebuild_check
-            )
+        self.ensure_candidate_batch_rebuildable = ensure_candidate_batch_rebuildable or (
+            self._ensure_candidate_batch_rebuildable
+            if self._uses_database_candidate_workflows
+            else _noop_batch_rebuild_check
         )
+
+    async def download_source_files(self, files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """将嵌入系统的附件地址转换为 ``ingest_files`` 接受的文件数据。"""
+        if not files:
+            raise ValueError("files is required")
+
+        source_ids: set[str] = set()
+        normalized_files: list[dict[str, Any]] = []
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(REMOTE_FILE_DOWNLOAD_TIMEOUT_SECONDS, connect=10.0),
+            follow_redirects=True,
+            max_redirects=5,
+        ) as client:
+            for item in files:
+                source_file_id = str(item.get("source_file_id") or "").strip()
+                filename = Path(str(item.get("filename") or "")).name
+                source_url = str(item.get("source_url") or "").strip()
+                parsed_url = urlsplit(source_url)
+                if not source_file_id or not filename or not source_url:
+                    raise ValueError("every file requires source_file_id, filename and source_url")
+                if source_file_id in source_ids:
+                    raise ValueError("source_file_id must be unique in one request")
+                if not is_supported_file_extension(filename):
+                    raise ValueError("Unsupported file type")
+                if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                    raise ValueError("source_url must be an absolute HTTP or HTTPS URL")
+                if parsed_url.username or parsed_url.password:
+                    raise ValueError("source_url must not contain credentials")
+
+                content, mime_type, final_url = await _download_remote_file(client, source_url, filename)
+                source_ids.add(source_file_id)
+                normalized_files.append(
+                    {
+                        **item,
+                        "source_file_id": source_file_id,
+                        "filename": filename,
+                        "source_url": final_url,
+                        "mime_type": mime_type,
+                        "content": content,
+                    }
+                )
+
+        return normalized_files
 
     async def ingest_files(
         self,
@@ -496,9 +540,7 @@ class IncomingDocumentIngestService:
             async with pg_manager.get_async_session_context() as session:
                 # 来文检查、批次冻结、候选复验和任务审计必须处于同一事务；
                 # 不能先用仓储自建会话读到一个在提交前已失效的状态。
-                document = await self.incoming_repo.get_by_incoming_id_in_session(
-                    session, incoming_id, for_update=True
-                )
+                document = await self.incoming_repo.get_by_incoming_id_in_session(session, incoming_id, for_update=True)
                 if document is None:
                     raise ValueError(f"Incoming document not found: {incoming_id}")
                 if document.status != "ready":
@@ -1000,9 +1042,7 @@ class IncomingDocumentIngestService:
         supplementary_files = [parsed for parsed in parsed_files if parsed is not main_file]
         if not supplementary_files:
             return {}
-        results = await gather(
-            *(self._summarize_attachment(parsed) for parsed in supplementary_files)
-        )
+        results = await gather(*(self._summarize_attachment(parsed) for parsed in supplementary_files))
         return {
             parsed["file"].source_file_id: summary
             for parsed, summary in zip(supplementary_files, results, strict=True)
@@ -1122,6 +1162,41 @@ async def _upload_incoming_file(
     object_name = f"incoming/{_safe_object_segment(source_system)}/{incoming_id}/{incoming_file_id}/original{suffix}"
     minio_url = await aupload_file_to_minio(MinIOClient.KB_BUCKETS["documents"], object_name, content)
     return {"minio_url": minio_url, "content_hash": await calculate_content_hash(content), "size": len(content)}
+
+
+async def _download_remote_file(
+    client: httpx.AsyncClient, source_url: str, filename: str
+) -> tuple[bytes, str | None, str]:
+    try:
+        async with client.stream("GET", source_url) as response:
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            if content_type in {"text/html", "application/xhtml+xml"} and Path(filename).suffix.lower() not in {
+                ".html",
+                ".htm",
+            }:
+                raise ValueError("附件下载返回了 HTML 页面，请检查下载地址或访问权限")
+            content_length = response.headers.get("content-length")
+            if content_length:
+                try:
+                    declared_size = int(content_length)
+                except ValueError:
+                    declared_size = None
+                if declared_size is not None and declared_size > MAX_UPLOAD_SIZE_BYTES:
+                    raise ValueError("文件大小不能超过 100 MB 上限")
+
+            content = bytearray()
+            async for chunk in response.aiter_bytes():
+                content.extend(chunk)
+                if len(content) > MAX_UPLOAD_SIZE_BYTES:
+                    raise ValueError("文件大小不能超过 100 MB 上限")
+            return bytes(content), content_type or None, str(response.url)
+    except httpx.HTTPStatusError as exc:
+        raise ValueError(f"附件下载失败：HTTP {exc.response.status_code}") from exc
+    except httpx.TimeoutException as exc:
+        raise ValueError("附件下载超时") from exc
+    except httpx.RequestError as exc:
+        raise ValueError(f"附件下载失败：{exc}") from exc
 
 
 async def _parse_incoming_document(source: str, params: dict[str, Any]) -> str:

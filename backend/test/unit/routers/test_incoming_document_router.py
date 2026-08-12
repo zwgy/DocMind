@@ -28,6 +28,71 @@ def test_parse_file_metas_reads_main_file_marker():
     assert [meta.is_main_file for meta in metas] == [True, None]
 
 
+async def test_ingest_json_delegates_source_url_download_to_service(monkeypatch):
+    captured = {}
+
+    class FakeRequest:
+        headers = {"content-type": "application/json; charset=utf-8"}
+
+        async def json(self):
+            return {
+                "source_system": "oa",
+                "source_function_id": "incomingDocument",
+                "source_doc_id": "DOC001",
+                "document_metadata": {"title": "会议纪要", "incoming_date": "2026-08-12"},
+                "files": [
+                    {
+                        "source_file_id": "S001",
+                        "filename": "会议纪要.pdf",
+                        "source_url": "http://attachments.test/download?id=S001",
+                        "is_main_file": True,
+                    }
+                ],
+            }
+
+    class FakeIngestService:
+        async def download_source_files(self, files):
+            captured["download_files"] = files
+            return [{**files[0], "mime_type": "application/pdf", "content": b"pdf-data"}]
+
+        async def ingest_files(self, **kwargs):
+            captured["ingest"] = kwargs
+            return {"incomingId": "inc_1", "status": "accepted"}
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentIngestService", FakeIngestService)
+
+    result = await incoming_document_router.ingest_incoming_document(
+        FakeRequest(), current_user=SimpleNamespace(uid="user-1")
+    )
+
+    assert result == {"incomingId": "inc_1", "status": "accepted", "fileCount": 1}
+    assert captured["download_files"] == [
+        {
+            "source_file_id": "S001",
+            "filename": "会议纪要.pdf",
+            "source_url": "http://attachments.test/download?id=S001",
+            "is_main_file": True,
+        }
+    ]
+    assert captured["ingest"] == {
+        "source_doc_id": "DOC001",
+        "source_function_id": "incomingDocument",
+        "source_system": "oa",
+        "document_metadata": {"title": "会议纪要", "incoming_date": "2026-08-12"},
+        "files": [
+            {
+                "source_file_id": "S001",
+                "filename": "会议纪要.pdf",
+                "source_url": "http://attachments.test/download?id=S001",
+                "is_main_file": True,
+                "mime_type": "application/pdf",
+                "content": b"pdf-data",
+            }
+        ],
+        "operator_id": "user-1",
+    }
+
+
 async def test_management_list_normalizes_classification_label(monkeypatch):
     captured = {}
 

@@ -9,7 +9,7 @@
 ### chat-iframe 接入示例
 
 - 按当前部署补充其他系统的直接嵌入示例：SDK 与 `iframeSrc` 使用 `192.168.1.220:5174`，API 继续经过 5174 Nginx 的 `/api` 代理，因此无需填写 `apiBaseUrl`。
-- 完善未入库附件的嵌入式同步闭环：用户第一次打开助手后，chat-iframe 查询附件状态并在发现 `pending_sync` 时通过通用消息协议通知父页面 SDK；仅浏览宿主页面不会触发附件下载或上传。SDK 使用接入方提供的 `source_url` 下载附件并上传现有 DocMind 入库接口，同时回传下载、上传、完成或失败状态。聊天区顶部在可选通知轮播下方居中展示准备进度，解析未完成时保留用户输入并提示等待，解析就绪后自动刷新摘要并提示可提问；上传响应不确定时先以后端查询结果对账，避免重复上传。首次打开后最小化或关闭悬浮窗不会中断状态；宿主 SPA 以 `source_system + source_function_id + business_id` 识别页面，通过 `setPageContext()` 切页时中止并清空旧 SDK 任务、重载 iframe 清空旧状态。页面内来文 ID 在 `document_metadata.source_doc_id` 中声明一次，同一来文下的附件使用各自的 `source_file_id`；SDK 将来文 ID 转换为后端查询和上传所需的身份字段。未传 `source_doc_id` 时 SDK 仅为兼容旧的一页一来文接入而使用 `business_id` 兜底，二者语义不同。同一批附件复用进行中的任务，失败后允许重试，旧 SDK 与非嵌入场景继续使用原有直传路径。本次不增加特定系统适配器、自定义 `fileLoader` 或新的后端接口。
+- 完善未入库附件的嵌入式同步闭环：用户第一次打开助手后，chat-iframe 查询附件状态并在发现 `pending_sync` 时把接入方提供的 `source_url` 以 JSON 提交现有 DocMind 入库接口，由后端直接下载附件，和 multipart 已上传文件统一交给 `ingest_files()` 保存并投递解析，浏览器不再先下载再上传，也不再受附件服务 CORS 限制。下载支持 HTTP/HTTPS、重定向、60 秒超时和 100 MB 上限，拒绝非文档 HTML 响应并保留明确失败原因；不固定附件 host 或路径，不增加特定系统适配器、自定义 `fileLoader`、独立接口或数据表。聊天区顶部在可选通知轮播下方居中展示下载、解析和完成状态，解析未完成时保留用户输入并提示等待，解析就绪后自动刷新摘要；首次打开后最小化或关闭悬浮窗不会中断已提交到后端的任务。宿主 SPA 继续以 `source_system + source_function_id + business_id` 识别页面，通过 `setPageContext()` 切页时清空旧状态。页面内来文 ID 在 `document_metadata.source_doc_id` 中声明一次，同一来文下的附件使用各自的 `source_file_id`；未传 `source_doc_id` 时仅为旧接入兼容而使用 `business_id` 兜底。现有 multipart 直传方式继续兼容；父 SDK 中原浏览器下载、上传和附件状态消息协议已删除，避免保留两套入库链路。
 - 修正嵌入附件范围与来文元数据示例：同一来文仍按完整附件集合完成后台同步和解析，但模型上下文只包含用户本轮实际勾选的附件；所有默认刷新入口统一复用同一整组批次，避免初始化时单附件与整组附件并发入库；`example.html` 统一使用 SDK 支持的 `document_metadata` 参数，避免新入库来文因标题元数据为空而回退显示业务 ID。
 
 ### Web 登录

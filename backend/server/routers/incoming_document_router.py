@@ -65,6 +65,18 @@ class IncomingIngestMultipartFields(BaseModel):
     source_system: str = "production"
 
 
+class IncomingSourceFile(BaseModel):
+    source_file_id: str
+    filename: str
+    source_url: str
+    is_main_file: bool | None = None
+
+
+class IncomingSourceIngestRequest(IncomingIngestMultipartFields):
+    document_metadata: dict
+    files: list[IncomingSourceFile]
+
+
 class IncomingClassificationRequest(BaseModel):
     classification: str
 
@@ -188,42 +200,51 @@ async def confirm_incoming_document(incoming_id: str, current_user: User = Depen
 @incoming_documents.post("/ingest")
 async def ingest_incoming_document(request: Request, current_user: User = Depends(get_required_user)):
     try:
+        service = IncomingDocumentIngestService()
         if request.headers.get("content-type", "").startswith("application/json"):
-            raise ValueError("multipart files is required")
-
-        form = await request.form()
-        # 外部系统直接传文件内容；原文长期存 MinIO，数据库只保存地址和来文元数据。
-        uploads = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
-        if not uploads:
-            raise ValueError("files is required")
-        fields = IncomingIngestMultipartFields(
-            source_doc_id=str(form.get("source_doc_id") or "").strip(),
-            source_function_id=str(form.get("source_function_id") or "").strip(),
-            source_system=str(form.get("source_system") or "production").strip() or "production",
-        )
-        document_metadata = _parse_document_metadata(form.get("document_metadata"))
-        file_metas = _parse_file_metas(form.get("file_metas"), len(uploads))
-        files = []
-        for upload, meta in zip(uploads, file_metas, strict=True):
-            filename = meta.filename.strip() or str(upload.filename or "").strip()
-            source_file_id = meta.source_file_id.strip()
-            if not source_file_id:
-                raise ValueError("source_file_id is required")
-            if not filename:
-                raise ValueError("filename is required")
-            files.append(
-                {
-                    "source_file_id": source_file_id,
-                    "filename": filename,
-                    "is_main_file": meta.is_main_file,
-                    "content": await read_upload_with_limit(
-                        upload,
-                        max_size_bytes=MAX_UPLOAD_SIZE_BYTES,
-                        too_large_message="文件过大，当前仅支持 100 MB 以内的文件",
-                    ),
-                }
+            payload = IncomingSourceIngestRequest.model_validate(await request.json())
+            fields = IncomingIngestMultipartFields(
+                source_doc_id=payload.source_doc_id,
+                source_function_id=payload.source_function_id,
+                source_system=payload.source_system,
             )
-        result = await IncomingDocumentIngestService().ingest_files(
+            document_metadata = _validate_document_metadata(payload.document_metadata)
+            files = await service.download_source_files([item.model_dump() for item in payload.files])
+        else:
+            form = await request.form()
+            # 外部系统直接传文件内容；原文长期存 MinIO，数据库只保存地址和来文元数据。
+            uploads = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
+            if not uploads:
+                raise ValueError("files is required")
+            fields = IncomingIngestMultipartFields(
+                source_doc_id=str(form.get("source_doc_id") or "").strip(),
+                source_function_id=str(form.get("source_function_id") or "").strip(),
+                source_system=str(form.get("source_system") or "production").strip() or "production",
+            )
+            document_metadata = _parse_document_metadata(form.get("document_metadata"))
+            file_metas = _parse_file_metas(form.get("file_metas"), len(uploads))
+            files = []
+            for upload, meta in zip(uploads, file_metas, strict=True):
+                filename = meta.filename.strip() or str(upload.filename or "").strip()
+                source_file_id = meta.source_file_id.strip()
+                if not source_file_id:
+                    raise ValueError("source_file_id is required")
+                if not filename:
+                    raise ValueError("filename is required")
+                files.append(
+                    {
+                        "source_file_id": source_file_id,
+                        "filename": filename,
+                        "is_main_file": meta.is_main_file,
+                        "content": await read_upload_with_limit(
+                            upload,
+                            max_size_bytes=MAX_UPLOAD_SIZE_BYTES,
+                            too_large_message="文件过大，当前仅支持 100 MB 以内的文件",
+                        ),
+                    }
+                )
+
+        result = await service.ingest_files(
             source_doc_id=fields.source_doc_id,
             source_function_id=fields.source_function_id,
             document_metadata=document_metadata,
@@ -410,6 +431,10 @@ def _parse_document_metadata(raw_value) -> dict:
         raise ValueError("document_metadata must be a JSON object") from exc
     if not isinstance(metadata, dict):
         raise ValueError("document_metadata must be a JSON object")
+    return _validate_document_metadata(metadata)
+
+
+def _validate_document_metadata(metadata: dict) -> dict:
     incoming_date = metadata.get("incoming_date")
     if incoming_date is not None:
         try:

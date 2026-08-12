@@ -175,7 +175,7 @@
   <span class="tk-key">external_user_name</span>: <span class="tk-str">'张三'</span>,
 }
 
-<span class="tk-com">// 来文级公共元数据：同一来文的全部附件共享；首次打开助手触发未入库附件上传时会提交这些字段。</span>
+<span class="tk-com">// 来文级公共元数据：同一来文的全部附件共享；首次打开助手触发未入库附件同步时会提交这些字段。</span>
 <span class="tk-key">const</span> incomingDocumentMetadata = {
   <span class="tk-com">// 当前页面中的来文 ID；它与页面级 business_id 语义不同。</span>
   <span class="tk-key">source_doc_id</span>:    <span class="tk-str">'37908'</span>,
@@ -226,7 +226,8 @@ chat.<span class="tk-fn">setPageContent</span>([
 <span class="tk-com">// 3. 设置附件列表（被助手默认带入；selected: true 的项会被高亮选中）</span>
 <span class="tk-com">//   name：文件名，用于助手展示和上传时的文件名。</span>
 <span class="tk-com">//   source_file_id：来源系统内该附件的稳定唯一 ID，用于匹配与关联；请使用嵌入系统的文件 ID。</span>
-<span class="tk-com">//   source_url：附件下载地址；待入库时父页面 SDK 会下载并上传 DocMind，需可被嵌入页面访问（可选）。</span>
+<span class="tk-com">//   source_url：附件下载地址；待入库时由 DocMind 后端直接下载，必须是后端可访问的 HTTP/HTTPS 地址。</span>
+<span class="tk-com">//               相对地址会由父 SDK 按当前嵌入页面补成绝对地址，不要求浏览器跨域读取附件内容。</span>
 <span class="tk-com">//   selected：是否在助手中默认选中。</span>
 chat.<span class="tk-fn">setFiles</span>([
   {
@@ -326,7 +327,8 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
       // 设置附件列表（被助手默认带入；selected: true 的项会被高亮选中）
       //   name：文件名，用于助手展示和上传时的文件名。
       //   source_file_id：来源系统内该附件的稳定唯一 ID，用于匹配与关联；请使用嵌入系统的文件 ID。
-      //   source_url：附件下载地址；待入库时父页面 SDK 会下载并上传 DocMind，需可被嵌入页面访问（可选）。
+      //   source_url：附件下载地址；待入库时由 DocMind 后端直接下载，必须是后端可访问的 HTTP/HTTPS 地址。
+      //               相对地址会由父 SDK 按当前嵌入页面补成绝对地址，不要求浏览器跨域读取附件内容。
       //   selected：是否在助手中默认选中。
       chat.setFiles([
         {

@@ -24,7 +24,7 @@ test('refreshExtraction waits for token before querying extraction api', () => {
   assert.match(source, /void refreshExtraction\(\)/)
 })
 
-test('page attachments are prepared by the parent SDK and block questions until parsing is ready', () => {
+test('page attachments are downloaded by DocMind and block questions until parsing is ready', () => {
   assert.doesNotMatch(contextSource, /normalized\[0\]\.selected/)
   assert.doesNotMatch(inputSource, /if \(!next\.size && props\.selectedPageSourceFileId\)/)
   assert.match(source, /refreshExtraction\(selectedDocumentFiles, true\)/)
@@ -32,9 +32,8 @@ test('page attachments are prepared by the parent SDK and block questions until 
     source,
     /context\.files\.filter\(\(file\) => selectedKeys\.has\(documentKey\(file\)\)\)/
   )
-  assert.match(source, /context\.config\.parentFileIngest/)
-  assert.match(source, /requestFileIngest\(files/)
-  assert.match(source, /fileIngestPromises\.set\(key, tracked\)/)
+  assert.match(source, /await ingestIncomingDocument\(files, context\.config\.token\)/)
+  assert.match(source, /attachmentPreparationPromises\.set\(key, tracked\)/)
   assert.match(source, /const selectedDocumentFiles = filesForSelectedDocuments\(selectedPageFiles\)/)
   assert.match(
     source,
@@ -59,7 +58,7 @@ test('attachment status stays scoped to the current business page and can reatta
   assert.match(source, /pageContextKey === previousPageContextKey/)
   assert.match(source, /results\.value = \{\}/)
   assert.match(source, /selectedPageFiles\.value = \[\]/)
-  assert.match(source, /fileIngestPromises\.get\(key\) === tracked/)
+  assert.match(source, /attachmentPreparationPromises\.get\(key\) === tracked/)
   assert.match(
     source,
     /function resumeVisiblePage\(\) \{[\s\S]*refreshVisibleAttachment\(\)[\s\S]*\}/
@@ -70,10 +69,10 @@ test('attachment status stays scoped to the current business page and can reatta
   )
 })
 
-test('an uncertain upload result is reconciled against backend state before showing failure', () => {
+test('an uncertain backend submission is reconciled before showing failure', () => {
   assert.match(source, /let transferAttempted = false/)
   assert.match(source, /if \(transferAttempted && filesAreOnCurrentPage\(queryFiles\)\)/)
-  assert.match(source, /上传响应可能因刷新或网络中断丢失/)
+  assert.match(source, /后端提交响应可能因刷新或网络中断丢失/)
   assert.match(source, /result\?\.matchStatus === 'matched'/)
 })
 

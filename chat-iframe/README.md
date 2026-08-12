@@ -208,8 +208,8 @@ docMind backend
 2. 父脚本发送 `INIT_CONFIG`、`PAGE_CONTENT`、`PAGE_FILES_UPDATED`。
 3. iframe 保存上下文。
 4. 多附件默认选中第一个，但最小化或关闭状态不查询、不上传附件。
-5. 用户第一次打开助手后，iframe 调用 `/api/incoming-documents/extractions/query`；未入库时再通知父页面 SDK 下载并上传整份来文的附件。
-6. 页面展示 `matched/multiple/pending_sync/not_found` 和 `ready/running/not_found/failed`；首次打开后再最小化或关闭不会中断已经开始的上传、解析和轮询。
+5. 用户第一次打开助手后，iframe 调用 `/api/incoming-documents/extractions/query`；未入库时把整份来文的附件地址提交给 DocMind，由后端直接下载并进入解析流程。
+6. 页面展示 `matched/multiple/pending_sync/not_found` 和 `ready/running/not_found/failed`；首次打开后再最小化或关闭不会中断已经提交到后端的下载、解析和轮询。
 7. 用户提问时，iframe 创建或复用 `/api/chat/thread` 会话，调用 `/api/agent/runs` 创建运行任务，再读取 `/api/agent/runs/{runId}/events` 流式事件。
 8. “问网页/问文件”开启时，iframe 会把页面内容、选中附件、匹配结果和抽取摘要写入 `meta.iframe_context`，`query` 只保留用户原始问题；后端在运行任务时把该上下文渲染进系统提示。
 
@@ -274,7 +274,7 @@ docMind backend
 iframe 内部会话列表采用按需左侧抽屉展示，默认不占用聊天区域；点击顶部对话列表按钮后再展开历史会话和新建聊天入口。
 底部输入区的“问文件”会打开页面附件选择弹窗，显示当前页面识别到的附件名称，可多选/取消；未选择任何附件时会自动取消文件上下文，不再把附件摘要拼入提问。模型选择采用输入框右下角的模型按钮和搜索弹窗。左下角回形针按钮参考主站 `AttachmentOptionsComponent`，先弹出“添加附件 / 上传图片”小菜单；添加附件再打开拖拽上传弹窗，确认后进入当前消息的待发送附件列表。
 
-父脚本不自动解析宿主页面 DOM。接入方需要在初始化后调用 `setFiles()` 显式传入附件列表，避免不同业务系统的页面结构差异导致误识别。来文级 `source_doc_id` 放在初始化参数的 `document_metadata` 中，只需声明一次；附件对象提供 `name/source_url/source_file_id`，其中 `source_file_id` 标识具体附件。`source_system/source_function_id` 由初始化参数补齐。SDK 会把 `document_metadata.source_doc_id` 转换为查询和上传接口所需的文档身份。为兼容旧的“一页一来文”接入，未传 `source_doc_id` 时 SDK 会暂用当前 `business_id` 兜底，但 `business_id` 是页面会话作用域，二者语义不同，新接入不应依赖该兜底。
+父脚本不自动解析宿主页面 DOM。接入方需要在初始化后调用 `setFiles()` 显式传入附件列表，避免不同业务系统的页面结构差异导致误识别。来文级 `source_doc_id` 放在初始化参数的 `document_metadata` 中，只需声明一次；附件对象提供 `name/source_url/source_file_id`，其中 `source_file_id` 标识具体附件。`source_system/source_function_id` 由初始化参数补齐。SDK 会把 `document_metadata.source_doc_id` 转换为查询和入库接口所需的文档身份。待入库附件的 `source_url` 必须是 DocMind 后端可访问的 HTTP/HTTPS 地址；相对地址会由 SDK 按宿主页面补成绝对地址，浏览器不再读取附件内容，因此不要求附件服务为嵌入页面开放 CORS。为兼容旧的“一页一来文”接入，未传 `source_doc_id` 时 SDK 会暂用当前 `business_id` 兜底，但 `business_id` 是页面会话作用域，二者语义不同，新接入不应依赖该兜底。
 
 宿主 SPA 切换业务页面时，应先调用 `setPageContext()`，再重新调用 `setPageContent()` 和 `setFiles()`：
 
@@ -355,12 +355,11 @@ const chat = new DocMindChatIframe({
 
 | 消息 | 载荷 | 用途 |
 | --- | --- | --- |
-| `INIT_CONFIG` | `{ token, apiBaseUrl, agentId, conversationScopeKey, parentFileIngest }` | 初始化配置；`token` 由父脚本自动换票后下发 |
+| `INIT_CONFIG` | `{ token, apiBaseUrl, agentId, conversationScopeKey }` | 初始化配置；`token` 由父脚本自动换票后下发 |
 | `PAGE_CONTENT` | `{ title?, url?, html?, text? }` | 页面内容 |
 | `PAGE_FILES_UPDATED` | `IncomingPageFile[]` | 页面附件列表 |
 | `FILE_LIST` | `IncomingPageFile[]` | 兼容旧消息名 |
 | `WINDOW_STATE` | `{ state }` | 父窗口状态 |
-| `FILE_INGEST_STATE` | `{ requestId, source_file_ids, stage, error? }` | 回传附件下载、上传、完成或失败状态 |
 
 iframe 发送给父页面：
 
@@ -369,7 +368,6 @@ iframe 发送给父页面：
 | `IFRAME_READY` | iframe 已准备接收上下文 |
 | `REQUEST_PAGE_CONTENT` | 请求父页面补发页面内容 |
 | `REQUEST_FILE_LIST` | 请求父页面补发附件列表 |
-| `FILE_INGEST_REQUEST` | 请求父 SDK 使用 `source_url` 下载指定附件并上传 DocMind |
 | `MINIMIZE` / `MAXIMIZE` / `RESTORE` / `CLOSE` | 窗口控制 |
 | `CONVERSATION_CREATED` | iframe 创建新会话后的可选通知 |
 | `MESSAGE_SENT` | iframe 发送消息后的可选通知 |
@@ -470,5 +468,5 @@ CHAT_IFRAME_TOKEN_RATE_LIMIT_PER_MINUTE=60
 
 - “问网页”开启时，iframe 会把父页面传入的 `title/url/text/html` 放入 `iframe_context.page`。后端优先使用已解析文本；只有 HTML 时会先解析为 Markdown。短页面直接进入系统提示，长页面会写入当前线程沙箱文件，并在提示中给出 `read_file` 可读取路径。
 - “问文件”开启时，iframe 会把本轮选中的全部页面附件放入 `iframe_context.files`，而不是只传第一个附件。已匹配知识库且有摘要的附件会携带摘要、`kbId/fileId`；摘要不足时，模型可按提示使用 `open_kb_document` 读取全文。
-- 如果附件没有摘要但父页面提供了 `source_url`，iframe 会通知父 SDK 在宿主页面上下文中以 `cache: no-store` 下载附件，再用 multipart 调用 `POST /api/incoming-documents/ingest`。父 SDK 会把下载、上传和失败状态同步给 iframe；iframe 在解析完成前阻止发送本轮文件问题并保留输入。旧 SDK 或独立打开 iframe 时继续使用原有直传路径。附件地址必须能被宿主页面脚本读取；若跨域，来源服务仍需允许相应 CORS 请求。
+- 如果附件没有摘要但父页面提供了 `source_url`，iframe 会用 JSON 调用现有 `POST /api/incoming-documents/ingest`，由 DocMind 后端下载文件并统一交给 `ingest_files()`。iframe 展示下载和解析状态，并在解析完成前阻止发送本轮文件问题、保留输入。multipart 直接上传仍兼容；`source_url` 只需能被 DocMind 后端访问，不要求浏览器跨域读取。
 - 兼容过渡期仍保留 `meta.page_content`、`meta.selected_file`、`meta.extraction_result` 字段，但新的问答上下文应以 `iframe_context` 为准。

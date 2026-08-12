@@ -24,7 +24,7 @@ import ScheduledCenterDrawer from '@/components/ScheduledCenterDrawer.vue'
 import { useIframeBridge } from '@/composables/useIframeBridge'
 import { useChatStore } from '@/stores/chat'
 import { useIframeContextStore } from '@/stores/iframe-context'
-import type { ExtractionResult, FileIngestStage, IncomingPageFile } from '@/types'
+import type { ExtractionResult, IncomingPageFile } from '@/types'
 
 const context = useIframeContextStore()
 const {
@@ -37,15 +37,14 @@ const {
   notifyWindowDragEnd,
   notifyWindowDragMove,
   notifyWindowDragStart,
-  notifyUnreadCountChanged,
-  requestFileIngest
+  notifyUnreadCountChanged
 } = useIframeBridge()
 const chat = useChatStore()
 const loading = ref(false)
 const error = ref('')
 const results = ref<Record<string, ExtractionResult>>({})
 const selectedPageFiles = ref<IncomingPageFile[]>([])
-type AttachmentPreparationStage = FileIngestStage | 'parsing' | 'ready'
+type AttachmentPreparationStage = 'downloading' | 'parsing' | 'ready' | 'failed'
 type AttachmentPreparationNotice = {
   stage: AttachmentPreparationStage
   sourceFileIds: string[]
@@ -53,7 +52,7 @@ type AttachmentPreparationNotice = {
 }
 const attachmentPreparationNotice = ref<AttachmentPreparationNotice | null>(null)
 const attachmentPreparationEnabled = ref(false)
-const fileIngestPromises = new Map<string, Promise<void>>()
+const attachmentPreparationPromises = new Map<string, Promise<void>>()
 const showSidebar = ref(false)
 const showScheduledCenter = ref(false)
 const unreadCounts = ref<InboxUnreadCounts>({
@@ -156,10 +155,8 @@ function showAttachmentPreparation(
   }
   const subject = attachmentNames(files)
   const messages: Record<AttachmentPreparationStage, string> = {
-    downloading: `正在从当前系统下载${subject}…`,
-    uploading: `正在将${subject}上传到 DocMind…`,
-    completed: `${subject}已上传，正在等待解析…`,
-    parsing: `${subject}已上传，正在解析内容…`,
+    downloading: `DocMind 正在下载${subject}…`,
+    parsing: `${subject}已下载，正在解析内容…`,
     ready: `${subject}解析完成，可以开始提问`,
     failed: errorMessage || `${subject}准备失败，请稍后重试`
   }
@@ -176,7 +173,7 @@ function showAttachmentPreparation(
   }
 }
 
-function fileIngestKey(files: IncomingPageFile[]) {
+function attachmentPreparationKey(files: IncomingPageFile[]) {
   return files
     .map((file) => file.source_file_id)
     .sort()
@@ -184,25 +181,22 @@ function fileIngestKey(files: IncomingPageFile[]) {
 }
 
 async function preparePendingFiles(files: IncomingPageFile[]) {
-  const key = fileIngestKey(files)
-  const existing = fileIngestPromises.get(key)
+  const key = attachmentPreparationKey(files)
+  const existing = attachmentPreparationPromises.get(key)
   if (existing) return existing
 
-  // 新 SDK 在父页面复用宿主下载权限；旧 SDK 和独立打开场景保留原直传路径。
-  const operation = context.config.parentFileIngest
-    ? requestFileIngest(files, (stage, stageError) => {
-        showAttachmentPreparation(stage === 'completed' ? 'parsing' : stage, files, stageError)
-      })
-    : (async () => {
-        showAttachmentPreparation('downloading', files)
-        await ingestIncomingDocument(files, context.config.token)
-        showAttachmentPreparation('parsing', files)
-      })()
+  // 浏览器只提交附件地址，文件由 DocMind 后端直接下载并进入既有解析流程。
+  const operation = (async () => {
+    showAttachmentPreparation('downloading', files)
+    await ingestIncomingDocument(files, context.config.token)
+    showAttachmentPreparation('parsing', files)
+  })()
   const tracked = operation.finally(() => {
     // 同一页面可能已为同一批附件创建新的监听，旧 Promise 不能误删新监听。
-    if (fileIngestPromises.get(key) === tracked) fileIngestPromises.delete(key)
+    if (attachmentPreparationPromises.get(key) === tracked)
+      attachmentPreparationPromises.delete(key)
   })
-  fileIngestPromises.set(key, tracked)
+  attachmentPreparationPromises.set(key, tracked)
   return tracked
 }
 
@@ -225,7 +219,7 @@ function refreshAttachmentPreparation(files: IncomingPageFile[]) {
     if (notice.stage !== 'ready') showAttachmentPreparation('ready', related)
     return
   }
-  if (notice.stage === 'completed' || notice.stage === 'parsing') {
+  if (notice.stage === 'parsing') {
     showAttachmentPreparation('parsing', related)
   }
 }
@@ -523,7 +517,7 @@ async function refreshExtraction(
   } catch (err) {
     if (transferAttempted && filesAreOnCurrentPage(queryFiles)) {
       try {
-        // 上传响应可能因刷新或网络中断丢失；先以后端状态对账，避免把已入库附件再次上传。
+        // 后端提交响应可能因刷新或网络中断丢失；先查询真实状态，避免重复触发附件下载和入库。
         const reconciled = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
         cacheExtractionResults(queryFiles, reconciled.items || [])
         const reconciledResults = queryFiles.map(
@@ -772,7 +766,7 @@ watch(
   (pageContextKey, previousPageContextKey) => {
     if (!previousPageContextKey || pageContextKey === previousPageContextKey) return
     // 页面身份只由 source_system + source_function_id + business_id 决定；source_doc_id 仅归属页面内来文附件。
-    fileIngestPromises.clear()
+    attachmentPreparationPromises.clear()
     results.value = {}
     selectedPageFiles.value = []
     error.value = ''
