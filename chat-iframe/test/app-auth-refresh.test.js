@@ -35,6 +35,10 @@ test('page attachments are prepared by the parent SDK and block questions until 
   assert.match(source, /requestFileIngest\(files/)
   assert.match(source, /fileIngestPromises\.set\(key, tracked\)/)
   assert.match(source, /const selectedDocumentFiles = filesForSelectedDocuments\(selectedPageFiles\)/)
+  assert.match(
+    source,
+    /queryFiles: IncomingPageFile\[\] = selectedFile\.value\s*\? filesForSelectedDocuments\(\[selectedFile\.value\]\)/
+  )
   assert.match(source, /同一来文可以整组同步到后端/)
   assert.match(source, /selectedPageFiles,\s*\n\s*extractionResults:/)
   assert.doesNotMatch(source, /selectedPageFiles: selectedDocumentFiles/)

@@ -440,7 +440,9 @@ function filesForSelectedDocuments(selectedFiles: IncomingPageFile[]) {
 }
 
 async function refreshExtraction(
-  queryFiles: IncomingPageFile[] = selectedFile.value ? [selectedFile.value] : [],
+  queryFiles: IncomingPageFile[] = selectedFile.value
+    ? filesForSelectedDocuments([selectedFile.value])
+    : [],
   syncPending = true
 ) {
   if (extractionRefreshTimer) {
@@ -866,7 +868,7 @@ function refreshVisibleAttachment() {
   const queryFiles = noticeFiles.length
     ? filesForSelectedDocuments(noticeFiles)
     : selectedFile.value
-      ? [selectedFile.value]
+      ? filesForSelectedDocuments([selectedFile.value])
       : []
   if (queryFiles.length) void refreshExtraction(queryFiles)
 }
