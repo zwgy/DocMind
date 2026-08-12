@@ -613,10 +613,15 @@
         }}</a-descriptions-item>
       </a-descriptions>
       <p class="delete-hint">
-        为避免误删，请在下方输入来源单号后
-        <strong>6 位</strong>（不区分大小写、忽略空白）以确认删除。
+        为避免误删，请在下方输入
+        <strong>{{ deleteConfirmInputLabel }}</strong>
+        （不区分大小写、忽略空白）以确认删除。
       </p>
-      <a-input v-model:value="deleteConfirmText" placeholder="请输入来源单号后 6 位" allow-clear />
+      <a-input
+        v-model:value="deleteConfirmText"
+        :placeholder="`请输入${deleteConfirmInputLabel}`"
+        allow-clear
+      />
     </a-modal>
   </div>
 </template>
@@ -824,15 +829,23 @@ function canDelete(record) {
   return true
 }
 
-const deleteConfirmExpectedSuffix = computed(() => {
+const normalizedDeleteSourceDocumentId = computed(() => {
   const target = deleteTarget.value
   if (!target?.sourceDocumentId) return ''
-  return String(target.sourceDocumentId).replace(/\s+/g, '').slice(-6).toLowerCase()
+  return String(target.sourceDocumentId).replace(/\s+/g, '').toLowerCase()
+})
+
+const deleteConfirmExpectedText = computed(() => {
+  return normalizedDeleteSourceDocumentId.value.slice(-6)
+})
+
+const deleteConfirmInputLabel = computed(() => {
+  return normalizedDeleteSourceDocumentId.value.length > 6 ? '来源单号后 6 位' : '完整来源单号'
 })
 
 const isDeleteConfirmValid = computed(() => {
-  const expected = deleteConfirmExpectedSuffix.value
-  if (!expected || expected.length < 6) return false
+  const expected = deleteConfirmExpectedText.value
+  if (!expected) return false
   return deleteConfirmText.value.replace(/\s+/g, '').toLowerCase() === expected
 })
 
@@ -865,7 +878,7 @@ async function confirmDelete() {
     return
   }
   if (!isDeleteConfirmValid.value) {
-    message.warning('请输入正确的来源单号后 6 位以确认删除')
+    message.warning(`请输入正确的${deleteConfirmInputLabel.value}以确认删除`)
     return
   }
   const incomingId = deleteTarget.value.incomingId

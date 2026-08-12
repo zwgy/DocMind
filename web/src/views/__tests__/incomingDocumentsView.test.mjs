@@ -64,5 +64,14 @@ assert.match(component, /'parsing', 'extracting'/, 'canDelete 必须拦截处理
 assert.match(component, /openDeleteConfirm\(record\)/, '列表行的删除按钮应触发 openDeleteConfirm')
 assert.match(component, /openDeleteConfirm\(detail\)/, '详情抽屉的删除按钮也应触发 openDeleteConfirm')
 assert.match(component, /confirmDelete/, '删除弹窗的确认按钮应调用 confirmDelete')
-assert.match(component, /isDeleteConfirmValid/, '删除确认应要求用户输入来源单号后 6 位')
+assert.match(component, /normalizedDeleteSourceDocumentId/, '删除确认应规范化来源单号')
+assert.match(
+  component,
+  /normalizedDeleteSourceDocumentId\.value\.length > 6\s*\? '来源单号后 6 位'\s*: '完整来源单号'/,
+  '超过 6 位时应输入后 6 位，短来源单号应输入完整值'
+)
+assert.match(component, /normalizedDeleteSourceDocumentId\.value\.slice\(-6\)/, '长来源单号应取后 6 位')
+assert.doesNotMatch(component, /expected\.length < 6/, '短来源单号不能被固定长度校验阻止删除')
+assert.match(component, /:placeholder="`请输入\$\{deleteConfirmInputLabel\}`"/, '输入提示应随来源单号长度变化')
+assert.match(component, /isDeleteConfirmValid/, '删除确认必须校验用户输入')
 assert.match(component, /incomingDocumentApi\.remove/, '删除逻辑必须通过 incomingDocumentApi.remove 调用后端')
