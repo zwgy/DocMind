@@ -633,9 +633,10 @@ test('local example starts minimized so users open the assistant explicitly', ()
   assert.doesNotMatch(example, /initialState:\s*'(open|normal|maximized)'/)
   assert.match(
     example,
-    /<span class="tk-key">incoming_document_metadata<\/span>:\s*incomingDocumentMetadata/
+    /<span class="tk-key">document_metadata<\/span>:\s*incomingDocumentMetadata/
   )
-  assert.match(example, /incoming_document_metadata:\s*incomingDocumentMetadata/)
+  assert.match(example, /document_metadata:\s*incomingDocumentMetadata/)
+  assert.doesNotMatch(example, /incoming_document_metadata/)
   assert.match(example, /\.\.\.businessContext,/)
   assert.doesNotMatch(example, /\.\.\.incomingDocumentMetadata,/)
   assert.match(example, /source_file_id：来源系统内该附件的稳定唯一 ID/)

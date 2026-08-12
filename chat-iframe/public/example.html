@@ -193,7 +193,7 @@
   <span class="tk-com">// 当前 5174 Nginx 已代理 /api，因此只需填写 iframe 地址，不要填写 apiBaseUrl。</span>
   <span class="tk-key">iframeSrc</span>: <span class="tk-str">'http://192.168.1.220:5174/chat-iframe/'</span>,
   ...businessContext,
-  <span class="tk-key">incoming_document_metadata</span>: incomingDocumentMetadata,
+  <span class="tk-key">document_metadata</span>: incomingDocumentMetadata,
 })
 
 <span class="tk-com">// 可选参数速查（按需启用，未列出的使用默认值；详见 docmind-chat-iframe-parent.js 构造函数）：</span>
@@ -206,7 +206,7 @@
 <span class="tk-com">//   initialState:       'minimized'                     // 初始状态：minimized / normal / maximized / closed</span>
 <span class="tk-com">//   offsetX / offsetY:  24 / 24                         // 距视口边缘偏移（像素）</span>
 <span class="tk-com">//   buttonHtml:         '<span>🤖</span>'               // 自定义悬浮按钮内容</span>
-<span class="tk-com">//   incoming_document_metadata: { ... }                 // 来文级公共元数据，选择询问的附件没有上传时与附件信息组合后上传服务器</span>
+<span class="tk-com">//   document_metadata: { ... }                          // 来文级公共元数据，选择询问的附件没有上传时与附件信息组合后上传服务器</span>
 
 <span class="tk-com">// SPA 切换业务页面时先更新页面身份；该调用会清空上一页面的 SDK 任务与 iframe 状态。</span>
 <span class="tk-com">// chat.setPageContext({ source_system: 'oa', source_function_id: 'incomingDocument', business_id: '37909' })</span>
@@ -303,7 +303,7 @@ chat.<span class="tk-fn">on</span>(<span class="tk-str">'stateChange'</span>,   
         // iframeSrc: 'http://192.168.1.220:5174/chat-iframe/',
         // apiBaseUrl 无需填写：5174 Nginx 已代理 /api。
         ...businessContext,
-        incoming_document_metadata: incomingDocumentMetadata,
+        document_metadata: incomingDocumentMetadata,
       })
 
       // SPA 切换业务页面时先调用：

@@ -687,9 +687,8 @@ async function sendChat(payload: {
       pageContent: context.pageContent,
       selectedFile: selectedContextFile,
       extractionResult: selectedContextResult,
-      // 用户选择来文中的任一附件时，模型必须同时获得同一来文的完整附件清单，
-      // 否则只能看到主文件并为其他附件猜测 source_file_id。
-      selectedPageFiles: selectedDocumentFiles,
+      // 同一来文可以整组同步到后端，但模型上下文必须严格服从用户本轮勾选的附件范围。
+      selectedPageFiles,
       extractionResults: results.value
     },
     context.config.token,
