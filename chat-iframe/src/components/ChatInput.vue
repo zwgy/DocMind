@@ -36,6 +36,7 @@ const props = withDefaults(
     pageFiles?: IncomingPageFile[]
     selectedPageSourceFileId?: string
     tokenUsage?: Record<string, unknown> | null
+    showPageContext?: boolean
   }>(),
   {
     disabled: false,
@@ -46,7 +47,8 @@ const props = withDefaults(
     selectedModelSpec: '',
     pageFiles: () => [],
     selectedPageSourceFileId: '',
-    tokenUsage: null
+    tokenUsage: null,
+    showPageContext: false
   }
 )
 
@@ -141,6 +143,14 @@ function resizeTextarea() {
   // 输入区要让历史消息区尽量可见，所以只随内容增长到上限，超过后交给 textarea 自己滚动。
   nextTick(() => autosizeTextarea(textareaRef.value))
 }
+
+function setDraft(value: string) {
+  text.value = value
+  resizeTextarea()
+  nextTick(() => textareaRef.value?.focus())
+}
+
+defineExpose({ setDraft })
 
 function submit() {
   const content = text.value.trim()
@@ -305,13 +315,18 @@ watch(text, resizeTextarea)
 
 <template>
   <form class="chat-input" @submit.prevent="submit">
-    <div class="input-toolbar">
-      <label class="context-chip" :class="{ active: askPage }" title="携带当前页面内容">
+    <div v-if="showPageContext || hasPageFiles" class="input-toolbar">
+      <label
+        v-if="showPageContext"
+        class="context-chip"
+        :class="{ active: askPage }"
+        title="携带当前页面内容"
+      >
         <input type="checkbox" :checked="askPage" @change="emitAskPage" />
         <Globe2 :size="15" />
         <span>问网页</span>
       </label>
-      <div ref="fileMenuRef" class="file-context-menu">
+      <div v-if="hasPageFiles" ref="fileMenuRef" class="file-context-menu">
         <button
           type="button"
           class="context-chip"

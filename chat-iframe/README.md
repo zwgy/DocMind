@@ -182,7 +182,7 @@ chat-iframe/
   -> 引入 docmind-chat-iframe-parent.js
   -> 创建 DocMindChatIframe
   -> 父脚本挂载 iframe 和悬浮按钮
-  -> 父脚本采集页面内容、附件列表
+  -> 接入方按需传入页面内容、附件列表
   -> postMessage 发送给 iframe
 
 chat-iframe
@@ -233,12 +233,9 @@ docMind backend
     initialState: 'minimized'
   })
 
-  // 未调用时，父脚本会自动采集当前页面 HTML；显式传入时以这里为准。
-  chat.setPageContent({
-    title: document.title,
-    url: location.href,
-    html: document.documentElement.outerHTML
-  })
+  // 仅需要“问网页”时调用；无参会抓取当前整页，也可传入自定义文本或对象。
+  chat.setPageContent()
+  // chat.setPageContent({ title: document.title, url: location.href, text: '脱敏后的页面内容' })
 
   chat.setFiles([
     {
@@ -252,7 +249,7 @@ docMind backend
 </script>
 ```
 
-### 7.2 只嵌入脚本，自动扫描生产系统附件
+### 7.2 不使用页面上下文
 
 ```html
 <script src="https://docmind.example.com/chat-iframe/docmind-chat-iframe-parent.js"></script>
@@ -269,12 +266,14 @@ docMind backend
 </script>
 ```
 
+未调用 `setPageContent()` 和 `setFiles()` 时，小助手不显示“问网页”“问文件”，顶部也不显示来文解析摘要；空对话会提示用户仍可按标题、关键词、发文单位或时间查询后端已收录的来文，并提供仅回填输入框的示例问题。有页面内容但没有页面来文时，空对话改为提示可询问当前页面。
+
 父脚本会用外部业务身份自动换取 docMind token。聊天、模型列表、附件抽取查询等接口都经过 `get_required_user`，因此换票失败时，iframe 会显示认证错误，模型选择器也会因为模型列表接口 401 而为空。
 父脚本的窗口控制会在关闭和最小化时保留悬浮入口；普通窗口可通过顶部标题栏拖动，最小化/关闭后的悬浮入口也可直接拖动。从悬浮入口恢复普通窗口时，会先判断当前位置是否能完整显示小助手，若放不下则自动回到当前视口右下角。
 iframe 内部会话列表采用按需左侧抽屉展示，默认不占用聊天区域；点击顶部对话列表按钮后再展开历史会话和新建聊天入口。
 底部输入区的“问文件”会打开页面附件选择弹窗，显示当前页面识别到的附件名称，可多选/取消；未选择任何附件时会自动取消文件上下文，不再把附件摘要拼入提问。模型选择采用输入框右下角的模型按钮和搜索弹窗。左下角回形针按钮参考主站 `AttachmentOptionsComponent`，先弹出“添加附件 / 上传图片”小菜单；添加附件再打开拖拽上传弹窗，确认后进入当前消息的待发送附件列表。
 
-父脚本不自动解析宿主页面 DOM。接入方需要在初始化后调用 `setFiles()` 显式传入附件列表，避免不同业务系统的页面结构差异导致误识别。来文级 `source_doc_id` 放在初始化参数的 `document_metadata` 中，只需声明一次；附件对象提供 `name/source_url/source_file_id`，其中 `source_file_id` 标识具体附件。`source_system` 由初始化参数补齐，`source_function_id` 只用于页面会话 scope，不进入来文上传和查询身份。SDK 会把 `document_metadata.source_doc_id` 转换为查询所需的文档身份。待入库附件的 `source_url` 必须是 DocMind 后端可访问的 HTTP/HTTPS 地址；相对地址会由 SDK 按宿主页面补成绝对地址，浏览器不再读取附件内容，因此不要求附件服务为嵌入页面开放 CORS。`business_id` 主要用于页面会话隔离；兼容旧的一页一来文接入时，仅在未提供 `document_metadata.source_doc_id` 时作为来文 ID 兜底。
+父脚本不自动采集或解析宿主页面 DOM。接入方需要在初始化后按需调用 `setPageContent()` 和 `setFiles()`；未传入的上下文入口不会显示，避免不同业务系统的页面结构差异导致误识别。来文级 `source_doc_id` 放在初始化参数的 `document_metadata` 中，只需声明一次；附件对象提供 `name/source_url/source_file_id`，其中 `source_file_id` 标识具体附件。`source_system` 由初始化参数补齐，`source_function_id` 只用于页面会话 scope，不进入来文上传和查询身份。SDK 会把 `document_metadata.source_doc_id` 转换为查询所需的文档身份。待入库附件的 `source_url` 必须是 DocMind 后端可访问的 HTTP/HTTPS 地址；相对地址会由 SDK 按宿主页面补成绝对地址，浏览器不再读取附件内容，因此不要求附件服务为嵌入页面开放 CORS。`business_id` 主要用于页面会话隔离；兼容旧的一页一来文接入时，仅在未提供 `document_metadata.source_doc_id` 时作为来文 ID 兜底。
 
 宿主 SPA 切换业务页面时，应先调用 `setPageContext()`，再重新调用 `setPageContent()` 和 `setFiles()`：
 
@@ -346,7 +345,7 @@ const chat = new DocMindChatIframe({
 | `restore()` | 恢复普通窗口 |
 | `destroy()` | 移除 DOM、消息监听并中止附件任务；仅在彻底卸载小助手时调用 |
 | `setPageContext(context)` | SPA 切换业务页面；参数为 `source_system/source_function_id/business_id/document_metadata`，会清空旧页任务并重载 iframe |
-| `setPageContent(content)` | 显式设置页面内容，支持字符串或对象 |
+| `setPageContent(content?)` | 手动启用“问网页”；无参抓取当前整页，传参时使用指定字符串或对象 |
 | `setFiles(files)` | 覆盖附件列表 |
 | `addFile(file)` | 追加附件 |
 | `on(event, callback)` | 监听 `stateChange`、`conversationCreated`、`messageSent` 等事件 |
@@ -446,7 +445,7 @@ iframe 发送给父页面：
 
 - iframe 消息目标会从 iframe 地址自动推导；来源限制由后端 `CHAT_IFRAME_ALLOWED_ORIGINS` 强制执行。
 - 父脚本换取的 docMind token 会进入 iframe 并用于后端请求；生产环境优先使用 `tokenExchangeUrl`，避免把高权限凭据暴露到浏览器。
-- 默认页面内容是 `document.documentElement.outerHTML`；如页面含敏感信息，应使用 `setPageContent()` 传脱敏文本覆盖自动采集结果。
+- 只有接入方无参调用 `setPageContent()` 时才会采集 `document.documentElement.outerHTML`；页面含敏感信息时应传入脱敏文本，不需要“问网页”时不要调用。
 - 前端只负责携带上下文和展示结果，后端仍是最终权限边界。
 
 ## 14. 测试覆盖

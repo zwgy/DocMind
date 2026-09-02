@@ -15,8 +15,9 @@ description: "查询、读取、统计和综合解读已接入系统的来文。
 
 ## 可用工具
 
-- `search_incoming_documents`：按来文日期、主分类、条目类型、标题、文号或附件名分页查找来文。
+- `search_incoming_documents`：按来文日期、主分类、条目类型、标题、文号、发文单位或关键词分页查找来文；通用关键词匹配标题、文号、发文单位、摘要和附件名。
 - `read_incoming_document`：`include_full_text=false` 时读取来文整体结论、附件清单和正式结构化结果；`include_full_text=true` 时只将指定附件的 Markdown 写入当前会话目录并返回路径。
+- `download_incoming_document_files`：将指定主文件或附件的原始文件写入当前会话 outputs，供用户预览或下载。
 - `get_incoming_document_statistics`：按与查询相同的条件统计来文，并按分类、条目类型和月份聚合。
 - `ask_user_question`：搜索命中多份来文或关键范围不明确时，请用户选择。
 - `read_file`：读取 `read_incoming_document` 返回的 `markdown_path`，用于核验附件原文。
@@ -48,7 +49,17 @@ description: "查询、读取、统计和综合解读已接入系统的来文。
    ```
 
 4. 搜索只命中一份，或用户选定一份后，再使用真实 `incoming_id` 读取详情。命中多份时调用 `ask_user_question`，选项必须来自搜索结果并携带真实 `incoming_id`；不要自行选择。
-5. 用户要求交付 Markdown 文件，或需要原文依据、具体附件内容、核验细节时，从页面上下文或附件清单选择真实 `source_file_id`。如果页面上下文已经提供真实 `incoming_id` 和 `source_file_id`，直接调用原文模式，不要先重复读取来文详情：
+5. 用户要求下载原始主文件或附件时，从附件清单选择真实 `source_file_id`，调用：
+
+   ```text
+   download_incoming_document_files(
+     incoming_id="真实 incoming_id",
+     source_file_ids=["附件清单中的 source_file_id"]
+   )
+   ```
+
+   返回 `original_path` 后调用 `present_artifacts` 交付；不要把 MinIO 地址或宿主机路径返回给用户。
+6. 用户要求交付 Markdown 文件，或需要原文依据、具体附件内容、核验细节时，从页面上下文或附件清单选择真实 `source_file_id`。如果页面上下文已经提供真实 `incoming_id` 和 `source_file_id`，直接调用原文模式，不要先重复读取来文详情：
 
    ```text
    read_incoming_document(
@@ -58,13 +69,13 @@ description: "查询、读取、统计和综合解读已接入系统的来文。
    )
    ```
 
-6. 上一步返回 `markdown_path` 后：
+7. 上一步返回 `markdown_path` 后：
    - 用户只要求“转换成 Markdown 文件发我”时，直接调用 `present_artifacts` 交付该路径，不要调用 `read_file` 把全文送入模型上下文。
    - 用户要求解读、引用或核验原文时，才使用 `read_file` 分段读取；多个附件分别读取，并保留文件名边界。
 
 ### B. 来文检索
 
-1. 使用用户给出的时间、分类、条目类型或关键词调用 `search_incoming_documents`。
+1. 使用用户给出的时间、分类、条目类型、标题、文号、发文单位或关键词调用 `search_incoming_documents`。
 2. 用户只需要列表时直接返回搜索结果；用户选定来文或询问详情时，再调用 `read_incoming_document(include_full_text=false)`。
 3. 需要下一页时使用工具返回的 `page`、`page_size` 和 `total` 计算，不猜测页码。
 

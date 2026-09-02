@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 const component = readFileSync(new URL('../src/components/ChatMessages.vue', import.meta.url), 'utf8')
+const inputComponent = readFileSync(
+  new URL('../src/components/ChatInput.vue', import.meta.url),
+  'utf8'
+)
+const appComponent = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
 const pdfPreview = readFileSync(
   new URL('../src/components/PdfArtifactPreview.vue', import.meta.url),
   'utf8'
@@ -86,4 +91,25 @@ test('completed conversation history scrolls to its last message without animati
     component,
     /watch\(\s*\(\) => props\.historyScrollRequest,[\s\S]*\(\) => void scrollToBottom\('auto'\),[\s\S]*\{ flush: 'post' \}\s*\)/
   )
+})
+
+test('empty chat explains available context and fills suggested incoming-document questions', () => {
+  assert.match(component, /hasPageContent\?: boolean/)
+  assert.match(component, /hasPageFiles\?: boolean/)
+  assert.match(component, /可以询问当前页面，也可以直接提出其他问题。/)
+  assert.match(component, /按标题、关键词、发文单位或时间查找已收录来文/)
+  assert.match(component, /总结当前页面的主要内容/)
+  assert.match(component, /提取当前来文的关键信息/)
+  assert.match(component, /v-for="suggestion in questionSuggestions"/)
+  assert.match(component, /suggestQuestion/)
+  assert.match(component, /class="welcome-heading"/)
+  assert.match(component, /class="welcome-suggestion-copy"/)
+  assert.match(styles, /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/)
+  assert.match(styles, /@media \(max-width: 430px\)/)
+  assert.match(styles, /welcome-subtitle[\s\S]*color:\s*var\(--gray-600\)/)
+  assert.match(styles, /button:focus-visible[\s\S]*var\(--main-700\)/)
+  assert.match(inputComponent, /defineExpose\(\{ setDraft \}\)/)
+  assert.match(inputComponent, /textareaRef\.value\?\.focus\(\)/)
+  assert.match(appComponent, /@suggest-question="fillSuggestedQuestion"/)
+  assert.match(appComponent, /chatInputRef\.value\?\.setDraft\(question\)/)
 })

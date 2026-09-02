@@ -20,6 +20,7 @@ from yuxi.repositories.incoming_document_repository import IncomingDocumentRepos
 from yuxi.services.incoming_document_markdown_service import (
     IncomingDocumentMarkdownError,
     IncomingDocumentMarkdownService,
+    IncomingDocumentOriginalFileError,
 )
 
 INCOMING_TOOL_CONFIG_GUIDE = "由来文业务 Skill 按需加载，不作为 Agent 基础工具直接配置。"
@@ -41,7 +42,14 @@ class IncomingDocumentFilters(BaseModel):
         max_length=50,
         description="正式结构化结果的条目类型列表，支持内部 ID 或当前中文名称",
     )
-    keyword: str | None = Field(default=None, max_length=200, description="标题、文号或附件文件名关键词")
+    title: str | None = Field(default=None, max_length=200, description="来文标题关键词")
+    document_number: str | None = Field(default=None, max_length=100, description="来文文号关键词")
+    source_unit: str | None = Field(default=None, max_length=100, description="发文单位关键词")
+    keyword: str | None = Field(
+        default=None,
+        max_length=200,
+        description="同时匹配标题、文号、发文单位、摘要或附件文件名的关键词",
+    )
 
     @model_validator(mode="after")
     def validate_date_range(self):
@@ -165,11 +173,14 @@ async def search_incoming_documents(
     date_to: date | None = None,
     classifications: list[str] | None = None,
     item_types: list[str] | None = None,
+    title: str | None = None,
+    document_number: str | None = None,
+    source_unit: str | None = None,
     keyword: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> dict[str, Any] | str:
-    """按时间、分类、条目类型或关键词查找来文；先用本工具定位来文，再按需读取详情。"""
+    """按时间、分类、条目类型、标题、文号、发文单位或关键词查找来文。"""
     try:
         normalized_classifications = normalize_document_category_ids(classifications)
         normalized_item_types = _normalize_item_types(item_types)
@@ -182,6 +193,9 @@ async def search_incoming_documents(
         date_to=date_to.isoformat() if date_to else None,
         classifications=normalized_classifications or None,
         item_types=normalized_item_types or None,
+        title=title,
+        document_number=document_number,
+        source_unit=source_unit,
         keyword=keyword,
         page=page,
         page_size=page_size,
@@ -274,6 +288,38 @@ async def read_incoming_document(
 
 @tool(
     category="incoming_document",
+    tags=["来文", "下载"],
+    display_name="下载来文原始文件",
+    config_guide=INCOMING_TOOL_CONFIG_GUIDE,
+)
+async def download_incoming_document_files(
+    incoming_id: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=64),
+        Field(description="来文 ID"),
+    ],
+    source_file_ids: Annotated[
+        list[SourceFileId],
+        Field(min_length=1, max_length=100, description="需要下载的主文件或附件 source_file_id"),
+    ],
+    runtime: ToolRuntime = None,
+) -> dict[str, Any]:
+    """将指定来文的原始主文件或附件写入当前线程 outputs，供用户预览或下载。"""
+    try:
+        uid, thread_id = _runtime_thread_scope(runtime)
+        original_files = await IncomingDocumentMarkdownService().materialize_original(
+            incoming_id=incoming_id,
+            source_file_ids=source_file_ids,
+            uid=uid,
+            thread_id=thread_id,
+        )
+    except (IncomingDocumentOriginalFileError, ValueError) as exc:
+        raise ToolException(f"下载来文原始文件失败：{exc}") from exc
+    return {"incoming_id": incoming_id, "original_files": original_files}
+
+
+@tool(
+    category="incoming_document",
     tags=["来文", "统计"],
     display_name="统计来文",
     config_guide=INCOMING_TOOL_CONFIG_GUIDE,
@@ -284,6 +330,9 @@ async def get_incoming_document_statistics(
     date_to: date | None = None,
     classifications: list[str] | None = None,
     item_types: list[str] | None = None,
+    title: str | None = None,
+    document_number: str | None = None,
+    source_unit: str | None = None,
     keyword: str | None = None,
 ) -> dict[str, Any] | str:
     """统计筛选范围内的来文总数，并按分类、条目类型和月份聚合。"""
@@ -297,6 +346,9 @@ async def get_incoming_document_statistics(
         date_to=date_to.isoformat() if date_to else None,
         classifications=normalized_classifications or None,
         item_types=normalized_item_types or None,
+        title=title,
+        document_number=document_number,
+        source_unit=source_unit,
         keyword=keyword,
     )
     labels = _item_type_labels()

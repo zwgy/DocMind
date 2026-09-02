@@ -833,15 +833,116 @@
 
 .chat-welcome {
   display: grid;
-  gap: 6px;
-  margin: auto;
+  gap: 18px;
+  width: min(100%, 560px);
+  margin: 32px auto auto;
   color: var(--gray-700);
-  text-align: center;
+  text-align: left;
 }
 
-.chat-welcome span {
-  color: var(--gray-500);
+.welcome-heading {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.welcome-heading > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.welcome-symbol {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--main-200);
+  border-radius: 8px;
+  background: var(--main-50);
+  color: var(--main-700);
+}
+
+.welcome-heading strong {
+  color: var(--gray-900);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.welcome-subtitle {
+  color: var(--gray-600);
   font-size: 13px;
+  line-height: 1.55;
+}
+
+.welcome-suggestions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.welcome-suggestions button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 16px;
+  gap: 9px;
+  align-items: center;
+  min-height: 72px;
+  padding: 11px 12px;
+  border: 1px solid var(--gray-150);
+  border-radius: 6px;
+  background: var(--gray-0);
+  color: var(--gray-700);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.welcome-suggestions button:hover {
+  border-color: var(--main-500);
+  background: var(--main-50);
+  color: var(--main-700);
+}
+
+.welcome-suggestion-icon {
+  color: var(--main-600);
+}
+
+.welcome-suggestion-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.welcome-suggestion-copy small {
+  color: var(--gray-600);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.welcome-suggestion-copy span {
+  color: var(--gray-800);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.welcome-suggestion-arrow {
+  color: var(--gray-400);
+}
+
+.welcome-suggestions button:hover .welcome-suggestion-arrow {
+  color: var(--main-600);
+}
+
+.welcome-suggestions button:focus-visible {
+  outline: 2px solid var(--main-700);
+  outline-offset: 2px;
+}
+
+@media (max-width: 430px) {
+  .welcome-suggestions {
+    grid-template-columns: 1fr;
+  }
 }
 
 .chat-message {

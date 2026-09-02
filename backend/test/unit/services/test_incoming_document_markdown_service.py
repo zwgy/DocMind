@@ -19,12 +19,14 @@ class FakeIncomingRepository:
                 incoming_file_id="file-row-1",
                 source_file_id="main",
                 filename="主文件.docx",
+                original_file_url="minio://original/main.docx",
                 markdown_file_url="minio://parsed/main.md",
             ),
             SimpleNamespace(
                 incoming_file_id="file-row-2",
                 source_file_id="attachment",
                 filename="附件.xlsx",
+                original_file_url="minio://original/attachment.xlsx",
                 markdown_file_url="minio://parsed/attachment.md",
             ),
         ]
@@ -115,3 +117,58 @@ async def test_materialize_rejects_unknown_source_file_id(monkeypatch):
             uid="user-1",
             thread_id="thread-1",
         )
+
+
+@pytest.mark.asyncio
+async def test_materialize_original_writes_selected_file_to_owned_thread(tmp_path, monkeypatch):
+    monkeypatch.setattr(sandbox_paths.conf, "save_dir", str(tmp_path))
+
+    @asynccontextmanager
+    async def fake_session_context():
+        yield object()
+
+    class FakeConversationRepository:
+        def __init__(self, session):
+            del session
+
+        async def get_conversation_by_thread_id(self, thread_id):
+            assert thread_id == "thread-1"
+            return SimpleNamespace(uid="user-1", status="active")
+
+    class FakeMinioClient:
+        async def adownload_file(self, bucket_name, object_name):
+            assert (bucket_name, object_name) == ("original", "main.docx")
+            return b"original-content"
+
+    monkeypatch.setattr(service_module.pg_manager, "get_async_session_context", fake_session_context)
+    monkeypatch.setattr(service_module, "ConversationRepository", FakeConversationRepository)
+    monkeypatch.setattr(service_module, "get_minio_client", lambda: FakeMinioClient())
+
+    result = await IncomingDocumentMarkdownService(FakeIncomingRepository()).materialize_original(
+        incoming_id="inc-1",
+        source_file_ids=["main"],
+        uid="user-1",
+        thread_id="thread-1",
+    )
+
+    assert result == [
+        {
+            "source_file_id": "main",
+            "filename": "主文件.docx",
+            "original_path": "/home/gem/user-data/outputs/incoming-documents/inc-1/file-row-1/主文件.docx",
+        }
+    ]
+    host_path = (
+        tmp_path
+        / "threads"
+        / "thread-1"
+        / "user-data"
+        / "outputs"
+        / "incoming-documents"
+        / "inc-1"
+        / "file-row-1"
+        / "主文件.docx"
+    )
+    assert host_path.read_bytes() == b"original-content"
+    assert "minio" not in str(result).lower()
+    assert str(tmp_path) not in str(result)

@@ -16,6 +16,9 @@ def test_business_query_filters_cover_document_metadata_files_and_latest_items()
         date_to="2026-12-31",
         classifications=["风险管理类"],
         item_types=["risk_item"],
+        title="安全",
+        document_number="2026",
+        source_unit="安监部",
         keyword="合同",
     )
 
@@ -27,6 +30,10 @@ def test_business_query_filters_cover_document_metadata_files_and_latest_items()
     assert "max(document_business_extraction_results.id)" in sql
     assert "incoming_documents.status = 'ready'" in sql
     assert "incoming_date" in sql
+    assert "document_number" in sql
+    assert "title" in sql
+    assert "source_unit" in sql
+    assert "incoming_documents.summary" in sql
     assert "2026-01-01" in sql
     assert "2026-12-31" in sql
 

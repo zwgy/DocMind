@@ -163,7 +163,7 @@ test('derives the default iframe URL from the parent script URL', () => {
   chat.destroy()
 })
 
-test('automatically captures page content and lets explicit content override it', () => {
+test('only sends page content supplied by the embedding page', () => {
   const { DocMindChatIframe, listeners, sentMessages } = parentHarness()
   const chat = new DocMindChatIframe({ iframeSrc: 'https://docmind.example.com/chat-iframe/' })
 
@@ -171,6 +171,9 @@ test('automatically captures page content and lets explicit content override it'
     origin: 'https://docmind.example.com',
     data: { type: 'REQUEST_PAGE_CONTENT' }
   })
+  assert.equal(sentMessages.at(-1).message.payload, null)
+
+  chat.setPageContent()
   assert.deepEqual(JSON.parse(JSON.stringify(sentMessages.at(-1).message.payload)), {
     title: 'production page',
     url: 'https://production.example.com/page',

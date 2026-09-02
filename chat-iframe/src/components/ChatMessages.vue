@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   Check,
+  ChevronRight,
   Circle,
   CircleCheck,
   Copy,
@@ -9,6 +10,8 @@ import {
   FileText,
   Image as ImageIcon,
   LoaderCircle,
+  MessageCircleQuestion,
+  Search,
   X
 } from 'lucide-vue-next'
 import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } from 'vue'
@@ -40,6 +43,8 @@ const props = withDefaults(
     threadId?: string
     token?: string
     historyScrollRequest?: number
+    hasPageContent?: boolean
+    hasPageFiles?: boolean
   }>(),
   {
     messages: () => [],
@@ -50,14 +55,58 @@ const props = withDefaults(
     agentState: null,
     threadId: '',
     token: '',
-    historyScrollRequest: 0
+    historyScrollRequest: 0,
+    hasPageContent: false,
+    hasPageFiles: false
   }
 )
 
 defineEmits<{
   feedback: [payload: { messageId: string; rating: 'like' | 'dislike'; reason: string | null }]
+  suggestQuestion: [question: string]
 }>()
 
+const incomingQuestionSuggestions = [
+  {
+    label: '查找来文',
+    question: '查询安全科近期来文',
+    icon: Search
+  },
+  {
+    label: '内容解读',
+    question: '总结“来文标题”的主要内容',
+    icon: FileText
+  }
+]
+const pageQuestionSuggestions = [
+  {
+    label: '页面概览',
+    question: '总结当前页面的主要内容',
+    icon: FileText
+  },
+  {
+    label: '信息提取',
+    question: '提取当前页面的关键信息',
+    icon: Search
+  }
+]
+const fileQuestionSuggestions = [
+  {
+    label: '来文摘要',
+    question: '总结当前来文的主要内容',
+    icon: FileText
+  },
+  {
+    label: '关键信息',
+    question: '提取当前来文的关键信息',
+    icon: Search
+  }
+]
+const questionSuggestions = computed(() => {
+  if (props.hasPageContent) return pageQuestionSuggestions
+  if (props.hasPageFiles) return fileQuestionSuggestions
+  return incomingQuestionSuggestions
+})
 const openReasoning = ref<Record<string, boolean>>({})
 const messagesEl = ref<HTMLElement | null>(null)
 const copiedUserMessageId = ref('')
@@ -429,8 +478,38 @@ onUnmounted(() => {
   <section ref="messagesEl" class="chat-messages">
     <p v-if="loading" class="empty">正在加载聊天记录...</p>
     <div v-else-if="!messages.length" class="chat-welcome">
-      <strong>可以直接提问</strong>
-      <span>默认会带上当前页面和选中文档的结构化结果。</span>
+      <div class="welcome-heading">
+        <span class="welcome-symbol" aria-hidden="true">
+          <MessageCircleQuestion :size="21" />
+        </span>
+        <div>
+          <strong>有什么可以帮您？</strong>
+          <span v-if="hasPageContent" class="welcome-subtitle">
+            可以询问当前页面，也可以直接提出其他问题。
+          </span>
+          <span v-else-if="hasPageFiles" class="welcome-subtitle">
+            可以询问当前来文，也可以直接提出其他问题。
+          </span>
+          <span v-else class="welcome-subtitle">
+            按标题、关键词、发文单位或时间查找已收录来文，并查看摘要、关键信息、原文与附件。
+          </span>
+        </div>
+      </div>
+      <div class="welcome-suggestions" aria-label="示例问题">
+        <button
+          v-for="suggestion in questionSuggestions"
+          :key="suggestion.question"
+          type="button"
+          @click="$emit('suggestQuestion', suggestion.question)"
+        >
+          <component :is="suggestion.icon" class="welcome-suggestion-icon" :size="18" />
+          <span class="welcome-suggestion-copy">
+            <small>{{ suggestion.label }}</small>
+            <span>{{ suggestion.question }}</span>
+          </span>
+          <ChevronRight class="welcome-suggestion-arrow" :size="16" />
+        </button>
+      </div>
     </div>
     <template v-else>
       <article

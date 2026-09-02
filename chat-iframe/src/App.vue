@@ -83,6 +83,7 @@ const tickerShouldMove = computed(
 const inboxNavigation = ref<{ key: number; category: 'notification' | 'task' } | null>(null)
 const draggingWindow = ref(false)
 const historyScrollRequest = ref(0)
+const chatInputRef = ref<{ setDraft: (value: string) => void } | null>(null)
 let extractionRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const extractionRefreshPromises = new Map<string, Promise<boolean>>()
 let attachmentNoticeTimer: ReturnType<typeof setTimeout> | null = null
@@ -93,6 +94,11 @@ let tickerResizeObserver: ResizeObserver | null = null
 let tickerMotionQuery: MediaQueryList | null = null
 
 const selectedFile = computed(() => context.selectedFile)
+const hasPageContent = computed(() =>
+  Object.values(context.pageContent).some(
+    (value) => typeof value === 'string' && value.trim().length > 0
+  )
+)
 const attachmentNoticeKind = computed(() => {
   if (attachmentPreparationNotice.value?.stage === 'failed') return 'error'
   if (attachmentPreparationNotice.value?.stage === 'ready') return 'success'
@@ -115,6 +121,10 @@ function openSidebar() {
     context.config.agentId,
     context.config.conversationScopeKey
   )
+}
+
+function fillSuggestedQuestion(question: string) {
+  chatInputRef.value?.setDraft(question)
 }
 
 function displayCount(value: number) {
@@ -722,7 +732,7 @@ async function sendChat(payload: {
       text: payload.text,
       files: payload.files,
       imageFile: payload.imageFile,
-      pageContent: context.pageContent,
+      pageContent: hasPageContent.value ? context.pageContent : undefined,
       selectedFile: selectedContextFile,
       extractionResult: selectedContextResult,
       // 同一来文可以整组同步到后端，但模型上下文必须严格服从用户本轮勾选的附件范围。
@@ -1119,7 +1129,10 @@ function resumeVisiblePage() {
             :thread-id="chat.currentThreadId"
             :token="context.config.token"
             :history-scroll-request="historyScrollRequest"
+            :has-page-content="hasPageContent"
+            :has-page-files="context.files.length > 0"
             @feedback="submitFeedback"
+            @suggest-question="fillSuggestedQuestion"
           />
         </section>
         <RunInterruptCard
@@ -1131,6 +1144,7 @@ function resumeVisiblePage() {
         />
         <ChatInput
           v-else
+          ref="chatInputRef"
           :disabled="chat.isSending || Boolean(context.config.authError) || !context.config.token"
           :streaming="chat.isStreaming"
           :ask-page="chat.askPage"
@@ -1140,6 +1154,7 @@ function resumeVisiblePage() {
           :token-usage="currentTokenUsage"
           :page-files="context.files"
           :selected-page-source-file-id="context.selectedSourceFileId"
+          :show-page-context="hasPageContent"
           @update:ask-page="chat.askPage = $event"
           @update:ask-file="chat.askFile = $event"
           @update:selected-model-spec="chat.setSelectedModelSpec($event)"

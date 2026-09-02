@@ -359,6 +359,9 @@ class IncomingDocumentRepository:
         date_to: str | None = None,
         classifications: list[str] | None = None,
         item_types: list[str] | None = None,
+        title: str | None = None,
+        document_number: str | None = None,
+        source_unit: str | None = None,
         keyword: str | None = None,
     ) -> list:
         filters = []
@@ -390,6 +393,15 @@ class IncomingDocumentRepository:
                 )
             )
 
+        metadata_filters = {
+            "title": title,
+            "document_number": document_number,
+            "source_unit": source_unit,
+        }
+        for field, value in metadata_filters.items():
+            if value := (value or "").strip():
+                filters.append(IncomingDocument.document_metadata[field].as_string().icontains(value, autoescape=True))
+
         if keyword := (keyword or "").strip():
             filters.append(
                 or_(
@@ -397,6 +409,8 @@ class IncomingDocumentRepository:
                     IncomingDocument.document_metadata["document_number"]
                     .as_string()
                     .icontains(keyword, autoescape=True),
+                    IncomingDocument.document_metadata["source_unit"].as_string().icontains(keyword, autoescape=True),
+                    IncomingDocument.summary.icontains(keyword, autoescape=True),
                     IncomingDocument.incoming_id.in_(
                         select(IncomingDocumentFile.incoming_id).where(
                             IncomingDocumentFile.filename.icontains(keyword, autoescape=True)
@@ -413,6 +427,9 @@ class IncomingDocumentRepository:
         date_to: str | None = None,
         classifications: list[str] | None = None,
         item_types: list[str] | None = None,
+        title: str | None = None,
+        document_number: str | None = None,
+        source_unit: str | None = None,
         keyword: str | None = None,
         page: int = 1,
         page_size: int = 20,
@@ -423,6 +440,9 @@ class IncomingDocumentRepository:
             date_to=date_to,
             classifications=classifications,
             item_types=item_types,
+            title=title,
+            document_number=document_number,
+            source_unit=source_unit,
             keyword=keyword,
         )
         page = max(int(page or 1), 1)
@@ -445,6 +465,9 @@ class IncomingDocumentRepository:
         date_to: str | None = None,
         classifications: list[str] | None = None,
         item_types: list[str] | None = None,
+        title: str | None = None,
+        document_number: str | None = None,
+        source_unit: str | None = None,
         keyword: str | None = None,
     ) -> dict[str, Any]:
         """统计筛选后文档数，并区分条目类型的文档数和 detail 数。"""
@@ -453,6 +476,9 @@ class IncomingDocumentRepository:
             date_to=date_to,
             classifications=classifications,
             item_types=item_types,
+            title=title,
+            document_number=document_number,
+            source_unit=source_unit,
             keyword=keyword,
         )
         filtered_ids = select(IncomingDocument.incoming_id).where(*filters)
@@ -542,23 +568,15 @@ class IncomingDocumentRepository:
                 .scalar_subquery()
             )
             has_audit_reference = (
-                (
-                    await session.execute(
-                        select(ScheduledJobAuditLog.id)
-                        .where(ScheduledJobAuditLog.candidate_id.in_(candidate_ids))
-                        .limit(1)
-                    )
-                ).scalar_one_or_none()
-                is not None
-            )
+                await session.execute(
+                    select(ScheduledJobAuditLog.id).where(ScheduledJobAuditLog.candidate_id.in_(candidate_ids)).limit(1)
+                )
+            ).scalar_one_or_none() is not None
             has_enabled_job = (
-                (
-                    await session.execute(
-                        select(ScheduledJob.id).where(ScheduledJob.source_candidate_id.in_(candidate_ids)).limit(1)
-                    )
-                ).scalar_one_or_none()
-                is not None
-            )
+                await session.execute(
+                    select(ScheduledJob.id).where(ScheduledJob.source_candidate_id.in_(candidate_ids)).limit(1)
+                )
+            ).scalar_one_or_none() is not None
             if getattr(document, "review_status", None) == "confirmed" or has_audit_reference or has_enabled_job:
                 raise IncomingDocumentAuditReferenceError()
 

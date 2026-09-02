@@ -101,10 +101,11 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
         slug="incoming-document",
         source_dir=_SKILLS_ROOT / "incoming-document",
         description="查询、读取、统计和综合解读已接入系统的来文，并在必要时按附件核验原文。",
-        version="2026.07.21",
+        version="2026.09.02",
         tool_dependencies=(
             "search_incoming_documents",
             "read_incoming_document",
+            "download_incoming_document_files",
             "get_incoming_document_statistics",
             "ask_user_question",
             "present_artifacts",

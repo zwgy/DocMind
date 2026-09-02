@@ -41,6 +41,7 @@ def test_incoming_document_tools_are_registered_for_skill_gating():
     for tool_name in (
         "search_incoming_documents",
         "read_incoming_document",
+        "download_incoming_document_files",
         "get_incoming_document_statistics",
     ):
         metadata = get_extra_metadata(tool_name)
@@ -55,6 +56,7 @@ def test_incoming_document_tools_are_registered_for_skill_gating():
                 "tools": [
                     "search_incoming_documents",
                     "read_incoming_document",
+                    "download_incoming_document_files",
                     "get_incoming_document_statistics",
                 ]
             }
@@ -63,6 +65,7 @@ def test_incoming_document_tools_are_registered_for_skill_gating():
     assert {tool.name for tool in resolve_skill_gated_tools(context)} == {
         "search_incoming_documents",
         "read_incoming_document",
+        "download_incoming_document_files",
         "get_incoming_document_statistics",
     }
 
@@ -72,6 +75,8 @@ def test_tool_schemas_limit_filter_and_source_file_lists():
         tools.SearchIncomingDocumentsInput(classifications=["分类"] * 51)
     with pytest.raises(ValidationError):
         tools.read_incoming_document.args_schema(incoming_id="inc-1", source_file_ids=["file"] * 101)
+    with pytest.raises(ValidationError):
+        tools.download_incoming_document_files.args_schema(incoming_id="inc-1", source_file_ids=["file"] * 101)
 
 
 def test_runtime_thread_scope_uses_runtime_configurable_when_context_is_missing():
@@ -135,6 +140,10 @@ async def test_search_returns_document_summary_without_full_details_or_urls(monk
         async def search_business_documents(self, **kwargs):
             assert kwargs["date_from"] == "2026-07-01"
             assert kwargs["item_types"] == ["risk_item"]
+            assert kwargs["title"] == "风险"
+            assert kwargs["document_number"] == "安监〔2026〕1号"
+            assert kwargs["source_unit"] == "安监部"
+            assert kwargs["keyword"] == "整改"
             return [_document()], 1
 
         async def get_business_document_facets(self, incoming_ids):
@@ -146,6 +155,10 @@ async def test_search_returns_document_summary_without_full_details_or_urls(monk
     result = await _tool_callable(tools.search_incoming_documents)(
         date_from=date(2026, 7, 1),
         item_types=["风险事项"],
+        title="风险",
+        document_number="安监〔2026〕1号",
+        source_unit="安监部",
+        keyword="整改",
     )
 
     assert result["total"] == 1
@@ -260,6 +273,37 @@ async def test_read_without_full_text_does_not_materialize_markdown(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_download_original_files_returns_only_thread_artifact_paths(monkeypatch):
+    class FakeOriginalFileService:
+        async def materialize_original(self, **kwargs):
+            assert kwargs == {
+                "incoming_id": "inc-1",
+                "source_file_ids": ["main"],
+                "uid": "user-1",
+                "thread_id": "thread-1",
+            }
+            return [
+                {
+                    "source_file_id": "main",
+                    "filename": "主文件.docx",
+                    "original_path": "/home/gem/user-data/outputs/incoming-documents/inc-1/file-1/主文件.docx",
+                }
+            ]
+
+    monkeypatch.setattr(tools, "IncomingDocumentMarkdownService", FakeOriginalFileService)
+
+    result = await _tool_callable(tools.download_incoming_document_files)(
+        incoming_id="inc-1",
+        source_file_ids=["main"],
+        runtime=SimpleNamespace(context=SimpleNamespace(uid="user-1", thread_id="thread-1")),
+    )
+
+    assert set(result) == {"incoming_id", "original_files"}
+    assert result["original_files"][0]["original_path"].startswith("/home/gem/user-data/")
+    assert "minio" not in str(result).lower()
+
+
+@pytest.mark.asyncio
 async def test_read_returns_clear_error_when_markdown_storage_fails(monkeypatch):
     class FakeIncomingRepository:
         async def get_by_incoming_id(self, incoming_id):
@@ -316,6 +360,9 @@ async def test_statistics_uses_same_filters(monkeypatch):
                 "date_to": "2026-07-31",
                 "classifications": ["risk_management"],
                 "item_types": None,
+                "title": None,
+                "document_number": None,
+                "source_unit": None,
                 "keyword": None,
             }
             return {"total": 2, "by_classification": [], "by_item_type": [], "by_month": []}

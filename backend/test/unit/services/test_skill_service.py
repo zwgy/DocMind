@@ -302,6 +302,7 @@ def test_incoming_document_builtin_skill_spec():
     assert incoming_document["tool_dependencies"] == [
         "search_incoming_documents",
         "read_incoming_document",
+        "download_incoming_document_files",
         "get_incoming_document_statistics",
         "ask_user_question",
         "present_artifacts",

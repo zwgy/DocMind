@@ -18,6 +18,10 @@ class IncomingDocumentMarkdownError(RuntimeError):
     """来文 Markdown 下载或落盘失败。"""
 
 
+class IncomingDocumentOriginalFileError(RuntimeError):
+    """来文原始文件下载或落盘失败。"""
+
+
 class IncomingDocumentMarkdownService:
     """下载来文 Markdown，并按需写入当前对话可读取的 sandbox。"""
 
@@ -34,14 +38,14 @@ class IncomingDocumentMarkdownService:
             logger.warning(f"来文 Markdown 下载失败: {exc}")
             raise IncomingDocumentMarkdownError("对象存储中的附件 Markdown 读取失败") from exc
 
-    async def materialize(
+    async def _resolve_selection(
         self,
         *,
         incoming_id: str,
         source_file_ids: list[str],
         uid: str,
         thread_id: str,
-    ) -> list[dict[str, str]]:
+    ):
         normalized_file_ids = list(dict.fromkeys(value.strip() for value in source_file_ids if value.strip()))
         if not normalized_file_ids:
             raise ValueError("source_file_ids 不能为空")
@@ -60,6 +64,22 @@ class IncomingDocumentMarkdownService:
         missing = [source_file_id for source_file_id in normalized_file_ids if source_file_id not in selected]
         if missing:
             raise ValueError(f"来文附件不存在: {', '.join(missing)}")
+        return document, selected, normalized_file_ids
+
+    async def materialize(
+        self,
+        *,
+        incoming_id: str,
+        source_file_ids: list[str],
+        uid: str,
+        thread_id: str,
+    ) -> list[dict[str, str]]:
+        document, selected, normalized_file_ids = await self._resolve_selection(
+            incoming_id=incoming_id,
+            source_file_ids=source_file_ids,
+            uid=uid,
+            thread_id=thread_id,
+        )
 
         ensure_thread_dirs(thread_id, uid)
         target_dir = sandbox_outputs_dir(thread_id) / "incoming-documents" / document.incoming_id
@@ -83,6 +103,47 @@ class IncomingDocumentMarkdownService:
                     "source_file_id": file.source_file_id,
                     "filename": Path(file.filename).name,
                     "markdown_path": virtual_path_for_thread_file(thread_id, host_path, uid=uid),
+                }
+            )
+        return result
+
+    async def materialize_original(
+        self,
+        *,
+        incoming_id: str,
+        source_file_ids: list[str],
+        uid: str,
+        thread_id: str,
+    ) -> list[dict[str, str]]:
+        document, selected, normalized_file_ids = await self._resolve_selection(
+            incoming_id=incoming_id,
+            source_file_ids=source_file_ids,
+            uid=uid,
+            thread_id=thread_id,
+        )
+        ensure_thread_dirs(thread_id, uid)
+        target_dir = sandbox_outputs_dir(thread_id) / "incoming-documents" / document.incoming_id
+        result = []
+        for source_file_id in normalized_file_ids:
+            file = selected[source_file_id]
+            if not file.original_file_url:
+                raise ValueError(f"来文原始文件尚未上传: {file.filename}")
+            filename = Path(file.filename).name or "incoming"
+            host_path = target_dir / file.incoming_file_id / filename
+            if not host_path.is_file():
+                try:
+                    bucket_name, object_name = parse_minio_url(file.original_file_url)
+                    content = await get_minio_client().adownload_file(bucket_name, object_name)
+                    host_path.parent.mkdir(parents=True, exist_ok=True)
+                    host_path.write_bytes(content)
+                except (StorageError, MinioException, HTTPError, OSError, ValueError) as exc:
+                    logger.warning(f"来文原始文件写入会话目录失败: {exc}")
+                    raise IncomingDocumentOriginalFileError("对象存储中的来文原始文件交付失败") from exc
+            result.append(
+                {
+                    "source_file_id": file.source_file_id,
+                    "filename": filename,
+                    "original_path": virtual_path_for_thread_file(thread_id, host_path, uid=uid),
                 }
             )
         return result

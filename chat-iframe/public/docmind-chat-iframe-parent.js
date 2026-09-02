@@ -154,7 +154,14 @@
   }
 
   DocMindChatIframe.prototype.setPageContent = function (content) {
-    // 允许直接传字符串，是为了兼容已有接入方只准备了页面纯文本的轻量场景。
+    // 无参时由接入方主动触发整页抓取；传参时也兼容纯文本和脱敏后的自定义页面内容。
+    if (content === undefined) {
+      content = {
+        title: document.title,
+        url: location.href,
+        html: document.documentElement.outerHTML
+      }
+    }
     this.pageContent = typeof content === 'string' ? { text: content } : content
     if (this.container) this._sendToIframe('PAGE_CONTENT', this.pageContent)
     return this
@@ -435,7 +442,7 @@
         this._sendInitialPayload()
         break
       case 'REQUEST_PAGE_CONTENT':
-        this._sendToIframe('PAGE_CONTENT', this.pageContent || this._pageContentFromDocument())
+        this._sendToIframe('PAGE_CONTENT', this.pageContent)
         break
       case 'REQUEST_FILE_LIST':
         this._sendToIframe('FILE_LIST', this.pageFiles)
@@ -479,10 +486,6 @@
     var count = Number(value) || 0
     var button = this.container && this.container.querySelector('.docmind-chat-restore')
     if (button) button.setAttribute('data-unread', count > 0 ? 'true' : 'false')
-  }
-
-  DocMindChatIframe.prototype._pageContentFromDocument = function () {
-    return { title: document.title, url: location.href, html: document.documentElement.outerHTML }
   }
 
   DocMindChatIframe.prototype._requiredExternalPayload = function () {
@@ -589,7 +592,7 @@
     var self = this
     return this._sendConfig().then(function () {
       self._sendToIframe('WINDOW_STATE', { state: self.windowState })
-      self._sendToIframe('PAGE_CONTENT', self.pageContent || self._pageContentFromDocument())
+      self._sendToIframe('PAGE_CONTENT', self.pageContent)
       self._sendToIframe('PAGE_FILES_UPDATED', self.pageFiles)
     })
   }
