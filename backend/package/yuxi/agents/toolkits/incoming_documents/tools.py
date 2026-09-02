@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import date
 from typing import Annotated, Any
 
 from langchain_core.tools import ToolException
 from langgraph.prebuilt.tool_node import ToolRuntime
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, StringConstraints, model_validator
 
 from yuxi.agents.toolkits.registry import tool
 from yuxi.document_extraction.schemas import (
@@ -27,6 +28,28 @@ INCOMING_TOOL_CONFIG_GUIDE = "由来文业务 Skill 按需加载，不作为 Age
 
 FilterValue = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 SourceFileId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)]
+
+
+def _decode_source_file_ids(value: Any) -> Any:
+    # 本地模型偶尔会把数组参数编码成 JSON 字符串；只解析合法 JSON，其他输入继续由 Schema 明确拒绝。
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+OptionalSourceFileIds = Annotated[
+    list[SourceFileId],
+    BeforeValidator(_decode_source_file_ids),
+    Field(max_length=100, description="需要写入 sandbox 的附件 source_file_id；读取全文时必填"),
+]
+RequiredSourceFileIds = Annotated[
+    list[SourceFileId],
+    BeforeValidator(_decode_source_file_ids),
+    Field(min_length=1, max_length=100, description="需要下载的主文件或附件 source_file_id"),
+]
 
 
 class IncomingDocumentFilters(BaseModel):
@@ -230,10 +253,7 @@ async def read_incoming_document(
         StringConstraints(strip_whitespace=True, min_length=1, max_length=64),
         Field(description="来文 ID"),
     ],
-    source_file_ids: Annotated[
-        list[SourceFileId] | None,
-        Field(max_length=100, description="需要写入 sandbox 的附件 source_file_id；读取全文时必填"),
-    ] = None,
+    source_file_ids: OptionalSourceFileIds | None = None,
     include_full_text: Annotated[bool, Field(description="是否将选定附件 Markdown 写入当前线程 sandbox")] = False,
     runtime: ToolRuntime = None,
 ) -> dict[str, Any] | str:
@@ -298,10 +318,7 @@ async def download_incoming_document_files(
         StringConstraints(strip_whitespace=True, min_length=1, max_length=64),
         Field(description="来文 ID"),
     ],
-    source_file_ids: Annotated[
-        list[SourceFileId],
-        Field(min_length=1, max_length=100, description="需要下载的主文件或附件 source_file_id"),
-    ],
+    source_file_ids: RequiredSourceFileIds,
     runtime: ToolRuntime = None,
 ) -> dict[str, Any]:
     """将指定来文的原始主文件或附件写入当前线程 outputs，供用户预览或下载。"""

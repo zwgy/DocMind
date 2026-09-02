@@ -79,6 +79,22 @@ def test_tool_schemas_limit_filter_and_source_file_lists():
         tools.download_incoming_document_files.args_schema(incoming_id="inc-1", source_file_ids=["file"] * 101)
 
 
+def test_tool_schemas_accept_json_encoded_source_file_lists_from_local_models():
+    read_input = tools.read_incoming_document.args_schema(
+        incoming_id="inc-1",
+        source_file_ids='["file-1"]',
+        include_full_text="true",
+    )
+    download_input = tools.download_incoming_document_files.args_schema(
+        incoming_id="inc-1",
+        source_file_ids='["file-1"]',
+    )
+
+    assert read_input.source_file_ids == ["file-1"]
+    assert read_input.include_full_text is True
+    assert download_input.source_file_ids == ["file-1"]
+
+
 def test_runtime_thread_scope_uses_runtime_configurable_when_context_is_missing():
     runtime = ToolRuntime(
         state={},

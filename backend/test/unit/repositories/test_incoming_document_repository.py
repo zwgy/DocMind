@@ -41,6 +41,7 @@ def test_business_query_filters_cover_document_metadata_files_and_latest_items()
 @pytest.mark.asyncio
 async def test_search_business_documents_returns_document_page_count(monkeypatch):
     document = SimpleNamespace(incoming_id="inc-1")
+    executed_sql = ""
 
     class FakeScalars:
         def all(self):
@@ -56,8 +57,15 @@ async def test_search_business_documents_returns_document_page_count(monkeypatch
             return 1
 
         async def execute(self, statement):
+            nonlocal executed_sql
             compiled = statement.compile().params
             assert list(compiled.values()).count(5) == 2
+            executed_sql = str(
+                statement.compile(
+                    dialect=postgresql.dialect(),
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
             return FakeResult()
 
     @asynccontextmanager
@@ -70,6 +78,9 @@ async def test_search_business_documents_returns_document_page_count(monkeypatch
 
     assert items == [document]
     assert total == 1
+    assert "incoming_date" in executed_sql
+    assert "NULLS LAST" in executed_sql
+    assert "incoming_documents.created_at DESC" in executed_sql
 
 
 @pytest.mark.asyncio

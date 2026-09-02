@@ -447,12 +447,18 @@ class IncomingDocumentRepository:
         )
         page = max(int(page or 1), 1)
         page_size = min(max(int(page_size or 20), 1), 100)
+        incoming_date = IncomingDocument.document_metadata["incoming_date"].as_string()
         async with pg_manager.get_async_session_context() as session:
             total = await session.scalar(select(func.count()).select_from(IncomingDocument).where(*filters))
             rows = await session.execute(
                 select(IncomingDocument)
                 .where(*filters)
-                .order_by(IncomingDocument.created_at.desc())
+                # 工具返回顺序必须与用户看到的“最近来文”一致，避免后续按序号选择时读错记录。
+                .order_by(
+                    incoming_date.desc().nullslast(),
+                    IncomingDocument.created_at.desc(),
+                    IncomingDocument.incoming_id.desc(),
+                )
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
