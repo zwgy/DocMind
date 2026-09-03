@@ -222,14 +222,24 @@ def test_summary_call_limits_scale_across_supported_context_windows(
 
 
 @pytest.mark.unit
-def test_summary_output_validation_prefers_provider_usage() -> None:
+def test_summary_output_validation_keeps_final_request_estimate_conservative() -> None:
     class ProviderMeasuredSummaryModel(_SummaryModel):
+        def __init__(self) -> None:
+            super().__init__()
+            self.responses = [
+                SimpleNamespace(
+                    text="x" * 100,
+                    usage_metadata={"input_tokens": 200, "output_tokens": 20, "total_tokens": 220},
+                ),
+                SimpleNamespace(
+                    text="已压缩",
+                    usage_metadata={"input_tokens": 200, "output_tokens": 3, "total_tokens": 203},
+                ),
+            ]
+
         def invoke(self, prompt: str):
             self.prompts.append(prompt)
-            return SimpleNamespace(
-                text="x" * 100,
-                usage_metadata={"input_tokens": 200, "output_tokens": 20, "total_tokens": 220},
-            )
+            return self.responses.pop(0)
 
     model = ProviderMeasuredSummaryModel()
     _, request = _request([])
@@ -243,7 +253,8 @@ def test_summary_output_validation_prefers_provider_usage() -> None:
         resolve_context_budget(request),
     )
 
-    assert summary == "x" * 100
+    assert summary == "已压缩"
+    assert len(model.prompts) == 2
 
 
 @pytest.mark.unit
@@ -294,7 +305,7 @@ async def test_oversized_complete_summary_is_repaired_once(asynchronous: bool) -
 
     model = ShrinkingSummaryModel()
     middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
-    arguments = ("ID-2026", [HumanMessage(content="NEXT-2026")], 32, 3_000)
+    arguments = ("ID-2026", [HumanMessage(content="NEXT-2026")], 80, 3_000)
 
     if asynchronous:
         summary = await middleware._acreate_summary_once(*arguments)

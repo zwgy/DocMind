@@ -194,15 +194,18 @@ def _summary_text(response: Any) -> str:
 
 
 def _summary_output_tokens(response: Any, summary: str) -> int:
-    """优先采用 provider 实测输出用量；缺失时才使用保守的本地估算。"""
+    """同时满足 provider 输出上限和最终主请求的保守预算。"""
+    estimated = estimate_messages_tokens([SystemMessage(content=summary)])
     usage = getattr(response, "usage_metadata", None)
     if isinstance(usage, dict):
         value = usage.get("output_tokens")
         # 非空摘要却报告 0 token 通常意味着兼容层没有填充 usage。若信任该值，会让
         # 未遵守输出上限的本地部署绕过 checkpoint 校验，因此只接受正数实测值。
         if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
-    return estimate_messages_tokens([SystemMessage(content=summary)])
+            # provider 用量约束摘要调用自身；本地估算约束候选装入主请求后的准入。
+            # 取较大值可在现有有界修复阶段收敛，避免直到最终装配才原子失败。
+            return max(value, estimated)
+    return estimated
 
 
 def _summary_exact_anchors(summary: str) -> list[str]:
