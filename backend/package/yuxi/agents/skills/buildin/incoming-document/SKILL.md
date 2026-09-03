@@ -41,6 +41,7 @@ ask_user_question(questions=[{
 - `download_incoming_document_files`：将指定主文件或附件的原始文件写入当前会话 outputs，供用户预览或下载。
 - `get_incoming_document_statistics`：按与查询相同的条件统计来文，并按分类、条目类型和月份聚合。
 - `ask_user_question`：用户要求查看、下载或解读单篇来文，但搜索结果无法唯一确定目标，或关键范围不明确时，请用户选择。
+- `grep`：在已经落盘的 Markdown 原文中按字面关键词定位匹配行；大文件核验时先定位，不要从头盲读大窗口。
 - `read_file`：读取 `read_incoming_document` 返回的 `markdown_path`，用于核验附件原文。
 - `present_artifacts`：把已写入当前线程 outputs 的 Markdown 文件作为交付物展示给用户。
 
@@ -92,7 +93,8 @@ ask_user_question(questions=[{
 
 7. 上一步返回 `markdown_path` 后：
    - 用户只要求“转换成 Markdown 文件发我”时，直接调用 `present_artifacts` 交付该路径，不要调用 `read_file` 把全文送入模型上下文。
-   - 用户要求解读、引用或核验原文时，才使用 `read_file` 分段读取；多个附件分别读取，并保留文件名边界。
+   - 用户要求解读、引用或核验原文时，先针对问题中的关键名称、数字或条款调用 `grep(pattern="字面关键词", path="markdown_path", output_mode="content")` 定位行号，再用 `read_file` 读取命中位置附近不超过 50 行的小窗口；不要从第 0 行开始读取 100 行以上的大窗口。
+   - 一个关键词无法覆盖多个事实时分别定位；多个附件分别读取，并保留文件名边界。没有读到原文窗口时明确说明无法核验，不能把摘要或结构化结果改写成原文引语。
 
 ### B. 来文检索
 
