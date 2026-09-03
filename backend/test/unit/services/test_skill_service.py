@@ -314,7 +314,7 @@ def test_incoming_document_builtin_skill_spec():
     assert skill_content.index("## 首要决策") < skill_content.index("## 可用工具")
     assert "若 `total > 1`，下一步只能调用 `ask_user_question`" in skill_content
     assert '"question_id": "incoming_id"' in skill_content
-    assert 'grep(pattern="字面关键词"' in skill_content
+    assert 'grep(pattern="一个字面短语"' in skill_content
     assert "不要先用 `grep` 或 `glob` 扫描工作区" in skill_content
     assert "省略 `source_file_ids` 时默认读取主文件" in skill_content
     assert "不调用 `task` 委派子智能体" in skill_content
