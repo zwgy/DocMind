@@ -319,6 +319,8 @@ def test_incoming_document_builtin_skill_spec():
     assert "省略 `source_file_ids` 时默认读取主文件" in skill_content
     assert "不调用 `task` 委派子智能体" in skill_content
     assert "每次调用必须显式设置 `limit <= 50`" in skill_content
+    assert "不能在 `pattern` 中使用 `|`、正则或拼接多个候选" in skill_content
+    assert "禁止用 `execute`、`sed`、`awk`、`cat`、`head` 或 `tail`" in skill_content
     assert "直到找到命中款项之前最近的“第X条”标题" in skill_content
     assert "绝不能根据摘要、结构化结果或相邻款项猜测父级条号" in skill_content
     assert "来文无需进入知识库，不得改用 knowledge-base" in incoming_document["description"]

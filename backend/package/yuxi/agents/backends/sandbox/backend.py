@@ -37,9 +37,11 @@ _USER_DATA_ROOT = "/" + VIRTUAL_PATH_PREFIX.strip("/")
 _WORKSPACE_ROOT = f"{_USER_DATA_ROOT}/{WORKSPACE_DIR_NAME}"
 _UPLOADS_ROOT = f"{_USER_DATA_ROOT}/{UPLOADS_DIR_NAME}"
 _OUTPUTS_ROOT = f"{_USER_DATA_ROOT}/{OUTPUTS_DIR_NAME}"
+_INCOMING_DOCUMENT_OUTPUTS_ROOT = f"{_OUTPUTS_ROOT}/incoming-documents"
 _SKILLS_ROOT = "/" + VIRTUAL_SKILLS_PATH.strip("/")
 _READABLE_ROOTS = (_USER_DATA_ROOT, _SKILLS_ROOT)
 _WRITABLE_ROOTS = (_WORKSPACE_ROOT, _OUTPUTS_ROOT)
+_INCOMING_DOCUMENT_READ_LIMIT = 50
 
 
 def _normalize_path(path: str) -> str:
@@ -271,6 +273,13 @@ class ProvisionerSandboxBackend(BaseSandbox):
             return ReadResult(error=f"Invalid path '{file_path}': {exc}")
         if not _can_read_path(normalized_path):
             return ReadResult(error=_permission_error("read", normalized_path))
+        if _is_same_or_child(normalized_path, _INCOMING_DOCUMENT_OUTPUTS_ROOT) and limit > _INCOMING_DOCUMENT_READ_LIMIT:
+            return ReadResult(
+                error=(
+                    "incoming document source reads are limited to 50 lines; "
+                    "retry read_file with an explicit limit <= 50"
+                )
+            )
 
         try:
             content = self._read_binary(normalized_path, offset=offset, limit=limit)
@@ -291,6 +300,12 @@ class ProvisionerSandboxBackend(BaseSandbox):
         Output is normalized to text and truncated to the configured maximum
         payload size before being returned.
         """
+        if _INCOMING_DOCUMENT_OUTPUTS_ROOT in command:
+            return ExecuteResponse(
+                output="Error: use grep and read_file to inspect incoming document sources; shell access is disabled",
+                exit_code=1,
+                truncated=False,
+            )
         try:
             kwargs: dict[str, Any] = {"command": command}
             if timeout is not None:
