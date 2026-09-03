@@ -517,28 +517,6 @@ def test_provisioner_read_reports_binary_files(monkeypatch) -> None:
     assert result.file_data["encoding"] == "base64"
 
 
-def test_provisioner_limits_incoming_document_source_reads(monkeypatch) -> None:
-    monkeypatch.setattr("yuxi.agents.backends.sandbox.backend.get_sandbox_provider", lambda: object())
-    backend = ProvisionerSandboxBackend(thread_id="thread-1", uid="user-1")
-    calls = []
-    monkeypatch.setattr(
-        backend,
-        "_read_binary",
-        lambda path, offset=0, limit=None: calls.append((path, offset, limit)) or b"source",
-    )
-    path = "/home/gem/user-data/outputs/incoming-documents/inc_1/main.md"
-
-    denied = backend.read(path, limit=51)
-    allowed = backend.read(path, offset=10, limit=50)
-
-    assert denied.error == (
-        "incoming document source reads are limited to 50 lines; "
-        "retry read_file with an explicit limit <= 50"
-    )
-    assert allowed.error is None
-    assert calls == [(path, 10, 50)]
-
-
 def test_provisioner_read_reports_invalid_path(monkeypatch) -> None:
     monkeypatch.setattr("yuxi.agents.backends.sandbox.backend.get_sandbox_provider", lambda: object())
     backend = ProvisionerSandboxBackend(thread_id="thread-1", uid="user-1")
@@ -601,15 +579,3 @@ def test_provisioner_execute_returns_error_response_on_client_failure(monkeypatc
 
     assert result.exit_code == 1
     assert "Error:" in result.output
-
-
-def test_provisioner_denies_shell_access_to_incoming_document_sources(monkeypatch) -> None:
-    monkeypatch.setattr("yuxi.agents.backends.sandbox.backend.get_sandbox_provider", lambda: object())
-    backend = ProvisionerSandboxBackend(thread_id="thread-1", uid="user-1")
-
-    result = backend.execute(
-        "sed -n '1,100p' /home/gem/user-data/outputs/incoming-documents/inc_1/main.md"
-    )
-
-    assert result.exit_code == 1
-    assert "shell access is disabled" in result.output

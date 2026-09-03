@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from yuxi.agents.buildin.chatbot.prompt import build_prompt_with_context
+from yuxi.agents.buildin.chatbot.prompt import TODO_MID_PROMPT, build_prompt_with_context
 
 
 def test_chatbot_prompt_uses_general_tool_and_source_rules():
@@ -25,3 +25,10 @@ def test_chatbot_prompt_uses_general_tool_and_source_rules():
     assert "`grep` 是字面搜索" not in prompt
     assert "不得用 `execute`、`glob`、`ls`" not in prompt
     assert "不得把序号自行解释成“第几款”" not in prompt
+
+
+def test_todo_prompt_distinguishes_complex_and_single_step_tasks():
+    assert "多个相互依赖的步骤或需要生成交付物" in TODO_MID_PROMPT
+    assert "单步问答不要创建待办" in TODO_MID_PROMPT
+    assert "失败时根据结果调整后续计划" in TODO_MID_PROMPT
+    assert "结果经过验证后才能结束" in TODO_MID_PROMPT

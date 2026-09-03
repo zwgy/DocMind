@@ -1,7 +1,7 @@
 ---
 name: incoming-document
 slug: incoming-document
-description: "用户提到来文、收文、文号，或按标题查询已收录来文及其主文件、附件、摘要、原文时必须使用；来文无需进入知识库，不得改用 knowledge-base。"
+description: "按来文、收文、文号或标题查询系统已收录的来文，并读取其主文件、附件、摘要、关键信息和原文。"
 ---
 
 # 来文查询与解读技能

@@ -86,11 +86,8 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
     BuiltinSkillSpec(
         slug="knowledge-base",
         source_dir=_SKILLS_ROOT / "knowledge-base",
-        description=(
-            "检索用户明确指定的知识库或已入库资料；不用于按来文、收文或文号查询业务库，"
-            "此类请求必须使用 incoming-document。"
-        ),
-        version="2026.09.03",
+        description="检索用户明确指定的知识库或已导入知识库的资料，支持打开文档、文档内定位和查看思维导图。",
+        version="2026.09.03.1",
         tool_dependencies=(
             "list_kbs",
             "query_kb",
@@ -103,11 +100,8 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
     BuiltinSkillSpec(
         slug="incoming-document",
         source_dir=_SKILLS_ROOT / "incoming-document",
-        description=(
-            "用户提到来文、收文、文号，或按标题查询已收录来文及其主文件、附件、摘要、原文时必须使用；"
-            "来文无需进入知识库，不得改用 knowledge-base。"
-        ),
-        version="2026.09.03.7",
+        description="按来文、收文、文号或标题查询系统已收录的来文，并读取其主文件、附件、摘要、关键信息和原文。",
+        version="2026.09.03.8",
         tool_dependencies=(
             "search_incoming_documents",
             "read_incoming_document",
