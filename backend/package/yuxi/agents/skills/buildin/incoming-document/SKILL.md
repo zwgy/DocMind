@@ -15,11 +15,11 @@ description: "查询、读取、统计和综合解读已接入系统的来文。
 
 ## 可用工具
 
-- `search_incoming_documents`：按来文日期、主分类、条目类型、标题、文号、发文单位或关键词分页查找来文；通用关键词匹配标题、文号、发文单位、摘要和附件名。
+- `search_incoming_documents`：按来文日期、主分类、条目类型、标题、文号、发文单位或关键词分页查找来文；通用关键词匹配标题、文号、发文单位、摘要和附件名。`has_main_file` 表示是否有主文件，`attachment_count` 只统计主文件之外的附件。
 - `read_incoming_document`：`include_full_text=false` 时读取来文整体结论、附件清单和正式结构化结果；`include_full_text=true` 时只将指定附件的 Markdown 写入当前会话目录并返回路径。
 - `download_incoming_document_files`：将指定主文件或附件的原始文件写入当前会话 outputs，供用户预览或下载。
 - `get_incoming_document_statistics`：按与查询相同的条件统计来文，并按分类、条目类型和月份聚合。
-- `ask_user_question`：搜索命中多份来文或关键范围不明确时，请用户选择。
+- `ask_user_question`：用户要求查看、下载或解读单篇来文，但搜索结果无法唯一确定目标，或关键范围不明确时，请用户选择。
 - `read_file`：读取 `read_incoming_document` 返回的 `markdown_path`，用于核验附件原文。
 - `present_artifacts`：把已写入当前线程 outputs 的 Markdown 文件作为交付物展示给用户。
 
@@ -48,7 +48,7 @@ description: "查询、读取、统计和综合解读已接入系统的来文。
    search_incoming_documents(keyword="用户关键词", page=1, page_size=20)
    ```
 
-4. 搜索只命中一份，或用户选定一份后，再使用真实 `incoming_id` 读取详情。命中多份时调用 `ask_user_question`，选项必须来自搜索结果并携带真实 `incoming_id`；不要自行选择。
+4. 搜索只命中一份，或用户选定一份后，再使用真实 `incoming_id` 读取详情。用户要求操作单篇来文但命中多份时调用 `ask_user_question`，选项必须来自搜索结果并携带真实 `incoming_id`；不要自行选择。用户只要求查找或列出来文时，不反问，直接按工具顺序展示结果。
 5. 用户要求下载原始主文件或附件时，从附件清单选择真实 `source_file_id`，调用：
 
    ```text
@@ -76,8 +76,9 @@ description: "查询、读取、统计和综合解读已接入系统的来文。
 ### B. 来文检索
 
 1. 使用用户给出的时间、分类、条目类型、标题、文号、发文单位或关键词调用 `search_incoming_documents`。
-2. 用户只需要列表时直接返回搜索结果；用户选定来文或询问详情时，再调用 `read_incoming_document(include_full_text=false)`。
-3. 需要下一页时使用工具返回的 `page`、`page_size` 和 `total` 计算，不猜测页码。
+2. 没有命中时明确说明未找到，并建议用户放宽标题、单位、时间等已有条件；不要编造结果，也不要擅自切换成无条件全库查询。
+3. 用户只需要列表时，保持工具返回顺序，展示当前页结果、总数、主文件是否存在和附件数量，不调用 `ask_user_question`。用户选定来文或询问详情时，再调用 `read_incoming_document(include_full_text=false)`。
+4. 结果超过当前页时明确说明当前页范围；用户要求下一页时使用工具返回的 `page`、`page_size` 和 `total` 计算，不猜测页码，不一次铺开全部结果。
 
 ### C. 来文统计
 

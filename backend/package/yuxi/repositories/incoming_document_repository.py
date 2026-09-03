@@ -617,16 +617,23 @@ class IncomingDocumentRepository:
         return document, files
 
     async def get_business_document_facets(self, incoming_ids: list[str]) -> dict[str, dict[str, Any]]:
-        """批量补齐搜索结果需要的附件数和条目类型，避免逐文档查询。"""
+        """批量补齐搜索结果需要的主文件、附件数和条目类型，避免逐文档查询。"""
         normalized_ids = list(dict.fromkeys(value for value in incoming_ids if value))
-        facets = {incoming_id: {"attachment_count": 0, "item_types": []} for incoming_id in normalized_ids}
+        facets = {
+            incoming_id: {"has_main_file": False, "attachment_count": 0, "item_types": []}
+            for incoming_id in normalized_ids
+        }
         if not normalized_ids:
             return facets
 
         latest_result_ids = self._latest_success_result_ids()
         async with pg_manager.get_async_session_context() as session:
             file_rows = await session.execute(
-                select(IncomingDocumentFile.incoming_id, func.count())
+                select(
+                    IncomingDocumentFile.incoming_id,
+                    func.count().filter(IncomingDocumentFile.is_main_file.is_(True)),
+                    func.count().filter(IncomingDocumentFile.is_main_file.is_(False)),
+                )
                 .where(IncomingDocumentFile.incoming_id.in_(normalized_ids))
                 .group_by(IncomingDocumentFile.incoming_id)
             )
@@ -646,8 +653,9 @@ class IncomingDocumentRepository:
                 )
             )
 
-        for incoming_id, count in file_rows.all():
-            facets[incoming_id]["attachment_count"] = int(count)
+        for incoming_id, main_file_count, attachment_count in file_rows.all():
+            facets[incoming_id]["has_main_file"] = bool(main_file_count)
+            facets[incoming_id]["attachment_count"] = int(attachment_count)
         for incoming_id, item_type in item_rows.all():
             facets[incoming_id]["item_types"].append(item_type)
         return facets

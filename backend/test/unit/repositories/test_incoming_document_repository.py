@@ -131,7 +131,7 @@ async def test_business_statistics_distinguish_documents_and_details(monkeypatch
 
 @pytest.mark.asyncio
 async def test_business_document_facets_batch_file_counts_and_item_types(monkeypatch):
-    rows = iter([[("inc-1", 2)], [("inc-1", "risk_item"), ("inc-1", "task_item")]])
+    rows = iter([[("inc-1", 1, 2)], [("inc-1", "risk_item"), ("inc-1", "task_item")]])
 
     class FakeResult:
         def __init__(self, values):
@@ -154,8 +154,8 @@ async def test_business_document_facets_batch_file_counts_and_item_types(monkeyp
     result = await IncomingDocumentRepository().get_business_document_facets(["inc-1", "inc-2"])
 
     assert result == {
-        "inc-1": {"attachment_count": 2, "item_types": ["risk_item", "task_item"]},
-        "inc-2": {"attachment_count": 0, "item_types": []},
+        "inc-1": {"has_main_file": True, "attachment_count": 2, "item_types": ["risk_item", "task_item"]},
+        "inc-2": {"has_main_file": False, "attachment_count": 0, "item_types": []},
     }
 
 

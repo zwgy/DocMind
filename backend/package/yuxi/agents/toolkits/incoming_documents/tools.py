@@ -229,6 +229,7 @@ async def search_incoming_documents(
             _document_payload(document)
             | {
                 "item_types": facets[document.incoming_id]["item_types"],
+                "has_main_file": facets[document.incoming_id]["has_main_file"],
                 "attachment_count": facets[document.incoming_id]["attachment_count"],
             }
             for document in documents

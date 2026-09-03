@@ -164,7 +164,9 @@ async def test_search_returns_document_summary_without_full_details_or_urls(monk
 
         async def get_business_document_facets(self, incoming_ids):
             assert incoming_ids == ["inc-1"]
-            return {"inc-1": {"attachment_count": 2, "item_types": ["risk_item"]}}
+            return {
+                "inc-1": {"has_main_file": True, "attachment_count": 2, "item_types": ["risk_item"]}
+            }
 
     monkeypatch.setattr(tools, "IncomingDocumentRepository", FakeRepository)
 
@@ -178,6 +180,7 @@ async def test_search_returns_document_summary_without_full_details_or_urls(monk
     )
 
     assert result["total"] == 1
+    assert result["items"][0]["has_main_file"] is True
     assert result["items"][0]["attachment_count"] == 2
     assert result["items"][0]["item_types"] == ["risk_item"]
     assert result["items"][0]["classification"] == "risk_management"
