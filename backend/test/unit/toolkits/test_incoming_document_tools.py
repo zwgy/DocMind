@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from types import SimpleNamespace
 
@@ -19,7 +20,11 @@ def _document():
         incoming_id="inc-1",
         source_system="production",
         source_document_id="doc-1",
-        document_metadata={"title": "风险通知", "incoming_date": "2026-07-01"},
+        document_metadata={
+            "title": "风险通知",
+            "document_number": "安监〔2026〕1号",
+            "incoming_date": "2026-07-01",
+        },
         confirmed_classification=None,
         ai_classification="risk_management",
         classification_confidence=0.95,
@@ -29,6 +34,42 @@ def _document():
         status="ready",
         review_status="confirmed",
         created_at=None,
+    )
+
+
+def _runtime_with_search(user_message: str):
+    return SimpleNamespace(
+        state={
+            "messages": [
+                SimpleNamespace(type="human", content=user_message),
+                SimpleNamespace(
+                    type="tool",
+                    name="search_incoming_documents",
+                    content=json.dumps(
+                        {
+                            "total": 2,
+                            "items": [
+                                {
+                                    "incoming_id": "inc-1",
+                                    "document_metadata": {
+                                        "title": "风险通知",
+                                        "document_number": "安监〔2026〕1号",
+                                    },
+                                },
+                                {
+                                    "incoming_id": "inc-2",
+                                    "document_metadata": {
+                                        "title": "安全通知",
+                                        "document_number": "安监〔2026〕2号",
+                                    },
+                                },
+                            ],
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            ]
+        }
     )
 
 
@@ -289,6 +330,104 @@ async def test_read_without_full_text_does_not_materialize_markdown(monkeypatch)
     )
 
     assert result["markdown_files"] == []
+
+
+@pytest.mark.asyncio
+async def test_read_requires_structured_choice_after_ambiguous_search(monkeypatch):
+    documents = {
+        "inc-1": _document(),
+        "inc-2": SimpleNamespace(**{**vars(_document()), "incoming_id": "inc-2"}),
+    }
+
+    class FakeIncomingRepository:
+        async def get_by_incoming_id(self, incoming_id):
+            return documents.get(incoming_id)
+
+        async def list_files(self, incoming_id):
+            return [SimpleNamespace(
+                source_file_id=f"{incoming_id}-main",
+                filename=f"{incoming_id}.pdf",
+                is_main_file=True,
+                status="parsed",
+                markdown_file_url="minio://parsed/main.md",
+            )]
+
+    class FakeExtractionRepository:
+        async def get_latest_by_incoming_id(self, incoming_id):
+            return None
+
+    questions = []
+    monkeypatch.setattr(tools, "IncomingDocumentRepository", FakeIncomingRepository)
+    monkeypatch.setattr(tools, "DocumentBusinessExtractionRepository", FakeExtractionRepository)
+    monkeypatch.setattr(
+        tools,
+        "ask_user_question",
+        SimpleNamespace(
+            func=lambda **kwargs: questions.append(kwargs) or {"answer": {"incoming_id": "inc-2"}}
+        ),
+    )
+
+    result = await _tool_callable(tools.read_incoming_document)(
+        incoming_id="inc-1",
+        include_full_text=False,
+        runtime=_runtime_with_search("请查看一份已收录来文的详细内容"),
+    )
+
+    assert result["incoming_id"] == "inc-2"
+    assert result["files"][0]["filename"] == "inc-2.pdf"
+    assert questions[0]["questions"][0]["question_id"] == "incoming_id"
+    assert [option["value"] for option in questions[0]["questions"][0]["options"]] == ["inc-1", "inc-2"]
+
+
+@pytest.mark.asyncio
+async def test_read_skips_choice_when_user_provided_document_number(monkeypatch):
+    class FakeIncomingRepository:
+        async def get_by_incoming_id(self, incoming_id):
+            return _document()
+
+        async def list_files(self, incoming_id):
+            return []
+
+    class FakeExtractionRepository:
+        async def get_latest_by_incoming_id(self, incoming_id):
+            return None
+
+    monkeypatch.setattr(tools, "IncomingDocumentRepository", FakeIncomingRepository)
+    monkeypatch.setattr(tools, "DocumentBusinessExtractionRepository", FakeExtractionRepository)
+    monkeypatch.setattr(
+        tools,
+        "ask_user_question",
+        SimpleNamespace(func=lambda **_kwargs: pytest.fail("明确文号不应再次要求选择")),
+    )
+
+    result = await _tool_callable(tools.read_incoming_document)(
+        incoming_id="inc-1",
+        include_full_text=False,
+        runtime=_runtime_with_search("请查看安监〔2026〕1号来文"),
+    )
+
+    assert result["incoming_id"] == "inc-1"
+
+
+@pytest.mark.asyncio
+async def test_read_rejects_ambiguous_search_with_only_one_page_candidate(monkeypatch):
+    runtime = _runtime_with_search("请查看一份已收录来文的详细内容")
+    payload = json.loads(runtime.state["messages"][1].content)
+    payload["items"] = payload["items"][:1]
+    runtime.state["messages"][1].content = json.dumps(payload, ensure_ascii=False)
+
+    class FakeIncomingRepository:
+        async def get_by_incoming_id(self, incoming_id):
+            return _document()
+
+    monkeypatch.setattr(tools, "IncomingDocumentRepository", FakeIncomingRepository)
+
+    with pytest.raises(ToolException, match="page_size.*至少 2"):
+        await _tool_callable(tools.read_incoming_document)(
+            incoming_id="inc-1",
+            include_full_text=False,
+            runtime=runtime,
+        )
 
 
 @pytest.mark.asyncio

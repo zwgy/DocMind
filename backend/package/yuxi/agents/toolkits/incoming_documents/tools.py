@@ -9,6 +9,7 @@ from langchain_core.tools import ToolException
 from langgraph.prebuilt.tool_node import ToolRuntime
 from pydantic import BaseModel, BeforeValidator, Field, StringConstraints, model_validator
 
+from yuxi.agents.toolkits.buildin.tools import ask_user_question
 from yuxi.agents.toolkits.registry import tool
 from yuxi.document_extraction.schemas import (
     document_category_label,
@@ -184,6 +185,104 @@ def _runtime_thread_scope(runtime: ToolRuntime | None) -> tuple[str, str]:
     return uid, thread_id
 
 
+def _current_search_candidates(runtime: ToolRuntime | None) -> tuple[str, list[dict[str, Any]]]:
+    """只读取当前用户轮次最近一次搜索结果，避免把旧候选用于新请求。"""
+    state = getattr(runtime, "state", None)
+    messages = state.get("messages", []) if isinstance(state, Mapping) else getattr(state, "messages", [])
+    messages = list(messages or [])
+    latest_user_index = next(
+        (index for index in range(len(messages) - 1, -1, -1) if getattr(messages[index], "type", None) == "human"),
+        None,
+    )
+    if latest_user_index is None:
+        return "", []
+
+    user_content = getattr(messages[latest_user_index], "content", "")
+    user_message = user_content.strip() if isinstance(user_content, str) else ""
+    for message in reversed(messages[latest_user_index + 1 :]):
+        if getattr(message, "type", None) != "tool" or getattr(message, "name", None) != "search_incoming_documents":
+            continue
+        content = getattr(message, "content", "")
+        if isinstance(content, Mapping):
+            payload = content
+        elif isinstance(content, str):
+            try:
+                payload = json.loads(content)
+            except json.JSONDecodeError:
+                return user_message, []
+        else:
+            return user_message, []
+        items = payload.get("items") if isinstance(payload, Mapping) else None
+        total = payload.get("total") if isinstance(payload, Mapping) else 0
+        return user_message, list(items or []) if isinstance(total, int) and total > 1 else []
+    return user_message, []
+
+
+def _document_identified_in_message(user_message: str, document: Any) -> bool:
+    """完整标题、文号或业务 ID 已由用户给出时，不重复要求选择。"""
+    metadata = document.document_metadata or {}
+    identifiers = (
+        document.incoming_id,
+        document.source_document_id,
+        metadata.get("title"),
+        metadata.get("document_number"),
+    )
+    folded_message = user_message.casefold()
+    return any(
+        isinstance(identifier, str) and identifier.strip() and identifier.strip().casefold() in folded_message
+        for identifier in identifiers
+    )
+
+
+def _resolve_ambiguous_document_choice(
+    runtime: ToolRuntime | None,
+    incoming_id: str,
+    document: Any,
+) -> str:
+    """单篇操作命中多份时在工具边界阻止模型自行挑选。"""
+    user_message, candidates = _current_search_candidates(runtime)
+    if not candidates or _document_identified_in_message(user_message, document):
+        return incoming_id
+    if len(candidates) < 2:
+        raise ToolException("命中多篇来文但当前页候选不足，请将 page_size 调整为至少 2 后重新搜索")
+
+    options = []
+    for candidate in candidates[:5]:
+        metadata = candidate.get("document_metadata") or {}
+        title = metadata.get("title") or candidate.get("incoming_id")
+        number = metadata.get("document_number")
+        options.append(
+            {
+                "label": f"{title}（{number}）" if number else str(title),
+                "value": candidate.get("incoming_id"),
+            }
+        )
+    answer = ask_user_question.func(
+        questions=[
+            {
+                "question_id": "incoming_id",
+                "question": "请选择要查看的来文",
+                "options": options,
+                "multi_select": False,
+                "allow_other": True,
+            }
+        ]
+    )
+    selected: Any = (answer.get("answer") or {}).get("incoming_id") if isinstance(answer, Mapping) else None
+    if isinstance(selected, Mapping) and selected.get("type") == "other":
+        selected = selected.get("text")
+    selected = str(selected or "").strip()
+    for candidate in candidates:
+        metadata = candidate.get("document_metadata") or {}
+        if selected in {
+            str(candidate.get("incoming_id") or ""),
+            str(metadata.get("title") or ""),
+            str(metadata.get("document_number") or ""),
+        }:
+            return str(candidate["incoming_id"])
+    raise ToolException("未能确认要查看的来文，请重新选择或提供标题、文号")
+
+
 @tool(
     category="incoming_document",
     tags=["来文", "检索"],
@@ -266,6 +365,13 @@ async def read_incoming_document(
     document = await incoming_repo.get_by_incoming_id(incoming_id)
     if document is None:
         return f"来文不存在: {incoming_id}"
+    if not include_full_text:
+        selected_incoming_id = _resolve_ambiguous_document_choice(runtime, incoming_id, document)
+        if selected_incoming_id != incoming_id:
+            incoming_id = selected_incoming_id
+            document = await incoming_repo.get_by_incoming_id(incoming_id)
+            if document is None:
+                return f"来文不存在: {incoming_id}"
     if include_full_text:
         try:
             uid, thread_id = _runtime_thread_scope(runtime)
