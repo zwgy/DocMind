@@ -68,6 +68,23 @@ def test_flowchart_tool_schema_accepts_definition_without_intermediate_path() ->
     assert set(render_flowchart.tool_call_schema.model_fields) == {"definition", "output_name"}
 
 
+def test_flowchart_tool_schema_accepts_chinese_node_ids() -> None:
+    result = render_flowchart.tool_call_schema.model_validate(
+        {
+            "definition": {
+                "nodes": [
+                    {"id": "开始", "kind": "start", "label": "开始"},
+                    {"id": "结束", "kind": "end", "label": "结束"},
+                ],
+                "edges": [{"source": "开始", "target": "结束"}],
+            },
+            "output_name": "simple-flow",
+        }
+    )
+
+    assert result.definition.edges[0].source == "开始"
+
+
 def test_visualization_tool_schema_accepts_user_requested_chinese_output_name() -> None:
     result = render_mindmap.tool_call_schema.model_validate(
         {

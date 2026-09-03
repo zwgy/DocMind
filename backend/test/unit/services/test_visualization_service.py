@@ -129,6 +129,34 @@ def test_flowchart_renderer_builds_controlled_d2_and_valid_svg(
     _validate_svg(output)
 
 
+def test_flowchart_renderer_accepts_unicode_ids_and_multi_branch_decision() -> None:
+    renderer = _load_flowchart_renderer()
+    data = {
+        "nodes": [
+            {"id": "开始", "kind": "start", "label": "开始"},
+            {"id": "选择周期", "kind": "decision", "label": "选择检修周期"},
+            {"id": "辅修", "kind": "process", "label": "辅修"},
+            {"id": "段修", "kind": "process", "label": "段修"},
+            {"id": "大修", "kind": "process", "label": "大修"},
+            {"id": "结束", "kind": "end", "label": "结束"},
+        ],
+        "edges": [
+            {"source": "开始", "target": "选择周期"},
+            {"source": "选择周期", "target": "辅修", "label": "A1"},
+            {"source": "选择周期", "target": "段修", "label": "A3"},
+            {"source": "选择周期", "target": "大修", "label": "A4/A5"},
+            {"source": "辅修", "target": "结束"},
+            {"source": "段修", "target": "结束"},
+            {"source": "大修", "target": "结束"},
+        ],
+    }
+
+    source = renderer._build_d2(data)
+
+    assert 'node_2: "选择检修周期"' in source
+    assert 'node_2 -> node_5: "A4/A5"' in source
+
+
 def test_flowchart_renderer_main_reads_inline_definition(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

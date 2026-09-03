@@ -32,15 +32,15 @@ class ChartEncoding(BaseModel):
 
 class FlowNode(BaseModel):
     model_config = {"extra": "forbid"}
-    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$", description="唯一节点 ID")
+    id: str = Field(min_length=1, max_length=64, description="唯一节点 ID")
     kind: Literal["start", "process", "decision", "end"] = Field(description="节点类型")
     label: str = Field(min_length=1, max_length=80, description="节点文本")
 
 
 class FlowEdge(BaseModel):
     model_config = {"extra": "forbid"}
-    source: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$", description="起点 ID")
-    target: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$", description="终点 ID")
+    source: str = Field(min_length=1, max_length=64, description="起点 ID")
+    target: str = Field(min_length=1, max_length=64, description="终点 ID")
     label: str = Field(default="", max_length=40, description="可选分支标签")
 
 

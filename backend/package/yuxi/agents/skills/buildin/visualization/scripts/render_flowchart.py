@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 import uuid
 from pathlib import Path
 
-_NODE_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _ALLOWED_KINDS = {"start", "process", "decision", "end"}
 _CLASS_STYLES = {
     "start": (
@@ -50,8 +48,10 @@ def _validate_flow(data: dict) -> tuple[list[dict], list[dict]]:
     ids = {node.get("id") for node in nodes}
     if len(ids) != len(nodes) or None in ids:
         raise ValueError("节点 ID 必须唯一")
-    if any(not isinstance(node.get("id"), str) or not _NODE_ID_RE.fullmatch(node["id"]) for node in nodes):
-        raise ValueError("节点 ID 必须以 ASCII 字母开头，且只包含字母、数字、下划线或短横线")
+    if any(
+        not isinstance(node.get("id"), str) or not node["id"].strip() or len(node["id"]) > 64 for node in nodes
+    ):
+        raise ValueError("节点 ID 必须是 1 至 64 个字符的非空文本")
     if any(
         node.get("kind") not in _ALLOWED_KINDS
         or not isinstance(node.get("label"), str)
@@ -87,8 +87,8 @@ def _validate_flow(data: dict) -> tuple[list[dict], list[dict]]:
     if any(outgoing[end["id"]] for end in ends):
         raise ValueError("结束节点不能有出边")
     for node in nodes:
-        if node["kind"] == "decision" and len(outgoing[node["id"]]) != 2:
-            raise ValueError("判断节点必须恰好有两条出边")
+        if node["kind"] == "decision" and len(outgoing[node["id"]]) < 2:
+            raise ValueError("判断节点必须至少有两条出边")
 
     reachable = set()
     pending = [starts[0]["id"]]
