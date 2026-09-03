@@ -66,7 +66,7 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
             "用户要求生成或导出 DOCX、Word、PDF、XLSX、Excel 文件，或要求把当前会话中的图片、"
             "图表、流程图、思维导图插入这些文件时必须先读取此 Skill。"
         ),
-        version="2026.09.03.1",
+        version="2026.09.03.2",
         tool_dependencies=("export_office_file",),
     ),
     BuiltinSkillSpec(
