@@ -185,8 +185,21 @@ def _runtime_thread_scope(runtime: ToolRuntime | None) -> tuple[str, str]:
     return uid, thread_id
 
 
-def _current_search_candidates(runtime: ToolRuntime | None) -> tuple[str, list[dict[str, Any]]]:
-    """只读取当前用户轮次最近一次搜索结果，避免把旧候选用于新请求。"""
+def _tool_message_payload(message: Any) -> Mapping[str, Any] | None:
+    content = getattr(message, "content", "")
+    if isinstance(content, Mapping):
+        return content
+    if isinstance(content, str):
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            return None
+        return payload if isinstance(payload, Mapping) else None
+    return None
+
+
+def _current_search_candidates(runtime: ToolRuntime | None) -> tuple[str, list[dict[str, Any]], str]:
+    """只读取当前用户轮次最近一次搜索及其结构化选择，避免复用旧候选。"""
     state = getattr(runtime, "state", None)
     messages = state.get("messages", []) if isinstance(state, Mapping) else getattr(state, "messages", [])
     messages = list(messages or [])
@@ -195,27 +208,33 @@ def _current_search_candidates(runtime: ToolRuntime | None) -> tuple[str, list[d
         None,
     )
     if latest_user_index is None:
-        return "", []
+        return "", [], ""
 
     user_content = getattr(messages[latest_user_index], "content", "")
     user_message = user_content.strip() if isinstance(user_content, str) else ""
-    for message in reversed(messages[latest_user_index + 1 :]):
-        if getattr(message, "type", None) != "tool" or getattr(message, "name", None) != "search_incoming_documents":
+    tool_messages = [
+        message for message in messages[latest_user_index + 1 :] if getattr(message, "type", None) == "tool"
+    ]
+    selected_incoming_id = ""
+    if tool_messages and getattr(tool_messages[-1], "name", None) == "ask_user_question":
+        answer_payload = _tool_message_payload(tool_messages[-1])
+        answers = answer_payload.get("answer") if answer_payload else None
+        selected = answers.get("incoming_id") if isinstance(answers, Mapping) else None
+        if isinstance(selected, Mapping) and selected.get("type") == "other":
+            selected = selected.get("text")
+        selected_incoming_id = str(selected or "").strip()
+
+    for message in reversed(tool_messages):
+        if getattr(message, "name", None) != "search_incoming_documents":
             continue
-        content = getattr(message, "content", "")
-        if isinstance(content, Mapping):
-            payload = content
-        elif isinstance(content, str):
-            try:
-                payload = json.loads(content)
-            except json.JSONDecodeError:
-                return user_message, []
-        else:
-            return user_message, []
+        payload = _tool_message_payload(message)
+        if payload is None:
+            return user_message, [], ""
         items = payload.get("items") if isinstance(payload, Mapping) else None
         total = payload.get("total") if isinstance(payload, Mapping) else 0
-        return user_message, list(items or []) if isinstance(total, int) and total > 1 else []
-    return user_message, []
+        candidates = list(items or []) if isinstance(total, int) and total > 1 else []
+        return user_message, candidates, selected_incoming_id
+    return user_message, [], ""
 
 
 def _document_identified_in_message(user_message: str, document: Any) -> bool:
@@ -240,9 +259,12 @@ def _resolve_ambiguous_document_choice(
     document: Any,
 ) -> str:
     """单篇操作命中多份时在工具边界阻止模型自行挑选。"""
-    user_message, candidates = _current_search_candidates(runtime)
+    user_message, candidates, selected_incoming_id = _current_search_candidates(runtime)
     if not candidates or _document_identified_in_message(user_message, document):
         return incoming_id
+    candidate_ids = {str(candidate.get("incoming_id") or "") for candidate in candidates}
+    if selected_incoming_id in candidate_ids:
+        return selected_incoming_id
     if len(candidates) < 2:
         raise ToolException("命中多篇来文但当前页候选不足，请将 page_size 调整为至少 2 后重新搜索")
 

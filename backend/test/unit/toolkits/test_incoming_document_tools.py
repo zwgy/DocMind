@@ -410,6 +410,49 @@ async def test_read_skips_choice_when_user_provided_document_number(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_read_honors_structured_choice_without_asking_again(monkeypatch):
+    runtime = _runtime_with_search("请查看一份已收录来文的详细内容")
+    runtime.state["messages"].append(
+        SimpleNamespace(
+            type="tool",
+            name="ask_user_question",
+            content=json.dumps({"answer": {"incoming_id": "inc-2"}}),
+        )
+    )
+    documents = {
+        "inc-1": _document(),
+        "inc-2": SimpleNamespace(**{**vars(_document()), "incoming_id": "inc-2"}),
+    }
+
+    class FakeIncomingRepository:
+        async def get_by_incoming_id(self, incoming_id):
+            return documents.get(incoming_id)
+
+        async def list_files(self, incoming_id):
+            return []
+
+    class FakeExtractionRepository:
+        async def get_latest_by_incoming_id(self, incoming_id):
+            return None
+
+    monkeypatch.setattr(tools, "IncomingDocumentRepository", FakeIncomingRepository)
+    monkeypatch.setattr(tools, "DocumentBusinessExtractionRepository", FakeExtractionRepository)
+    monkeypatch.setattr(
+        tools,
+        "ask_user_question",
+        SimpleNamespace(func=lambda **_kwargs: pytest.fail("已选择来文后不应再次要求选择")),
+    )
+
+    result = await _tool_callable(tools.read_incoming_document)(
+        incoming_id="inc-1",
+        include_full_text=False,
+        runtime=runtime,
+    )
+
+    assert result["incoming_id"] == "inc-2"
+
+
+@pytest.mark.asyncio
 async def test_read_rejects_ambiguous_search_with_only_one_page_candidate(monkeypatch):
     runtime = _runtime_with_search("请查看一份已收录来文的详细内容")
     payload = json.loads(runtime.state["messages"][1].content)
