@@ -299,6 +299,7 @@ def test_incoming_document_builtin_skill_spec():
     specs = {spec["slug"]: spec for spec in svc.list_builtin_skill_specs()}
 
     incoming_document = specs["incoming-document"]
+    knowledge_base = specs["knowledge-base"]
     assert incoming_document["tool_dependencies"] == [
         "search_incoming_documents",
         "read_incoming_document",
@@ -320,6 +321,8 @@ def test_incoming_document_builtin_skill_spec():
     assert "每次调用必须显式设置 `limit <= 50`" in skill_content
     assert "直到找到命中款项之前最近的“第X条”标题" in skill_content
     assert "绝不能根据摘要、结构化结果或相邻款项猜测父级条号" in skill_content
+    assert "来文无需进入知识库，不得改用 knowledge-base" in incoming_document["description"]
+    assert "此类请求必须使用 incoming-document" in knowledge_base["description"]
 
 
 def test_phase3_incoming_business_skill_specs():

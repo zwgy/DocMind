@@ -1,7 +1,7 @@
 ---
 name: incoming-document
 slug: incoming-document
-description: "查询、读取、统计和综合解读已接入系统的来文。当用户按标题或文号询问某份来文、主文件、附件、摘要、原文、分类、业务事项或数量分布时使用此技能。"
+description: "用户提到来文、收文、文号，或按标题查询已收录来文及其主文件、附件、摘要、原文时必须使用；来文无需进入知识库，不得改用 knowledge-base。"
 ---
 
 # 来文查询与解读技能
