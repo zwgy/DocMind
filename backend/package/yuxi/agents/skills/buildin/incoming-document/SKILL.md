@@ -13,6 +13,27 @@ description: "查询、读取、统计和综合解读已接入系统的来文。
 - **来文**：一条完整业务记录，由唯一 `incoming_id` 标识，包含来文级摘要、分类、结构化结果和文件清单。
 - **文件**：来文中的主文件或附件，每个文件由 `source_file_id` 标识并拥有独立原文。不要把单个文件当作整份来文。
 
+## 首要决策
+
+- 用户要求“查找、列出、有哪些”来文：搜索后直接按工具顺序展示分页候选，不反问。
+- 用户要求查看、解读或下载**一份**来文，但没有唯一标识：先搜索。若 `total > 1`，下一步只能调用 `ask_user_question`，不能先回答、展开摘要或用普通文本提问。
+- 搜索结果只是候选摘要，不是来文详情。选定唯一 `incoming_id` 后，必须调用 `read_incoming_document(include_full_text=false)` 才能列出具体主文件、附件名称和正式结构化结果。
+
+`ask_user_question` 最小调用示例；实际选项使用搜索结果中的标题、文号和真实 `incoming_id`：
+
+```text
+ask_user_question(questions=[{
+  "question_id": "incoming_id",
+  "question": "请选择要查看的来文",
+  "options": [
+    {"label": "来文标题一（文号一）", "value": "真实 incoming_id 一"},
+    {"label": "来文标题二（文号二）", "value": "真实 incoming_id 二"}
+  ],
+  "multi_select": false,
+  "allow_other": true
+}])
+```
+
 ## 可用工具
 
 - `search_incoming_documents`：按来文日期、主分类、条目类型、标题、文号、发文单位或关键词分页查找来文；通用关键词匹配标题、文号、发文单位、摘要和附件名。`has_main_file` 表示是否有主文件，`attachment_count` 只统计主文件之外的附件。
@@ -48,7 +69,7 @@ description: "查询、读取、统计和综合解读已接入系统的来文。
    search_incoming_documents(keyword="用户关键词", page=1, page_size=20)
    ```
 
-4. 搜索只命中一份，或用户选定一份后，再使用真实 `incoming_id` 读取详情。用户要求操作单篇来文且搜索返回 `total > 1` 时，下一步只能调用 `ask_user_question`；选项必须来自搜索结果并携带真实 `incoming_id`。选择前不要输出各来文摘要、不要把搜索结果称为详情、不要用普通文本提问，也不要自行选择。用户只要求查找或列出来文时，不反问，直接按工具顺序展示结果。
+4. 搜索只命中一份，或用户选定一份后，再使用真实 `incoming_id` 读取详情。单篇操作命中多份时严格遵守“首要决策”，不要自行选择。
 5. 用户要求下载原始主文件或附件时，从附件清单选择真实 `source_file_id`，调用：
 
    ```text

@@ -310,7 +310,9 @@ def test_incoming_document_builtin_skill_spec():
     skill_path = incoming_document["source_dir"] / "SKILL.md"
     assert skill_path.exists()
     skill_content = skill_path.read_text(encoding="utf-8")
-    assert "搜索返回 `total > 1` 时，下一步只能调用 `ask_user_question`" in skill_content
+    assert skill_content.index("## 首要决策") < skill_content.index("## 可用工具")
+    assert "若 `total > 1`，下一步只能调用 `ask_user_question`" in skill_content
+    assert '"question_id": "incoming_id"' in skill_content
 
 
 def test_phase3_incoming_business_skill_specs():
