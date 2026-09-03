@@ -157,6 +157,33 @@ def test_flowchart_renderer_accepts_unicode_ids_and_multi_branch_decision() -> N
     assert 'node_2 -> node_5: "A4/A5"' in source
 
 
+def test_flowchart_renderer_reports_all_topology_errors() -> None:
+    renderer = _load_flowchart_renderer()
+    data = {
+        "nodes": [
+            {"id": "start", "kind": "start", "label": "开始"},
+            {"id": "review", "kind": "decision", "label": "审核"},
+            {"id": "orphan", "kind": "process", "label": "孤立节点"},
+            {"id": "end", "kind": "end", "label": "结束"},
+        ],
+        "edges": [
+            {"source": "start", "target": "review"},
+            {"source": "review", "target": "end"},
+            {"source": "end", "target": "start"},
+        ],
+    }
+
+    with pytest.raises(ValueError) as error:
+        renderer._validate_flow(data)
+
+    message = str(error.value)
+    assert "开始节点不能有入边：start" in message
+    assert "结束节点不能有出边：end" in message
+    assert "判断节点必须至少有两条出边：review" in message
+    assert "节点无法从开始节点到达：orphan" in message
+    assert "节点无法到达结束节点：orphan" in message
+
+
 def test_flowchart_renderer_main_reads_inline_definition(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

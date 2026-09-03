@@ -82,13 +82,17 @@ def _validate_flow(data: dict) -> tuple[list[dict], list[dict]]:
     for edge in edges:
         outgoing[edge["source"]].append(edge["target"])
         incoming[edge["target"]].append(edge["source"])
+    issues = []
     if incoming[starts[0]["id"]]:
-        raise ValueError("开始节点不能有入边")
-    if any(outgoing[end["id"]] for end in ends):
-        raise ValueError("结束节点不能有出边")
-    for node in nodes:
-        if node["kind"] == "decision" and len(outgoing[node["id"]]) < 2:
-            raise ValueError("判断节点必须至少有两条出边")
+        issues.append(f"开始节点不能有入边：{starts[0]['id']}")
+    invalid_ends = [end["id"] for end in ends if outgoing[end["id"]]]
+    if invalid_ends:
+        issues.append(f"结束节点不能有出边：{', '.join(invalid_ends)}")
+    invalid_decisions = [
+        node["id"] for node in nodes if node["kind"] == "decision" and len(outgoing[node["id"]]) < 2
+    ]
+    if invalid_decisions:
+        issues.append(f"判断节点必须至少有两条出边：{', '.join(invalid_decisions)}")
 
     reachable = set()
     pending = [starts[0]["id"]]
@@ -98,8 +102,9 @@ def _validate_flow(data: dict) -> tuple[list[dict], list[dict]]:
             continue
         reachable.add(node_id)
         pending.extend(outgoing[node_id])
-    if reachable != ids or not any(end["id"] in reachable for end in ends):
-        raise ValueError("所有节点必须可从开始节点到达")
+    unreachable = ids - reachable
+    if unreachable:
+        issues.append(f"节点无法从开始节点到达：{', '.join(sorted(unreachable))}")
 
     can_finish = set()
     pending = [end["id"] for end in ends]
@@ -109,8 +114,11 @@ def _validate_flow(data: dict) -> tuple[list[dict], list[dict]]:
             continue
         can_finish.add(node_id)
         pending.extend(incoming[node_id])
-    if can_finish != ids:
-        raise ValueError("所有节点都必须能够到达结束节点")
+    unable_to_finish = ids - can_finish
+    if unable_to_finish:
+        issues.append(f"节点无法到达结束节点：{', '.join(sorted(unable_to_finish))}")
+    if issues:
+        raise ValueError("；".join(issues))
     return nodes, edges
 
 

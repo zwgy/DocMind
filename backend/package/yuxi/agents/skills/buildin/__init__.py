@@ -45,7 +45,7 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
             "用户明确要求流程图、审批流程或业务流程图时必须先读取此 Skill；"
             "只用 render_flowchart 生成 SVG，禁止改用文档生成工具或手写 SVG。"
         ),
-        version="2026.09.03.2",
+        version="2026.09.03.3",
         tool_dependencies=("render_flowchart",),
     ),
     BuiltinSkillSpec(

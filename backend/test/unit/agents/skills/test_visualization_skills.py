@@ -81,6 +81,8 @@ def test_flowchart_skill_provides_the_renderer_json_contract() -> None:
     assert "不调用 `task` 或其他子智能体" in content
     assert "不调用 `ls`、`write_file`、`edit_file` 或 `execute`" in content
     assert "不创建中间 JSON 文件" in content
+    assert "2 至 10 个节点" in content
+    assert "不存在孤立节点或回到 `start` 的边" in content
 
 
 def test_visualization_skills_preserve_user_requested_output_names() -> None:
