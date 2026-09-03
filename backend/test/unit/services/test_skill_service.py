@@ -315,6 +315,7 @@ def test_incoming_document_builtin_skill_spec():
     assert '"question_id": "incoming_id"' in skill_content
     assert 'grep(pattern="字面关键词"' in skill_content
     assert "不超过 50 行" in skill_content
+    assert "不要先用 `grep` 或 `glob` 扫描工作区" in skill_content
 
 
 def test_phase3_incoming_business_skill_specs():
