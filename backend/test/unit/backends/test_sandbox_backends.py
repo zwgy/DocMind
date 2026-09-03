@@ -531,7 +531,10 @@ def test_provisioner_limits_incoming_document_source_reads(monkeypatch) -> None:
     denied = backend.read(path, limit=51)
     allowed = backend.read(path, offset=10, limit=50)
 
-    assert denied.error == "incoming document source reads are limited to 50 lines; retry read_file with an explicit limit <= 50"
+    assert denied.error == (
+        "incoming document source reads are limited to 50 lines; "
+        "retry read_file with an explicit limit <= 50"
+    )
     assert allowed.error is None
     assert calls == [(path, 10, 50)]
 

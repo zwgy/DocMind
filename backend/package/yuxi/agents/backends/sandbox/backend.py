@@ -273,7 +273,10 @@ class ProvisionerSandboxBackend(BaseSandbox):
             return ReadResult(error=f"Invalid path '{file_path}': {exc}")
         if not _can_read_path(normalized_path):
             return ReadResult(error=_permission_error("read", normalized_path))
-        if _is_same_or_child(normalized_path, _INCOMING_DOCUMENT_OUTPUTS_ROOT) and limit > _INCOMING_DOCUMENT_READ_LIMIT:
+        if (
+            _is_same_or_child(normalized_path, _INCOMING_DOCUMENT_OUTPUTS_ROOT)
+            and limit > _INCOMING_DOCUMENT_READ_LIMIT
+        ):
             return ReadResult(
                 error=(
                     "incoming document source reads are limited to 50 lines; "
