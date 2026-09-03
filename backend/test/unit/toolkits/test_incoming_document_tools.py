@@ -422,7 +422,7 @@ async def test_read_rejects_ambiguous_search_with_only_one_page_candidate(monkey
 
     monkeypatch.setattr(tools, "IncomingDocumentRepository", FakeIncomingRepository)
 
-    with pytest.raises(ToolException, match="page_size.*至少 2"):
+    with pytest.raises(tools.ToolException, match="page_size.*至少 2"):
         await _tool_callable(tools.read_incoming_document)(
             incoming_id="inc-1",
             include_full_text=False,
