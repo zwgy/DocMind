@@ -5,7 +5,7 @@ description: 用户明确要求流程图、审批流程或业务流程图时必�
 ---
 
 # 流程图
-1. 直接调用 `render_flowchart`，把流程定义放入 `definition`；不调用 `ls`、`write_file`、`edit_file` 或 `execute`，不创建中间 JSON 文件。
+1. 直接调用 `render_flowchart`，把流程定义放入 `definition`；不调用 `task` 或其他子智能体代写流程定义，不调用 `ls`、`write_file`、`edit_file` 或 `execute`，不创建中间 JSON 文件。
 2. `definition.nodes` 的每项必须有 `id`、`kind`、`label`；`id` 以 ASCII 字母开头且只使用字母、数字、下划线或短横线；`kind` 只能是 `start`、`process`、`decision`、`end`。`definition.edges` 的每项使用 `source`、`target`，判断分支把“是/否”写入 `label`。
 3. 必须恰有一个 `start`，至少一个 `end`；每个 `decision` 恰有两条出边，所有节点都必须能从开始到达并最终到达结束。
 4. 直接套用此工具调用模板后替换文字和节点 ID：
