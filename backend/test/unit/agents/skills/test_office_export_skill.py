@@ -14,6 +14,8 @@ def test_office_export_skill_exposes_native_tool_and_format_references() -> None
     assert spec.tool_dependencies == ("export_office_file",)
     assert spec.mcp_dependencies == ()
     content = spec.source_dir.joinpath("SKILL.md").read_text(encoding="utf-8")
+    assert "不调用 `task` 委派读取 reference、生成定义、导出或验收" in content
+    assert "先用 `write_todos` 制定计划并在每步完成后更新状态" in content
     assert "成功后文件已由系统自动交付" in content
     assert "不要重复调用 `present_artifacts`" in content
     assert "写入后立即调用 `export_office_file`" in content

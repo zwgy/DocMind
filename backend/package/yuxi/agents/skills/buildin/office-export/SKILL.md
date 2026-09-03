@@ -6,6 +6,8 @@ description: 用户要求生成或导出 DOCX、Word、PDF、XLSX、Excel 文件
 
 # Office 文件导出
 
+这是当前 Agent 直接完成的确定性导出流程，不调用 `task` 委派读取 reference、生成定义、导出或验收。任务还包含资料检索、事实核验等多个步骤时，先用 `write_todos` 制定计划并在每步完成后更新状态。
+
 1. 只读取用户所需格式对应的一个 reference；直接读取系统给出的路径，不列目录、不搜索或重复读取 Skill：
    - DOCX/Word：`references/docx.md`
    - PDF：`references/pdf.md`
