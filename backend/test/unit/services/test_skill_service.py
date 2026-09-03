@@ -317,6 +317,8 @@ def test_incoming_document_builtin_skill_spec():
     assert "不超过 50 行" in skill_content
     assert "不要先用 `grep` 或 `glob` 扫描工作区" in skill_content
     assert "省略 `source_file_ids` 时默认读取主文件" in skill_content
+    assert "不调用 `task` 委派子智能体" in skill_content
+    assert "同时覆盖条款标题和引用正文" in skill_content
 
 
 def test_phase3_incoming_business_skill_specs():
