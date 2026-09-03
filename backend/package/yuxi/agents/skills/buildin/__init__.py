@@ -107,10 +107,11 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
             "用户提到来文、收文、文号，或按标题查询已收录来文及其主文件、附件、摘要、原文时必须使用；"
             "来文无需进入知识库，不得改用 knowledge-base。"
         ),
-        version="2026.09.03.6",
+        version="2026.09.03.7",
         tool_dependencies=(
             "search_incoming_documents",
             "read_incoming_document",
+            "locate_incoming_document_text",
             "download_incoming_document_files",
             "get_incoming_document_statistics",
             "ask_user_question",

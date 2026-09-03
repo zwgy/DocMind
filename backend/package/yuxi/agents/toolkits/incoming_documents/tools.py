@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from datetime import date
 from typing import Annotated, Any
@@ -29,6 +30,16 @@ INCOMING_TOOL_CONFIG_GUIDE = "由来文业务 Skill 按需加载，不作为 Age
 
 FilterValue = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 SourceFileId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)]
+TextQuery = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+TextQueries = Annotated[
+    list[TextQuery],
+    Field(min_length=1, max_length=5, description="要在原文中逐项字面匹配的短语，最多 5 个"),
+]
+
+_ARTICLE_HEADING_RE = re.compile(r"^第[〇零一二三四五六七八九十百千0-9]+条(?:\s|$)")
+_SUBSECTION_HEADING_RE = re.compile(r"^[（(][〇零一二三四五六七八九十百千0-9]+[）)]")
+_MAX_TEXT_MATCHES_PER_QUERY = 3
+_MAX_CLAUSE_LINES = 50
 
 
 def _decode_source_file_ids(value: Any) -> Any:
@@ -89,6 +100,67 @@ class SearchIncomingDocumentsInput(IncomingDocumentFilters):
 
 def _iso(value: Any) -> Any:
     return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
+
+
+def _locate_text_queries(text: str, queries: list[str]) -> list[dict[str, Any]]:
+    """按字面短语返回命中条款；条款层级由服务端扫描标题确定，避免模型猜测。"""
+    lines = text.splitlines()
+    stripped_lines = [line.strip() for line in lines]
+    results = []
+    for query in queries:
+        matches = []
+        for match_index, line in enumerate(lines):
+            if query not in line:
+                continue
+            article_index = next(
+                (
+                    index
+                    for index in range(match_index, -1, -1)
+                    if _ARTICLE_HEADING_RE.match(stripped_lines[index])
+                ),
+                None,
+            )
+            subsection_index = next(
+                (
+                    index
+                    for index in range(match_index, (article_index if article_index is not None else -1), -1)
+                    if _SUBSECTION_HEADING_RE.match(stripped_lines[index])
+                ),
+                None,
+            )
+            if subsection_index is not None:
+                clause_start = subsection_index
+                clause_end = next(
+                    (
+                        index
+                        for index in range(subsection_index + 1, len(lines))
+                        if _ARTICLE_HEADING_RE.match(stripped_lines[index])
+                        or _SUBSECTION_HEADING_RE.match(stripped_lines[index])
+                    ),
+                    len(lines),
+                )
+                if match_index >= clause_start + _MAX_CLAUSE_LINES:
+                    clause_start = max(subsection_index, match_index - _MAX_CLAUSE_LINES + 5)
+            else:
+                clause_start = max(0, match_index - 2)
+                clause_end = min(len(lines), match_index + 3)
+            clause_end = min(clause_end, clause_start + _MAX_CLAUSE_LINES)
+            matches.append(
+                {
+                    "match_line": match_index + 1,
+                    "article_line": article_index + 1 if article_index is not None else None,
+                    "article_heading": lines[article_index].strip() if article_index is not None else None,
+                    "subsection_line": subsection_index + 1 if subsection_index is not None else None,
+                    "subsection_heading": lines[subsection_index].strip() if subsection_index is not None else None,
+                    "clause_start_line": clause_start + 1,
+                    "clause_end_line": clause_end,
+                    "clause_text": "\n".join(lines[clause_start:clause_end]).strip(),
+                }
+            )
+            if len(matches) >= _MAX_TEXT_MATCHES_PER_QUERY:
+                break
+        results.append({"query": query, "matches": matches})
+    return results
 
 
 def _document_payload(document) -> dict[str, Any]:
@@ -455,6 +527,61 @@ async def read_incoming_document(
         "classification_labels": document_category_label_mapping(),
         "item_type_labels": _item_type_labels(),
         "markdown_files": [],
+    }
+
+
+@tool(
+    category="incoming_document",
+    tags=["来文", "原文定位"],
+    display_name="定位来文原文",
+    config_guide=INCOMING_TOOL_CONFIG_GUIDE,
+)
+async def locate_incoming_document_text(
+    incoming_id: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=64),
+        Field(description="来文 ID"),
+    ],
+    queries: TextQueries,
+    source_file_id: SourceFileId | None = None,
+    runtime: ToolRuntime = None,
+) -> dict[str, Any] | str:
+    """在指定来文文件中按字面短语定位，并确定命中内容所属的条、款及原文。"""
+    incoming_repo = IncomingDocumentRepository()
+    document = await incoming_repo.get_by_incoming_id(incoming_id)
+    if document is None:
+        return f"来文不存在: {incoming_id}"
+    selected_incoming_id = _resolve_ambiguous_document_choice(runtime, incoming_id, document)
+    if selected_incoming_id != incoming_id:
+        incoming_id = selected_incoming_id
+        document = await incoming_repo.get_by_incoming_id(incoming_id)
+        if document is None:
+            return f"来文不存在: {incoming_id}"
+
+    files = await incoming_repo.list_files(incoming_id)
+    selected_file = next(
+        (
+            file
+            for file in files
+            if file.source_file_id == source_file_id
+            or (source_file_id is None and file.is_main_file)
+        ),
+        None,
+    )
+    if selected_file is None:
+        return f"来文附件不存在: {source_file_id}" if source_file_id else "该来文没有可读取的主文件"
+    if not selected_file.markdown_file_url:
+        return f"附件 Markdown 尚未生成: {selected_file.filename}"
+
+    try:
+        text = await IncomingDocumentMarkdownService.download_text(selected_file.markdown_file_url)
+    except IncomingDocumentMarkdownError as exc:
+        raise ToolException(f"定位来文原文失败：{exc}") from exc
+    return {
+        "incoming_id": incoming_id,
+        "source_file_id": selected_file.source_file_id,
+        "filename": selected_file.filename,
+        "query_matches": _locate_text_queries(text, queries),
     }
 
 

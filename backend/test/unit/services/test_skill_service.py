@@ -303,6 +303,7 @@ def test_incoming_document_builtin_skill_spec():
     assert incoming_document["tool_dependencies"] == [
         "search_incoming_documents",
         "read_incoming_document",
+        "locate_incoming_document_text",
         "download_incoming_document_files",
         "get_incoming_document_statistics",
         "ask_user_question",
@@ -314,15 +315,12 @@ def test_incoming_document_builtin_skill_spec():
     assert skill_content.index("## 首要决策") < skill_content.index("## 可用工具")
     assert "若 `total > 1`，下一步只能调用 `ask_user_question`" in skill_content
     assert '"question_id": "incoming_id"' in skill_content
-    assert 'grep(pattern="一个字面短语"' in skill_content
     assert "不要先用 `grep` 或 `glob` 扫描工作区" in skill_content
     assert "省略 `source_file_ids` 时默认读取主文件" in skill_content
     assert "不调用 `task` 委派子智能体" in skill_content
-    assert "每次调用必须显式设置 `limit <= 50`" in skill_content
-    assert "不能在 `pattern` 中使用 `|`、正则或拼接多个候选" in skill_content
-    assert "禁止用 `execute`、`sed`、`awk`、`cat`、`head` 或 `tail`" in skill_content
-    assert "直到找到命中款项之前最近的“第X条”标题" in skill_content
-    assert "绝不能根据摘要、结构化结果或相邻款项猜测父级条号" in skill_content
+    assert 'queries=["日常检修", "运行速度"]' in skill_content
+    assert "不要先物化 Markdown，也不要调用 `grep`、`read_file`、`execute` 或 `task`" in skill_content
+    assert "必须逐字使用工具返回的 `article_heading` 和 `subsection_heading`" in skill_content
     assert "来文无需进入知识库，不得改用 knowledge-base" in incoming_document["description"]
     assert "此类请求必须使用 incoming-document" in knowledge_base["description"]
 
