@@ -724,6 +724,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         if not candidate:
             raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
         required_anchors = _required_summary_anchors(previous_summary, source_messages)
+        oversized_candidate = False
         try:
             self._validate_summary_for_next_prompt(
                 candidate,
@@ -735,6 +736,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         except SummaryOutputTooLargeError:
             # 小模型偶尔会完整输出但略微超过目标；复用唯一一次有界修复压短候选，
             # 仍不合格时由下方相同校验原子拒绝，不能字符截断 checkpoint。
+            oversized_candidate = True
             needs_repair = True
         if not needs_repair:
             return candidate
@@ -746,6 +748,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             target_tokens,
         )
         if estimate_messages_tokens([SystemMessage(content=repair_prompt)]) > input_budget:
+            if oversized_candidate:
+                raise SummaryOutputTooLargeError("摘要过长，且压缩修复请求超出摘要输入预算")
             raise SummaryInvariantLossError("摘要遗漏精确事实，且修复请求超出摘要输入预算")
         repair_response = summary_model.invoke(repair_prompt)
         # 本地小模型偶尔会把修复提示的控制块一并回显。控制块不是 checkpoint 内容；
@@ -778,6 +782,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         if not candidate:
             raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
         required_anchors = _required_summary_anchors(previous_summary, source_messages)
+        oversized_candidate = False
         try:
             self._validate_summary_for_next_prompt(
                 candidate,
@@ -787,6 +792,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             )
             needs_repair = any(anchor not in candidate for anchor in required_anchors)
         except SummaryOutputTooLargeError:
+            oversized_candidate = True
             needs_repair = True
         if not needs_repair:
             return candidate
@@ -798,6 +804,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             target_tokens,
         )
         if estimate_messages_tokens([SystemMessage(content=repair_prompt)]) > input_budget:
+            if oversized_candidate:
+                raise SummaryOutputTooLargeError("摘要过长，且压缩修复请求超出摘要输入预算")
             raise SummaryInvariantLossError("摘要遗漏精确事实，且修复请求超出摘要输入预算")
         repair_response = await summary_model.ainvoke(repair_prompt)
         repaired = _SUMMARY_REPAIR_CONTROL_BLOCK_PATTERN.sub("", _summary_text(repair_response)).strip()
