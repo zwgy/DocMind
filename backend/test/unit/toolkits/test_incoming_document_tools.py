@@ -105,7 +105,6 @@ def test_incoming_document_tools_are_registered_for_skill_gating():
     for tool_name in (
         "search_incoming_documents",
         "read_incoming_document",
-        "locate_incoming_document_text",
         "download_incoming_document_files",
         "get_incoming_document_statistics",
     ):
@@ -121,7 +120,6 @@ def test_incoming_document_tools_are_registered_for_skill_gating():
                 "tools": [
                     "search_incoming_documents",
                     "read_incoming_document",
-                    "locate_incoming_document_text",
                     "download_incoming_document_files",
                     "get_incoming_document_statistics",
                 ]
@@ -131,7 +129,6 @@ def test_incoming_document_tools_are_registered_for_skill_gating():
     assert {tool.name for tool in resolve_skill_gated_tools(context)} == {
         "search_incoming_documents",
         "read_incoming_document",
-        "locate_incoming_document_text",
         "download_incoming_document_files",
         "get_incoming_document_statistics",
     }
@@ -144,93 +141,6 @@ def test_tool_schemas_limit_filter_and_source_file_lists():
         tools.read_incoming_document.args_schema(incoming_id="inc-1", source_file_ids=["file"] * 101)
     with pytest.raises(ValidationError):
         tools.download_incoming_document_files.args_schema(incoming_id="inc-1", source_file_ids=["file"] * 101)
-    with pytest.raises(ValidationError):
-        tools.locate_incoming_document_text.args_schema(incoming_id="inc-1", queries=["词"] * 6)
-
-
-def test_locate_text_queries_returns_nearest_article_and_complete_subsection():
-    text = "\n".join(
-        [
-            "第十六条  国铁路用客车运用。",
-            "（一）投入运用前，使用单位应制定计划，",
-            "每运行4000km或72小时须实施日常检修。",
-            "（二）其他要求。",
-            "第十七条  局管路用客车运用。",
-            "（四）局管路用客车管内运行速度不得超过标记速度，",
-            "具体以调度命令或电报限速条件为准。",
-            "（五）其他要求。",
-        ]
-    )
-
-    result = tools._locate_text_queries(text, ["日常检修", "运行速度", "未出现"])
-
-    daily = result[0]["matches"][0]
-    speed = result[1]["matches"][0]
-    assert (daily["article_heading"], daily["subsection_heading"]) == (
-        "第十六条  国铁路用客车运用。",
-        "（一）投入运用前，使用单位应制定计划，",
-    )
-    assert "每运行4000km或72小时须实施日常检修。" in daily["clause_text"]
-    assert (speed["article_heading"], speed["subsection_heading"]) == (
-        "第十七条  局管路用客车运用。",
-        "（四）局管路用客车管内运行速度不得超过标记速度，",
-    )
-    assert "具体以调度命令或电报限速条件为准。" in speed["clause_text"]
-    assert result[2]["matches"] == []
-
-
-@pytest.mark.asyncio
-async def test_locate_incoming_document_text_defaults_to_main_file(monkeypatch):
-    class FakeIncomingRepository:
-        async def get_by_incoming_id(self, incoming_id):
-            assert incoming_id == "inc-1"
-            return _document()
-
-        async def list_files(self, incoming_id):
-            assert incoming_id == "inc-1"
-            return [
-                SimpleNamespace(
-                    source_file_id="main",
-                    filename="主文件.pdf",
-                    is_main_file=True,
-                    markdown_file_url="minio://parsed/main.md",
-                ),
-                SimpleNamespace(
-                    source_file_id="attachment",
-                    filename="附件.doc",
-                    is_main_file=False,
-                    markdown_file_url="minio://parsed/attachment.md",
-                ),
-            ]
-
-    class FakeMarkdownService:
-        @staticmethod
-        async def download_text(markdown_file_url):
-            assert markdown_file_url == "minio://parsed/main.md"
-            return "\n".join(
-                [
-                    "第十七条  局管路用客车运用。",
-                    "（四）局管路用客车管内运行速度不得超过标记速度，",
-                    "具体以调度命令或电报限速条件为准。",
-                    "（五）其他要求。",
-                ]
-            )
-
-    monkeypatch.setattr(tools, "IncomingDocumentRepository", FakeIncomingRepository)
-    monkeypatch.setattr(tools, "IncomingDocumentMarkdownService", FakeMarkdownService)
-
-    result = await _tool_callable(tools.locate_incoming_document_text)(
-        incoming_id="inc-1",
-        queries=["运行速度"],
-    )
-
-    assert result["source_file_id"] == "main"
-    match = result["query_matches"][0]["matches"][0]
-    assert match["article_heading"].startswith("第十七条")
-    assert match["subsection_heading"].startswith("（四）")
-    assert "调度命令或电报限速条件" in match["clause_text"]
-
-
 def test_tool_schemas_accept_json_encoded_source_file_lists_from_local_models():
     read_input = tools.read_incoming_document.args_schema(
         incoming_id="inc-1",

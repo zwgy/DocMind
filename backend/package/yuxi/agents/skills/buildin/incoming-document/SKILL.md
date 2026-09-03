@@ -38,7 +38,6 @@ ask_user_question(questions=[{
 
 - `search_incoming_documents`：按来文日期、主分类、条目类型、标题、文号、发文单位或关键词分页查找来文；通用关键词匹配标题、文号、发文单位、摘要和附件名。`has_main_file` 表示是否有主文件，`attachment_count` 只统计主文件之外的附件。
 - `read_incoming_document`：`include_full_text=false` 时读取来文整体结论、附件清单和正式结构化结果；`include_full_text=true` 时将指定文件的 Markdown 写入当前会话目录并返回路径，省略 `source_file_ids` 时默认读取主文件。
-- `locate_incoming_document_text`：在指定主文件或附件中逐项字面定位短语，并由服务端返回命中内容所属的“第X条”、款项和不超过 50 行的完整款项原文；省略 `source_file_id` 时定位主文件。
 - `download_incoming_document_files`：将指定主文件或附件的原始文件写入当前会话 outputs，供用户预览或下载。
 - `get_incoming_document_statistics`：按与查询相同的条件统计来文，并按分类、条目类型和月份聚合。
 - `ask_user_question`：用户要求查看、下载或解读单篇来文，但搜索结果无法唯一确定目标，或关键范围不明确时，请用户选择。
@@ -73,7 +72,7 @@ ask_user_question(questions=[{
    search_incoming_documents(keyword="用户关键词", page=1, page_size=20)
    ```
 
-4. 搜索只命中一份，或用户选定一份后，再使用真实 `incoming_id` 读取详情。单篇操作命中多份时严格遵守“首要决策”，不要自行选择。
+4. 搜索只命中一份，或用户选定一份后，再使用真实 `incoming_id`。需要摘要、结构化结果或附件清单时读取详情；只核验主文件原文时直接执行第 6 步，避免先加载无关的完整结构化结果。单篇操作命中多份时严格遵守“首要决策”，不要自行选择。
 5. 用户要求下载原始主文件或附件时，从附件清单选择真实 `source_file_id`，调用：
 
    ```text
@@ -84,9 +83,7 @@ ask_user_question(questions=[{
    ```
 
    返回 `original_path` 后调用 `present_artifacts` 交付；不要把 MinIO 地址或宿主机路径返回给用户。
-6. 用户要求交付 Markdown 文件时，从页面上下文或附件清单选择真实 `source_file_id`。如果页面上下文已经提供真实 `incoming_id` 和 `source_file_id`，直接调用原文模式，不要先重复读取来文详情：
-   - 用户明确要求交付主文件 Markdown 且已经通过搜索获得唯一 `incoming_id` 时，直接调用原文模式并省略 `source_file_ids`，不要先读取包含整套结构化结果的来文详情。
-   - 用户要求交付指定附件 Markdown 时，仍须先从页面上下文或附件清单取得该附件的真实 `source_file_id`。
+6. 用户要求核验原文或交付 Markdown 文件时，从页面上下文或附件清单选择真实 `source_file_id`。已经通过搜索获得唯一 `incoming_id` 且目标是主文件时，直接调用原文模式并省略 `source_file_ids`；指定附件仍须先从页面上下文或附件清单取得真实 `source_file_id`：
 
    ```text
    read_incoming_document(
@@ -96,19 +93,12 @@ ask_user_question(questions=[{
    )
    ```
 
-7. 用户要求解读、引用或核验原文时，调用 `locate_incoming_document_text`，不要先物化 Markdown，也不要调用 `grep`、`read_file`、`execute` 或 `task`。每个问题选择一个原文中可能出现的 2 至 8 字核心短语，例如“日常检修”“运行速度”；不要照抄带“最高”“是什么”“要求”的整句问题。
-
-   ```text
-   locate_incoming_document_text(
-     incoming_id="真实 incoming_id",
-     queries=["日常检修", "运行速度"]
-   )
-   ```
-
-   - `matches` 为空时，用更短、更接近原文的一个字面短语重试；仍为空则明确说明无法在原文定位，不能从摘要补全。
-   - 回答中的条款号必须逐字使用工具返回的 `article_heading` 和 `subsection_heading`，引文必须来自 `clause_text`；不要自行推导或改写条款层级。
-   - 核验指定附件时传入附件清单中的真实 `source_file_id`；多个附件分别定位并标明文件名。
-8. 上一步仅在交付 Markdown 文件时返回 `markdown_path`。直接调用 `present_artifacts` 交付该路径，不要调用 `read_file` 把全文送入模型上下文。
+7. 返回 `markdown_path` 后按任务继续：
+   - 只要求交付 Markdown 时，直接调用 `present_artifacts`，不要读取全文。
+   - 要求解读、引用或核验时，先用 `grep` 对每个问题分别搜索一个 2 至 8 字的原文字面短语，再按命中行号用 `read_file(limit<=50)` 读取必要窗口。不要用 `execute`、`cat`、`sed`、`awk`、`head` 或 `tail` 代替这两个通用工具。
+   - 引用条款号时，必须在读取窗口中同时看到命中正文和此前最近的“第X条”标题；窗口不足时向前读取另一个不超过 50 行的窗口，不能根据摘要或相邻条款猜测。
+   - 首个短语未命中时可换一个更短短语重试一次；仍未命中则说明无法从原文核验，不从摘要补全。
+   - 多个附件分别定位并标明文件名。复杂任务由 Agent 的 Todo/ReAct 循环维护进度，来文 Skill 不替代任务编排。
 
 ### B. 来文检索
 

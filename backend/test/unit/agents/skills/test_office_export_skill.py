@@ -16,6 +16,8 @@ def test_office_export_skill_exposes_native_tool_and_format_references() -> None
     content = spec.source_dir.joinpath("SKILL.md").read_text(encoding="utf-8")
     assert "成功后文件已由系统自动交付" in content
     assert "不要重复调用 `present_artifacts`" in content
+    assert "写入后立即调用 `export_office_file`" in content
+    assert "失败时只依据错误修改同一份定义并重试一次" in content
     for format_name in ("docx", "pdf", "xlsx"):
         assert spec.source_dir.joinpath("references", f"{format_name}.md").is_file()
 

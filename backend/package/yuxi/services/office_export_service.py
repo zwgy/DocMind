@@ -156,9 +156,12 @@ def load_office_definition(path: Path) -> DocumentDefinition | WorkbookDefinitio
         raise OfficeExportError("Office 定义文件超过 2 MB 限制")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        return OFFICE_DEFINITION_ADAPTER.validate_python(payload)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise OfficeExportError("Office 定义文件不是有效的 UTF-8 JSON") from exc
+    if not isinstance(payload, dict) or payload.get("kind") not in {"document", "workbook"}:
+        raise OfficeExportError("Office 定义顶层字段 kind 必须为 document（DOCX/PDF）或 workbook（XLSX）")
+    try:
+        return OFFICE_DEFINITION_ADAPTER.validate_python(payload)
     except ValueError as exc:
         raise OfficeExportError(f"Office 定义不符合格式要求：{exc}") from exc
 

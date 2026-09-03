@@ -24,6 +24,14 @@ def _png(path: Path, size: tuple[int, int] = (320, 180)) -> None:
     Image.new("RGB", size, "#2f6f5e").save(path)
 
 
+def test_load_office_definition_explains_required_kind(tmp_path: Path) -> None:
+    definition = tmp_path / "report.json"
+    definition.write_text('{"blocks": []}', encoding="utf-8")
+
+    with pytest.raises(service.OfficeExportError, match="顶层字段 kind 必须为 document.*workbook"):
+        service.load_office_definition(definition)
+
+
 @pytest.mark.asyncio
 async def test_export_docx_inserts_table_picture_and_caption(tmp_path: Path) -> None:
     image = tmp_path / "chart.png"

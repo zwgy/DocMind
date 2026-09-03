@@ -66,7 +66,7 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
             "用户要求生成或导出 DOCX、Word、PDF、XLSX、Excel 文件，或要求把当前会话中的图片、"
             "图表、流程图、思维导图插入这些文件时必须先读取此 Skill。"
         ),
-        version="2026.07.30",
+        version="2026.09.03.1",
         tool_dependencies=("export_office_file",),
     ),
     BuiltinSkillSpec(
@@ -101,11 +101,10 @@ BUILTIN_SKILLS: list[BuiltinSkillSpec] = [
         slug="incoming-document",
         source_dir=_SKILLS_ROOT / "incoming-document",
         description="按来文、收文、文号或标题查询系统已收录的来文，并读取其主文件、附件、摘要、关键信息和原文。",
-        version="2026.09.03.8",
+        version="2026.09.03.9",
         tool_dependencies=(
             "search_incoming_documents",
             "read_incoming_document",
-            "locate_incoming_document_text",
             "download_incoming_document_files",
             "get_incoming_document_statistics",
             "ask_user_question",

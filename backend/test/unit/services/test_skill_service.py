@@ -302,7 +302,6 @@ def test_incoming_document_builtin_skill_spec():
     assert incoming_document["tool_dependencies"] == [
         "search_incoming_documents",
         "read_incoming_document",
-        "locate_incoming_document_text",
         "download_incoming_document_files",
         "get_incoming_document_statistics",
         "ask_user_question",
@@ -317,9 +316,9 @@ def test_incoming_document_builtin_skill_spec():
     assert "不要先用 `grep` 或 `glob` 扫描工作区" in skill_content
     assert "省略 `source_file_ids` 时默认读取主文件" in skill_content
     assert "不调用 `task` 委派子智能体" in skill_content
-    assert 'queries=["日常检修", "运行速度"]' in skill_content
-    assert "不要先物化 Markdown，也不要调用 `grep`、`read_file`、`execute` 或 `task`" in skill_content
-    assert "必须逐字使用工具返回的 `article_heading` 和 `subsection_heading`" in skill_content
+    assert "直接执行第 6 步，避免先加载无关的完整结构化结果" in skill_content
+    assert "复杂任务由 Agent 的 Todo/ReAct 循环维护进度" in skill_content
+    assert "不要用 `execute`、`cat`、`sed`、`awk`、`head` 或 `tail`" in skill_content
     assert "系统已收录的来文" in incoming_document["description"]
 
 
