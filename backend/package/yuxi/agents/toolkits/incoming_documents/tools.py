@@ -253,6 +253,25 @@ def _document_identified_in_message(user_message: str, document: Any) -> bool:
     )
 
 
+def _owns_ambiguity_prompt(runtime: ToolRuntime | None) -> bool:
+    """并行读取多个候选时只让首个工具调用发起一次 interrupt。"""
+    tool_call_id = getattr(runtime, "tool_call_id", None)
+    if not tool_call_id:
+        return True
+    state = getattr(runtime, "state", None)
+    messages = state.get("messages", []) if isinstance(state, Mapping) else getattr(state, "messages", [])
+    for message in reversed(messages or []):
+        if getattr(message, "type", None) != "ai":
+            continue
+        read_call_ids = [
+            call.get("id")
+            for call in getattr(message, "tool_calls", []) or []
+            if call.get("name") == "read_incoming_document"
+        ]
+        return not read_call_ids or tool_call_id == read_call_ids[0]
+    return True
+
+
 def _resolve_ambiguous_document_choice(
     runtime: ToolRuntime | None,
     incoming_id: str,
@@ -267,6 +286,8 @@ def _resolve_ambiguous_document_choice(
         return selected_incoming_id
     if len(candidates) < 2:
         raise ToolException("命中多篇来文但当前页候选不足，请将 page_size 调整为至少 2 后重新搜索")
+    if not _owns_ambiguity_prompt(runtime):
+        raise ToolException("目标不唯一，已在同批读取中请求用户选择，请等待选择结果")
 
     options = []
     for candidate in candidates[:5]:

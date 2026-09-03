@@ -78,6 +78,29 @@ def test_search_schema_rejects_reversed_date_range():
         tools.SearchIncomingDocumentsInput(date_from="2026-07-02", date_to="2026-07-01")
 
 
+def test_only_first_parallel_read_owns_ambiguity_prompt(monkeypatch):
+    runtime = _runtime_with_search("请查看一份已收录来文的详细内容")
+    runtime.tool_call_id = "call-2"
+    runtime.state["messages"].append(
+        SimpleNamespace(
+            type="ai",
+            tool_calls=[
+                {"id": "call-1", "name": "read_incoming_document", "args": {"incoming_id": "inc-1"}},
+                {"id": "call-2", "name": "read_incoming_document", "args": {"incoming_id": "inc-2"}},
+            ],
+        )
+    )
+    document = SimpleNamespace(**{**vars(_document()), "incoming_id": "inc-2"})
+    monkeypatch.setattr(
+        tools,
+        "ask_user_question",
+        SimpleNamespace(func=lambda **_kwargs: pytest.fail("并行读取只能由首个调用发起选择")),
+    )
+
+    with pytest.raises(tools.ToolException, match="同批读取中请求用户选择"):
+        tools._resolve_ambiguous_document_choice(runtime, "inc-2", document)
+
+
 def test_incoming_document_tools_are_registered_for_skill_gating():
     for tool_name in (
         "search_incoming_documents",
