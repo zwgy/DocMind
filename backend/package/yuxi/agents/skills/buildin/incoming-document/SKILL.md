@@ -37,7 +37,7 @@ ask_user_question(questions=[{
 ## 可用工具
 
 - `search_incoming_documents`：按来文日期、主分类、条目类型、标题、文号、发文单位或关键词分页查找来文；通用关键词匹配标题、文号、发文单位、摘要和附件名。`has_main_file` 表示是否有主文件，`attachment_count` 只统计主文件之外的附件。
-- `read_incoming_document`：`include_full_text=false` 时读取来文整体结论、附件清单和正式结构化结果；`include_full_text=true` 时只将指定附件的 Markdown 写入当前会话目录并返回路径。
+- `read_incoming_document`：`include_full_text=false` 时读取来文整体结论、附件清单和正式结构化结果；`include_full_text=true` 时将指定文件的 Markdown 写入当前会话目录并返回路径，省略 `source_file_ids` 时默认读取主文件。
 - `download_incoming_document_files`：将指定主文件或附件的原始文件写入当前会话 outputs，供用户预览或下载。
 - `get_incoming_document_statistics`：按与查询相同的条件统计来文，并按分类、条目类型和月份聚合。
 - `ask_user_question`：用户要求查看、下载或解读单篇来文，但搜索结果无法唯一确定目标，或关键范围不明确时，请用户选择。
@@ -82,6 +82,8 @@ ask_user_question(questions=[{
 
    返回 `original_path` 后调用 `present_artifacts` 交付；不要把 MinIO 地址或宿主机路径返回给用户。
 6. 用户要求交付 Markdown 文件，或需要原文依据、具体附件内容、核验细节时，从页面上下文或附件清单选择真实 `source_file_id`。如果页面上下文已经提供真实 `incoming_id` 和 `source_file_id`，直接调用原文模式，不要先重复读取来文详情：
+   - 用户明确核验主文件且已经通过搜索获得唯一 `incoming_id` 时，直接调用原文模式并省略 `source_file_ids`，不要先读取包含整套结构化结果的来文详情。
+   - 用户核验指定附件时，仍须先从页面上下文或附件清单取得该附件的真实 `source_file_id`。
 
    ```text
    read_incoming_document(

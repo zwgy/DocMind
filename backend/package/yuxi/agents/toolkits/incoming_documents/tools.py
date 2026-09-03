@@ -44,7 +44,7 @@ def _decode_source_file_ids(value: Any) -> Any:
 OptionalSourceFileIds = Annotated[
     list[SourceFileId],
     BeforeValidator(_decode_source_file_ids),
-    Field(max_length=100, description="需要写入 sandbox 的附件 source_file_id；读取全文时必填"),
+    Field(max_length=100, description="需要写入 sandbox 的文件 ID；读取全文时省略则默认主文件"),
 ]
 RequiredSourceFileIds = Annotated[
     list[SourceFileId],
@@ -401,13 +401,15 @@ async def read_incoming_document(
     runtime: ToolRuntime = None,
 ) -> dict[str, Any] | str:
     """读取来文结论、附件和结构化结果；核验原文时再落盘指定附件，并用 read_file 读取返回路径。"""
-    if include_full_text and not source_file_ids:
-        return "include_full_text=true 时必须指定 source_file_ids"
-
     incoming_repo = IncomingDocumentRepository()
     document = await incoming_repo.get_by_incoming_id(incoming_id)
     if document is None:
         return f"来文不存在: {incoming_id}"
+    if include_full_text and not source_file_ids:
+        files = await incoming_repo.list_files(incoming_id)
+        source_file_ids = [file.source_file_id for file in files if file.is_main_file]
+        if not source_file_ids:
+            return "该来文没有可读取的主文件"
     if not include_full_text:
         selected_incoming_id = _resolve_ambiguous_document_choice(runtime, incoming_id, document)
         if selected_incoming_id != incoming_id:

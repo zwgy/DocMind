@@ -565,14 +565,35 @@ async def test_read_returns_clear_error_when_markdown_storage_fails(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_read_full_text_requires_source_file_ids(monkeypatch):
+async def test_read_full_text_defaults_to_main_file(monkeypatch):
+    class FakeIncomingRepository:
+        async def get_by_incoming_id(self, incoming_id):
+            return _document()
+
+        async def list_files(self, incoming_id):
+            return [
+                SimpleNamespace(source_file_id="main", is_main_file=True),
+                SimpleNamespace(source_file_id="attachment", is_main_file=False),
+            ]
+
+    class FakeMarkdownService:
+        def __init__(self, repo):
+            assert isinstance(repo, FakeIncomingRepository)
+
+        async def materialize(self, **kwargs):
+            assert kwargs["source_file_ids"] == ["main"]
+            return [{"source_file_id": "main", "markdown_path": "/outputs/main.md"}]
+
+    monkeypatch.setattr(tools, "IncomingDocumentRepository", FakeIncomingRepository)
+    monkeypatch.setattr(tools, "IncomingDocumentMarkdownService", FakeMarkdownService)
+
     result = await _tool_callable(tools.read_incoming_document)(
         incoming_id="inc-1",
         include_full_text=True,
-        runtime=SimpleNamespace(),
+        runtime=SimpleNamespace(context=SimpleNamespace(uid="user-1", thread_id="thread-1")),
     )
 
-    assert result == "include_full_text=true 时必须指定 source_file_ids"
+    assert result["markdown_files"][0]["source_file_id"] == "main"
 
 
 @pytest.mark.asyncio
