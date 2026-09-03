@@ -749,7 +749,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         )
         if estimate_messages_tokens([SystemMessage(content=repair_prompt)]) > input_budget:
             if oversized_candidate:
-                raise SummaryOutputTooLargeError("摘要过长，且压缩修复请求超出摘要输入预算")
+                raise SummaryOutputTooLargeError("摘要模型未遵守输出上限，且压缩修复请求超出摘要输入预算")
             raise SummaryInvariantLossError("摘要遗漏精确事实，且修复请求超出摘要输入预算")
         repair_response = summary_model.invoke(repair_prompt)
         # 本地小模型偶尔会把修复提示的控制块一并回显。控制块不是 checkpoint 内容；
@@ -805,7 +805,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         )
         if estimate_messages_tokens([SystemMessage(content=repair_prompt)]) > input_budget:
             if oversized_candidate:
-                raise SummaryOutputTooLargeError("摘要过长，且压缩修复请求超出摘要输入预算")
+                raise SummaryOutputTooLargeError("摘要模型未遵守输出上限，且压缩修复请求超出摘要输入预算")
             raise SummaryInvariantLossError("摘要遗漏精确事实，且修复请求超出摘要输入预算")
         repair_response = await summary_model.ainvoke(repair_prompt)
         repaired = _SUMMARY_REPAIR_CONTROL_BLOCK_PATTERN.sub("", _summary_text(repair_response)).strip()
