@@ -30,5 +30,7 @@ def test_chatbot_prompt_uses_general_tool_and_source_rules():
 def test_todo_prompt_distinguishes_complex_and_single_step_tasks():
     assert "多个相互依赖的步骤或需要生成交付物" in TODO_MID_PROMPT
     assert "单步问答不要创建待办" in TODO_MID_PROMPT
+    assert "首次业务操作前必须调用 write_todos" in TODO_MID_PROMPT
+    assert "不得用 task 代替总计划" in TODO_MID_PROMPT
     assert "失败时根据结果调整后续计划" in TODO_MID_PROMPT
     assert "结果经过验证后才能结束" in TODO_MID_PROMPT
