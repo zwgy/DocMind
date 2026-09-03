@@ -49,6 +49,25 @@ def test_mindmap_tool_schema_accepts_outline_without_intermediate_path() -> None
     assert render_mindmap.tool_call_schema.model_json_schema()["properties"]["outline"]["maxLength"] == 8_000
 
 
+def test_flowchart_tool_schema_accepts_definition_without_intermediate_path() -> None:
+    result = render_flowchart.tool_call_schema.model_validate(
+        {
+            "definition": {
+                "nodes": [
+                    {"id": "start", "kind": "start", "label": "开始"},
+                    {"id": "end", "kind": "end", "label": "结束"},
+                ],
+                "edges": [{"source": "start", "target": "end"}],
+                "direction": "TB",
+            },
+            "output_name": "simple-flow",
+        }
+    )
+
+    assert result.definition.nodes[0].kind == "start"
+    assert set(render_flowchart.tool_call_schema.model_fields) == {"definition", "output_name"}
+
+
 def test_visualization_tool_schema_accepts_user_requested_chinese_output_name() -> None:
     result = render_mindmap.tool_call_schema.model_validate(
         {
@@ -155,3 +174,50 @@ async def test_mindmap_sends_outline_directly_to_renderer(monkeypatch) -> None:
 
     assert captured["request"] == {"outline": outline, "layout": "horizontal"}
     assert command.update["artifacts"] == ["/home/gem/user-data/outputs/project-governance.svg"]
+
+
+@pytest.mark.asyncio
+async def test_flowchart_sends_definition_directly_to_renderer(monkeypatch) -> None:
+    captured: dict = {}
+    runtime = ToolRuntime(
+        state={},
+        tool_call_id="call-1",
+        config={"configurable": {}},
+        context=SimpleNamespace(uid="user-1", thread_id="thread-1"),
+        store=None,
+        stream_writer=lambda _: None,
+    )
+
+    async def fake_render_visualization(**kwargs):
+        captured.update(kwargs)
+        ensure_thread_dirs("thread-1", "user-1")
+        sandbox_outputs_dir("thread-1").joinpath("simple-flow.svg").write_text("<svg/>", encoding="utf-8")
+        return {"artifact_path": "/home/gem/user-data/outputs/simple-flow.svg"}
+
+    monkeypatch.setattr(tools, "render_visualization", fake_render_visualization)
+    definition = tools.FlowDefinition(
+        nodes=[
+            tools.FlowNode(id="start", kind="start", label="开始"),
+            tools.FlowNode(id="end", kind="end", label="结束"),
+        ],
+        edges=[tools.FlowEdge(source="start", target="end")],
+    )
+
+    command = await render_flowchart.coroutine(
+        definition=definition,
+        output_name="simple-flow",
+        tool_call_id="call-1",
+        runtime=runtime,
+    )
+
+    assert captured["request"] == {
+        "definition": {
+            "nodes": [
+                {"id": "start", "kind": "start", "label": "开始"},
+                {"id": "end", "kind": "end", "label": "结束"},
+            ],
+            "edges": [{"source": "start", "target": "end", "label": ""}],
+            "direction": "TB",
+        }
+    }
+    assert command.update["artifacts"] == ["/home/gem/user-data/outputs/simple-flow.svg"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from xml.etree import ElementTree
@@ -126,6 +127,32 @@ def test_flowchart_renderer_builds_controlled_d2_and_valid_svg(
     assert 'node_1: "开始"' in d2_source
     assert captured["command"][:3] == ["d2", "--layout=dagre", "--theme=0"]
     _validate_svg(output)
+
+
+def test_flowchart_renderer_main_reads_inline_definition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output = tmp_path / "flow.svg"
+    renderer = _load_flowchart_renderer()
+    request = {
+        "definition": {
+            "nodes": [
+                {"id": "start", "kind": "start", "label": "开始"},
+                {"id": "end", "kind": "end", "label": "结束"},
+            ],
+            "edges": [{"source": "start", "target": "end"}],
+        },
+        "output": str(output),
+    }
+    monkeypatch.setattr(renderer.sys, "stdin", StringIO(json.dumps(request)))
+    monkeypatch.setattr(renderer, "_render_d2", lambda _source, path: path.write_text("<svg/>", encoding="utf-8"))
+
+    renderer.main()
+
+    assert json.loads(capsys.readouterr().out)["summary"] == "已生成流程图，共 2 个节点"
+    assert output.read_text(encoding="utf-8") == "<svg/>"
 
 
 @pytest.mark.parametrize(

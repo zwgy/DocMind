@@ -175,7 +175,7 @@ def _render_d2(source: str, output: Path) -> None:
 
 def main() -> None:
     request = json.load(sys.stdin)
-    data = json.loads(Path(request["source_path"]).read_text(encoding="utf-8"))
+    data = request["definition"]
     nodes, _edges = _validate_flow(data)
     _render_d2(_build_d2(data), Path(request["output"]))
     print(json.dumps({"summary": f"已生成流程图，共 {len(nodes)} 个节点"}, ensure_ascii=False))

@@ -157,7 +157,3 @@ async def render_visualization(
 
 def chart_source_path(thread_id: str, uid: str, value: str) -> Path:
     return _require_input_path(thread_id, uid, value, ".csv")
-
-
-def flow_source_path(thread_id: str, uid: str, value: str) -> Path:
-    return _require_input_path(thread_id, uid, value, ".flow.json")

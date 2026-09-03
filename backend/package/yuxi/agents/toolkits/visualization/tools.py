@@ -13,7 +13,6 @@ from yuxi.agents.toolkits.registry import tool
 from yuxi.services.visualization_service import (
     VisualizationError,
     chart_source_path,
-    flow_source_path,
     render_visualization,
 )
 
@@ -29,6 +28,27 @@ class ChartEncoding(BaseModel):
     y: str | None = Field(default=None, description="散点图 Y 数值列")
     label: str | None = Field(default=None, description="散点标签列")
     size: str | None = Field(default=None, description="散点大小列")
+
+
+class FlowNode(BaseModel):
+    model_config = {"extra": "forbid"}
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$", description="唯一节点 ID")
+    kind: Literal["start", "process", "decision", "end"] = Field(description="节点类型")
+    label: str = Field(min_length=1, max_length=80, description="节点文本")
+
+
+class FlowEdge(BaseModel):
+    model_config = {"extra": "forbid"}
+    source: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$", description="起点 ID")
+    target: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$", description="终点 ID")
+    label: str = Field(default="", max_length=40, description="可选分支标签")
+
+
+class FlowDefinition(BaseModel):
+    model_config = {"extra": "forbid"}
+    nodes: list[FlowNode] = Field(min_length=2, max_length=80, description="流程节点")
+    edges: list[FlowEdge] = Field(max_length=160, description="流程连线")
+    direction: Literal["TB", "LR"] = Field(default="TB", description="从上到下或从左到右")
 
 
 def _scope(runtime: ToolRuntime) -> tuple[str, str]:
@@ -87,7 +107,7 @@ async def render_data_chart(
 
 @tool(category="visualization", tags=["可视化"], display_name="生成流程图")
 async def render_flowchart(
-    definition_path: Annotated[str, Field(description="当前会话中的 .flow.json 虚拟路径")],
+    definition: Annotated[FlowDefinition, Field(description="包含节点、连线和方向的流程定义")],
     output_name: Annotated[
         str,
         Field(
@@ -99,16 +119,15 @@ async def render_flowchart(
     tool_call_id: Annotated[str, InjectedToolCallId],
     runtime: ToolRuntime = None,
 ) -> Command:
-    """根据受限流程 JSON 生成静态 SVG 流程图。"""
+    """直接根据受限流程定义生成并自动交付静态 SVG 流程图。"""
     uid, thread_id = _scope(runtime)
     try:
-        source = flow_source_path(thread_id, uid, definition_path)
         result = await render_visualization(
             thread_id=thread_id,
             uid=uid,
             script_name="render_flowchart.py",
             output_name=output_name,
-            request={"source_path": str(source)},
+            request={"definition": definition.model_dump()},
         )
         return deliver_artifacts(
             filepaths=[result["artifact_path"]],

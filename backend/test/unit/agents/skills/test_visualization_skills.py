@@ -77,6 +77,9 @@ def test_flowchart_skill_provides_the_renderer_json_contract() -> None:
     # 小模型必须能在首次调用前得到渲染器要求的真实字段名，避免靠错误信息反复猜测。
     for field_name in ('"kind"', '"source"', '"target"', '"label"'):
         assert field_name in content
+    assert '"definition"' in content
+    assert "不调用 `ls`、`write_file`、`edit_file` 或 `execute`" in content
+    assert "不创建中间 JSON 文件" in content
 
 
 def test_visualization_skills_preserve_user_requested_output_names() -> None:
