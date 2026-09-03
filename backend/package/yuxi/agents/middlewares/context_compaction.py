@@ -1645,6 +1645,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         compacted_rounds = []
         source_messages = list(survivors)
         remaining_rounds = compactable_api_rounds(survivors)
+        l5_started = False
+        archive_count = 0
         # L5 只能移除完整 API round。latest Human、跨越该消息的 round 和当前尾部
         # 始终留在 survivors；这是单请求多工具调用仍能继续的协议安全边界。
         while remaining_rounds:
@@ -1675,17 +1677,19 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             tokens_before = self._request_tokens(
                 self._request_with_summary(request, messages=source_messages, summary=summary)
             )
-            request.runtime.stream_writer(
-                self._compaction_event(
-                    "started",
-                    level="L5",
-                    sequence=5,
-                    cycle_id=cycle_id,
-                    reason=reason,
-                    tokens_before=tokens_before,
-                    messages_before=len(source_messages),
+            if not l5_started:
+                request.runtime.stream_writer(
+                    self._compaction_event(
+                        "started",
+                        level="L5",
+                        sequence=5,
+                        cycle_id=cycle_id,
+                        reason=reason,
+                        tokens_before=tokens_before,
+                        messages_before=len(source_messages),
+                    )
                 )
-            )
+                l5_started = True
             archive_completed = False
             try:
                 archive_path = self._archive_compacted_messages(
@@ -1694,6 +1698,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     revision=next_revision,
                 )
                 archive_completed = True
+                archive_count += 1
                 archive_prefix = _archive_summary_prefix(archive_path)
                 generated_summary = self._create_summary(summary, compacted, target_tokens, budget)
                 summary, summary_quality = self._fit_summary_to_budget(
@@ -1704,6 +1709,10 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     budget=budget,
                 )
             except Exception as error:
+                # 第一个可用边界可能只给完整 checkpoint 留出极小空间。摘要过大时继续
+                # 纳入下一个完整 round；其他失败仍立即退出，不能借扩大边界掩盖数据丢失。
+                if isinstance(error, SummaryOutputTooLargeError) and remaining_rounds and not compact_all_history:
+                    continue
                 request.runtime.stream_writer(
                     self._compaction_event(
                         "failed",
@@ -1718,7 +1727,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                         messages_after=len(source_messages),
                         messages_removed=0,
                         rounds_removed=0,
-                        archive_count=int(archive_completed),
+                        archive_count=archive_count,
                         summary_revision=int(state.get("context_revision") or 0),
                     )
                 )
@@ -1740,7 +1749,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                         messages_after=len(survivors),
                         messages_removed=len(compacted),
                         rounds_removed=len(compacted_rounds),
-                        archive_count=1,
+                        archive_count=archive_count,
                         archive_path=archive_path,
                         summary_revision=next_revision,
                         summary_quality=summary_quality,
@@ -1934,6 +1943,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         compacted_rounds = []
         source_messages = list(survivors)
         remaining_rounds = compactable_api_rounds(survivors)
+        l5_started = False
+        archive_count = 0
         while remaining_rounds:
             if compact_all_history:
                 compacted_rounds.extend(remaining_rounds)
@@ -1959,17 +1970,19 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             tokens_before = self._request_tokens(
                 self._request_with_summary(request, messages=source_messages, summary=summary)
             )
-            request.runtime.stream_writer(
-                self._compaction_event(
-                    "started",
-                    level="L5",
-                    sequence=5,
-                    cycle_id=cycle_id,
-                    reason=reason,
-                    tokens_before=tokens_before,
-                    messages_before=len(source_messages),
+            if not l5_started:
+                request.runtime.stream_writer(
+                    self._compaction_event(
+                        "started",
+                        level="L5",
+                        sequence=5,
+                        cycle_id=cycle_id,
+                        reason=reason,
+                        tokens_before=tokens_before,
+                        messages_before=len(source_messages),
+                    )
                 )
-            )
+                l5_started = True
             archive_completed = False
             try:
                 archive_path = await self._aarchive_compacted_messages(
@@ -1978,6 +1991,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     revision=next_revision,
                 )
                 archive_completed = True
+                archive_count += 1
                 archive_prefix = _archive_summary_prefix(archive_path)
                 generated_summary = await self._acreate_summary(
                     summary,
@@ -1993,6 +2007,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     budget=budget,
                 )
             except Exception as error:
+                if isinstance(error, SummaryOutputTooLargeError) and remaining_rounds and not compact_all_history:
+                    continue
                 request.runtime.stream_writer(
                     self._compaction_event(
                         "failed",
@@ -2007,7 +2023,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                         messages_after=len(source_messages),
                         messages_removed=0,
                         rounds_removed=0,
-                        archive_count=int(archive_completed),
+                        archive_count=archive_count,
                         summary_revision=int(state.get("context_revision") or 0),
                     )
                 )
@@ -2029,7 +2045,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                         messages_after=len(survivors),
                         messages_removed=len(compacted),
                         rounds_removed=len(compacted_rounds),
-                        archive_count=1,
+                        archive_count=archive_count,
                         archive_path=archive_path,
                         summary_revision=next_revision,
                         summary_quality=summary_quality,

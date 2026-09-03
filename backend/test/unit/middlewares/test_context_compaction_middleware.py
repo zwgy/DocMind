@@ -887,6 +887,65 @@ def test_oversized_summary_does_not_commit_a_truncated_checkpoint() -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("asynchronous", [False, True])
+async def test_l5_expands_archive_boundary_when_summary_does_not_fit(
+    asynchronous: bool,
+    archive_backend: _ArchiveBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = [
+        HumanMessage(content="first old request " + "a" * 800, id="user-old-1"),
+        AIMessage(content="first old answer", id="assistant-old-1"),
+        HumanMessage(content="second old request " + "b" * 800, id="user-old-2"),
+        AIMessage(content="second old answer", id="assistant-old-2"),
+        HumanMessage(content="current request", id="user-current"),
+    ]
+    model, request = _request(messages)
+    middleware = create_summary_middleware(model=model, summary_prompt="summary\n{messages}")
+    summarized_batches: list[list[str]] = []
+
+    def create_summary(_previous: str, compacted: list, _target: int, _budget) -> str:
+        summarized_batches.append([message.id for message in compacted])
+        if len(summarized_batches) == 1:
+            raise SummaryOutputTooLargeError("first boundary is too small")
+        return "已归档旧对话"
+
+    async def acreate_summary(previous: str, compacted: list, target: int, budget) -> str:
+        return create_summary(previous, compacted, target, budget)
+
+    monkeypatch.setattr(
+        middleware,
+        "_acreate_summary" if asynchronous else "_create_summary",
+        acreate_summary if asynchronous else create_summary,
+    )
+    captured = {}
+
+    def handler(prepared: ModelRequest):
+        captured["messages"] = prepared.messages
+        return ModelResponse(result=[AIMessage(content="answer")])
+
+    async def async_handler(prepared: ModelRequest):
+        return handler(prepared)
+
+    if asynchronous:
+        await middleware.awrap_model_call(request, async_handler)
+    else:
+        middleware.wrap_model_call(request, handler)
+
+    assert summarized_batches == [
+        ["user-old-1", "assistant-old-1", "user-old-2"],
+        ["user-old-1", "assistant-old-1", "user-old-2", "assistant-old-2"],
+    ]
+    assert captured["messages"] == [messages[-1]]
+    assert len(archive_backend.writes) == 2
+    l5_events = [event for event in request.runtime.stream_events if event["level"] == "L5"]
+    assert [event["status"] for event in l5_events] == ["started", "finished"]
+    assert l5_events[-1]["rounds_removed"] == 2
+    assert l5_events[-1]["archive_count"] == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
 async def test_summary_generation_failure_does_not_commit_or_call_main_model(
     asynchronous: bool, archive_backend: _ArchiveBackend
 ) -> None:
