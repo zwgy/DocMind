@@ -319,6 +319,9 @@ def test_incoming_document_builtin_skill_spec():
     assert "省略 `source_file_ids` 时默认读取主文件" in skill_content
     assert "不调用 `task` 委派子智能体" in skill_content
     assert "同时覆盖条款标题和引用正文" in skill_content
+    assert "每次调用必须显式设置 `limit <= 50`" in skill_content
+    assert "直到找到命中款项之前最近的“第X条”标题" in skill_content
+    assert "绝不能根据摘要、结构化结果或相邻款项猜测父级条号" in skill_content
 
 
 def test_phase3_incoming_business_skill_specs():
