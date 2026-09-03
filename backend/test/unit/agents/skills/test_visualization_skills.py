@@ -78,6 +78,8 @@ def test_flowchart_skill_provides_the_renderer_json_contract() -> None:
     for field_name in ('"kind"', '"source"', '"target"', '"label"'):
         assert field_name in content
     assert '"definition"' in content
+    assert '"output_name"' in content
+    assert "边的 `source`、`target` 必须原样引用它" in content
     assert "不调用 `task` 或其他子智能体" in content
     assert "不调用 `ls`、`write_file`、`edit_file` 或 `execute`" in content
     assert "不创建中间 JSON 文件" in content

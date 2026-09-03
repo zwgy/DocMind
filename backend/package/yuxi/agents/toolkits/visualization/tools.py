@@ -39,8 +39,8 @@ class FlowNode(BaseModel):
 
 class FlowEdge(BaseModel):
     model_config = {"extra": "forbid"}
-    source: str = Field(min_length=1, max_length=64, description="起点 ID")
-    target: str = Field(min_length=1, max_length=64, description="终点 ID")
+    source: str = Field(min_length=1, max_length=64, description="必须原样引用已有节点 id，不能填写节点 label")
+    target: str = Field(min_length=1, max_length=64, description="必须原样引用已有节点 id，不能填写节点 label")
     label: str = Field(default="", max_length=40, description="可选分支标签")
 
 
@@ -107,13 +107,16 @@ async def render_data_chart(
 
 @tool(category="visualization", tags=["可视化"], display_name="生成流程图")
 async def render_flowchart(
-    definition: Annotated[FlowDefinition, Field(description="包含节点、连线和方向的流程定义")],
+    definition: Annotated[
+        FlowDefinition,
+        Field(description="只包含 nodes、edges、direction；output_name 是工具顶层参数，不能放在 definition 内"),
+    ],
     output_name: Annotated[
         str,
         Field(
             min_length=1,
             max_length=80,
-            description="文件名主体，不含扩展名；用户明确指定名称时保留原名称，可使用中文",
+            description="工具顶层参数；文件名主体，不含扩展名；用户明确指定名称时保留原名称，可使用中文",
         ),
     ],
     tool_call_id: Annotated[str, InjectedToolCallId],

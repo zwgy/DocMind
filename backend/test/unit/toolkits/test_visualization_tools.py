@@ -66,6 +66,9 @@ def test_flowchart_tool_schema_accepts_definition_without_intermediate_path() ->
 
     assert result.definition.nodes[0].kind == "start"
     assert set(render_flowchart.tool_call_schema.model_fields) == {"definition", "output_name"}
+    schema = render_flowchart.tool_call_schema.model_json_schema()
+    assert "不能放在 definition 内" in schema["properties"]["definition"]["description"]
+    assert "工具顶层参数" in schema["properties"]["output_name"]["description"]
 
 
 def test_flowchart_tool_schema_accepts_chinese_node_ids() -> None:

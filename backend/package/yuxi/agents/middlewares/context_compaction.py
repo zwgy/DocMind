@@ -723,14 +723,20 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         candidate = _summary_text(response)
         if not candidate:
             raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
-        self._validate_summary_for_next_prompt(
-            candidate,
-            output_tokens=_summary_output_tokens(response, candidate),
-            target_tokens=target_tokens,
-            input_budget=input_budget,
-        )
         required_anchors = _required_summary_anchors(previous_summary, source_messages)
-        if not any(anchor not in candidate for anchor in required_anchors):
+        try:
+            self._validate_summary_for_next_prompt(
+                candidate,
+                output_tokens=_summary_output_tokens(response, candidate),
+                target_tokens=target_tokens,
+                input_budget=input_budget,
+            )
+            needs_repair = any(anchor not in candidate for anchor in required_anchors)
+        except SummaryOutputTooLargeError:
+            # 小模型偶尔会完整输出但略微超过目标；复用唯一一次有界修复压短候选，
+            # 仍不合格时由下方相同校验原子拒绝，不能字符截断 checkpoint。
+            needs_repair = True
+        if not needs_repair:
             return candidate
 
         repair_prompt = self._render_summary_repair_prompt(
@@ -771,14 +777,18 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         candidate = _summary_text(response)
         if not candidate:
             raise RuntimeError("摘要模型返回空内容，未提交上下文裁剪")
-        self._validate_summary_for_next_prompt(
-            candidate,
-            output_tokens=_summary_output_tokens(response, candidate),
-            target_tokens=target_tokens,
-            input_budget=input_budget,
-        )
         required_anchors = _required_summary_anchors(previous_summary, source_messages)
-        if not any(anchor not in candidate for anchor in required_anchors):
+        try:
+            self._validate_summary_for_next_prompt(
+                candidate,
+                output_tokens=_summary_output_tokens(response, candidate),
+                target_tokens=target_tokens,
+                input_budget=input_budget,
+            )
+            needs_repair = any(anchor not in candidate for anchor in required_anchors)
+        except SummaryOutputTooLargeError:
+            needs_repair = True
+        if not needs_repair:
             return candidate
 
         repair_prompt = self._render_summary_repair_prompt(

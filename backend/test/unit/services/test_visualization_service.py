@@ -184,6 +184,24 @@ def test_flowchart_renderer_reports_all_topology_errors() -> None:
     assert "节点无法到达结束节点：orphan" in message
 
 
+def test_flowchart_renderer_reports_invalid_edges_with_valid_ids() -> None:
+    renderer = _load_flowchart_renderer()
+    data = {
+        "nodes": [
+            {"id": "start", "kind": "start", "label": "开始"},
+            {"id": "end", "kind": "end", "label": "结束"},
+        ],
+        "edges": [{"source": "开始", "target": "结束"}],
+    }
+
+    with pytest.raises(ValueError) as error:
+        renderer._validate_flow(data)
+
+    message = str(error.value)
+    assert "无效边：开始->结束" in message
+    assert "有效 id：end, start" in message
+
+
 def test_flowchart_renderer_main_reads_inline_definition(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

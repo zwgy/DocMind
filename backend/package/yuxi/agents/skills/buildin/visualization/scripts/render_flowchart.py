@@ -67,9 +67,16 @@ def _validate_flow(data: dict) -> tuple[list[dict], list[dict]]:
         raise ValueError("流程必须且只能有一个开始节点，并至少有一个结束节点")
 
     seen_edges = set()
+    invalid_edges = [
+        f"{edge.get('source')}->{edge.get('target')}"
+        for edge in edges
+        if edge.get("source") not in ids or edge.get("target") not in ids
+    ]
+    if invalid_edges:
+        raise ValueError(
+            f"边必须引用节点 id；无效边：{', '.join(invalid_edges)}；有效 id：{', '.join(sorted(ids))}"
+        )
     for edge in edges:
-        if edge.get("source") not in ids or edge.get("target") not in ids:
-            raise ValueError("存在指向不存在节点的边")
         key = (edge.get("source"), edge.get("target"), edge.get("label", ""))
         if key in seen_edges:
             raise ValueError("不能包含重复的边")
