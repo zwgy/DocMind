@@ -196,9 +196,28 @@ async def render_mindmap(
 
 
 def _validation_error(error) -> str:
-    """小模型无法利用 Pydantic 默认英文错误，因此统一压缩为中文修正提示。"""
-    fields = [".".join(str(part) for part in item.get("loc", ())) for item in error.errors()[:3]]
-    return f"参数校验失败，请检查字段：{'、'.join(fields) or '输入参数'}"
+    """小模型需要字段与失败原因才能在下一次调用中定向修正。"""
+    reasons = {
+        "missing": "缺少必填字段",
+        "model_type": "必须是对象",
+        "list_type": "必须是数组",
+        "string_type": "必须是文本",
+        "string_too_short": "不能为空",
+        "string_too_long": "文本过长",
+        "literal_error": "值不在允许范围内",
+        "extra_forbidden": "不允许该字段",
+    }
+    details = []
+    for item in error.errors()[:3]:
+        field = ".".join(str(part) for part in item.get("loc", ())) or "输入参数"
+        error_type = str(item.get("type") or "")
+        reason = reasons.get(error_type)
+        if error_type == "too_short":
+            reason = f"至少需要 {item.get('ctx', {}).get('min_length', 1)} 项"
+        elif error_type == "too_long":
+            reason = f"最多允许 {item.get('ctx', {}).get('max_length', 1)} 项"
+        details.append(f"{field}：{reason or '输入不合法'}")
+    return f"参数校验失败：{'；'.join(details) or '输入参数不合法'}"
 
 
 for _tool in (render_data_chart, render_flowchart, render_mindmap):

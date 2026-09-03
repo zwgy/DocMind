@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from langgraph.prebuilt.tool_node import ToolRuntime
+from pydantic import ValidationError
 
 from yuxi.agents.artifacts import ARTIFACT_DELIVERY_SCHEMA
 from yuxi.agents.backends.sandbox import ensure_thread_dirs, sandbox_outputs_dir
@@ -86,6 +87,32 @@ def test_flowchart_tool_schema_accepts_chinese_node_ids() -> None:
     )
 
     assert result.definition.edges[0].source == "开始"
+
+
+@pytest.mark.parametrize(
+    ("definition", "expected"),
+    [
+        ({"nodes": [], "edges": []}, "definition.nodes：至少需要 2 项"),
+        (
+            {
+                "nodes": [
+                    {"id": "start", "kind": "start", "label": ""},
+                    {"id": "end", "kind": "end", "label": "结束"},
+                ],
+                "edges": [{"source": "start", "target": "end"}],
+            },
+            "definition.nodes.0.label：不能为空",
+        ),
+        ("not-an-object", "definition：必须是对象"),
+    ],
+)
+def test_visualization_validation_error_includes_actionable_reason(definition, expected) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        render_flowchart.tool_call_schema.model_validate(
+            {"definition": definition, "output_name": "simple-flow"}
+        )
+
+    assert expected in tools._validation_error(exc_info.value)
 
 
 def test_visualization_tool_schema_accepts_user_requested_chinese_output_name() -> None:
