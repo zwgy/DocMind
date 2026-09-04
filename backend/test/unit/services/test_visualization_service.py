@@ -234,7 +234,7 @@ def test_flowchart_renderer_main_reads_inline_definition(
         (
             "render_data_chart.mjs",
             "chart.csv",
-            "月份,销量\n一月,10\n二月,14\n",
+            "月份,销量\n第一份名称较长的业务材料,10\n第二份名称较长的业务材料,14\n",
             {
                 "chart_type": "bar",
                 "title": "月度销量",
@@ -296,6 +296,9 @@ def test_echarts_renderers_generate_themed_safe_svg(
         }
         # 默认横向脑图必须把一级分支分布在中心主题两侧，而不是退化回单向树。
         assert text_positions["风险"] < text_positions["项目"] < text_positions["计划"]
+    else:
+        assert "第一份名称较长的业务材料" in content
+        assert "第二份名称较长的业务材料" in content
 
 
 @pytest.mark.parametrize(

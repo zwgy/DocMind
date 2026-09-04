@@ -88,7 +88,12 @@ if (option.xAxis) {
     ...option.xAxis,
     axisLine: { lineStyle: { color: "#AAB5C0" } },
     axisTick: { alignWithLabel: true, lineStyle: { color: "#AAB5C0" } },
-    axisLabel: { color: "#526170", margin: 14 },
+    axisLabel: {
+      color: "#526170",
+      margin: 14,
+      // 少量分类应完整标注；否则 ECharts 可能把两项对比误判为标签拥挤并隐藏一项。
+      interval: Array.isArray(option.xAxis.data) && option.xAxis.data.length <= 4 ? 0 : "auto",
+    },
   };
   option.yAxis = {
     ...option.yAxis,
