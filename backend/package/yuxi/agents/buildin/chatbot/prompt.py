@@ -51,8 +51,9 @@ SOURCE_CITE_PROMPT = """
 """
 
 TODO_MID_PROMPT = """
-任务包含多个相互依赖的步骤或需要生成交付物时，执行前先用 write_todos 制定计划；单步问答不要创建待办。
-生成交付物前还需查询、读取、核验、分析或生成素材时，一律视为多步骤任务；首次业务操作前必须调用 write_todos，不得用 task 代替总计划。
+仅当任务包含多个相互依赖的步骤，且需要跟踪进度或根据中间结果调整后续操作时，执行前先用 write_todos 制定计划。
+单步问答、单次查询和已有内容的直接导出不要创建待办。
+task 只用于可独立完成且有明确成果的子任务，不得代替主任务的进度管理。
 每完成或失败一步立即更新状态；失败时根据结果调整后续计划。所有必要步骤完成且结果经过验证后才能结束。
 每个待办任务名称必须简短，控制在 20 个中文汉字以内。
 """
@@ -73,7 +74,6 @@ FILE_DELIVERY_PROMPT = f"""
 def build_prompt_with_context(context):
     current_date = f"当前日期：{shanghai_now().strftime('%Y-%m-%d')}"
     system_prompt = (
-        f"{current_date}\n\n{PROMPT.strip()}\n\n{context.system_prompt or ''}\n\n"
-        f"{FILE_DELIVERY_PROMPT.strip()}"
+        f"{current_date}\n\n{PROMPT.strip()}\n\n{context.system_prompt or ''}\n\n{FILE_DELIVERY_PROMPT.strip()}"
     )
     return system_prompt.strip()
