@@ -134,7 +134,7 @@ with requests.get(f"{base_url}{run['stream_url']}", headers=headers, stream=True
 
 事件流默认返回完整载荷，便于排查 LangGraph/Langfuse 运行细节。如果只需要渲染消息、工具调用、工具结果、Agent state 和终止状态，可以在订阅地址追加 `?verbose=false`。精简模式会保留 SSE `event/data/id`、data 中的 `run_id/thread_id/request_id/payload` 以及客户端消费所需字段；同一 data 内的 `request_id` 会外提为单个字段。精简模式还会跳过 `metadata` 和空 `yuxi.agent_state`，并去掉每个 chunk 中重复的 `meta`、`metadata`、`thread_id`、`response`、空 `namespace` 和图片 base64 等调试字段。
 
-每次创建 run 都会返回 `request_id`，可用于日志追踪和问题排查。如果需要在多轮对话中使用同一个会话，请复用 `thread_id`，系统会将同一线程的消息串联起来形成连贯的对话上下文。
+每次创建 run 都会返回 `request_id`，可用于日志追踪和问题排查。调用方通过 `meta.request_id` 或 `resume_request_id` 指定幂等键时，长度不能超过 64 个字符；未指定时由服务端生成。如果需要在多轮对话中使用同一个会话，请复用 `thread_id`，系统会将同一线程的消息串联起来形成连贯的对话上下文。
 
 ## 认证方式
 

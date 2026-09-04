@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.utils.auth_middleware import get_admin_user, get_db, get_required_user
@@ -56,6 +56,13 @@ class AgentUpdate(BaseModel):
     is_subagent: bool | None = None
 
 
+def _validate_run_meta(meta: dict) -> dict:
+    request_id = meta.get("request_id")
+    if request_id is not None and len(str(request_id)) > 64:
+        raise ValueError("meta.request_id 长度不能超过 64 个字符")
+    return meta
+
+
 class AgentRunCreate(BaseModel):
     query: str | None = Field(None, description="用户输入的问题")
     agent_id: str = Field(..., description="智能体 ID")
@@ -65,8 +72,13 @@ class AgentRunCreate(BaseModel):
     model_spec: str | None = Field(None, description="可选，对话级模型覆盖，优先级高于智能体配置")
     resume: Any | None = Field(None, description="可选，恢复 interrupted run 的输入")
     parent_run_id: str | None = Field(None, description="可选，被恢复的 run ID")
-    resume_request_id: str | None = Field(None, description="可选，resume 幂等键")
+    resume_request_id: str | None = Field(None, max_length=64, description="可选，resume 幂等键")
     queue_policy: str = Field("reject", description="会话忙碌时的策略：reject 或 enqueue")
+
+    @field_validator("meta")
+    @classmethod
+    def validate_request_id(cls, meta: dict) -> dict:
+        return _validate_run_meta(meta)
 
 
 class AgentEvaluationContext(BaseModel):
@@ -82,6 +94,11 @@ class AgentEvalRunCreate(BaseModel):
     meta: dict = Field(default_factory=dict, description="可选，请求追踪信息，例如 request_id、attachment_file_ids")
     image_content: str | None = Field(None, description="可选，base64 图片内容")
     model_spec: str | None = Field(None, description="可选，对话级模型覆盖，优先级高于智能体配置")
+
+    @field_validator("meta")
+    @classmethod
+    def validate_request_id(cls, meta: dict) -> dict:
+        return _validate_run_meta(meta)
 
 
 def _backend_info(info: dict) -> dict:
