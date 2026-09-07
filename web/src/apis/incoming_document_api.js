@@ -51,6 +51,10 @@ export const incomingDocumentApi = {
     })
   },
 
+  retryIngestJob: async (jobId) => {
+    return apiAdminPost(`/api/incoming-documents/ingest-jobs/${encodeURIComponent(jobId)}/retry`, {})
+  },
+
   options: async () => apiAdminGet('/api/incoming-documents/options'),
 
   correctClassification: async (incomingId, classification) => {

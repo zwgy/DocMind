@@ -56,7 +56,16 @@ class IncomingIngestWorkerService:
             await self._stop_heartbeat(heartbeat)
             async with self._session_factory() as session:
                 async with session.begin():
-                    await self._repository_factory(session).finish_delivery(
+                    repository = self._repository_factory(session)
+                    if _is_retryable_download_error(exc) and job.attempt_count <= sys_config.incoming_auto_retry_count:
+                        await repository.retry_running_delivery(
+                            job_id=job_id,
+                            delivery_token=delivery_token,
+                            worker_id=self._worker_id,
+                            error_message=str(exc),
+                        )
+                        return False
+                    await repository.finish_delivery(
                         job_id=job_id,
                         delivery_token=delivery_token,
                         worker_id=self._worker_id,
@@ -95,6 +104,16 @@ class IncomingIngestWorkerService:
         heartbeat.cancel()
         with suppress(asyncio.CancelledError):
             await heartbeat
+
+
+def _is_retryable_download_error(exc: Exception) -> bool:
+    """仅重试短暂网络故障，避免对失效链接和非法文件反复发起无效请求。"""
+    message = str(exc)
+    if "附件下载超时" in message:
+        return True
+    if "附件下载失败：HTTP 5" in message:
+        return True
+    return message.startswith("附件下载失败：") and "HTTP " not in message
 
 
 async def _execute_ingest_job(job_id: str, delivery_token: str) -> None:

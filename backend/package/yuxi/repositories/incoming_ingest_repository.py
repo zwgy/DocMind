@@ -590,6 +590,34 @@ class IncomingIngestRepository:
         await self.db.flush()
         return job
 
+    async def retry_running_delivery(
+        self,
+        *,
+        job_id: str,
+        delivery_token: str,
+        worker_id: str,
+        error_message: str,
+    ) -> bool:
+        """可恢复下载错误只释放当前租约，下一次 Dispatcher 轮询再重新投递。"""
+        job = await self._get_job_for_update(job_id)
+        if (
+            job is None
+            or job.status != "running"
+            or job.delivery_token != delivery_token
+            or job.lease_owner != worker_id
+        ):
+            return False
+        job.status = "pending"
+        job.stage = "registered"
+        job.delivery_token = None
+        job.lease_owner = None
+        job.lease_expires_at = None
+        job.last_heartbeat_at = None
+        job.next_attempt_at = utc_now_naive()
+        job.processing_error = error_message
+        await self.db.flush()
+        return True
+
     async def refresh_terminal_job_source(
         self,
         *,
@@ -644,6 +672,7 @@ class IncomingIngestRepository:
         job.lease_expires_at = None
         job.last_heartbeat_at = None
         job.next_attempt_at = utc_now_naive()
+        job.attempt_count = 0
         job.processing_error = None
         job.updated_by = actor_uid
 

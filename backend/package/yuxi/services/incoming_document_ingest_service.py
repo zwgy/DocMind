@@ -49,7 +49,6 @@ BuildCandidatesFn = Callable[..., Awaitable[None]]
 EnsureBatchRebuildableFn = Callable[[str], Awaitable[None]]
 INCOMING_DOCUMENT_PROCESS_TASK_TYPE = "incoming_document_process"
 MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.8
-REMOTE_FILE_DOWNLOAD_TIMEOUT_SECONDS = 60.0
 def incoming_ocr_parser_params() -> dict[str, Any]:
     """在首次执行前读取全局默认值，随后由任务记录固化为参数快照。"""
     engine_config = dict(sys_config.document_parser_ocr_engine_config or {})
@@ -130,7 +129,7 @@ class IncomingDocumentIngestService:
         source_ids: set[str] = set()
         normalized_files: list[dict[str, Any]] = []
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(REMOTE_FILE_DOWNLOAD_TIMEOUT_SECONDS, connect=10.0),
+            timeout=httpx.Timeout(float(sys_config.incoming_download_timeout_seconds), connect=10.0),
             follow_redirects=True,
             max_redirects=5,
         ) as client:

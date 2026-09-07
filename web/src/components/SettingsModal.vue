@@ -39,6 +39,15 @@
           </div>
           <div
             class="sider-item"
+            :class="{ activesec: activeTab === 'documentParser' }"
+            @click="activeTab = 'documentParser'"
+            v-if="userStore.isAdmin"
+          >
+            <FileSearch class="icon" :size="18" />
+            <span>文档解析配置</span>
+          </div>
+          <div
+            class="sider-item"
             :class="{ activesec: activeTab === 'user' }"
             @click="activeTab = 'user'"
             v-if="userStore.isAdmin"
@@ -128,6 +137,14 @@
         </div>
         <div
           class="nav-item"
+          :class="{ active: activeTab === 'documentParser' }"
+          @click="activeTab = 'documentParser'"
+          v-if="userStore.isAdmin"
+        >
+          文档解析配置
+        </div>
+        <div
+          class="nav-item"
           :class="{ active: activeTab === 'user' }"
           @click="activeTab = 'user'"
           v-if="userStore.isAdmin"
@@ -159,6 +176,10 @@
             <BasicSettingsSection />
           </div>
 
+          <div v-if="activeTab === 'documentParser' && userStore.isAdmin">
+            <DocumentParserSettingsCard />
+          </div>
+
           <div v-show="activeTab === 'user'" v-if="userStore.isAdmin">
             <UserManagementComponent />
           </div>
@@ -178,6 +199,7 @@ import { useUserStore } from '@/stores/user'
 import {
   CircleUser,
   ExternalLink,
+  FileSearch,
   Settings,
   Star,
   SquareTerminal,
@@ -190,6 +212,7 @@ import AgentEnvSettingsCard from '@/components/AgentEnvSettingsCard.vue'
 import BasicSettingsSection from '@/components/BasicSettingsSection.vue'
 import UserManagementComponent from '@/components/UserManagementComponent.vue'
 import DepartmentManagementComponent from '@/components/DepartmentManagementComponent.vue'
+import DocumentParserSettingsCard from '@/components/DocumentParserSettingsCard.vue'
 
 const props = defineProps({
   visible: {
@@ -220,7 +243,7 @@ const visible = computed({
 const availableTabs = computed(() => {
   const tabs = []
   if (userStore.isLoggedIn) tabs.push('account', 'agentEnv')
-  if (userStore.isAdmin) tabs.push('base', 'user')
+  if (userStore.isAdmin) tabs.push('base', 'documentParser', 'user')
   if (userStore.isSuperAdmin) tabs.push('department')
   return tabs
 })

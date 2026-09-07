@@ -2,7 +2,7 @@
   <div class="incoming-documents-view">
     <PageHeader title="来文管理" :loading="loading" :show-border="true">
       <template #actions>
-        <a-button @click="loadDocuments">
+        <a-button @click="refreshActiveTab">
           <template #icon><RefreshCw :size="14" /></template>
           刷新
         </a-button>
@@ -10,6 +10,8 @@
     </PageHeader>
 
     <div class="incoming-content">
+      <a-tabs v-model:active-key="activeViewTab" class="incoming-management-tabs">
+        <a-tab-pane key="documents" tab="来文">
       <div class="toolbar">
         <a-input-search
           v-model:value="filters.keyword"
@@ -182,13 +184,20 @@
         </template>
       </a-table>
 
+        </a-tab-pane>
+        <a-tab-pane key="tasks" tab="处理任务">
       <section class="ingest-jobs-section">
         <div class="ingest-jobs-heading">
-          <h2>接入任务</h2>
-          <a-button size="small" @click="loadIngestJobs">
-            <template #icon><RefreshCw :size="14" /></template>
-            刷新
-          </a-button>
+          <a-space>
+            <a-button size="small" @click="loadIngestJobs">
+              <template #icon><RefreshCw :size="14" /></template>
+              刷新
+            </a-button>
+            <a-button size="small" @click="openSchedulerSettings">
+              <template #icon><SlidersHorizontal :size="14" /></template>
+              调度设置
+            </a-button>
+          </a-space>
         </div>
         <a-table
           row-key="jobId"
@@ -210,8 +219,27 @@
                 {{ ingestJobStatusMeta(record.status).label }}
               </a-tag>
             </template>
+            <template v-else-if="column.key === 'stage'">
+              {{ record.stageLabel || '处理中' }}
+            </template>
+            <template v-else-if="column.key === 'failureReason'">
+              <a-popover v-if="record.processingError" title="失败详情" placement="leftTop">
+                <template #content><pre class="job-error-detail">{{ record.processingError }}</pre></template>
+                <a-button type="link" size="small" class="job-failure-reason">
+                  {{ record.failureReason || '查看详情' }}
+                </a-button>
+              </a-popover>
+              <span v-else>-</span>
+            </template>
             <template v-else-if="column.key === 'updatedAt'">{{ formatDate(record.updatedAt) }}</template>
             <template v-else-if="column.key === 'actions'">
+              <a-button
+                v-if="['failed', 'cancelled'].includes(record.status)"
+                type="link"
+                size="small"
+                :loading="retryingIngestJobId === record.jobId"
+                @click="retryIngestJob(record)"
+              >重试</a-button>
               <a-button
                 v-if="record.priority === 'historical' && !['succeeded', 'failed', 'cancelled'].includes(record.status)"
                 type="link"
@@ -223,6 +251,8 @@
           </template>
         </a-table>
       </section>
+        </a-tab-pane>
+      </a-tabs>
     </div>
 
     <a-drawer
@@ -578,14 +608,39 @@
             个附件；默认选择尚未入库的全部附件，可取消不需要进入知识库的附件。
           </div>
         </a-form-item>
-        <a-form-item label="OCR 引擎">
-          <a-select v-model:value="importForm.ocrEngine" :options="ocrOptions" />
-        </a-form-item>
         <ChunkParamsConfig
           :temp-chunk-params="importForm.chunkParams"
           :allow-preset-follow-default="true"
           :database-preset-id="selectedDatabasePresetId"
         />
+      </a-form>
+    </a-modal>
+
+    <a-modal
+      v-model:open="schedulerSettingsOpen"
+      title="处理任务调度设置"
+      width="560px"
+      :confirm-loading="schedulerSettingsSaving"
+      :destroy-on-close="true"
+      ok-text="保存配置"
+      @ok="saveSchedulerSettings"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="历史任务开始时间">
+          <a-time-picker v-model:value="schedulerSettings.windowStart" value-format="HH:mm" format="HH:mm" />
+        </a-form-item>
+        <a-form-item label="历史任务结束时间">
+          <a-time-picker v-model:value="schedulerSettings.windowEnd" value-format="HH:mm" format="HH:mm" />
+        </a-form-item>
+        <a-form-item label="可并行处理的来文数量">
+          <a-input-number v-model:value="schedulerSettings.maxConcurrency" :min="1" :max="4" />
+        </a-form-item>
+        <a-form-item label="来源文件下载超时（秒）">
+          <a-input-number v-model:value="schedulerSettings.downloadTimeoutSeconds" :min="10" :max="900" />
+        </a-form-item>
+        <a-form-item label="可恢复下载异常自动重试次数">
+          <a-input-number v-model:value="schedulerSettings.autoRetryCount" :min="0" :max="5" />
+        </a-form-item>
       </a-form>
     </a-modal>
 
@@ -669,12 +724,13 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import { message } from 'ant-design-vue'
-import { ChevronRight, FileSearch, FileText, RefreshCw } from 'lucide-vue-next'
+import { ChevronRight, FileSearch, FileText, RefreshCw, SlidersHorizontal } from 'lucide-vue-next'
 import PageHeader from '@/components/shared/PageHeader.vue'
 import AgentFilePreview from '@/components/AgentFilePreview.vue'
 import ChunkParamsConfig from '@/components/ChunkParamsConfig.vue'
 import FileDetailModal from '@/components/FileDetailModal.vue'
 import { incomingDocumentApi } from '@/apis/incoming_document_api'
+import { configApi } from '@/apis/system_api'
 import { databaseApi, documentApi } from '@/apis/knowledge_api'
 import { buildChunkParamsPayload } from '@/utils/chunkUtils'
 import { getPreviewTypeByPath, normalizePreviewResponse } from '@/utils/file_preview'
@@ -711,9 +767,20 @@ const importPreview = reactive({
   message: ''
 })
 const retryingId = ref('')
+const retryingIngestJobId = ref('')
 const ingestJobs = ref([])
 const ingestJobsLoading = ref(false)
 const expeditingJobId = ref('')
+const activeViewTab = ref('documents')
+const schedulerSettingsOpen = ref(false)
+const schedulerSettingsSaving = ref(false)
+const schedulerSettings = reactive({
+  windowStart: '18:00',
+  windowEnd: '07:30',
+  maxConcurrency: 1,
+  downloadTimeoutSeconds: 60,
+  autoRetryCount: 0
+})
 let ingestJobsRefreshTimer = null
 // "原文 / Markdown" Tab 与原文预览状态，与知识库 FileDetailModal 保持同样的请求序号防抖模式。
 const previewTab = ref('source')
@@ -748,7 +815,6 @@ const importForm = reactive({
   kbId: undefined,
   parentId: null,
   sourceFileIds: [],
-  ocrEngine: 'disable',
   chunkParams: {
     chunk_preset_id: '',
     chunk_parser_config: {}
@@ -777,10 +843,11 @@ const ingestJobColumns = [
   { title: '来源', key: 'sourceSystem', dataIndex: 'sourceSystem', width: 110 },
   { title: '优先级', key: 'priority', width: 90 },
   { title: '状态', key: 'status', width: 110 },
-  { title: '阶段', key: 'stage', dataIndex: 'stage', width: 110 },
+  { title: '业务进度', key: 'stage', width: 130 },
+  { title: '失败原因', key: 'failureReason', width: 180 },
   { title: '重试', key: 'attemptCount', dataIndex: 'attemptCount', width: 80 },
   { title: '最后更新', key: 'updatedAt', width: 160 },
-  { title: '操作', key: 'actions', width: 100, fixed: 'right' }
+  { title: '操作', key: 'actions', width: 150, fixed: 'right' }
 ]
 
 const processingStatusOptions = [
@@ -797,14 +864,6 @@ const importStatusOptions = [
   { value: 'partial', label: '部分入库' },
   { value: 'indexed', label: '已入库' },
   { value: 'failed', label: '入库失败' }
-]
-
-const ocrOptions = [
-  { value: 'disable', label: '不启用 OCR' },
-  { value: 'rapid_ocr', label: 'RapidOCR (ONNX)' },
-  { value: 'mineru_ocr', label: 'MinerU OCR' },
-  { value: 'pp_structure_v3_ocr', label: 'PP-StructureV3 OCR' },
-  { value: 'deepseek_ocr', label: 'DeepSeek OCR' }
 ]
 
 const databaseOptions = computed(() =>
@@ -1215,13 +1274,57 @@ async function loadIngestJobs() {
     const result = await incomingDocumentApi.listIngestJobs({ page: 1, page_size: 20 })
     ingestJobs.value = result.items || []
     if (ingestJobsRefreshTimer) clearTimeout(ingestJobsRefreshTimer)
-    if (ingestJobs.value.some((item) => ['pending', 'dispatching', 'queued', 'running'].includes(item.status))) {
+    if (
+      activeViewTab.value === 'tasks' &&
+      ingestJobs.value.some((item) => ['pending', 'dispatching', 'queued', 'running'].includes(item.status))
+    ) {
       ingestJobsRefreshTimer = setTimeout(() => void loadIngestJobs(), 5000)
     }
   } catch (error) {
     message.error(error.message || '加载接入任务失败')
   } finally {
     ingestJobsLoading.value = false
+  }
+}
+
+async function refreshActiveTab() {
+  if (activeViewTab.value === 'tasks') {
+    await loadIngestJobs()
+    return
+  }
+  await loadDocuments()
+}
+
+async function openSchedulerSettings() {
+  try {
+    const config = await configApi.getConfig()
+    schedulerSettings.windowStart = config.incoming_history_window_start || '18:00'
+    schedulerSettings.windowEnd = config.incoming_history_window_end || '07:30'
+    schedulerSettings.maxConcurrency = Number(config.incoming_max_concurrency || 1)
+    schedulerSettings.downloadTimeoutSeconds = Number(config.incoming_download_timeout_seconds || 60)
+    schedulerSettings.autoRetryCount = Number(config.incoming_auto_retry_count || 0)
+    schedulerSettingsOpen.value = true
+  } catch (error) {
+    message.error(error.message || '加载调度设置失败')
+  }
+}
+
+async function saveSchedulerSettings() {
+  schedulerSettingsSaving.value = true
+  try {
+    await configApi.updateConfigBatch({
+      incoming_history_window_start: schedulerSettings.windowStart,
+      incoming_history_window_end: schedulerSettings.windowEnd,
+      incoming_max_concurrency: schedulerSettings.maxConcurrency,
+      incoming_download_timeout_seconds: schedulerSettings.downloadTimeoutSeconds,
+      incoming_auto_retry_count: schedulerSettings.autoRetryCount
+    })
+    schedulerSettingsOpen.value = false
+    message.success('处理任务调度设置已保存')
+  } catch (error) {
+    message.error(error.message || '保存调度设置失败')
+  } finally {
+    schedulerSettingsSaving.value = false
   }
 }
 
@@ -1239,6 +1342,19 @@ async function expediteIngestJob(record) {
     message.error(error.message || '提升任务优先级失败')
   } finally {
     expeditingJobId.value = ''
+  }
+}
+
+async function retryIngestJob(record) {
+  retryingIngestJobId.value = record.jobId
+  try {
+    await incomingDocumentApi.retryIngestJob(record.jobId)
+    message.success('已重新加入处理队列')
+    await loadIngestJobs()
+  } catch (error) {
+    message.error(error.message || '重试处理任务失败')
+  } finally {
+    retryingIngestJobId.value = ''
   }
 }
 
@@ -1411,7 +1527,6 @@ async function openImport(record) {
   importForm.sourceFileIds = (importTarget.value.files || [])
     .filter((file) => file.knowledgeImportStatus !== 'indexed')
     .map((file) => file.sourceFileId)
-  importForm.ocrEngine = 'disable'
   importForm.chunkParams.chunk_preset_id = ''
   importForm.chunkParams.chunk_parser_config = {}
   loadFolderTree(importForm.kbId)
@@ -1453,11 +1568,7 @@ async function submitImport() {
 
   importing.value = true
   try {
-    const params = {
-      ocr_engine: importForm.ocrEngine,
-      ocr_engine_config: {},
-      ...buildChunkParamsPayload(importForm.chunkParams)
-    }
+    const params = buildChunkParamsPayload(importForm.chunkParams)
     await incomingDocumentApi.importToKnowledge(importTarget.value.incomingId, {
       kbId: importForm.kbId,
       parentId: importForm.parentId || null,
@@ -1479,6 +1590,16 @@ async function submitImport() {
 
 onMounted(async () => {
   await Promise.all([loadDatabases(), loadDocuments(), loadClassificationOptions(), loadIngestJobs()])
+})
+
+watch(activeViewTab, async (tab) => {
+  if (ingestJobsRefreshTimer) {
+    clearTimeout(ingestJobsRefreshTimer)
+    ingestJobsRefreshTimer = null
+  }
+  if (tab === 'tasks') {
+    await loadIngestJobs()
+  }
 })
 
 watch(
@@ -1525,8 +1646,12 @@ onBeforeUnmount(() => {
   padding: 16px var(--page-padding) 24px;
 }
 
+.incoming-management-tabs :deep(.ant-tabs-nav) {
+  margin-bottom: 12px;
+}
+
 .ingest-jobs-section {
-  margin-top: 24px;
+  min-width: 0;
 }
 
 .ingest-jobs-heading {
@@ -1536,9 +1661,25 @@ onBeforeUnmount(() => {
   margin-bottom: 10px;
 }
 
-.ingest-jobs-heading h2 {
+.job-failure-reason {
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  color: var(--color-error-700);
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+.job-error-detail {
+  max-width: min(520px, 72vw);
+  max-height: 260px;
   margin: 0;
-  font-size: 16px;
+  overflow: auto;
+  color: var(--color-text);
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .toolbar {

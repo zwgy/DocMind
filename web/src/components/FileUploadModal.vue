@@ -898,7 +898,7 @@ const unavailableOcrExpanded = ref(false)
 
 // 解析参数
 const processingParams = ref({
-  ocr_engine: 'disable',
+  ocr_engine: 'system_default',
   ocr_engine_config: {}
 })
 
@@ -972,6 +972,11 @@ const hasZipFiles = computed(() => {
 
 const ocrEngineOptions = [
   {
+    value: 'system_default',
+    label: '使用系统默认配置',
+    description: '使用设置中的文档解析默认配置'
+  },
+  {
     value: 'disable',
     label: '不启用',
     description: '不启用 OCR，仅处理文本文件'
@@ -1015,6 +1020,7 @@ const ocrStatusLabels = {
 }
 
 const getOcrStatus = (engine) => {
+  if (engine === 'system_default') return 'local'
   if (engine === 'disable') return 'local'
   const current = ocrHealthStatus.value?.[engine]
   if (ocrHealthChecking.value && (!current || current.status === 'unknown')) return 'checking'
@@ -1025,6 +1031,7 @@ const getOcrStatusLabel = (engine) => ocrStatusLabels[getOcrStatus(engine)] || '
 
 const getOcrDescription = (engine) => {
   const option = ocrEngineOptions.find((item) => item.value === engine)
+  if (engine === 'system_default') return option?.description || '使用设置中的文档解析默认配置'
   if (engine === 'disable') return option?.description || '不启用 OCR，仅处理文本文件'
 
   const messageText = ocrHealthStatus.value?.[engine]?.message
@@ -1077,6 +1084,7 @@ const validateOcrService = () => {
   }
 
   const engine = processingParams.value.ocr_engine
+  if (engine === 'system_default') return true
   if (isUnavailableOcrEngine(engine)) {
     message.error(`OCR服务不可用: ${getOcrDescription(engine)}`)
     return false

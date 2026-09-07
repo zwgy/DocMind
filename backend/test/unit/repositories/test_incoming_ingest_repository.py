@@ -247,6 +247,7 @@ async def test_retry_terminal_job_resets_delivery_state_and_preserves_priority(r
     assert retried.status == "pending"
     assert retried.stage == "registered"
     assert retried.priority == "immediate"
+    assert retried.attempt_count == 0
     assert retried.delivery_token is None
     assert retried.lease_owner is None
     assert retried.processing_error is None

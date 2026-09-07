@@ -86,6 +86,12 @@ class Config(BaseModel):
     incoming_max_concurrency: int = Field(
         default=1, ge=1, le=4, description="来文 Worker 调度并发上限（1 至 4）"
     )
+    incoming_download_timeout_seconds: int = Field(
+        default=60, ge=10, le=900, description="来文来源文件下载超时秒数（10 至 900）"
+    )
+    incoming_auto_retry_count: int = Field(
+        default=0, ge=0, le=5, description="来文来源下载可恢复异常的自动重试次数（0 至 5）"
+    )
     document_parser_ocr_engine: str = Field(default="disable", description="文档解析默认 OCR 引擎")
     document_parser_ocr_engine_config: dict[str, Any] = Field(
         default_factory=dict, description="文档解析默认 OCR 引擎高级参数"
@@ -167,7 +173,8 @@ class Config(BaseModel):
             if field_info.exclude:
                 continue
             current_value = getattr(self, field_name)
-            if current_value != field_info.default:
+            default_value = field_info.get_default(call_default_factory=True)
+            if current_value != default_value:
                 user_modified[field_name] = current_value
 
         try:
