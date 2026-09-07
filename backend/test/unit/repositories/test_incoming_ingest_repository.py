@@ -4,13 +4,20 @@ import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from yuxi.repositories import incoming_ingest_repository as ingest_repository_module
 from yuxi.repositories.incoming_ingest_repository import IncomingIngestRepository, is_historical_window
 from yuxi.storage.postgres.models_knowledge import Base, IncomingIngestBatch, IncomingIngestBatchItem, IncomingIngestJob
 
 
 @pytest.fixture
-async def repository():
+async def repository(monkeypatch):
     """仅建来文接入表，使用真实 ORM 状态验证仓储的事务内决策。"""
+    # 领取断言使用固定时间，登记时间也必须固定，避免真实时钟越过测试时间后产生假失败。
+    monkeypatch.setattr(
+        ingest_repository_module,
+        "utc_now_naive",
+        lambda: datetime(2026, 9, 7, 9, 0),
+    )
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(
