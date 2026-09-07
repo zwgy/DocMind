@@ -18,6 +18,7 @@ class FakeIngestRepository:
     def __init__(self, _session, job):
         self.job = job
         self.bound_incoming_ids = []
+        self.stages = []
 
     async def get_running_delivery(self, *, job_id, delivery_token):
         if self.job.job_id == job_id and self.job.delivery_token == delivery_token:
@@ -36,6 +37,12 @@ class FakeIngestRepository:
         if getattr(self.job, "parser_params", None) is None:
             self.job.parser_params = parser_params
         return self.job.parser_params
+
+    async def update_running_stage(self, *, job_id, delivery_token, stage):
+        if await self.get_running_delivery(job_id=job_id, delivery_token=delivery_token) is None:
+            return False
+        self.stages.append(stage)
+        return True
 
 
 @pytest.mark.asyncio
@@ -83,9 +90,17 @@ async def test_execute_ingest_job_processes_manifest_for_current_delivery(monkey
         calls.append(("ingest", kwargs))
         return {"incomingId": "inc_1", "status": "accepted"}
 
-    async def fake_process(incoming_id, *, operator_id=None, publication_guard=None, parser_params=None):
+    async def fake_process(
+        incoming_id,
+        *,
+        operator_id=None,
+        publication_guard=None,
+        parser_params=None,
+        job_stage_callback=None,
+    ):
         calls.append(("process", incoming_id, operator_id, parser_params))
         assert await publication_guard() is True
+        await job_stage_callback("extracting")
         return {"incoming_id": incoming_id, "status": "ready"}
 
     service.download_source_files = fake_download
@@ -105,3 +120,4 @@ async def test_execute_ingest_job_processes_manifest_for_current_delivery(monkey
         {"ocr_engine": "disable", "ocr_engine_config": {}},
     )
     assert repository.bound_incoming_ids == ["inc_1"]
+    assert repository.stages == ["parsing", "extracting"]
