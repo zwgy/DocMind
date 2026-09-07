@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from asyncio import gather
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -30,6 +29,7 @@ from yuxi.repositories.incoming_document_repository import (
     IncomingDocumentAuditReferenceError,
     IncomingDocumentRepository,
 )
+from yuxi.repositories.incoming_ingest_repository import IncomingIngestRepository
 from yuxi.services.incoming_task_candidate_service import IncomingTaskCandidateService
 from yuxi.services.knowledge_document_ingest_service import KnowledgeDocumentIngestService
 from yuxi.services.task_service import TaskContext, tasker
@@ -162,6 +162,7 @@ class IncomingDocumentIngestService:
         source_system: str = "production",
         files: list[dict[str, Any]],
         operator_id: str | None = None,
+        enqueue_processing: bool = True,
     ) -> dict[str, Any]:
         source_system = (source_system or "production").strip() or "production"
         source_document_id = (source_doc_id or "").strip()
@@ -211,8 +212,17 @@ class IncomingDocumentIngestService:
 
         if not changed:
             if existing_document.status == "uploaded":
-                task = await self._submit_process_task(incoming_id=incoming_id, operator_id=operator_id)
-                return {"incomingId": incoming_id, "taskId": task.id, "status": "accepted", "items": []}
+                task = (
+                    await self._submit_process_task(incoming_id=incoming_id, operator_id=operator_id)
+                    if enqueue_processing
+                    else None
+                )
+                return {
+                    "incomingId": incoming_id,
+                    "taskId": task.id if task is not None else None,
+                    "status": "accepted",
+                    "items": [],
+                }
             return {
                 "incomingId": incoming_id,
                 "taskId": None,
@@ -326,8 +336,69 @@ class IncomingDocumentIngestService:
                         "knowledge_import_error": None,
                     },
                 )
-        task = await self._submit_process_task(incoming_id=document.incoming_id, operator_id=operator_id)
-        return {"incomingId": document.incoming_id, "taskId": task.id, "status": "accepted", "items": items}
+        task = (
+            await self._submit_process_task(incoming_id=document.incoming_id, operator_id=operator_id)
+            if enqueue_processing
+            else None
+        )
+        return {
+            "incomingId": document.incoming_id,
+            "taskId": task.id if task is not None else None,
+            "status": "accepted",
+            "items": items,
+        }
+
+    async def execute_ingest_job(self, job_id: str, delivery_token: str) -> dict[str, Any]:
+        """执行持久化来文任务，Redis 消息只作为该令牌的触发器。"""
+        job = await self._get_running_ingest_job(job_id=job_id, delivery_token=delivery_token)
+        if job is None:
+            return {"job_id": job_id, "status": "stale"}
+
+        files = await self.download_source_files(files=list(job.file_manifest or []))
+        received = await self.ingest_files(
+            source_system=job.source_system,
+            source_doc_id=job.source_document_id,
+            document_metadata=dict(job.document_metadata or {}),
+            files=files,
+            operator_id=job.created_by,
+            enqueue_processing=False,
+        )
+        incoming_id = received["incomingId"]
+        if not await self._bind_ingest_job_incoming_document(
+            job_id=job_id,
+            delivery_token=delivery_token,
+            incoming_id=incoming_id,
+        ):
+            return {"job_id": job_id, "status": "stale"}
+
+        async def publication_guard() -> bool:
+            return await self._get_running_ingest_job(job_id=job_id, delivery_token=delivery_token) is not None
+
+        processed = await self.process_incoming_document(
+            incoming_id,
+            operator_id=job.created_by,
+            publication_guard=publication_guard,
+        )
+        if processed.get("status") == "stale":
+            return {"job_id": job_id, "status": "stale"}
+        return {"job_id": job_id, "incoming_id": incoming_id, "status": "ready"}
+
+    async def _get_running_ingest_job(self, *, job_id: str, delivery_token: str):
+        async with pg_manager.get_async_session_context() as session:
+            return await IncomingIngestRepository(session).get_running_delivery(
+                job_id=job_id,
+                delivery_token=delivery_token,
+            )
+
+    async def _bind_ingest_job_incoming_document(
+        self, *, job_id: str, delivery_token: str, incoming_id: str
+    ) -> bool:
+        async with pg_manager.get_async_session_context() as session:
+            return await IncomingIngestRepository(session).bind_incoming_document(
+                job_id=job_id,
+                delivery_token=delivery_token,
+                incoming_id=incoming_id,
+            )
 
     async def process_incoming_document(
         self,
@@ -335,6 +406,7 @@ class IncomingDocumentIngestService:
         *,
         operator_id: str | None = None,
         context: TaskContext | None = None,
+        publication_guard: Callable[[], Awaitable[bool]] | None = None,
     ) -> dict[str, Any]:
         document = await self.incoming_repo.get_by_incoming_id(incoming_id)
         if document is None:
@@ -381,7 +453,18 @@ class IncomingDocumentIngestService:
                     )
                     raise
 
-            parsed_files = list(await gather(*(parse_file(file) for file in files)))
+            parsed_files = []
+            for file in files:
+                # 成功附件的 Markdown 是恢复检查点。重试只处理未完成附件，避免
+                # 对 MinerU 和本地模型造成无意义的重复压力。
+                if file.status == "parsed" and file.markdown_file_url:
+                    markdown = await _download_markdown(file.markdown_file_url)
+                    if markdown.strip():
+                        parsed_files.append(
+                            {"file": file, "markdown": markdown, "markdown_url": file.markdown_file_url}
+                        )
+                        continue
+                parsed_files.append(await parse_file(file))
             await _set_progress(context, 50, f"已解析全部 {len(files)} 个附件")
 
             await self.incoming_repo.update_document(incoming_id, {"status": "extracting", "updated_by": operator_id})
@@ -408,6 +491,8 @@ class IncomingDocumentIngestService:
                 "processing_error": None,
                 "updated_by": operator_id,
             }
+            if publication_guard is not None and not await publication_guard():
+                return {"incoming_id": incoming_id, "status": "stale"}
             await self._finish_candidate_build(
                 incoming_id=incoming_id,
                 extraction_result=extraction_result,
@@ -622,8 +707,9 @@ class IncomingDocumentIngestService:
             await self.incoming_repo.update_file(
                 file.incoming_file_id,
                 {
-                    "status": "uploaded",
-                    "markdown_file_url": None,
+                    # 普通重试只恢复失败阶段，已解析附件仍是有效检查点；
+                    # 显式重解析入口才允许删除 Markdown 并重新调用解析器。
+                    "status": "parsed" if file.markdown_file_url else "uploaded",
                     "processing_error": None,
                     "linked_file_id": None,
                     "knowledge_import_status": "none",
@@ -985,10 +1071,13 @@ class IncomingDocumentIngestService:
         ready_updates: dict[str, Any],
     ) -> None:
         """真实抽取运行必须生成候选；仅为旧单元测试兼容无运行 ID 的替身返回值。"""
+        extraction_run_id = (extraction_result or {}).get("run_id")
+        if extraction_run_id:
+            # 候选与来文状态同事务发布，读取端只能使用该明确指针，而不是碰巧最新的运行。
+            ready_updates = {**ready_updates, "published_extraction_run_id": extraction_run_id}
         if not self._uses_database_candidate_workflows:
             await self.incoming_repo.update_document(incoming_id, ready_updates)
             return
-        extraction_run_id = (extraction_result or {}).get("run_id")
         if not extraction_run_id:
             await self.incoming_repo.update_document(incoming_id, ready_updates)
             return
@@ -1037,7 +1126,9 @@ class IncomingDocumentIngestService:
         supplementary_files = [parsed for parsed in parsed_files if parsed is not main_file]
         if not supplementary_files:
             return {}
-        results = await gather(*(self._summarize_attachment(parsed) for parsed in supplementary_files))
+        results = []
+        for parsed in supplementary_files:
+            results.append(await self._summarize_attachment(parsed))
         return {
             parsed["file"].source_file_id: summary
             for parsed, summary in zip(supplementary_files, results, strict=True)
@@ -1068,28 +1159,26 @@ class IncomingDocumentIngestService:
                 }
             },
         )
-        summaries = await gather(
-            *(
-                self.summarize_attachment(
+        summaries = []
+        for chunk in chunks:
+            summaries.append(
+                await self.summarize_attachment(
                     filename=file.filename,
                     markdown=str(chunk["content"]),
                     model_spec=config.default_model,
                 )
-                for chunk in chunks
             )
-        )
         previous_tokens = count_tokens("\n\n".join(summaries))
         while previous_tokens > input_limit:
-            condensed = await gather(
-                *(
-                    self.summarize_attachment(
+            condensed = []
+            for group in _group_by_token_budget(summaries, input_limit):
+                condensed.append(
+                    await self.summarize_attachment(
                         filename=file.filename,
                         markdown="\n\n".join(group),
                         model_spec=config.default_model,
                     )
-                    for group in _group_by_token_budget(summaries, input_limit)
                 )
-            )
             current_tokens = count_tokens("\n\n".join(condensed))
             if current_tokens >= previous_tokens:
                 raise RuntimeError("Attachment summary reduction did not converge")

@@ -6,9 +6,13 @@ import pytest
 from yuxi.agents.backends.sandbox import paths as sandbox_paths
 from yuxi.services import incoming_document_markdown_service as service_module
 from yuxi.services.incoming_document_markdown_service import IncomingDocumentMarkdownService
+from yuxi.utils import hashstr
 
 
 class FakeIncomingRepository:
+    def __init__(self):
+        self.markdown_file_url = "minio://parsed/attachment.md"
+
     async def get_by_incoming_id(self, incoming_id):
         return SimpleNamespace(incoming_id=incoming_id) if incoming_id == "inc-1" else None
 
@@ -27,7 +31,7 @@ class FakeIncomingRepository:
                 source_file_id="attachment",
                 filename="附件.xlsx",
                 original_file_url="minio://original/attachment.xlsx",
-                markdown_file_url="minio://parsed/attachment.md",
+                markdown_file_url=self.markdown_file_url,
             ),
         ]
 
@@ -72,11 +76,21 @@ async def test_materialize_writes_only_selected_markdown_to_owned_thread(tmp_pat
         {
             "source_file_id": "attachment",
             "filename": "附件.xlsx",
-            "markdown_path": "/home/gem/user-data/outputs/incoming-documents/inc-1/file-row-2.md",
+            "markdown_path": (
+                "/home/gem/user-data/outputs/incoming-documents/inc-1/"
+                f"file-row-2-{hashstr('minio://parsed/attachment.md', 16)}.md"
+            ),
         }
     ]
     host_path = (
-        tmp_path / "threads" / "thread-1" / "user-data" / "outputs" / "incoming-documents" / "inc-1" / "file-row-2.md"
+        tmp_path
+        / "threads"
+        / "thread-1"
+        / "user-data"
+        / "outputs"
+        / "incoming-documents"
+        / "inc-1"
+        / f"file-row-2-{hashstr('minio://parsed/attachment.md', 16)}.md"
     )
     assert host_path.read_text(encoding="utf-8") == "# 附件内容"
     assert "minio" not in str(result)
@@ -91,6 +105,44 @@ async def test_materialize_writes_only_selected_markdown_to_owned_thread(tmp_pat
 
     assert repeated == result
     assert download_calls == ["minio://parsed/attachment.md"]
+
+
+@pytest.mark.asyncio
+async def test_materialize_refreshes_sandbox_cache_when_markdown_version_changes(tmp_path, monkeypatch):
+    monkeypatch.setattr(sandbox_paths.conf, "save_dir", str(tmp_path))
+
+    @asynccontextmanager
+    async def fake_session_context():
+        yield object()
+
+    class FakeConversationRepository:
+        def __init__(self, session):
+            del session
+
+        async def get_conversation_by_thread_id(self, _thread_id):
+            return SimpleNamespace(uid="user-1", status="active")
+
+    downloads = []
+
+    async def fake_download_text(url):
+        downloads.append(url)
+        return f"# {url}"
+
+    repo = FakeIncomingRepository()
+    monkeypatch.setattr(service_module.pg_manager, "get_async_session_context", fake_session_context)
+    monkeypatch.setattr(service_module, "ConversationRepository", FakeConversationRepository)
+    monkeypatch.setattr(IncomingDocumentMarkdownService, "download_text", staticmethod(fake_download_text))
+
+    first = await IncomingDocumentMarkdownService(repo).materialize(
+        incoming_id="inc-1", source_file_ids=["attachment"], uid="user-1", thread_id="thread-1"
+    )
+    repo.markdown_file_url = "minio://parsed/attachment-v2.md"
+    second = await IncomingDocumentMarkdownService(repo).materialize(
+        incoming_id="inc-1", source_file_ids=["attachment"], uid="user-1", thread_id="thread-1"
+    )
+
+    assert first[0]["markdown_path"] != second[0]["markdown_path"]
+    assert downloads == ["minio://parsed/attachment.md", "minio://parsed/attachment-v2.md"]
 
 
 @pytest.mark.asyncio
@@ -155,7 +207,10 @@ async def test_materialize_original_writes_selected_file_to_owned_thread(tmp_pat
         {
             "source_file_id": "main",
             "filename": "主文件.docx",
-            "original_path": "/home/gem/user-data/outputs/incoming-documents/inc-1/file-row-1/主文件.docx",
+            "original_path": (
+                "/home/gem/user-data/outputs/incoming-documents/inc-1/file-row-1/"
+                f"{hashstr('minio://original/main.docx', 16)}/主文件.docx"
+            ),
         }
     ]
     host_path = (
@@ -167,6 +222,7 @@ async def test_materialize_original_writes_selected_file_to_owned_thread(tmp_pat
         / "incoming-documents"
         / "inc-1"
         / "file-row-1"
+        / hashstr("minio://original/main.docx", 16)
         / "主文件.docx"
     )
     assert host_path.read_bytes() == b"original-content"

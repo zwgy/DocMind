@@ -11,7 +11,7 @@ from yuxi.repositories.conversation_repository import ConversationRepository
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
 from yuxi.storage.minio import StorageError, get_minio_client
 from yuxi.storage.postgres.manager import pg_manager
-from yuxi.utils import logger
+from yuxi.utils import hashstr, logger
 
 
 class IncomingDocumentMarkdownError(RuntimeError):
@@ -89,7 +89,9 @@ class IncomingDocumentMarkdownService:
             file = selected[source_file_id]
             if not file.markdown_file_url:
                 raise ValueError(f"附件 Markdown 尚未生成: {file.filename}")
-            host_path = target_dir / f"{file.incoming_file_id}.md"
+            # 对象 URL 是已发布解析版本的身份。缓存路径必须随它改变，否则重解析
+            # 后旧对话会继续向模型暴露上一版 Markdown。
+            host_path = target_dir / f"{file.incoming_file_id}-{hashstr(file.markdown_file_url, 16)}.md"
             # 来文 ready 后 Markdown 对象保持不变；同一线程续聊复用已落盘文件，
             # 避免每轮“问文件”都在模型首个可见事件前重复访问对象存储。
             if not host_path.is_file():
@@ -129,7 +131,7 @@ class IncomingDocumentMarkdownService:
             if not file.original_file_url:
                 raise ValueError(f"来文原始文件尚未上传: {file.filename}")
             filename = Path(file.filename).name or "incoming"
-            host_path = target_dir / file.incoming_file_id / filename
+            host_path = target_dir / file.incoming_file_id / hashstr(file.original_file_url, 16) / filename
             if not host_path.is_file():
                 try:
                     bucket_name, object_name = parse_minio_url(file.original_file_url)

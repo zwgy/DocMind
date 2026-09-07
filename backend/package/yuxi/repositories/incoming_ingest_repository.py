@@ -422,6 +422,22 @@ class IncomingIngestRepository:
         await self.db.flush()
         return job
 
+    async def get_running_delivery(self, *, job_id: str, delivery_token: str) -> IncomingIngestJob | None:
+        """读取当前有效投递；外部调用前后都必须以此拒绝过期 Worker。"""
+        job = await self.db.scalar(select(IncomingIngestJob).where(IncomingIngestJob.job_id == job_id))
+        if job is None or job.status != "running" or job.delivery_token != delivery_token:
+            return None
+        return job
+
+    async def bind_incoming_document(self, *, job_id: str, delivery_token: str, incoming_id: str) -> bool:
+        """将已接收的来文绑定到仍有效的投递，过期令牌不得写入新关联。"""
+        job = await self._get_job_for_update(job_id)
+        if job is None or job.status != "running" or job.delivery_token != delivery_token:
+            return False
+        job.incoming_id = incoming_id
+        await self.db.flush()
+        return True
+
     async def renew_lease(
         self,
         *,

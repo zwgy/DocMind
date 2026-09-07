@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 import os
 from collections.abc import Awaitable, Callable
 
@@ -23,11 +25,13 @@ class IncomingIngestWorkerService:
         execute_job: Callable[[str, str], Awaitable[None]],
         repository_factory=IncomingIngestRepository,
         worker_id: str | None = None,
+        lease_renew_interval_seconds: float = 30,
     ):
         self._session_factory = session_factory
         self._execute_job = execute_job
         self._repository_factory = repository_factory
         self._worker_id = worker_id or f"incoming-worker:{os.getenv('HOSTNAME', 'local')}"
+        self._lease_renew_interval_seconds = lease_renew_interval_seconds
 
     async def process(self, *, job_id: str, delivery_token: str) -> bool:
         now = utc_now()
@@ -38,11 +42,55 @@ class IncomingIngestWorkerService:
                     delivery_token=delivery_token,
                     worker_id=self._worker_id,
                     now=now,
-                )
+        )
         if job is None:
             return False
-        await self._execute_job(job_id, delivery_token)
+        heartbeat = asyncio.create_task(self._renew_lease_until_finished(job_id, delivery_token))
+        try:
+            await self._execute_job(job_id, delivery_token)
+        except Exception as exc:
+            await self._stop_heartbeat(heartbeat)
+            async with self._session_factory() as session:
+                async with session.begin():
+                    await self._repository_factory(session).finish_delivery(
+                        job_id=job_id,
+                        delivery_token=delivery_token,
+                        worker_id=self._worker_id,
+                        status="failed",
+                        error_message=str(exc),
+                    )
+            raise
+        await self._stop_heartbeat(heartbeat)
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._repository_factory(session).finish_delivery(
+                    job_id=job_id,
+                    delivery_token=delivery_token,
+                    worker_id=self._worker_id,
+                    status="succeeded",
+                )
         return True
+
+    async def _renew_lease_until_finished(self, job_id: str, delivery_token: str) -> None:
+        """长耗时解析期间定期续租，避免恢复器把存活 Worker 误判为失联。"""
+        while True:
+            await asyncio.sleep(self._lease_renew_interval_seconds)
+            async with self._session_factory() as session:
+                async with session.begin():
+                    renewed = await self._repository_factory(session).renew_lease(
+                        job_id=job_id,
+                        delivery_token=delivery_token,
+                        worker_id=self._worker_id,
+                        now=utc_now(),
+                    )
+            if not renewed:
+                return
+
+    @staticmethod
+    async def _stop_heartbeat(heartbeat: asyncio.Task[None]) -> None:
+        heartbeat.cancel()
+        with suppress(asyncio.CancelledError):
+            await heartbeat
 
 
 async def _execute_ingest_job(job_id: str, delivery_token: str) -> None:

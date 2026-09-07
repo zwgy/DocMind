@@ -9,6 +9,7 @@ from yuxi.storage.postgres.models_knowledge import (
     DocumentBusinessExtractionItem,
     DocumentBusinessExtractionResult,
     DocumentBusinessExtractionRun,
+    IncomingDocument,
 )
 
 
@@ -97,7 +98,10 @@ class DocumentBusinessExtractionRepository:
 
     async def get_latest_by_incoming_id(self, incoming_id: str) -> dict[str, Any] | None:
         async with pg_manager.get_async_session_context() as session:
-            row = await session.execute(
+            document = await session.scalar(
+                select(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id)
+            )
+            query = (
                 select(DocumentBusinessExtractionResult, DocumentBusinessExtractionRun)
                 .join(
                     DocumentBusinessExtractionRun,
@@ -108,9 +112,13 @@ class DocumentBusinessExtractionRepository:
                     DocumentBusinessExtractionResult.incoming_id == incoming_id,
                     DocumentBusinessExtractionRun.status == "success",
                 )
-                .order_by(DocumentBusinessExtractionResult.created_at.desc())
-                .limit(1)
             )
+            if document is not None and document.published_extraction_run_id:
+                query = query.where(DocumentBusinessExtractionResult.run_id == document.published_extraction_run_id)
+            else:
+                # 兼容发布指针上线前的存量来文，保持原来的最新成功运行读取。
+                query = query.order_by(DocumentBusinessExtractionResult.created_at.desc())
+            row = await session.execute(query.limit(1))
             pair = row.one_or_none()
             if pair is None:
                 return None

@@ -326,6 +326,7 @@ async def test_process_reads_all_attachments_and_extracts_one_document_result():
     assert result == {"incoming_id": "inc_1", "status": "ready"}
     assert repo.document.summary == "这份来文部署专项检查。"
     assert repo.document.ai_classification == "staged_work"
+    assert repo.document.published_extraction_run_id == "ber_1"
     assert len(extraction.calls) == 1
     assert [file["source_file_id"] for file in extraction.calls[0]["files"]] == ["main", "attachment"]
     assert [file["is_main_file"] for file in extraction.calls[0]["files"]] == [True, False]
@@ -335,6 +336,94 @@ async def test_process_reads_all_attachments_and_extracts_one_document_result():
     assert len(classify_calls) == 1
     assert "minio://attachment" in summary_calls[0]["markdown"]
     assert all(file.markdown_file_url for file in repo.files)
+
+
+async def test_process_reuses_parsed_attachment_and_parses_remaining_files_serially(monkeypatch):
+    parse_calls = []
+    active_parses = 0
+    max_active_parses = 0
+
+    async def fake_parse(source, _params):
+        nonlocal active_parses, max_active_parses
+        parse_calls.append(source)
+        active_parses += 1
+        max_active_parses = max(max_active_parses, active_parses)
+        await asyncio.sleep(0)
+        active_parses -= 1
+        return f"# {source}"
+
+    async def fake_markdown_upload(*, incoming_id, markdown):
+        return f"minio://parsed/{incoming_id}.md"
+
+    async def fake_classify(**_kwargs):
+        return {
+            "classification": "阶段性工作类",
+            "classification_confidence": 0.9,
+            "classification_evidence": "已完成附件",
+            "summary": "来文摘要",
+            "structured_result": {},
+        }
+
+    async def fake_download_markdown(_url):
+        return "# 已完成附件"
+
+    monkeypatch.setattr(ingest_module, "_download_markdown", fake_download_markdown)
+    repo = FakeIncomingRepo()
+    repo.document = SimpleNamespace(
+        incoming_id="inc_1",
+        source_document_id="DOC-1",
+        document_metadata={},
+        confirmed_classification=None,
+        ai_classification=None,
+        status="failed",
+    )
+    repo.files = [
+        SimpleNamespace(
+            incoming_id="inc_1",
+            incoming_file_id="incf_done",
+            source_file_id="done",
+            filename="已完成.pdf",
+            original_file_url="minio://done",
+            markdown_file_url="minio://parsed/done.md",
+            is_main_file=True,
+            status="parsed",
+        ),
+        SimpleNamespace(
+            incoming_id="inc_1",
+            incoming_file_id="incf_second",
+            source_file_id="second",
+            filename="第二个.pdf",
+            original_file_url="minio://second",
+            markdown_file_url=None,
+            is_main_file=False,
+            status="uploaded",
+        ),
+        SimpleNamespace(
+            incoming_id="inc_1",
+            incoming_file_id="incf_third",
+            source_file_id="third",
+            filename="第三个.pdf",
+            original_file_url="minio://third",
+            markdown_file_url=None,
+            is_main_file=False,
+            status="uploaded",
+        ),
+    ]
+    service = IncomingDocumentIngestService(
+        incoming_repo=repo,
+        tasker=FakeTasker(),
+        parse_document=fake_parse,
+        upload_markdown=fake_markdown_upload,
+        classify_document=fake_classify,
+        summarize_attachment=lambda **_kwargs: asyncio.sleep(0, result="附件摘要"),
+        business_extraction_service=FakeBusinessExtractionService(),
+    )
+
+    await service.process_incoming_document("inc_1")
+
+    assert parse_calls == ["minio://second", "minio://third"]
+    assert max_active_parses == 1
+    assert repo.files[0].markdown_file_url == "minio://parsed/done.md"
 
 
 async def test_process_rejects_empty_parsed_markdown():
@@ -493,7 +582,7 @@ async def test_retry_resets_all_attachment_processing_state():
     result = await service.retry_processing("inc_1", operator_id="admin")
 
     assert result["taskId"] == "task_1"
-    assert all(file.status == "uploaded" and file.markdown_file_url is None for file in repo.files)
+    assert all(file.status == "parsed" and file.markdown_file_url for file in repo.files)
     assert repo.document.status == "uploaded"
 
 
