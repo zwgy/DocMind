@@ -6,6 +6,12 @@
 
 ## v0.7.1 (current)
 
+### 历史来文错峰接入
+
+- 新增 PostgreSQL 驱动的来文接入任务、历史批次登记与专用串行 Worker：历史任务仅在夜间启动，即时来文优先，Redis 仅传递带令牌的短消息，文件与解析产物仍由 MinIO 保存。
+- 来文管理增加接入任务概览和历史任务提优先级操作；提供按 200 条分块、可使用相同批次键续传的历史清单登记脚本。
+- 新增来文专用 OCR 配置快照：`INCOMING_OCR_ENGINE` 与 `INCOMING_OCR_ENGINE_CONFIG_JSON` 可安全透传 MinerU 请求参数，固定 ZIP 响应协议字段不允许覆盖。
+
 ### chat-iframe 接入示例
 
 - 新增面向嵌入系统开发方的《来文上传接口接入指南》，完整说明 JSON 下载地址与 multipart 二进制两种上传方式、API Key 认证、字段和幂等规则、响应状态、错误处理、常见 `application/*` Content-Type 及可直接运行的 curl/Python 示例，并加入正式文档导航。
