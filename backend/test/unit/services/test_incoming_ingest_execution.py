@@ -30,6 +30,13 @@ class FakeIngestRepository:
         self.bound_incoming_ids.append(incoming_id)
         return True
 
+    async def snapshot_parser_params(self, *, job_id, delivery_token, parser_params):
+        if await self.get_running_delivery(job_id=job_id, delivery_token=delivery_token) is None:
+            return None
+        if getattr(self.job, "parser_params", None) is None:
+            self.job.parser_params = parser_params
+        return self.job.parser_params
+
 
 @pytest.mark.asyncio
 async def test_execute_ingest_job_skips_stale_token_before_external_processing(monkeypatch):
@@ -60,6 +67,7 @@ async def test_execute_ingest_job_processes_manifest_for_current_delivery(monkey
         document_metadata={"title": "通知"},
         file_manifest=[{"source_file_id": "main", "filename": "main.pdf", "source_url": "https://oa.test/main"}],
         created_by="admin",
+        parser_params=None,
     )
     repository = FakeIngestRepository(object(), job)
     monkeypatch.setattr(ingest_module.pg_manager, "get_async_session_context", FakeSessionContext)
@@ -75,8 +83,8 @@ async def test_execute_ingest_job_processes_manifest_for_current_delivery(monkey
         calls.append(("ingest", kwargs))
         return {"incomingId": "inc_1", "status": "accepted"}
 
-    async def fake_process(incoming_id, *, operator_id=None, publication_guard=None):
-        calls.append(("process", incoming_id, operator_id))
+    async def fake_process(incoming_id, *, operator_id=None, publication_guard=None, parser_params=None):
+        calls.append(("process", incoming_id, operator_id, parser_params))
         assert await publication_guard() is True
         return {"incoming_id": incoming_id, "status": "ready"}
 
@@ -90,5 +98,10 @@ async def test_execute_ingest_job_processes_manifest_for_current_delivery(monkey
     assert calls[0][0] == "download"
     assert calls[1][0] == "ingest"
     assert calls[1][1]["enqueue_processing"] is False
-    assert calls[2] == ("process", "inc_1", "admin")
+    assert calls[2] == (
+        "process",
+        "inc_1",
+        "admin",
+        {"ocr_engine": "disable", "ocr_engine_config": {}},
+    )
     assert repository.bound_incoming_ids == ["inc_1"]

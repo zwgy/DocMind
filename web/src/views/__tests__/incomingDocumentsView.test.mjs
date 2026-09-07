@@ -75,3 +75,7 @@ assert.doesNotMatch(component, /expected\.length < 6/, '短来源单号不能被
 assert.match(component, /:placeholder="`请输入\$\{deleteConfirmInputLabel\}`"/, '输入提示应随来源单号长度变化')
 assert.match(component, /isDeleteConfirmValid/, '删除确认必须校验用户输入')
 assert.match(component, /incomingDocumentApi\.remove/, '删除逻辑必须通过 incomingDocumentApi.remove 调用后端')
+assert.match(component, /接入任务/, '来文管理页应展示持久化接入任务概要')
+assert.match(component, /listIngestJobs/, '接入任务列表应从后端 PostgreSQL 概要接口读取')
+assert.match(component, /setTimeout\(\(\) => void loadIngestJobs\(\), 5000\)/, '运行中任务应每 5 秒刷新')
+assert.match(component, /立即处理/, '历史任务应提供提升为即时处理的运维操作')

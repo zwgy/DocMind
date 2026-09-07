@@ -39,6 +39,18 @@ export const incomingDocumentApi = {
     return apiAdminPost(`/api/incoming-documents/${incomingId}/retry`, {})
   },
 
+  listIngestJobs: async (params = {}) => {
+    const query = buildQuery(params)
+    return apiAdminGet(`/api/incoming-documents/ingest-jobs${query ? `?${query}` : ''}`)
+  },
+
+  expediteIngestJob: async (jobId, sourceSystem, sourceDocumentId) => {
+    return apiAdminPost(`/api/incoming-documents/ingest-jobs/${encodeURIComponent(jobId)}/expedite`, {
+      source_system: sourceSystem,
+      source_document_id: sourceDocumentId
+    })
+  },
+
   options: async () => apiAdminGet('/api/incoming-documents/options'),
 
   correctClassification: async (incomingId, classification) => {

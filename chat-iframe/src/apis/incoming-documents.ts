@@ -77,13 +77,19 @@ export async function queryIncomingDocumentExtractions(
 
 export async function expediteIncomingIngestJob(
   jobId: string,
+  sourceSystem: string,
+  sourceDocumentId: string,
   token?: string
 ): Promise<Record<string, unknown>> {
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
   const response = await fetch(
     apiUrl(`/api/incoming-documents/ingest-jobs/${encodeURIComponent(jobId)}/expedite`),
-    { method: 'POST', headers }
+    {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_system: sourceSystem, source_document_id: sourceDocumentId })
+    }
   )
   return parseApiResponse<Record<string, unknown>>(response, `提升任务优先级失败：${response.status}`)
 }

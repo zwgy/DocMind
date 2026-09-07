@@ -65,6 +65,39 @@ class IncomingIngestRepository:
             )
         )
 
+    async def list_batches(self, *, page: int, page_size: int) -> tuple[list[IncomingIngestBatch], int]:
+        statement = select(IncomingIngestBatch).order_by(
+            IncomingIngestBatch.updated_at.desc(), IncomingIngestBatch.id.desc()
+        )
+        total = await self.db.scalar(select(func.count()).select_from(statement.subquery()))
+        batches = list((await self.db.scalars(statement.offset((page - 1) * page_size).limit(page_size))).all())
+        return batches, int(total or 0)
+
+    async def list_jobs(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        status: str | None = None,
+        priority: str | None = None,
+    ) -> tuple[list[IncomingIngestJob], int]:
+        statement = select(IncomingIngestJob)
+        if status:
+            statement = statement.where(IncomingIngestJob.status == status)
+        if priority:
+            statement = statement.where(IncomingIngestJob.priority == priority)
+        total = await self.db.scalar(select(func.count()).select_from(statement.subquery()))
+        jobs = list(
+            (
+                await self.db.scalars(
+                    statement.order_by(IncomingIngestJob.updated_at.desc(), IncomingIngestJob.id.desc())
+                    .offset((page - 1) * page_size)
+                    .limit(page_size)
+                )
+            ).all()
+        )
+        return jobs, int(total or 0)
+
     async def create_batch(
         self,
         *,
@@ -266,9 +299,22 @@ class IncomingIngestRepository:
         await self.db.flush()
         return RegistrationResult(status="accepted", job_id=job.job_id)
 
-    async def expedite(self, job_id: str, *, actor_uid: str) -> bool:
+    async def expedite(
+        self,
+        job_id: str,
+        *,
+        source_system: str,
+        source_document_id: str,
+        actor_uid: str,
+    ) -> bool:
         job = await self.db.scalar(
-            select(IncomingIngestJob).where(IncomingIngestJob.job_id == job_id).with_for_update()
+            select(IncomingIngestJob)
+            .where(
+                IncomingIngestJob.job_id == job_id,
+                IncomingIngestJob.source_system == source_system,
+                IncomingIngestJob.source_document_id == source_document_id,
+            )
+            .with_for_update()
         )
         if job is None or job.status in TERMINAL_STATUSES:
             return False
@@ -447,6 +493,18 @@ class IncomingIngestRepository:
         job.incoming_id = incoming_id
         await self.db.flush()
         return True
+
+    async def snapshot_parser_params(
+        self, *, job_id: str, delivery_token: str, parser_params: dict
+    ) -> dict | None:
+        """首次执行时固定解析参数，失败恢复不得随环境变量悄悄改变解析语义。"""
+        job = await self._get_job_for_update(job_id)
+        if job is None or job.status != "running" or job.delivery_token != delivery_token:
+            return None
+        if job.parser_params is None:
+            job.parser_params = parser_params
+            await self.db.flush()
+        return job.parser_params
 
     async def renew_lease(
         self,

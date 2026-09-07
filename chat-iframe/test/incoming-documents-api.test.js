@@ -104,11 +104,15 @@ test('expediteIncomingIngestJob posts the job id with bearer token', async () =>
     return Response.json({ jobId: 'ij_1', priority: 'immediate' })
   }
 
-  const response = await expediteIncomingIngestJob('ij_1', 'token-1')
+  const response = await expediteIncomingIngestJob('ij_1', 'oa', 'DOC-1', 'token-1')
 
   assert.equal(calls[0].url, '/api/incoming-documents/ingest-jobs/ij_1/expedite')
   assert.equal(calls[0].options.method, 'POST')
   assert.equal(calls[0].options.headers.Authorization, 'Bearer token-1')
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    source_system: 'oa',
+    source_document_id: 'DOC-1'
+  })
   assert.equal(response.priority, 'immediate')
 })
 

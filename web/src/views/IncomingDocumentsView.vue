@@ -181,6 +181,48 @@
           </template>
         </template>
       </a-table>
+
+      <section class="ingest-jobs-section">
+        <div class="ingest-jobs-heading">
+          <h2>接入任务</h2>
+          <a-button size="small" @click="loadIngestJobs">
+            <template #icon><RefreshCw :size="14" /></template>
+            刷新
+          </a-button>
+        </div>
+        <a-table
+          row-key="jobId"
+          size="small"
+          :columns="ingestJobColumns"
+          :data-source="ingestJobs"
+          :loading="ingestJobsLoading"
+          :pagination="false"
+          :scroll="{ x: 980 }"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'priority'">
+              <a-tag :color="record.priority === 'immediate' ? 'blue' : 'default'">
+                {{ record.priority === 'immediate' ? '即时' : '历史' }}
+              </a-tag>
+            </template>
+            <template v-else-if="column.key === 'status'">
+              <a-tag :color="ingestJobStatusMeta(record.status).color">
+                {{ ingestJobStatusMeta(record.status).label }}
+              </a-tag>
+            </template>
+            <template v-else-if="column.key === 'updatedAt'">{{ formatDate(record.updatedAt) }}</template>
+            <template v-else-if="column.key === 'actions'">
+              <a-button
+                v-if="record.priority === 'historical' && !['succeeded', 'failed', 'cancelled'].includes(record.status)"
+                type="link"
+                size="small"
+                :loading="expeditingJobId === record.jobId"
+                @click="expediteIngestJob(record)"
+              >立即处理</a-button>
+            </template>
+          </template>
+        </a-table>
+      </section>
     </div>
 
     <a-drawer
@@ -669,6 +711,10 @@ const importPreview = reactive({
   message: ''
 })
 const retryingId = ref('')
+const ingestJobs = ref([])
+const ingestJobsLoading = ref(false)
+const expeditingJobId = ref('')
+let ingestJobsRefreshTimer = null
 // "原文 / Markdown" Tab 与原文预览状态，与知识库 FileDetailModal 保持同样的请求序号防抖模式。
 const previewTab = ref('source')
 const sourcePreviewSeq = ref(0)
@@ -726,6 +772,17 @@ const columns = [
   { title: '操作', key: 'actions', width: 260, fixed: 'right' }
 ]
 
+const ingestJobColumns = [
+  { title: '来文', key: 'title', dataIndex: 'title', width: 220 },
+  { title: '来源', key: 'sourceSystem', dataIndex: 'sourceSystem', width: 110 },
+  { title: '优先级', key: 'priority', width: 90 },
+  { title: '状态', key: 'status', width: 110 },
+  { title: '阶段', key: 'stage', dataIndex: 'stage', width: 110 },
+  { title: '重试', key: 'attemptCount', dataIndex: 'attemptCount', width: 80 },
+  { title: '最后更新', key: 'updatedAt', width: 160 },
+  { title: '操作', key: 'actions', width: 100, fixed: 'right' }
+]
+
 const processingStatusOptions = [
   { value: 'uploaded', label: '待处理' },
   { value: 'parsing', label: '解析中' },
@@ -777,6 +834,20 @@ function processingStatusMeta(status) {
       extracting: { label: '抽取中', color: 'processing' },
       ready: { label: '已完成', color: 'success' },
       failed: { label: '失败', color: 'error' }
+    }[status] || { label: status || '未知', color: 'default' }
+  )
+}
+
+function ingestJobStatusMeta(status) {
+  return (
+    {
+      pending: { label: '等待调度', color: 'default' },
+      dispatching: { label: '等待投递', color: 'processing' },
+      queued: { label: '队列中', color: 'processing' },
+      running: { label: '处理中', color: 'processing' },
+      succeeded: { label: '已完成', color: 'success' },
+      failed: { label: '失败', color: 'error' },
+      cancelled: { label: '已取消', color: 'default' }
     }[status] || { label: status || '未知', color: 'default' }
   )
 }
@@ -1138,6 +1209,39 @@ async function loadDocuments() {
   }
 }
 
+async function loadIngestJobs() {
+  ingestJobsLoading.value = true
+  try {
+    const result = await incomingDocumentApi.listIngestJobs({ page: 1, page_size: 20 })
+    ingestJobs.value = result.items || []
+    if (ingestJobsRefreshTimer) clearTimeout(ingestJobsRefreshTimer)
+    if (ingestJobs.value.some((item) => ['pending', 'dispatching', 'queued', 'running'].includes(item.status))) {
+      ingestJobsRefreshTimer = setTimeout(() => void loadIngestJobs(), 5000)
+    }
+  } catch (error) {
+    message.error(error.message || '加载接入任务失败')
+  } finally {
+    ingestJobsLoading.value = false
+  }
+}
+
+async function expediteIngestJob(record) {
+  expeditingJobId.value = record.jobId
+  try {
+    await incomingDocumentApi.expediteIngestJob(
+      record.jobId,
+      record.sourceSystem,
+      record.sourceDocumentId
+    )
+    message.success('已提升为即时处理')
+    await loadIngestJobs()
+  } catch (error) {
+    message.error(error.message || '提升任务优先级失败')
+  } finally {
+    expeditingJobId.value = ''
+  }
+}
+
 async function loadDatabases() {
   try {
     const result = await databaseApi.getAccessibleDatabases()
@@ -1374,7 +1478,7 @@ async function submitImport() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadDatabases(), loadDocuments(), loadClassificationOptions()])
+  await Promise.all([loadDatabases(), loadDocuments(), loadClassificationOptions(), loadIngestJobs()])
 })
 
 watch(
@@ -1405,6 +1509,7 @@ watch(detailOpen, (open) => {
 })
 
 onBeforeUnmount(() => {
+  if (ingestJobsRefreshTimer) clearTimeout(ingestJobsRefreshTimer)
   resetSourcePreview()
   resetImportPreview()
 })
@@ -1418,6 +1523,22 @@ onBeforeUnmount(() => {
 
 .incoming-content {
   padding: 16px var(--page-padding) 24px;
+}
+
+.ingest-jobs-section {
+  margin-top: 24px;
+}
+
+.ingest-jobs-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.ingest-jobs-heading h2 {
+  margin: 0;
+  font-size: 16px;
 }
 
 .toolbar {

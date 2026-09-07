@@ -136,6 +136,21 @@ class MinerUParser(BaseDocumentProcessor):
             "return_images": True,
         }
 
+        # 调用方可透传 MinerU 的新增请求字段；响应格式和内部路由字段必须保留
+        # 当前语义，否则下方 ZIP 解包和对象存储处理会失效。
+        protected_params = {
+            "ocr_engine",
+            "ocr_engine_config",
+            "image_bucket",
+            "image_prefix",
+            "server_url",
+            "return_md",
+            "response_format_zip",
+            "return_image",
+            "return_images",
+        }
+        data.update({key: value for key, value in params.items() if key not in protected_params})
+
         server_url = params.get("server_url")
         if server_url:
             data["server_url"] = server_url

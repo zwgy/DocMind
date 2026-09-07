@@ -217,26 +217,37 @@ async function preparePendingFiles(files: IncomingPageFile[]) {
 }
 
 async function expediteHistoricalIngestJobs(files: IncomingPageFile[]) {
-  const jobIds = new Set(
+  const jobs = new Map(
     files
-      .map((file) => results.value[file.source_file_id])
+      .map((file) => ({ file, result: results.value[file.source_file_id] }))
       .filter(
-        (result) =>
+        ({ file, result }) =>
           result?.matchStatus === 'matched' &&
           result.ingestPriority === 'historical' &&
           result.extractionStatus !== 'ready' &&
           result.processingStatus !== 'failed' &&
           result.processingStatus !== 'succeeded' &&
-          Boolean(result.ingestJobId)
+          Boolean(result.ingestJobId) &&
+          Boolean(file.source_doc_id)
       )
-      .map((result) => result!.ingestJobId!)
-      .filter((jobId) => !expeditedIngestJobIds.has(jobId))
+      .map(({ file, result }) => ({
+        jobId: result!.ingestJobId!,
+        sourceSystem: file.source_system || 'production',
+        sourceDocumentId: file.source_doc_id!
+      }))
+      .filter(({ jobId }) => !expeditedIngestJobIds.has(jobId))
+      .map((job) => [job.jobId, job])
   )
-  for (const jobId of jobIds) {
-    await expediteIncomingIngestJob(jobId, context.config.token)
-    expeditedIngestJobIds.add(jobId)
+  for (const job of jobs.values()) {
+    await expediteIncomingIngestJob(
+      job.jobId,
+      job.sourceSystem,
+      job.sourceDocumentId,
+      context.config.token
+    )
+    expeditedIngestJobIds.add(job.jobId)
   }
-  return jobIds.size > 0
+  return jobs.size > 0
 }
 
 function refreshAttachmentPreparation(files: IncomingPageFile[]) {

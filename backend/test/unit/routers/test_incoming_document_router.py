@@ -226,18 +226,31 @@ async def test_register_ingest_batch_items_rejects_oversized_chunk_before_servic
 
 
 async def test_expedite_returns_not_found_after_terminal_job(monkeypatch):
+    captured = {}
+
     class FakeIncomingDocumentService:
-        async def expedite_ingest_job(self, **_kwargs):
+        async def expedite_ingest_job(self, **kwargs):
+            captured.update(kwargs)
             return False
 
     monkeypatch.setattr(incoming_document_router, "IncomingDocumentService", FakeIncomingDocumentService)
 
     with pytest.raises(HTTPException) as exc_info:
         await incoming_document_router.expedite_incoming_ingest_job(
-            "ij_finished", current_user=SimpleNamespace(uid="user-1")
+            "ij_finished",
+            incoming_document_router.IncomingIngestJobExpediteRequest(
+                source_system="oa", source_document_id="DOC-1"
+            ),
+            current_user=SimpleNamespace(uid="user-1"),
         )
 
     assert exc_info.value.status_code == 404
+    assert captured == {
+        "job_id": "ij_finished",
+        "source_system": "oa",
+        "source_document_id": "DOC-1",
+        "actor_uid": "user-1",
+    }
 
 
 async def test_submit_ingest_batch_returns_service_batch_payload(monkeypatch):

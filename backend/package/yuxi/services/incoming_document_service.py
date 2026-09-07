@@ -65,6 +65,20 @@ class IncomingDocumentService:
             )
         return self._batch_payload(batch)
 
+    async def list_ingest_batches(self, *, page: int, page_size: int) -> dict[str, Any]:
+        async with pg_manager.get_async_session_context() as session:
+            batches, total = await IncomingIngestRepository(session).list_batches(page=page, page_size=page_size)
+        return {"items": [self._batch_payload(batch) for batch in batches], "total": total}
+
+    async def list_ingest_jobs(
+        self, *, page: int, page_size: int, status: str | None, priority: str | None
+    ) -> dict[str, Any]:
+        async with pg_manager.get_async_session_context() as session:
+            jobs, total = await IncomingIngestRepository(session).list_jobs(
+                page=page, page_size=page_size, status=status, priority=priority
+            )
+        return {"items": [self._job_payload(job) for job in jobs], "total": total}
+
     async def register_ingest_batch_items(
         self, *, batch_id: str, source_system: str, items: list[dict[str, Any]], actor_uid: str
     ) -> dict[str, Any]:
@@ -107,9 +121,16 @@ class IncomingDocumentService:
             )
         return {"jobId": result.job_id, "status": result.status, "priority": "immediate"}
 
-    async def expedite_ingest_job(self, *, job_id: str, actor_uid: str) -> bool:
+    async def expedite_ingest_job(
+        self, *, job_id: str, source_system: str, source_document_id: str, actor_uid: str
+    ) -> bool:
         async with pg_manager.get_async_session_context() as session:
-            return await IncomingIngestRepository(session).expedite(job_id, actor_uid=actor_uid)
+            return await IncomingIngestRepository(session).expedite(
+                job_id,
+                source_system=source_system,
+                source_document_id=source_document_id,
+                actor_uid=actor_uid,
+            )
 
     async def _query_one(self, incoming: IncomingPageFile) -> dict[str, Any]:
         base = {
@@ -224,4 +245,20 @@ class IncomingDocumentService:
             "status": batch.status,
             "isSubmitted": batch.is_submitted,
             "isPaused": batch.is_paused,
+        }
+
+    @staticmethod
+    def _job_payload(job) -> dict[str, Any]:
+        metadata = job.document_metadata or {}
+        return {
+            "jobId": job.job_id,
+            "sourceSystem": job.source_system,
+            "sourceDocumentId": job.source_document_id,
+            "title": metadata.get("title") or metadata.get("document_number") or job.source_document_id,
+            "priority": job.priority,
+            "status": job.status,
+            "stage": job.stage,
+            "attemptCount": job.attempt_count,
+            "processingError": job.processing_error,
+            "updatedAt": job.updated_at,
         }

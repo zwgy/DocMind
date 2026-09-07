@@ -96,6 +96,11 @@ class IncomingIngestBatchPauseRequest(BaseModel):
     paused: bool
 
 
+class IncomingIngestJobExpediteRequest(BaseModel):
+    source_system: str = "production"
+    source_document_id: str
+
+
 class IncomingClassificationRequest(BaseModel):
     classification: str
 
@@ -133,6 +138,30 @@ async def create_incoming_ingest_batch(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@incoming_documents.get("/ingest-batches")
+async def list_incoming_ingest_batches(
+    page: int = 1,
+    page_size: int = 20,
+    current_user: User = Depends(get_admin_user),
+):
+    del current_user
+    return await IncomingDocumentService().list_ingest_batches(page=max(page, 1), page_size=min(max(page_size, 1), 100))
+
+
+@incoming_documents.get("/ingest-jobs")
+async def list_incoming_ingest_jobs(
+    page: int = 1,
+    page_size: int = 20,
+    status: str | None = None,
+    priority: str | None = None,
+    current_user: User = Depends(get_admin_user),
+):
+    del current_user
+    return await IncomingDocumentService().list_ingest_jobs(
+        page=max(page, 1), page_size=min(max(page_size, 1), 100), status=status, priority=priority
+    )
 
 
 @incoming_documents.post("/ingest-batches/{batch_id}/items")
@@ -179,8 +208,17 @@ async def pause_or_resume_incoming_ingest_batch(
 
 
 @incoming_documents.post("/ingest-jobs/{job_id}/expedite")
-async def expedite_incoming_ingest_job(job_id: str, current_user: User = Depends(get_required_user)):
-    if not await IncomingDocumentService().expedite_ingest_job(job_id=job_id, actor_uid=current_user.uid):
+async def expedite_incoming_ingest_job(
+    job_id: str,
+    payload: IncomingIngestJobExpediteRequest,
+    current_user: User = Depends(get_required_user),
+):
+    if not await IncomingDocumentService().expedite_ingest_job(
+        job_id=job_id,
+        source_system=payload.source_system,
+        source_document_id=payload.source_document_id,
+        actor_uid=current_user.uid,
+    ):
         raise HTTPException(status_code=404, detail="待处理来文任务不存在或已结束")
     return {"jobId": job_id, "priority": "immediate"}
 

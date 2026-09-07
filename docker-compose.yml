@@ -136,6 +136,64 @@ services:
       sandbox-provisioner:
         condition: service_healthy
 
+  incoming-worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
+        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-mirrors.tuna.tsinghua.edu.cn/debian-security}
+    image: yuxi-api:${YUXI_VERSION:-0.7.1.dev0}
+    working_dir: /app
+    volumes:
+      - ./backend/server:/app/server
+      - ./backend/package:/app/package
+      - ./.env:/app/.env
+    networks:
+      - app-network
+    env_file:
+      - .env
+    environment:
+      <<: *api-worker-env
+    command: watchfiles --filter python "arq server.incoming_worker_main.IncomingWorkerSettings" /app/server /app/package
+    restart: unless-stopped
+    stop_grace_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  incoming-dispatcher:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
+        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-mirrors.tuna.tsinghua.edu.cn/debian-security}
+    image: yuxi-api:${YUXI_VERSION:-0.7.1.dev0}
+    working_dir: /app
+    volumes:
+      - ./backend/server:/app/server
+      - ./backend/package:/app/package
+      - ./.env:/app/.env
+    networks:
+      - app-network
+    env_file:
+      - .env
+    environment:
+      <<: *api-worker-env
+    command: uv run --no-sync --no-dev python -m server.incoming_dispatcher_main
+    restart: unless-stopped
+    stop_grace_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   scheduler:
     build:
       context: .

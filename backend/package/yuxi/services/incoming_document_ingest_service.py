@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -49,6 +51,35 @@ EnsureBatchRebuildableFn = Callable[[str], Awaitable[None]]
 INCOMING_DOCUMENT_PROCESS_TASK_TYPE = "incoming_document_process"
 MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.8
 REMOTE_FILE_DOWNLOAD_TIMEOUT_SECONDS = 60.0
+INCOMING_OCR_CONFIG_PROTECTED_KEYS = {
+    "ocr_engine",
+    "ocr_engine_config",
+    "image_bucket",
+    "image_prefix",
+    "server_url",
+    "return_md",
+    "response_format_zip",
+    "return_image",
+    "return_images",
+}
+
+
+def incoming_ocr_parser_params() -> dict[str, Any]:
+    """读取来文专用 OCR 配置，保证 MinerU 的 ZIP 响应协议不被环境变量破坏。"""
+    raw_config = os.getenv("INCOMING_OCR_ENGINE_CONFIG_JSON", "{}")
+    try:
+        engine_config = json.loads(raw_config)
+    except json.JSONDecodeError as exc:
+        raise ValueError("INCOMING_OCR_ENGINE_CONFIG_JSON 必须是 JSON 对象") from exc
+    if not isinstance(engine_config, dict):
+        raise ValueError("INCOMING_OCR_ENGINE_CONFIG_JSON 必须是 JSON 对象")
+    protected_keys = INCOMING_OCR_CONFIG_PROTECTED_KEYS.intersection(engine_config)
+    if protected_keys:
+        raise ValueError(f"INCOMING_OCR_ENGINE_CONFIG_JSON 不能覆盖 {sorted(protected_keys)[0]}")
+    return {
+        "ocr_engine": os.getenv("INCOMING_OCR_ENGINE", "disable").strip() or "disable",
+        "ocr_engine_config": engine_config,
+    }
 
 
 async def _noop_batch_rebuild_check(_incoming_id: str) -> None:
@@ -353,6 +384,13 @@ class IncomingDocumentIngestService:
         job = await self._get_running_ingest_job(job_id=job_id, delivery_token=delivery_token)
         if job is None:
             return {"job_id": job_id, "status": "stale"}
+        parser_params = await self._snapshot_ingest_job_parser_params(
+            job_id=job_id,
+            delivery_token=delivery_token,
+            parser_params=getattr(job, "parser_params", None) or incoming_ocr_parser_params(),
+        )
+        if parser_params is None:
+            return {"job_id": job_id, "status": "stale"}
 
         files = await self.download_source_files(files=list(job.file_manifest or []))
         received = await self.ingest_files(
@@ -378,6 +416,7 @@ class IncomingDocumentIngestService:
             incoming_id,
             operator_id=job.created_by,
             publication_guard=publication_guard,
+            parser_params=parser_params,
         )
         if processed.get("status") == "stale":
             return {"job_id": job_id, "status": "stale"}
@@ -400,6 +439,16 @@ class IncomingDocumentIngestService:
                 incoming_id=incoming_id,
             )
 
+    async def _snapshot_ingest_job_parser_params(
+        self, *, job_id: str, delivery_token: str, parser_params: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        async with pg_manager.get_async_session_context() as session:
+            return await IncomingIngestRepository(session).snapshot_parser_params(
+                job_id=job_id,
+                delivery_token=delivery_token,
+                parser_params=parser_params,
+            )
+
     async def process_incoming_document(
         self,
         incoming_id: str,
@@ -407,6 +456,7 @@ class IncomingDocumentIngestService:
         operator_id: str | None = None,
         context: TaskContext | None = None,
         publication_guard: Callable[[], Awaitable[bool]] | None = None,
+        parser_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         document = await self.incoming_repo.get_by_incoming_id(incoming_id)
         if document is None:
@@ -429,6 +479,7 @@ class IncomingDocumentIngestService:
                     markdown = await self.parse_document(
                         file.original_file_url,
                         {
+                            **(parser_params or {}),
                             "image_bucket": "public",
                             "image_prefix": f"incoming/{incoming_id}/{file.incoming_file_id}/images",
                         },
