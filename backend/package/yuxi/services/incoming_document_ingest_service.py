@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -23,6 +21,7 @@ from yuxi.document_extraction.schemas import (
     document_category_label,
 )
 from yuxi.document_extraction.service import document_input_token_limit
+from yuxi.config.app import DOCUMENT_PARSER_CONFIG_PROTECTED_KEYS, config as sys_config
 from yuxi.knowledge.chunking.ragflow_like.dispatcher import chunk_markdown
 from yuxi.knowledge.chunking.ragflow_like.nlp import count_tokens
 from yuxi.knowledge.parser import Parser, is_supported_file_extension
@@ -51,33 +50,14 @@ EnsureBatchRebuildableFn = Callable[[str], Awaitable[None]]
 INCOMING_DOCUMENT_PROCESS_TASK_TYPE = "incoming_document_process"
 MULTI_CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.8
 REMOTE_FILE_DOWNLOAD_TIMEOUT_SECONDS = 60.0
-INCOMING_OCR_CONFIG_PROTECTED_KEYS = {
-    "ocr_engine",
-    "ocr_engine_config",
-    "image_bucket",
-    "image_prefix",
-    "server_url",
-    "return_md",
-    "response_format_zip",
-    "return_image",
-    "return_images",
-}
-
-
 def incoming_ocr_parser_params() -> dict[str, Any]:
-    """读取来文专用 OCR 配置，保证 MinerU 的 ZIP 响应协议不被环境变量破坏。"""
-    raw_config = os.getenv("INCOMING_OCR_ENGINE_CONFIG_JSON", "{}")
-    try:
-        engine_config = json.loads(raw_config)
-    except json.JSONDecodeError as exc:
-        raise ValueError("INCOMING_OCR_ENGINE_CONFIG_JSON 必须是 JSON 对象") from exc
-    if not isinstance(engine_config, dict):
-        raise ValueError("INCOMING_OCR_ENGINE_CONFIG_JSON 必须是 JSON 对象")
-    protected_keys = INCOMING_OCR_CONFIG_PROTECTED_KEYS.intersection(engine_config)
+    """在首次执行前读取全局默认值，随后由任务记录固化为参数快照。"""
+    engine_config = dict(sys_config.document_parser_ocr_engine_config or {})
+    protected_keys = DOCUMENT_PARSER_CONFIG_PROTECTED_KEYS.intersection(engine_config)
     if protected_keys:
-        raise ValueError(f"INCOMING_OCR_ENGINE_CONFIG_JSON 不能覆盖 {sorted(protected_keys)[0]}")
+        raise ValueError(f"文档解析默认 OCR 高级参数不能覆盖 {sorted(protected_keys)[0]}")
     return {
-        "ocr_engine": os.getenv("INCOMING_OCR_ENGINE", "disable").strip() or "disable",
+        "ocr_engine": str(sys_config.document_parser_ocr_engine or "disable"),
         "ocr_engine_config": engine_config,
     }
 

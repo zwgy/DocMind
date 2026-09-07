@@ -117,11 +117,19 @@ def test_incoming_id_uses_source_system_and_global_source_doc_id():
     assert first_module != another_system
 
 
-def test_incoming_ocr_params_reads_json_configuration(monkeypatch):
-    monkeypatch.setenv("INCOMING_OCR_ENGINE", "mineru_ocr")
-    monkeypatch.setenv(
-        "INCOMING_OCR_ENGINE_CONFIG_JSON",
-        '{"backend":"hybrid-engine","parse_method":"auto","table_enable":false,"effort":"high"}',
+def test_incoming_ocr_params_uses_global_document_parser_configuration(monkeypatch):
+    monkeypatch.setattr(
+        ingest_module,
+        "sys_config",
+        SimpleNamespace(
+            document_parser_ocr_engine="mineru_ocr",
+            document_parser_ocr_engine_config={
+                "backend": "hybrid-engine",
+                "parse_method": "auto",
+                "table_enable": False,
+                "effort": "high",
+            },
+        ),
     )
 
     assert ingest_module.incoming_ocr_parser_params() == {
@@ -136,7 +144,14 @@ def test_incoming_ocr_params_reads_json_configuration(monkeypatch):
 
 
 def test_incoming_ocr_params_rejects_response_protocol_override(monkeypatch):
-    monkeypatch.setenv("INCOMING_OCR_ENGINE_CONFIG_JSON", '{"return_md":false}')
+    monkeypatch.setattr(
+        ingest_module,
+        "sys_config",
+        SimpleNamespace(
+            document_parser_ocr_engine="mineru_ocr",
+            document_parser_ocr_engine_config={"return_md": False},
+        ),
+    )
 
     with pytest.raises(ValueError, match="return_md"):
         ingest_module.incoming_ocr_parser_params()

@@ -243,6 +243,33 @@ def test_parse_image_uses_ocr_engine_config(tmp_path: Path, monkeypatch: pytest.
     assert captured["params"]["formula_enable"] is False
 
 
+def test_system_default_ocr_uses_global_configuration_without_merging_explicit_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """全局默认只在选择系统默认时生效，显式引擎不能混入另一引擎的参数。"""
+    monkeypatch.setattr(
+        parser_unified,
+        "sys_config",
+        SimpleNamespace(
+            document_parser_ocr_engine="mineru_ocr",
+            document_parser_ocr_engine_config={"backend": "hybrid-engine", "effort": "high"},
+        ),
+        raising=False,
+    )
+
+    engine, params = parser_unified._resolve_ocr_engine_params({"ocr_engine": "system_default"})
+    explicit_engine, explicit_params = parser_unified._resolve_ocr_engine_params(
+        {"ocr_engine": "rapid_ocr", "ocr_engine_config": {"det_model": "local"}}
+    )
+
+    assert engine == "mineru_ocr"
+    assert params["backend"] == "hybrid-engine"
+    assert params["effort"] == "high"
+    assert explicit_engine == "rapid_ocr"
+    assert explicit_params["det_model"] == "local"
+    assert "backend" not in explicit_params
+
+
 def test_parse_image_ignores_enable_ocr(tmp_path: Path) -> None:
     file_path = tmp_path / "parser_test.png"
     _build_png(file_path)

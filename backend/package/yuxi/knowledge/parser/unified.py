@@ -20,6 +20,7 @@ from docling.document_converter import DocumentConverter
 from langchain_community.document_loaders import PyPDFLoader
 from markdownify import markdownify as md_convert
 
+from yuxi.config.app import config as sys_config
 from yuxi.knowledge.parser.pdf_preflight import validate_pdf_page_tree_loadable
 from yuxi.knowledge.parser.zip_utils import process_zip_file as _process_zip_file
 from yuxi.storage.minio import get_minio_client
@@ -95,9 +96,15 @@ def _resolve_image_storage_params(params: dict | None) -> tuple[str, str]:
 
 def _resolve_ocr_engine_params(params: dict | None) -> tuple[str, dict[str, Any]]:
     params = params or {}
-    engine = str(params.get("ocr_engine") or "disable")
-    engine_config = params.get("ocr_engine_config")
-    processor_params = dict(params)
+    requested_engine = params.get("ocr_engine")
+    if requested_engine in {None, "", "system_default"}:
+        engine = str(sys_config.document_parser_ocr_engine or "disable")
+        engine_config = sys_config.document_parser_ocr_engine_config
+        processor_params = {key: value for key, value in params.items() if key != "ocr_engine_config"}
+    else:
+        engine = str(requested_engine)
+        engine_config = params.get("ocr_engine_config")
+        processor_params = dict(params)
     if isinstance(engine_config, dict):
         processor_params.update(engine_config)
     return engine, processor_params

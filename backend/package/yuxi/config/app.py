@@ -15,6 +15,19 @@ from yuxi.utils.logging_config import logger
 
 READONLY_CONFIG_FIELDS = frozenset({"save_dir"})
 REMOVED_CONFIG_FIELDS = frozenset({"business_extraction_model"})
+DOCUMENT_PARSER_CONFIG_PROTECTED_KEYS = frozenset(
+    {
+        "ocr_engine",
+        "ocr_engine_config",
+        "image_bucket",
+        "image_prefix",
+        "server_url",
+        "return_md",
+        "response_format_zip",
+        "return_image",
+        "return_images",
+    }
+)
 
 
 class Config(BaseModel):
@@ -73,6 +86,10 @@ class Config(BaseModel):
     incoming_max_concurrency: int = Field(
         default=1, ge=1, le=4, description="来文 Worker 调度并发上限（1 至 4）"
     )
+    document_parser_ocr_engine: str = Field(default="disable", description="文档解析默认 OCR 引擎")
+    document_parser_ocr_engine_config: dict[str, Any] = Field(
+        default_factory=dict, description="文档解析默认 OCR 引擎高级参数"
+    )
 
     _config_file: Path | None = PrivateAttr(default=None)
     _runtime_sync_thread: Any = PrivateAttr(default=None)
@@ -89,6 +106,9 @@ class Config(BaseModel):
             raise ValueError("历史来文处理窗口结束时间必须是 HH:MM")
         if self.incoming_history_window_start == self.incoming_history_window_end:
             raise ValueError("历史来文处理窗口开始和结束时间不能相同")
+        protected_keys = DOCUMENT_PARSER_CONFIG_PROTECTED_KEYS.intersection(self.document_parser_ocr_engine_config)
+        if protected_keys:
+            raise ValueError(f"文档解析默认 OCR 高级参数不能覆盖 {sorted(protected_keys)[0]}")
         return self
 
     def __init__(self, **data):

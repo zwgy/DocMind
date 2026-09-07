@@ -81,6 +81,8 @@ def test_save_persists_runtime_incoming_scheduler_settings(tmp_path, monkeypatch
             "incoming_history_window_start": "19:15",
             "incoming_history_window_end": "06:45",
             "incoming_max_concurrency": 2,
+            "document_parser_ocr_engine": "mineru_ocr",
+            "document_parser_ocr_engine_config": {"backend": "hybrid-engine", "effort": "high"},
         }
     )
     cfg.save()
@@ -89,6 +91,8 @@ def test_save_persists_runtime_incoming_scheduler_settings(tmp_path, monkeypatch
     assert payload["incoming_history_window_start"] == "19:15"
     assert payload["incoming_history_window_end"] == "06:45"
     assert payload["incoming_max_concurrency"] == 2
+    assert payload["document_parser_ocr_engine"] == "mineru_ocr"
+    assert payload["document_parser_ocr_engine_config"] == {"backend": "hybrid-engine", "effort": "high"}
 
 
 def test_update_rejects_out_of_range_incoming_concurrency(tmp_path, monkeypatch: pytest.MonkeyPatch):
