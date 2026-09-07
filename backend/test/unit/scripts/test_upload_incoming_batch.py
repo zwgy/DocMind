@@ -1,3 +1,4 @@
+import os
 import runpy
 from pathlib import Path
 
@@ -5,7 +6,8 @@ import pytest
 import requests
 
 
-ROOT = Path(__file__).resolve().parents[4]
+# 与其他仓库级脚本测试一致：一次性测试容器显式注入只读仓库根目录。
+ROOT = Path(os.environ.get("YUXI_TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[4]))
 SCRIPT = ROOT / "scripts" / "upload_incoming_batch.py"
 
 
