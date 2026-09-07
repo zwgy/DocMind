@@ -8,7 +8,7 @@ from typing import Any
 
 import tomli
 import tomli_w
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, TypeAdapter, model_validator
 
 from yuxi.config import cache as runtime_cache
 from yuxi.utils.logging_config import logger
@@ -205,10 +205,15 @@ class Config(BaseModel):
     def update(self, other: dict[str, Any]) -> None:
         updates = {key: value for key, value in other.items() if self.can_update(key)}
         if updates:
-            # 批量校验后再写入，避免接口携带多个设置时留下半更新的运行时状态。
-            validated = type(self).model_validate(self.model_dump() | updates)
-            for key in updates:
-                setattr(self, key, getattr(validated, key))
+            # 不能通过 Config.model_validate 构造候选对象：构造时会读取 base.toml，反而可能用磁盘旧值覆盖本次更新。
+            validated_updates = {
+                key: TypeAdapter(type(self).model_fields[key].rebuild_annotation()).validate_python(value)
+                for key, value in updates.items()
+            }
+            candidate = self.model_copy(update=validated_updates)
+            candidate._validate_incoming_schedule()
+            for key, value in validated_updates.items():
+                object.__setattr__(self, key, value)
         for key in other:
             if self.can_update(key):
                 continue
