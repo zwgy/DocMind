@@ -165,6 +165,40 @@ async def test_dispatching_job_keeps_same_token_for_enqueue_retry(repository) ->
 
 
 @pytest.mark.asyncio
+async def test_successful_delivery_records_succeeded_stage(repository) -> None:
+    """管理页的阶段必须反映已完成任务，而不是永久显示注册阶段。"""
+    registered = await repository.register_immediate(
+        source_system="legacy-oa",
+        source_document_id="terminal-stage",
+        document_metadata={"source_doc_id": "terminal-stage"},
+        file_manifest=[],
+        actor_uid="assistant",
+    )
+    now = datetime(2026, 9, 7, 10, 0, tzinfo=UTC)
+    claim = await repository.claim_next(instance_id="dispatcher", now=now, concurrency=1)
+    assert registered.job_id is not None
+    assert claim is not None
+    assert await repository.mark_queued(job_id=claim.job_id, delivery_token=claim.delivery_token)
+    assert await repository.start_delivery(
+        job_id=claim.job_id,
+        delivery_token=claim.delivery_token,
+        worker_id="worker",
+        now=now,
+    )
+
+    assert await repository.finish_delivery(
+        job_id=claim.job_id,
+        delivery_token=claim.delivery_token,
+        worker_id="worker",
+        status="succeeded",
+    )
+
+    job = await repository.get_by_source_identity(source_system="legacy-oa", source_document_id="terminal-stage")
+    assert job is not None
+    assert job.stage == "succeeded"
+
+
+@pytest.mark.asyncio
 async def test_registering_same_source_identity_reuses_pending_job(repository) -> None:
     """丢失来源身份去重会让不同入口重复下载同一份来文。"""
     first = await repository.register_immediate(

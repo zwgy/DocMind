@@ -550,6 +550,8 @@ class IncomingIngestRepository:
         ):
             return False
         job.status = status
+        if status in {"succeeded", "cancelled"}:
+            job.stage = status
         job.lease_owner = None
         job.lease_expires_at = None
         job.last_heartbeat_at = None
