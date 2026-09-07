@@ -111,10 +111,115 @@ class IncomingDocument(Base):
     knowledge_import_status = Column(String(32), default="none", index=True)
     knowledge_import_task_id = Column(String(64))
     knowledge_import_error = Column(Text)
+    published_extraction_run_id = Column(
+        String(64), ForeignKey("document_business_extraction_runs.run_id", ondelete="SET NULL")
+    )
     archived_at = Column(DateTime(timezone=True))
     archived_by = Column(String(64))
     created_by = Column(String(64))
     updated_by = Column(String(64))
+    created_at = Column(DateTime(timezone=True), default=utc_now_naive)
+    updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class IncomingIngestBatch(Base):
+    """历史来文批次只负责登记和运维，不保存原件或解析产物。"""
+
+    __tablename__ = "incoming_ingest_batches"
+    __table_args__ = (
+        UniqueConstraint("batch_id", name="uq_incoming_ingest_batches_batch_id"),
+        UniqueConstraint("source_system", "batch_key", name="uq_incoming_ingest_batches_source_batch_key"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    batch_id = Column(String(64), unique=True, nullable=False, index=True)
+    source_system = Column(String(64), nullable=False, index=True)
+    batch_key = Column(String(128), nullable=False)
+    name = Column(String(255), nullable=False)
+    status = Column(String(32), nullable=False, default="registering", index=True)
+    is_submitted = Column(Boolean, nullable=False, default=False)
+    is_paused = Column(Boolean, nullable=False, default=False)
+    summary = Column(JSON_VALUE)
+    created_by = Column(String(64))
+    updated_by = Column(String(64))
+    submitted_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), default=utc_now_naive)
+    updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class IncomingIngestJob(Base):
+    """来文接入的持久化执行真相，Redis 仅传递其短期执行令牌。"""
+
+    __tablename__ = "incoming_ingest_jobs"
+    __table_args__ = (
+        UniqueConstraint("job_id", name="uq_incoming_ingest_jobs_job_id"),
+        UniqueConstraint(
+            "source_system",
+            "source_document_id",
+            name="uq_incoming_ingest_jobs_source_identity",
+        ),
+        Index("ix_incoming_ingest_jobs_dispatch", "priority", "next_attempt_at", "created_at", "id"),
+        Index("ix_incoming_ingest_jobs_lease", "status", "lease_expires_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(String(64), unique=True, nullable=False, index=True)
+    incoming_id = Column(String(64), ForeignKey("incoming_documents.incoming_id", ondelete="SET NULL"), index=True)
+    source_system = Column(String(64), nullable=False)
+    source_document_id = Column(String(256), nullable=False)
+    document_metadata = Column(JSON_VALUE, nullable=False, default=dict)
+    file_manifest = Column(JSON_VALUE, nullable=False, default=list)
+    source_kind = Column(String(32), nullable=False, default="history")
+    priority = Column(String(16), nullable=False, default="historical", index=True)
+    status = Column(String(32), nullable=False, default="pending", index=True)
+    stage = Column(String(32), nullable=False, default="registered", index=True)
+    operation = Column(String(32), nullable=False, default="resume")
+    input_ready = Column(Boolean, nullable=False, default=True, index=True)
+    input_version = Column(Integer, nullable=False, default=1)
+    parser_params = Column(JSON_VALUE)
+    model_spec = Column(String(512))
+    rules_version = Column(String(128))
+    delivery_token = Column(String(64), index=True)
+    lease_owner = Column(String(128))
+    lease_expires_at = Column(DateTime(timezone=True), index=True)
+    last_heartbeat_at = Column(DateTime(timezone=True))
+    next_attempt_at = Column(DateTime(timezone=True), index=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    total_attempt_count = Column(Integer, nullable=False, default=0)
+    processing_error = Column(Text)
+    created_by = Column(String(64))
+    updated_by = Column(String(64))
+    created_at = Column(DateTime(timezone=True), default=utc_now_naive)
+    updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class IncomingIngestBatchItem(Base):
+    """批次成员保留每次登记结果，避免重处理改变历史批次进度。"""
+
+    __tablename__ = "incoming_ingest_batch_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_id",
+            "source_system",
+            "source_document_id",
+            name="uq_incoming_ingest_batch_items_identity",
+        ),
+        Index("ix_incoming_ingest_batch_items_job_id", "job_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    batch_id = Column(
+        String(64), ForeignKey("incoming_ingest_batches.batch_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    job_id = Column(String(64), ForeignKey("incoming_ingest_jobs.job_id", ondelete="SET NULL"))
+    source_system = Column(String(64), nullable=False)
+    source_document_id = Column(String(256), nullable=False)
+    input_version = Column(Integer)
+    registration_status = Column(String(32), nullable=False, default="accepted", index=True)
+    terminal_status = Column(String(32))
+    error_message = Column(Text)
+    completed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), default=utc_now_naive)
     updated_at = Column(DateTime(timezone=True), default=utc_now_naive, onupdate=utc_now_naive)
 

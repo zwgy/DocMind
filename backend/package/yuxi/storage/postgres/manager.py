@@ -747,6 +747,10 @@ class PostgresManager(metaclass=SingletonMeta):
             )
             """,
             "ALTER TABLE IF EXISTS agent_runs ADD COLUMN IF NOT EXISTS parent_agent_run_id VARCHAR(64)",
+            (
+                "ALTER TABLE IF EXISTS incoming_documents "
+                "ADD COLUMN IF NOT EXISTS published_extraction_run_id VARCHAR(64)"
+            ),
             """
             CREATE TABLE IF NOT EXISTS agent_run_requests (
                 id SERIAL PRIMARY KEY,
