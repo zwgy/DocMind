@@ -27,7 +27,7 @@
 - **未实现**：主站已有，而 iframe 当前活动链路没有消费或展示。
 - **iframe 特有**：不要求从主站复刻，属于嵌入和来文场景的独立优势。
 
-只存在文件不算已实现。例如 [IncomingDocumentPanel.vue](../../chat-iframe/src/components/IncomingDocumentPanel.vue) 和 [PageFileSelector.vue](../../chat-iframe/src/components/PageFileSelector.vue) 当前没有挂到 [App.vue](../../chat-iframe/src/App.vue) 的活动模板；真实文档摘要入口是 [ChatMessages.vue](../../chat-iframe/src/components/ChatMessages.vue) 顶部的 `context_summary` 卡片，真实附件选择入口在 [ChatInput.vue](../../chat-iframe/src/components/ChatInput.vue)。
+只存在文件不算已实现。例如 [IncomingDocumentPanel.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/components/IncomingDocumentPanel.vue) 和 [PageFileSelector.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/components/PageFileSelector.vue) 当前没有挂到 [App.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/App.vue) 的活动模板；真实文档摘要入口是 [ChatMessages.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/components/ChatMessages.vue) 顶部的 `context_summary` 卡片，真实附件选择入口在 [ChatInput.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/components/ChatInput.vue)。
 
 本报告也不再给单一“复刻率”。状态面板、人工审批、文件工作区与普通 Markdown 的权重显然不同，简单按功能条目计数会高估可用性。后续验收应按用户任务链路判断。
 
@@ -35,7 +35,7 @@
 
 ### 3.1 web 主站
 
-web 主站以 [AgentChatComponent.vue](../../web/src/components/AgentChatComponent.vue) 为编排中心：
+web 主站以 [AgentChatComponent.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/web/src/components/AgentChatComponent.vue) 为编排中心：
 
 1. `AgentInputArea` 收集文本、@ 提及、附件、图片与模型。
 2. `useAgentRunStream` 建立 run 事件流，保存事件序号，处理断流检查和活动 run 续接。
@@ -48,7 +48,7 @@ web 主站以 [AgentChatComponent.vue](../../web/src/components/AgentChatCompone
 
 ### 3.2 chat-iframe
 
-chat-iframe 以 [App.vue](../../chat-iframe/src/App.vue) 和 [stores/chat.ts](../../chat-iframe/src/stores/chat.ts) 为中心：
+chat-iframe 以 [App.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/App.vue) 和 [stores/chat.ts](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/stores/chat.ts) 为中心：
 
 1. 父页面 SDK 换取外部用户 token，并发送页面、附件和业务 scope。
 2. `iframe-context` 保存配置，默认选择首个页面附件。
@@ -127,7 +127,7 @@ chat-iframe 已实现结构化工具调用，不再只是“工具调用：xxx�
 
 它仍是主站工具体系的轻量子集。主站通过工具注册表覆盖计算器、搜索、文件编辑/读取、数据库、图片、Todo、Task/Subagent 等专用视图；iframe 对大多数工具使用通用 JSON/文本结果，也没有 Task 与子智能体联动。
 
-另有一个需要清理的兼容分支：`onTool` 会把无法归一化的旧工具事件写入 `message.toolEvents`，但 [ChatMessages.vue](../../chat-iframe/src/components/ChatMessages.vue) 不渲染 `toolEvents`。这类事件当前会静默消失，不能算工具提示兜底已经完成。
+另有一个需要清理的兼容分支：`onTool` 会把无法归一化的旧工具事件写入 `message.toolEvents`，但 [ChatMessages.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/components/ChatMessages.vue) 不渲染 `toolEvents`。这类事件当前会静默消失，不能算工具提示兜底已经完成。
 
 ### 4.5 流式运行与生命周期
 
@@ -149,7 +149,7 @@ chat-iframe 已实现结构化工具调用，不再只是“工具调用：xxx�
 | `agent_state` | 持续消费并渲染 | 消费状态并驱动 Todo、上下文用量和交付物 | 核心已复刻 |
 | 人工审批/问用户 | 弹窗回答并 resume | `RunInterruptCard` 提交后恢复原 parent run | 已复刻 |
 
-历史的串会话风险已消除：流回调捕获发起 run 的 `ThreadRuntime`，切换侧栏不会改写其他会话的运行态。后端 [agent_run_service.py](../../backend/package/yuxi/services/agent_run_service.py) 已提供的 SSE `id`、`after_seq`/`Last-Event-ID`、活动 run、`agent_state`、retryable error 和 interrupt 协议也已被 iframe 消费，无需新增后端协议。
+历史的串会话风险已消除：流回调捕获发起 run 的 `ThreadRuntime`，切换侧栏不会改写其他会话的运行态。后端 [agent_run_service.py](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/backend/package/yuxi/services/agent_run_service.py) 已提供的 SSE `id`、`after_seq`/`Last-Event-ID`、活动 run、`agent_state`、retryable error 和 interrupt 协议也已被 iframe 消费，无需新增后端协议。
 
 ### 4.6 状态、审批、产物与工作区
 
@@ -362,28 +362,28 @@ iframe 在配置到达前必须接收 `INIT_CONFIG`，但当前任何来源的�
 
 ### web
 
-- [AgentChatComponent.vue](../../web/src/components/AgentChatComponent.vue)：主聊天编排、线程运行态、状态面板、审批、文件与产物入口
-- [AgentMessageComponent.vue](../../web/src/components/AgentMessageComponent.vue)：消息、推理、错误、图片、附件与工具展示
-- [RefsComponent.vue](../../web/src/components/RefsComponent.vue)：模型、复制、反馈与来源
-- [useAgentRunStream.js](../../web/src/composables/useAgentRunStream.js)：SSE、序号、断流检查和活动 run 恢复
-- [useAgentStreamHandler.js](../../web/src/composables/useAgentStreamHandler.js)：正文、工具、审批和 agent state 事件处理
-- [AgentPanel.vue](../../web/src/components/AgentPanel.vue)：文件树和预览
+- [AgentChatComponent.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/web/src/components/AgentChatComponent.vue)：主聊天编排、线程运行态、状态面板、审批、文件与产物入口
+- [AgentMessageComponent.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/web/src/components/AgentMessageComponent.vue)：消息、推理、错误、图片、附件与工具展示
+- [RefsComponent.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/web/src/components/RefsComponent.vue)：模型、复制、反馈与来源
+- [useAgentRunStream.js](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/web/src/composables/useAgentRunStream.js)：SSE、序号、断流检查和活动 run 恢复
+- [useAgentStreamHandler.js](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/web/src/composables/useAgentStreamHandler.js)：正文、工具、审批和 agent state 事件处理
+- [AgentPanel.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/web/src/components/AgentPanel.vue)：文件树和预览
 
 ### chat-iframe
 
-- [App.vue](../../chat-iframe/src/App.vue)：嵌入页编排、来文查询和上下文摘要
-- [stores/chat.ts](../../chat-iframe/src/stores/chat.ts)：会话、消息、发送、停止和当前全局运行态
-- [apis/chat.ts](../../chat-iframe/src/apis/chat.ts)：聊天 API、iframe context 和精简 SSE 解析
-- [ChatInput.vue](../../chat-iframe/src/components/ChatInput.vue)：输入、模型、普通附件、图片和页面附件
-- [ChatMessages.vue](../../chat-iframe/src/components/ChatMessages.vue)：消息、文档摘要、推理、工具和末条操作区
-- [ToolCallsPanel.vue](../../chat-iframe/src/components/ToolCallsPanel.vue)：轻量工具调用视图
-- [docmind-chat-iframe-parent.js](../../chat-iframe/public/docmind-chat-iframe-parent.js)：父页面 SDK、换票、窗口和 postMessage
+- [App.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/App.vue)：嵌入页编排、来文查询和上下文摘要
+- [stores/chat.ts](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/stores/chat.ts)：会话、消息、发送、停止和当前全局运行态
+- [apis/chat.ts](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/apis/chat.ts)：聊天 API、iframe context 和精简 SSE 解析
+- [ChatInput.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/components/ChatInput.vue)：输入、模型、普通附件、图片和页面附件
+- [ChatMessages.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/components/ChatMessages.vue)：消息、文档摘要、推理、工具和末条操作区
+- [ToolCallsPanel.vue](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/src/components/ToolCallsPanel.vue)：轻量工具调用视图
+- [docmind-chat-iframe-parent.js](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/chat-iframe/public/docmind-chat-iframe-parent.js)：父页面 SDK、换票、窗口和 postMessage
 
 ### 后端契约
 
-- [agent_run_service.py](../../backend/package/yuxi/services/agent_run_service.py)：run 事件流、精简事件、序号与活动 run
-- [iframe_context_service.py](../../backend/package/yuxi/services/iframe_context_service.py)：页面/附件上下文、总长度闸门和全文读取提示
-- [incoming_document_service.py](../../backend/package/yuxi/services/incoming_document_service.py)：来文匹配、正式业务抽取与 display metadata
+- [agent_run_service.py](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/backend/package/yuxi/services/agent_run_service.py)：run 事件流、精简事件、序号与活动 run
+- [iframe_context_service.py](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/backend/package/yuxi/services/iframe_context_service.py)：页面/附件上下文、总长度闸门和全文读取提示
+- [incoming_document_service.py](https://github.com/zwgy/DocMind/blob/9c3649d5fa98eb2599c0e3ca001fe7ab7f32eaa1/backend/package/yuxi/services/incoming_document_service.py)：来文匹配、正式业务抽取与 display metadata
 
 ## 12. 实施 TODO 与状态台账
 
