@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yuxi.repositories.incoming_ingest_repository import IncomingIngestRepository
+from yuxi.services.incoming_ingest_dispatcher_service import INCOMING_QUEUE_NAME
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.redis import get_arq_redis_settings
 from yuxi.utils.datetime_utils import utc_now
@@ -128,6 +129,7 @@ async def _worker_shutdown(ctx) -> None:
 
 class IncomingWorkerSettings:
     functions = [process_incoming_document_job]
+    queue_name = INCOMING_QUEUE_NAME
     max_jobs = 1
     max_tries = 1
     retry_jobs = False

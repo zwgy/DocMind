@@ -2,7 +2,13 @@ import asyncio
 
 import pytest
 
-from yuxi.services.incoming_ingest_worker import IncomingIngestWorkerService
+from yuxi.services.incoming_ingest_dispatcher_service import INCOMING_QUEUE_NAME
+from yuxi.services.incoming_ingest_worker import IncomingIngestWorkerService, IncomingWorkerSettings
+
+
+def test_worker_settings_listens_on_dispatcher_dedicated_queue():
+    """若 Worker 回退到 ARQ 默认队列，已投递来文会永久停在 queued。"""
+    assert IncomingWorkerSettings.queue_name == INCOMING_QUEUE_NAME
 
 
 class FakeSession:
