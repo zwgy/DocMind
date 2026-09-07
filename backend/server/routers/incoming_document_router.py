@@ -43,6 +43,8 @@ from server.utils.auth_middleware import get_admin_user, get_required_user
 
 incoming_documents = APIRouter(prefix="/incoming-documents", tags=["incoming-documents"])
 INCOMING_MARKDOWN_PREVIEW_CHARS = 40_000
+INCOMING_INGEST_BATCH_ITEM_LIMIT = 200
+INCOMING_INGEST_BATCH_BYTES_LIMIT = 5 * 1024 * 1024
 
 
 class IncomingExtractionQueryRequest(BaseModel):
@@ -79,6 +81,21 @@ class IncomingSourceIngestRequest(IncomingIngestSourceFields):
     files: list[IncomingSourceFile]
 
 
+class IncomingIngestBatchRequest(BaseModel):
+    source_system: str = "production"
+    batch_key: str
+    name: str
+
+
+class IncomingIngestBatchItemsRequest(BaseModel):
+    source_system: str = "production"
+    items: list[dict]
+
+
+class IncomingIngestBatchPauseRequest(BaseModel):
+    paused: bool
+
+
 class IncomingClassificationRequest(BaseModel):
     classification: str
 
@@ -100,6 +117,72 @@ async def query_incoming_document_extractions(
     del current_user
     # iframe 只能按当前页面附件线索查询摘要，不提供全局来文列表。
     return await IncomingDocumentService().query_extractions([item.model_dump(by_alias=True) for item in payload.files])
+
+
+@incoming_documents.post("/ingest-batches")
+async def create_incoming_ingest_batch(
+    payload: IncomingIngestBatchRequest,
+    current_user: User = Depends(get_admin_user),
+):
+    try:
+        return await IncomingDocumentService().create_ingest_batch(
+            source_system=payload.source_system,
+            batch_key=payload.batch_key,
+            name=payload.name,
+            actor_uid=current_user.uid,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@incoming_documents.post("/ingest-batches/{batch_id}/items")
+async def register_incoming_ingest_batch_items(
+    batch_id: str,
+    payload: IncomingIngestBatchItemsRequest,
+    current_user: User = Depends(get_admin_user),
+):
+    if len(payload.items) > INCOMING_INGEST_BATCH_ITEM_LIMIT:
+        raise HTTPException(status_code=400, detail="单次登记不能超过 200 项")
+    if len(json.dumps(payload.items, ensure_ascii=False).encode("utf-8")) > INCOMING_INGEST_BATCH_BYTES_LIMIT:
+        raise HTTPException(status_code=400, detail="单次登记元数据不能超过 5 MiB")
+    try:
+        return await IncomingDocumentService().register_ingest_batch_items(
+            batch_id=batch_id,
+            source_system=payload.source_system,
+            items=payload.items,
+            actor_uid=current_user.uid,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@incoming_documents.post("/ingest-batches/{batch_id}/submit")
+async def submit_incoming_ingest_batch(batch_id: str, current_user: User = Depends(get_admin_user)):
+    del current_user
+    try:
+        return await IncomingDocumentService().submit_ingest_batch(batch_id=batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@incoming_documents.post("/ingest-batches/{batch_id}/pause")
+async def pause_or_resume_incoming_ingest_batch(
+    batch_id: str,
+    payload: IncomingIngestBatchPauseRequest,
+    current_user: User = Depends(get_admin_user),
+):
+    del current_user
+    try:
+        return await IncomingDocumentService().set_ingest_batch_paused(batch_id=batch_id, paused=payload.paused)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@incoming_documents.post("/ingest-jobs/{job_id}/expedite")
+async def expedite_incoming_ingest_job(job_id: str, current_user: User = Depends(get_required_user)):
+    if not await IncomingDocumentService().expedite_ingest_job(job_id=job_id, actor_uid=current_user.uid):
+        raise HTTPException(status_code=404, detail="待处理来文任务不存在或已结束")
+    return {"jobId": job_id, "priority": "immediate"}
 
 
 @incoming_documents.get("")
@@ -202,12 +285,18 @@ async def confirm_incoming_document(incoming_id: str, current_user: User = Depen
 @incoming_documents.post("/ingest")
 async def ingest_incoming_document(request: Request, current_user: User = Depends(get_required_user)):
     try:
-        service = IncomingDocumentIngestService()
         if request.headers.get("content-type", "").startswith("application/json"):
             payload = IncomingSourceIngestRequest.model_validate(await request.json())
-            fields = IncomingIngestSourceFields(source_system=payload.source_system)
             document_metadata = _validate_document_metadata(payload.document_metadata)
-            files = await service.download_source_files([item.model_dump() for item in payload.files])
+            files = [item.model_dump() for item in payload.files]
+            result = await IncomingDocumentService().register_immediate_ingest(
+                source_system=payload.source_system,
+                source_document_id=_source_doc_id_from_metadata(document_metadata),
+                document_metadata=document_metadata,
+                file_manifest=files,
+                actor_uid=current_user.uid,
+            )
+            return result | {"fileCount": len(files)}
         else:
             form = await request.form()
             if "source_doc_id" in form:
@@ -247,6 +336,7 @@ async def ingest_incoming_document(request: Request, current_user: User = Depend
                     }
                 )
 
+        service = IncomingDocumentIngestService()
         result = await service.ingest_files(
             # 外部契约只在 document_metadata 声明来文 ID；服务层再将其规范化为独立索引字段。
             source_doc_id=_source_doc_id_from_metadata(document_metadata),

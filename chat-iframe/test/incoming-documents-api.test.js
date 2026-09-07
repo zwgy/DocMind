@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  expediteIncomingIngestJob,
   ingestIncomingDocument,
   queryIncomingDocumentExtractions
 } from '../src/apis/incoming-documents.ts'
@@ -41,7 +42,7 @@ test('queryIncomingDocumentExtractions reports non-json http status', async () =
   )
 })
 
-test('ingestIncomingDocument asks DocMind to download source urls', async () => {
+test('ingestIncomingDocument registers source urls for background processing', async () => {
   const calls = []
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options })
@@ -94,6 +95,21 @@ test('ingestIncomingDocument asks DocMind to download source urls', async () => 
     ]
   })
   assert.equal(response.status, 'accepted')
+})
+
+test('expediteIncomingIngestJob posts the job id with bearer token', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    return Response.json({ jobId: 'ij_1', priority: 'immediate' })
+  }
+
+  const response = await expediteIncomingIngestJob('ij_1', 'token-1')
+
+  assert.equal(calls[0].url, '/api/incoming-documents/ingest-jobs/ij_1/expedite')
+  assert.equal(calls[0].options.method, 'POST')
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer token-1')
+  assert.equal(response.priority, 'immediate')
 })
 
 test('ingestIncomingDocument uses source_file_id as the source file key', async () => {

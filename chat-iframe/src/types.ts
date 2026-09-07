@@ -94,6 +94,9 @@ export type ExtractionResult = {
   incoming_date?: string
   matchStatus: 'matched' | 'multiple' | 'pending_sync' | 'not_found' | string
   extractionStatus: 'ready' | 'running' | 'not_found' | 'failed' | string
+  processingStatus?: string
+  ingestJobId?: string
+  ingestPriority?: string
   reason?: string
   runId?: string | null
   kbId?: string

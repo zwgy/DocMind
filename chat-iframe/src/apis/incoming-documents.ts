@@ -75,6 +75,19 @@ export async function queryIncomingDocumentExtractions(
   return parseApiResponse<ExtractionQueryResponse>(response, `查询失败：${response.status}`)
 }
 
+export async function expediteIncomingIngestJob(
+  jobId: string,
+  token?: string
+): Promise<Record<string, unknown>> {
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const response = await fetch(
+    apiUrl(`/api/incoming-documents/ingest-jobs/${encodeURIComponent(jobId)}/expedite`),
+    { method: 'POST', headers }
+  )
+  return parseApiResponse<Record<string, unknown>>(response, `提升任务优先级失败：${response.status}`)
+}
+
 export async function ingestIncomingDocument(
   files: IncomingPageFile[],
   token?: string,

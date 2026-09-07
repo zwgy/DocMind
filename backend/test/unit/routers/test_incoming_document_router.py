@@ -35,7 +35,7 @@ def test_parse_file_metas_reads_main_file_marker():
     assert [meta.is_main_file for meta in metas] == [True, None]
 
 
-async def test_ingest_json_delegates_source_url_download_to_service(monkeypatch):
+async def test_ingest_json_registers_immediate_job_without_downloading_source_file(monkeypatch):
     captured = {}
 
     class FakeRequest:
@@ -59,49 +59,35 @@ async def test_ingest_json_delegates_source_url_download_to_service(monkeypatch)
                 ],
             }
 
-    class FakeIngestService:
-        async def download_source_files(self, files):
-            captured["download_files"] = files
-            return [{**files[0], "mime_type": "application/pdf", "content": b"pdf-data"}]
+    class FakeIncomingDocumentService:
+        async def register_immediate_ingest(self, **kwargs):
+            captured["register"] = kwargs
+            return {"jobId": "ij_1", "status": "accepted", "priority": "immediate"}
 
-        async def ingest_files(self, **kwargs):
-            captured["ingest"] = kwargs
-            return {"incomingId": "inc_1", "status": "accepted"}
-
-    monkeypatch.setattr(incoming_document_router, "IncomingDocumentIngestService", FakeIngestService)
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentService", FakeIncomingDocumentService)
 
     result = await incoming_document_router.ingest_incoming_document(
         FakeRequest(), current_user=SimpleNamespace(uid="user-1")
     )
 
-    assert result == {"incomingId": "inc_1", "status": "accepted", "fileCount": 1}
-    assert captured["download_files"] == [
-        {
-            "source_file_id": "S001",
-            "filename": "会议纪要.pdf",
-            "source_url": "http://attachments.test/download?id=S001",
-            "is_main_file": True,
-        }
-    ]
-    assert captured["ingest"] == {
-        "source_doc_id": "DOC001",
+    assert result == {"jobId": "ij_1", "status": "accepted", "priority": "immediate", "fileCount": 1}
+    assert captured["register"] == {
         "source_system": "oa",
+        "source_document_id": "DOC001",
         "document_metadata": {
             "source_doc_id": "DOC001",
             "title": "会议纪要",
             "incoming_date": "2026-08-12",
         },
-        "files": [
+        "file_manifest": [
             {
                 "source_file_id": "S001",
                 "filename": "会议纪要.pdf",
                 "source_url": "http://attachments.test/download?id=S001",
                 "is_main_file": True,
-                "mime_type": "application/pdf",
-                "content": b"pdf-data",
             }
         ],
-        "operator_id": "user-1",
+        "actor_uid": "user-1",
     }
 
 
@@ -203,6 +189,70 @@ async def test_ingest_multipart_rejects_page_context_fields(field_name):
         )
     assert exc_info.value.status_code == 400
     assert "page and user context" in exc_info.value.detail
+
+
+def test_ingest_batch_routes_require_administrator_dependency():
+    protected_paths = {
+        "/incoming-documents/ingest-batches",
+        "/incoming-documents/ingest-batches/{batch_id}/items",
+        "/incoming-documents/ingest-batches/{batch_id}/submit",
+        "/incoming-documents/ingest-batches/{batch_id}/pause",
+    }
+    routes = {route.path: route for route in incoming_document_router.incoming_documents.routes}
+
+    for path in protected_paths:
+        dependencies = [dependency.call for dependency in routes[path].dependant.dependencies]
+        assert incoming_document_router.get_admin_user in dependencies
+
+
+async def test_register_ingest_batch_items_rejects_oversized_chunk_before_service_call(monkeypatch):
+    class FakeIncomingDocumentService:
+        def __init__(self):
+            raise AssertionError("超限请求不应进入服务层")
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentService", FakeIncomingDocumentService)
+    payload = incoming_document_router.IncomingIngestBatchItemsRequest(
+        source_system="oa",
+        items=[{}] * (incoming_document_router.INCOMING_INGEST_BATCH_ITEM_LIMIT + 1),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await incoming_document_router.register_incoming_ingest_batch_items(
+            "ib_1", payload, current_user=SimpleNamespace(uid="admin-1")
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "200" in exc_info.value.detail
+
+
+async def test_expedite_returns_not_found_after_terminal_job(monkeypatch):
+    class FakeIncomingDocumentService:
+        async def expedite_ingest_job(self, **_kwargs):
+            return False
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentService", FakeIncomingDocumentService)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await incoming_document_router.expedite_incoming_ingest_job(
+            "ij_finished", current_user=SimpleNamespace(uid="user-1")
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+async def test_submit_ingest_batch_returns_service_batch_payload(monkeypatch):
+    class FakeIncomingDocumentService:
+        async def submit_ingest_batch(self, **kwargs):
+            assert kwargs == {"batch_id": "ib_1"}
+            return {"batchId": "ib_1", "status": "active", "isSubmitted": True}
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentService", FakeIncomingDocumentService)
+
+    result = await incoming_document_router.submit_incoming_ingest_batch(
+        "ib_1", current_user=SimpleNamespace(uid="admin-1")
+    )
+
+    assert result == {"batchId": "ib_1", "status": "active", "isSubmitted": True}
 
 
 async def test_management_list_normalizes_classification_label(monkeypatch):

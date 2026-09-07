@@ -134,7 +134,15 @@ async def test_query_returns_each_selected_main_and_attachment():
 
 async def test_query_returns_pending_sync_when_attachment_is_not_ingested():
     incoming_repo = FakeIncomingRepo()
-    service = IncomingDocumentService(incoming_repo=incoming_repo, extraction_repo=FakeExtractionRepo())
+
+    async def no_ingest_job(*_args):
+        return None
+
+    service = IncomingDocumentService(
+        incoming_repo=incoming_repo,
+        extraction_repo=FakeExtractionRepo(),
+        ingest_job_lookup=no_ingest_job,
+    )
 
     result = await service.query_extractions(
         [{"name": "附件.pdf", "source_file_id": "file-1", "source_doc_id": "DOC-1"}]
@@ -158,6 +166,52 @@ async def test_query_returns_pending_sync_when_attachment_is_not_ingested():
         "source_document_id": "DOC-1",
         "source_file_id": "file-1",
     }
+
+
+async def test_query_returns_registered_historical_job_without_requesting_reupload():
+    async def find_ingest_job(source_system, source_document_id):
+        assert (source_system, source_document_id) == ("oa", "DOC-1")
+        return SimpleNamespace(
+            job_id="ij_1",
+            priority="historical",
+            status="pending",
+            stage="registered",
+            file_manifest=[{"source_file_id": "file-1", "filename": "附件.pdf"}],
+        )
+
+    service = IncomingDocumentService(
+        incoming_repo=FakeIncomingRepo(),
+        extraction_repo=FakeExtractionRepo(),
+        ingest_job_lookup=find_ingest_job,
+    )
+
+    result = await service.query_extractions(
+        [
+            {
+                "name": "附件.pdf",
+                "source_file_id": "file-1",
+                "source_system": "oa",
+                "source_doc_id": "DOC-1",
+                "source_url": "https://oa.test/file-1",
+            }
+        ]
+    )
+
+    assert result["items"] == [
+        {
+            "incomingFileId": "file-1",
+            "name": "附件.pdf",
+            "source_url": "https://oa.test/file-1",
+            "source_file_id": "file-1",
+            "source_doc_id": "DOC-1",
+            "matchStatus": "matched",
+            "processingStatus": "pending",
+            "extractionStatus": "pending",
+            "ingestJobId": "ij_1",
+            "ingestPriority": "historical",
+            "reason": "incoming ingest job registered",
+        }
+    ]
 
 
 async def test_query_returns_selected_attachment_summary_without_main_items():

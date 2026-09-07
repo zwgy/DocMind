@@ -55,6 +55,16 @@ class IncomingIngestRepository:
             raise RuntimeError("无法读取 PostgreSQL 当前时间")
         return now.astimezone(UTC)
 
+    async def get_by_source_identity(
+        self, *, source_system: str, source_document_id: str
+    ) -> IncomingIngestJob | None:
+        return await self.db.scalar(
+            select(IncomingIngestJob).where(
+                IncomingIngestJob.source_system == source_system,
+                IncomingIngestJob.source_document_id == source_document_id,
+            )
+        )
+
     async def create_batch(
         self,
         *,

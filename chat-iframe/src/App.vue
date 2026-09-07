@@ -13,7 +13,11 @@ import {
   TriangleAlert,
   X
 } from 'lucide-vue-next'
-import { ingestIncomingDocument, queryIncomingDocumentExtractions } from '@/apis/incoming-documents'
+import {
+  expediteIncomingIngestJob,
+  ingestIncomingDocument,
+  queryIncomingDocumentExtractions
+} from '@/apis/incoming-documents'
 import { inboxApi } from '@/apis/inbox'
 import type { InboxUnreadCounts, NotificationInboxItem, TaskInboxItem } from '@/apis/inbox'
 import ChatInput from '@/components/ChatInput.vue'
@@ -53,6 +57,7 @@ type AttachmentPreparationNotice = {
 const attachmentPreparationNotice = ref<AttachmentPreparationNotice | null>(null)
 const attachmentPreparationEnabled = ref(false)
 const attachmentPreparationPromises = new Map<string, Promise<void>>()
+const expeditedIngestJobIds = new Set<string>()
 const showSidebar = ref(false)
 const showScheduledCenter = ref(false)
 const unreadCounts = ref<InboxUnreadCounts>({
@@ -209,6 +214,29 @@ async function preparePendingFiles(files: IncomingPageFile[]) {
   })
   attachmentPreparationPromises.set(key, tracked)
   return tracked
+}
+
+async function expediteHistoricalIngestJobs(files: IncomingPageFile[]) {
+  const jobIds = new Set(
+    files
+      .map((file) => results.value[file.source_file_id])
+      .filter(
+        (result) =>
+          result?.matchStatus === 'matched' &&
+          result.ingestPriority === 'historical' &&
+          result.extractionStatus !== 'ready' &&
+          result.processingStatus !== 'failed' &&
+          result.processingStatus !== 'succeeded' &&
+          Boolean(result.ingestJobId)
+      )
+      .map((result) => result!.ingestJobId!)
+      .filter((jobId) => !expeditedIngestJobIds.has(jobId))
+  )
+  for (const jobId of jobIds) {
+    await expediteIncomingIngestJob(jobId, context.config.token)
+    expeditedIngestJobIds.add(jobId)
+  }
+  return jobIds.size > 0
 }
 
 function refreshAttachmentPreparation(files: IncomingPageFile[]) {
@@ -494,6 +522,11 @@ async function refreshExtractionOnce(
     let response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
     cacheExtractionResults(queryFiles, response.items || [])
     refreshAttachmentPreparation(queryFiles)
+    if (await expediteHistoricalIngestJobs(queryFiles)) {
+      response = await queryIncomingDocumentExtractions(queryFiles, context.config.token)
+      cacheExtractionResults(queryFiles, response.items || [])
+      refreshAttachmentPreparation(queryFiles)
+    }
     const pendingCandidates = syncPending
       ? queryFiles.filter(
           (file) => results.value[file.source_file_id]?.matchStatus === 'pending_sync'
@@ -812,6 +845,7 @@ watch(
     if (!previousPageContextKey || pageContextKey === previousPageContextKey) return
     // 页面身份只由 source_system + source_function_id + business_id 决定；source_doc_id 仅归属页面内来文附件。
     attachmentPreparationPromises.clear()
+    expeditedIngestJobIds.clear()
     extractionRefreshPromises.clear()
     results.value = {}
     selectedPageFiles.value = []
@@ -826,6 +860,7 @@ watch(
 watch(
   () => selectedFile.value?.source_file_id,
   () => {
+    expeditedIngestJobIds.clear()
     refreshContextSummaries()
     void refreshExtraction()
   },
