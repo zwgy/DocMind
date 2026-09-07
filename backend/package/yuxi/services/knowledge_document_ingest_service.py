@@ -46,6 +46,7 @@ class KnowledgeDocumentIngestService:
         params: dict[str, Any],
         operator_id: str | None,
         task_name: str | None = None,
+        preparsed_markdown_urls: dict[str, str] | None = None,
         on_success: TaskCallback | None = None,
         on_failure: TaskFailureCallback | None = None,
     ) -> dict[str, Any]:
@@ -60,6 +61,7 @@ class KnowledgeDocumentIngestService:
                     params=params,
                     operator_id=operator_id,
                     context=context,
+                    preparsed_markdown_urls=preparsed_markdown_urls,
                 )
                 if on_success is not None:
                     await _maybe_await(on_success(result))
@@ -90,6 +92,7 @@ class KnowledgeDocumentIngestService:
         params: dict[str, Any],
         operator_id: str | None,
         context: TaskContext,
+        preparsed_markdown_urls: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         await context.set_message("任务初始化")
         await context.set_progress(5.0, "准备处理文档")
@@ -143,7 +146,13 @@ class KnowledgeDocumentIngestService:
                 item = record["item"]
                 file_id = record["file_id"]
                 try:
-                    file_meta = await self.knowledge.parse_file(kb_id, file_id, operator_id=operator_id)
+                    markdown_file = (preparsed_markdown_urls or {}).get(item)
+                    if markdown_file:
+                        file_meta = await self.knowledge.adopt_parsed_markdown(
+                            kb_id, file_id, markdown_file, operator_id=operator_id
+                        )
+                    else:
+                        file_meta = await self.knowledge.parse_file(kb_id, file_id, operator_id=operator_id)
                     record["file_meta"] = file_meta
                     if not auto_index or file_meta.get("status") != "parsed":
                         processed_items[record["index"]] = file_meta

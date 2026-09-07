@@ -433,6 +433,29 @@ class KnowledgeBase(ABC):
 
             raise
 
+    async def adopt_parsed_markdown(
+        self, kb_id: str, file_id: str, markdown_file: str, operator_id: str | None = None
+    ) -> dict:
+        """将受调用方校验的既有 Markdown 绑定到新建知识库文件，跳过重复解析。"""
+        from yuxi.repositories.knowledge_file_repository import KnowledgeFileRepository
+
+        update_data = {
+            "status": FileStatus.PARSED,
+            "markdown_file": markdown_file,
+            "error_message": None,
+        }
+        if operator_id:
+            update_data["updated_by"] = operator_id
+        record = await KnowledgeFileRepository().update_fields_if_status(
+            kb_id=kb_id,
+            file_id=file_id,
+            allowed_statuses={FileStatus.UPLOADED, FileStatus.ERROR_PARSING, "failed"},
+            data=update_data,
+        )
+        if record is None:
+            raise ValueError(f"Cannot adopt Markdown for file {file_id} with its current status")
+        return self._file_record_to_meta(record)
+
     async def update_file_params(self, kb_id: str, file_id: str, params: dict, operator_id: str | None = None) -> None:
         """Update file processing params"""
         # Skip if no params to update

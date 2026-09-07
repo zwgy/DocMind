@@ -26,6 +26,8 @@ class FakeContext:
 class FakeKnowledge:
     def __init__(self):
         self.add_calls = []
+        self.parse_calls = []
+        self.adopt_calls = []
         self.update_calls = []
         self.index_calls = []
 
@@ -34,7 +36,12 @@ class FakeKnowledge:
         return {"file_id": "file_1", "status": "uploaded"}
 
     async def parse_file(self, kb_id, file_id, operator_id=None):
+        self.parse_calls.append((kb_id, file_id, operator_id))
         return {"file_id": file_id, "status": "parsed"}
+
+    async def adopt_parsed_markdown(self, kb_id, file_id, markdown_file, operator_id=None):
+        self.adopt_calls.append((kb_id, file_id, markdown_file, operator_id))
+        return {"file_id": file_id, "status": "parsed", "markdown_file": markdown_file}
 
     async def update_file_params(self, kb_id, file_id, params, operator_id=None):
         self.update_calls.append((kb_id, file_id, params, operator_id))
@@ -78,6 +85,31 @@ async def test_run_ingest_auto_indexes_and_preserves_source_path():
     assert knowledge.index_calls == [
         ("kb_1", "file_1", {"chunk_preset_id": "general", "chunk_parser_config": {"chunk_token_num": 512}}, "u1")
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_ingest_adopts_trusted_incoming_markdown_without_reparsing():
+    """来文入库应复用已验证的 Markdown，不能再次调用 Parser 或 OCR。"""
+    item = "minio://knowledgebases/incoming/inc_1/original.pdf"
+    markdown = "minio://knowledgebases/incoming/inc_1/incf_1/parsed.md"
+    knowledge = FakeKnowledge()
+    service = KnowledgeDocumentIngestService(knowledge=knowledge)
+
+    result = await service.run_ingest(
+        kb_id="kb_1",
+        items=[item],
+        params={
+            "content_type": "file",
+            "auto_index": True,
+        },
+        operator_id="u1",
+        context=FakeContext(),
+        preparsed_markdown_urls={item: markdown},
+    )
+
+    assert result["items"] == [{"file_id": "file_1", "status": "indexed"}]
+    assert knowledge.parse_calls == []
+    assert knowledge.adopt_calls == [("kb_1", "file_1", markdown, "u1")]
 
 
 class FakeTasker:

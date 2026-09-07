@@ -836,6 +836,13 @@ class IncomingDocumentIngestService:
             file.original_file_url: f"incoming/{category_path}/{file.incoming_file_id}/{file.filename}"
             for file in target_files
         }
+        preparsed_markdown_urls = {
+            file.original_file_url: file.markdown_file_url
+            for file in target_files
+            if file.markdown_file_url
+        }
+        if len(preparsed_markdown_urls) != len(target_files):
+            raise ValueError("Incoming document Markdown is not ready")
         document_ingest = document_ingest_service or KnowledgeDocumentIngestService()
         await document_ingest.ensure_database_supports_documents(kb_id, "来文存入知识库")
 
@@ -906,6 +913,7 @@ class IncomingDocumentIngestService:
                 params=ingest_params,
                 operator_id=operator_id,
                 task_name=f"来文存入知识库({incoming_id})",
+                preparsed_markdown_urls=preparsed_markdown_urls,
                 on_success=on_success,
                 on_failure=on_failure,
             )

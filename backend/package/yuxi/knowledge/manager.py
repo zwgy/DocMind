@@ -422,6 +422,13 @@ class KnowledgeBaseManager:
         kb_instance = await self._get_kb_for_database(kb_id)
         return await kb_instance.parse_file(kb_id, file_id, operator_id)
 
+    async def adopt_parsed_markdown(
+        self, kb_id: str, file_id: str, markdown_file: str, operator_id: str | None = None
+    ) -> dict:
+        """接纳受内部服务验证的 Markdown，复用既有索引状态机。"""
+        kb_instance = await self._get_kb_for_database(kb_id)
+        return await kb_instance.adopt_parsed_markdown(kb_id, file_id, markdown_file, operator_id)
+
     async def index_file(
         self, kb_id: str, file_id: str, operator_id: str | None = None, params: dict | None = None
     ) -> dict:

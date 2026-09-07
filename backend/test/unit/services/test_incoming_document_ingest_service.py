@@ -896,6 +896,7 @@ async def test_knowledge_import_can_select_attachments_then_complete_remaining_f
             source_file_id="main",
             filename="同名.pdf",
             original_file_url="minio://incoming/main.pdf",
+            markdown_file_url="minio://knowledgebases/incoming/inc_1/incf_main/parsed.md",
             content_hash="hash-main",
             file_size=10,
             knowledge_import_status="none",
@@ -908,6 +909,7 @@ async def test_knowledge_import_can_select_attachments_then_complete_remaining_f
             source_file_id="attachment",
             filename="同名.pdf",
             original_file_url="minio://incoming/attachment.pdf",
+            markdown_file_url="minio://knowledgebases/incoming/inc_1/incf_attachment/parsed.md",
             content_hash="hash-attachment",
             file_size=20,
             knowledge_import_status="none",
@@ -940,6 +942,9 @@ async def test_knowledge_import_can_select_attachments_then_complete_remaining_f
     assert attachment_ingest.calls[0]["items"] == ["minio://incoming/attachment.pdf"]
     assert attachment_ingest.calls[0]["params"]["source_paths"] == {
         "minio://incoming/attachment.pdf": "incoming/阶段性工作类/incf_attachment/同名.pdf"
+    }
+    assert attachment_ingest.calls[0]["preparsed_markdown_urls"] == {
+        "minio://incoming/attachment.pdf": "minio://knowledgebases/incoming/inc_1/incf_attachment/parsed.md"
     }
 
     remaining_ingest = FakeKnowledgeIngest(["kb_main"])
@@ -974,6 +979,7 @@ async def test_knowledge_import_enqueue_failure_restores_failed_state():
             source_file_id="main",
             filename="main.pdf",
             original_file_url="minio://incoming/main.pdf",
+            markdown_file_url="minio://knowledgebases/incoming/inc_1/incf_main/parsed.md",
             content_hash="hash-main",
             file_size=10,
             knowledge_import_status="none",
