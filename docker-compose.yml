@@ -148,6 +148,7 @@ services:
     volumes:
       - ./backend/server:/app/server
       - ./backend/package:/app/package
+      - ./docker/volumes/yuxi:/app/saves
       - ./.env:/app/.env
     networks:
       - app-network

@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+import yuxi.services.incoming_ingest_worker as worker_module
 from yuxi.services.incoming_ingest_dispatcher_service import INCOMING_QUEUE_NAME
 from yuxi.services.incoming_ingest_worker import IncomingIngestWorkerService, IncomingWorkerSettings
 
@@ -9,6 +10,31 @@ from yuxi.services.incoming_ingest_worker import IncomingIngestWorkerService, In
 def test_worker_settings_listens_on_dispatcher_dedicated_queue():
     """若 Worker 回退到 ARQ 默认队列，已投递来文会永久停在 queued。"""
     assert IncomingWorkerSettings.queue_name == INCOMING_QUEUE_NAME
+
+
+@pytest.mark.asyncio
+async def test_worker_startup_starts_runtime_configuration_sync(monkeypatch: pytest.MonkeyPatch):
+    """来文 Worker 必须获得管理端更新后的模型和解析配置。"""
+    calls = []
+
+    async def create_business_tables():
+        calls.append("tables")
+
+    async def ensure_business_schema():
+        calls.append("schema")
+
+    class RuntimeConfig:
+        def start_runtime_sync(self):
+            calls.append("runtime-config")
+
+    monkeypatch.setattr(worker_module.pg_manager, "initialize", lambda: calls.append("initialize"))
+    monkeypatch.setattr(worker_module.pg_manager, "create_business_tables", create_business_tables)
+    monkeypatch.setattr(worker_module.pg_manager, "ensure_business_schema", ensure_business_schema)
+    monkeypatch.setattr(worker_module, "sys_config", RuntimeConfig(), raising=False)
+
+    await worker_module._worker_startup(None)
+
+    assert calls == ["initialize", "tables", "schema", "runtime-config"]
 
 
 class FakeSession:

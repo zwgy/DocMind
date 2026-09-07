@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yuxi.config.app import config as sys_config
 from yuxi.repositories.incoming_ingest_repository import IncomingIngestRepository
 from yuxi.services.incoming_ingest_dispatcher_service import INCOMING_QUEUE_NAME
 from yuxi.storage.postgres.manager import pg_manager
@@ -116,6 +117,7 @@ async def _worker_startup(ctx) -> None:
     pg_manager.initialize()
     await pg_manager.create_business_tables()
     await pg_manager.ensure_business_schema()
+    sys_config.start_runtime_sync()
     _worker_service = IncomingIngestWorkerService(
         session_factory=pg_manager.AsyncSession,
         execute_job=_execute_ingest_job,
