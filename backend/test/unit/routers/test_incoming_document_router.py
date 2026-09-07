@@ -268,6 +268,83 @@ async def test_submit_ingest_batch_returns_service_batch_payload(monkeypatch):
     assert result == {"batchId": "ib_1", "status": "active", "isSubmitted": True}
 
 
+async def test_retry_ingest_job_delegates_to_service(monkeypatch):
+    captured = {}
+
+    class FakeIncomingDocumentService:
+        async def retry_ingest_job(self, **kwargs):
+            captured.update(kwargs)
+            return {"jobId": kwargs["job_id"], "status": "pending"}
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentService", FakeIncomingDocumentService)
+
+    result = await incoming_document_router.retry_incoming_ingest_job(
+        "ij_failed", current_user=SimpleNamespace(uid="admin-1")
+    )
+
+    assert result == {"jobId": "ij_failed", "status": "pending"}
+    assert captured == {"job_id": "ij_failed", "actor_uid": "admin-1"}
+
+
+async def test_retry_ingest_job_maps_non_terminal_error_to_400(monkeypatch):
+    class FakeIncomingDocumentService:
+        async def retry_ingest_job(self, **kwargs):
+            raise ValueError("仅处理失败或已取消的任务可以重试")
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentService", FakeIncomingDocumentService)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await incoming_document_router.retry_incoming_ingest_job(
+            "ij_running", current_user=SimpleNamespace(uid="admin-1")
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "仅处理失败或已取消的任务可以重试"
+
+
+async def test_refresh_ingest_job_source_delegates_to_service(monkeypatch):
+    captured = {}
+
+    class FakeIncomingDocumentService:
+        async def refresh_ingest_job_source(self, **kwargs):
+            captured.update(kwargs)
+            return {"jobId": kwargs["job_id"], "status": "pending"}
+
+    monkeypatch.setattr(incoming_document_router, "IncomingDocumentService", FakeIncomingDocumentService)
+    payload = incoming_document_router.IncomingIngestJobSourceRefreshRequest.model_validate(
+        {
+            "document_metadata": {"source_doc_id": "DOC-1", "title": "更新后的来源"},
+            "files": [
+                {
+                    "source_file_id": "main",
+                    "filename": "来文.pdf",
+                    "source_url": "https://source.example/new.pdf",
+                    "is_main_file": True,
+                }
+            ],
+        }
+    )
+
+    result = await incoming_document_router.refresh_incoming_ingest_job_source(
+        "ij_failed", payload, current_user=SimpleNamespace(uid="admin-1")
+    )
+
+    assert result == {"jobId": "ij_failed", "status": "pending"}
+    assert captured == {
+        "job_id": "ij_failed",
+        "document_metadata": {"source_doc_id": "DOC-1", "title": "更新后的来源"},
+        "file_manifest": [
+            {
+                "source_file_id": "main",
+                "filename": "来文.pdf",
+                "source_url": "https://source.example/new.pdf",
+                "is_main_file": True,
+            }
+        ],
+        "actor_uid": "admin-1",
+    }
+
+
 async def test_management_list_normalizes_classification_label(monkeypatch):
     captured = {}
 

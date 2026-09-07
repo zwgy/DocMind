@@ -485,6 +485,7 @@ class IncomingIngestRepository:
             await self.db.flush()
             return None
         job.status = "running"
+        job.stage = "downloading"
         job.lease_owner = worker_id
         job.lease_expires_at = now + timedelta(seconds=lease_seconds)
         job.last_heartbeat_at = now
@@ -518,6 +519,15 @@ class IncomingIngestRepository:
             job.parser_params = parser_params
             await self.db.flush()
         return job.parser_params
+
+    async def update_running_stage(self, *, job_id: str, delivery_token: str, stage: str) -> bool:
+        """只允许持有有效令牌的 Worker 更新业务进度，避免旧消息覆盖当前状态。"""
+        job = await self._get_job_for_update(job_id)
+        if job is None or job.status != "running" or job.delivery_token != delivery_token:
+            return False
+        job.stage = stage
+        await self.db.flush()
+        return True
 
     async def renew_lease(
         self,
@@ -563,14 +573,43 @@ class IncomingIngestRepository:
         ):
             return False
         job.status = status
-        if status in {"succeeded", "cancelled"}:
-            job.stage = status
+        job.stage = status
         job.lease_owner = None
         job.lease_expires_at = None
         job.last_heartbeat_at = None
         job.processing_error = error_message
         await self.db.flush()
         return True
+
+    async def retry_terminal_job(self, *, job_id: str, actor_uid: str) -> IncomingIngestJob | None:
+        """人工重试只恢复失败或取消任务，运行中任务必须由租约保障其唯一执行。"""
+        job = await self._get_job_for_update(job_id)
+        if job is None or job.status not in {"failed", "cancelled"}:
+            return None
+        self._reset_job_for_retry(job, actor_uid=actor_uid)
+        await self.db.flush()
+        return job
+
+    async def refresh_terminal_job_source(
+        self,
+        *,
+        job_id: str,
+        document_metadata: dict,
+        file_manifest: list[dict],
+        actor_uid: str,
+    ) -> IncomingIngestJob | None:
+        """来源下载链接失效时更新终态任务输入，并将其重新交给调度器。"""
+        job = await self._get_job_for_update(job_id)
+        if job is None or job.status not in {"failed", "cancelled"}:
+            return None
+        source_document_id = str(document_metadata.get("source_doc_id") or "").strip()
+        if source_document_id != job.source_document_id:
+            raise ValueError("刷新来源的来文 ID 与原任务不一致")
+        job.document_metadata = document_metadata
+        job.file_manifest = file_manifest
+        self._reset_job_for_retry(job, actor_uid=actor_uid)
+        await self.db.flush()
+        return job
 
     async def recover_expired(self, *, now: datetime) -> int:
         jobs = list(
@@ -595,6 +634,18 @@ class IncomingIngestRepository:
             job.next_attempt_at = now
         await self.db.flush()
         return len(jobs)
+
+    @staticmethod
+    def _reset_job_for_retry(job: IncomingIngestJob, *, actor_uid: str) -> None:
+        job.status = "pending"
+        job.stage = "registered"
+        job.delivery_token = None
+        job.lease_owner = None
+        job.lease_expires_at = None
+        job.last_heartbeat_at = None
+        job.next_attempt_at = utc_now_naive()
+        job.processing_error = None
+        job.updated_by = actor_uid
 
     async def _acquire_dispatch_lock(self) -> bool:
         """SQLite 单测不支持 PostgreSQL advisory lock；生产连接必须拿到事务锁。"""

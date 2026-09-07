@@ -101,6 +101,15 @@ class IncomingIngestJobExpediteRequest(BaseModel):
     source_document_id: str
 
 
+class IncomingIngestJobSourceRefreshRequest(BaseModel):
+    """仅供管理员在来源下载链接失效后更新终态任务的下载信息。"""
+
+    document_metadata: dict
+    files: list[IncomingSourceFile]
+
+    model_config = {"extra": "forbid"}
+
+
 class IncomingClassificationRequest(BaseModel):
     classification: str
 
@@ -221,6 +230,32 @@ async def expedite_incoming_ingest_job(
     ):
         raise HTTPException(status_code=404, detail="待处理来文任务不存在或已结束")
     return {"jobId": job_id, "priority": "immediate"}
+
+
+@incoming_documents.post("/ingest-jobs/{job_id}/retry")
+async def retry_incoming_ingest_job(job_id: str, current_user: User = Depends(get_admin_user)):
+    try:
+        return await IncomingDocumentService().retry_ingest_job(job_id=job_id, actor_uid=current_user.uid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@incoming_documents.put("/ingest-jobs/{job_id}/source")
+async def refresh_incoming_ingest_job_source(
+    job_id: str,
+    payload: IncomingIngestJobSourceRefreshRequest,
+    current_user: User = Depends(get_admin_user),
+):
+    try:
+        document_metadata = _validate_document_metadata(payload.document_metadata)
+        return await IncomingDocumentService().refresh_ingest_job_source(
+            job_id=job_id,
+            document_metadata=document_metadata,
+            file_manifest=[item.model_dump() for item in payload.files],
+            actor_uid=current_user.uid,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @incoming_documents.get("")

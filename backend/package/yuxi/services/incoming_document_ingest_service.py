@@ -373,6 +373,7 @@ class IncomingDocumentIngestService:
             return {"job_id": job_id, "status": "stale"}
 
         files = await self.download_source_files(files=list(job.file_manifest or []))
+        await self._update_ingest_job_stage(job_id=job_id, delivery_token=delivery_token, stage="parsing")
         received = await self.ingest_files(
             source_system=job.source_system,
             source_doc_id=job.source_document_id,
@@ -392,11 +393,15 @@ class IncomingDocumentIngestService:
         async def publication_guard() -> bool:
             return await self._get_running_ingest_job(job_id=job_id, delivery_token=delivery_token) is not None
 
+        async def update_job_stage(stage: str) -> None:
+            await self._update_ingest_job_stage(job_id=job_id, delivery_token=delivery_token, stage=stage)
+
         processed = await self.process_incoming_document(
             incoming_id,
             operator_id=job.created_by,
             publication_guard=publication_guard,
             parser_params=parser_params,
+            job_stage_callback=update_job_stage,
         )
         if processed.get("status") == "stale":
             return {"job_id": job_id, "status": "stale"}
@@ -429,6 +434,14 @@ class IncomingDocumentIngestService:
                 parser_params=parser_params,
             )
 
+    async def _update_ingest_job_stage(self, *, job_id: str, delivery_token: str, stage: str) -> bool:
+        async with pg_manager.get_async_session_context() as session:
+            return await IncomingIngestRepository(session).update_running_stage(
+                job_id=job_id,
+                delivery_token=delivery_token,
+                stage=stage,
+            )
+
     async def process_incoming_document(
         self,
         incoming_id: str,
@@ -437,6 +450,7 @@ class IncomingDocumentIngestService:
         context: TaskContext | None = None,
         publication_guard: Callable[[], Awaitable[bool]] | None = None,
         parser_params: dict[str, Any] | None = None,
+        job_stage_callback: Callable[[str], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         document = await self.incoming_repo.get_by_incoming_id(incoming_id)
         if document is None:
@@ -499,6 +513,8 @@ class IncomingDocumentIngestService:
             await _set_progress(context, 50, f"已解析全部 {len(files)} 个附件")
 
             await self.incoming_repo.update_document(incoming_id, {"status": "extracting", "updated_by": operator_id})
+            if job_stage_callback is not None:
+                await job_stage_callback("extracting")
             main_files = [
                 parsed for parsed in parsed_files if getattr(parsed["file"], "is_main_file", False)
             ] or parsed_files[:1]

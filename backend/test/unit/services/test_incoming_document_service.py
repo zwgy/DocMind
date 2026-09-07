@@ -296,3 +296,23 @@ async def test_query_hides_previous_extraction_while_document_is_not_ready():
 
     assert result["items"][0]["runId"] is None
     assert result["items"][0]["items"] == []
+def test_job_payload_exposes_chinese_progress_and_safe_failure_reason() -> None:
+    job = SimpleNamespace(
+        job_id="ij_failed",
+        source_system="oa",
+        source_document_id="DOC-1",
+        document_metadata={"title": "测试来文"},
+        priority="historical",
+        status="failed",
+        stage="failed",
+        attempt_count=1,
+        processing_error="附件下载失败：HTTP 404",
+        updated_at=None,
+    )
+
+    payload = IncomingDocumentService._job_payload(job)
+
+    assert payload["stage"] == "failed"
+    assert payload["stageLabel"] == "处理失败"
+    assert payload["failureReason"] == "下载地址不可用或已失效"
+    assert payload["processingError"] == "附件下载失败：HTTP 404"

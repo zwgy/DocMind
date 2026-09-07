@@ -13,6 +13,16 @@ from yuxi.storage.postgres.manager import pg_manager
 
 IngestJobLookup = Callable[[str, str], Awaitable[Any | None]]
 
+INGEST_STAGE_LABELS = {
+    "registered": "待接收",
+    "downloading": "下载中",
+    "parsing": "解析中",
+    "extracting": "分类与抽取中",
+    "succeeded": "已完成",
+    "failed": "处理失败",
+    "cancelled": "已取消",
+}
+
 
 class IncomingPageFile(BaseModel):
     """chat-iframe 从宿主页面收集到的附件线索。"""
@@ -132,6 +142,32 @@ class IncomingDocumentService:
                 actor_uid=actor_uid,
             )
 
+    async def retry_ingest_job(self, *, job_id: str, actor_uid: str) -> dict[str, Any]:
+        async with pg_manager.get_async_session_context() as session:
+            job = await IncomingIngestRepository(session).retry_terminal_job(job_id=job_id, actor_uid=actor_uid)
+        if job is None:
+            raise ValueError("仅处理失败或已取消的任务可以重试")
+        return self._job_payload(job)
+
+    async def refresh_ingest_job_source(
+        self,
+        *,
+        job_id: str,
+        document_metadata: dict[str, Any],
+        file_manifest: list[dict[str, Any]],
+        actor_uid: str,
+    ) -> dict[str, Any]:
+        async with pg_manager.get_async_session_context() as session:
+            job = await IncomingIngestRepository(session).refresh_terminal_job_source(
+                job_id=job_id,
+                document_metadata=document_metadata,
+                file_manifest=file_manifest,
+                actor_uid=actor_uid,
+            )
+        if job is None:
+            raise ValueError("仅处理失败或已取消的任务可以刷新来源")
+        return self._job_payload(job)
+
     async def _query_one(self, incoming: IncomingPageFile) -> dict[str, Any]:
         base = {
             "incomingFileId": incoming.source_file_id,
@@ -250,6 +286,7 @@ class IncomingDocumentService:
     @staticmethod
     def _job_payload(job) -> dict[str, Any]:
         metadata = job.document_metadata or {}
+        processing_error = job.processing_error
         return {
             "jobId": job.job_id,
             "sourceSystem": job.source_system,
@@ -258,7 +295,24 @@ class IncomingDocumentService:
             "priority": job.priority,
             "status": job.status,
             "stage": job.stage,
+            "stageLabel": INGEST_STAGE_LABELS.get(job.stage, "处理中"),
             "attemptCount": job.attempt_count,
-            "processingError": job.processing_error,
+            "failureReason": _ingest_failure_reason(processing_error),
+            "processingError": processing_error,
             "updatedAt": job.updated_at,
         }
+
+
+def _ingest_failure_reason(error: str | None) -> str | None:
+    """列表只展示可操作的失败摘要，完整诊断仍留给详情弹窗。"""
+    if not error:
+        return None
+    if "下载超时" in error:
+        return "下载超时"
+    if "HTTP 401" in error or "HTTP 403" in error or "HTML 页面" in error:
+        return "下载地址或访问权限异常"
+    if "HTTP 404" in error or "HTTP 410" in error:
+        return "下载地址不可用或已失效"
+    if "附件下载失败" in error:
+        return "附件下载失败"
+    return "处理失败，请查看详情"

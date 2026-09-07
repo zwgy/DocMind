@@ -208,6 +208,94 @@ async def test_successful_delivery_records_succeeded_stage(repository) -> None:
     assert job.stage == "succeeded"
 
 
+async def test_retry_terminal_job_resets_delivery_state_and_preserves_priority(repository) -> None:
+    """人工重试必须只恢复可安全重新投递的终态任务。"""
+    registered = await repository.register_immediate(
+        source_system="oa",
+        source_document_id="retryable-job",
+        document_metadata={"source_doc_id": "retryable-job"},
+        file_manifest=[],
+        actor_uid="admin",
+    )
+    claimed = await repository.claim_next(
+        instance_id="dispatcher-1",
+        now=datetime(2026, 9, 7, 12, 0, tzinfo=UTC),
+        concurrency=1,
+    )
+    assert claimed is not None
+    started = await repository.start_delivery(
+        job_id=registered.job_id,
+        delivery_token=claimed.delivery_token,
+        worker_id="worker-1",
+        now=datetime(2026, 9, 7, 12, 0, tzinfo=UTC),
+    )
+    assert started is not None
+    await repository.finish_delivery(
+        job_id=registered.job_id,
+        delivery_token=claimed.delivery_token,
+        worker_id="worker-1",
+        status="failed",
+        error_message="附件下载超时",
+    )
+    failed = await repository.get_by_source_identity(source_system="oa", source_document_id="retryable-job")
+    assert failed is not None
+    assert failed.stage == "failed"
+
+    retried = await repository.retry_terminal_job(job_id=registered.job_id, actor_uid="admin")
+
+    assert retried is not None
+    assert retried.status == "pending"
+    assert retried.stage == "registered"
+    assert retried.priority == "immediate"
+    assert retried.delivery_token is None
+    assert retried.lease_owner is None
+    assert retried.processing_error is None
+    assert retried.next_attempt_at is not None
+
+
+async def test_refresh_terminal_job_source_replaces_manifest_before_retry(repository) -> None:
+    """下载地址失效后，只允许在终态任务上换入新的来源清单。"""
+    registered = await repository.register_immediate(
+        source_system="oa",
+        source_document_id="refreshable-job",
+        document_metadata={"source_doc_id": "refreshable-job", "title": "旧标题"},
+        file_manifest=[{"source_file_id": "main", "source_url": "https://old.example/doc"}],
+        actor_uid="admin",
+    )
+    job = await repository.get_by_source_identity(source_system="oa", source_document_id="refreshable-job")
+    assert job is not None
+    job.status = "failed"
+    job.stage = "failed"
+    await repository.db.flush()
+
+    refreshed = await repository.refresh_terminal_job_source(
+        job_id=registered.job_id,
+        document_metadata={"source_doc_id": "refreshable-job", "title": "新标题"},
+        file_manifest=[{"source_file_id": "main", "source_url": "https://new.example/doc"}],
+        actor_uid="admin",
+    )
+
+    assert refreshed is not None
+    assert refreshed.status == "pending"
+    assert refreshed.stage == "registered"
+    assert refreshed.document_metadata["title"] == "新标题"
+    assert refreshed.file_manifest[0]["source_url"] == "https://new.example/doc"
+
+
+async def test_retry_non_terminal_job_is_rejected(repository) -> None:
+    registered = await repository.register_immediate(
+        source_system="oa",
+        source_document_id="running-job",
+        document_metadata={"source_doc_id": "running-job"},
+        file_manifest=[],
+        actor_uid="admin",
+    )
+
+    retried = await repository.retry_terminal_job(job_id=registered.job_id, actor_uid="admin")
+
+    assert retried is None
+
+
 @pytest.mark.asyncio
 async def test_registering_same_source_identity_reuses_pending_job(repository) -> None:
     """丢失来源身份去重会让不同入口重复下载同一份来文。"""
