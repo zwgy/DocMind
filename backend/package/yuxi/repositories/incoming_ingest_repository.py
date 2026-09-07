@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -48,6 +48,12 @@ class IncomingIngestRepository:
 
     def __init__(self, db_session: AsyncSession):
         self.db = db_session
+
+    async def database_now(self) -> datetime:
+        now = await self.db.scalar(select(func.now()))
+        if now is None:
+            raise RuntimeError("无法读取 PostgreSQL 当前时间")
+        return now.astimezone(UTC)
 
     async def create_batch(
         self,
@@ -331,6 +337,29 @@ class IncomingIngestRepository:
             raise ValueError("来文 Worker 并发必须大于 0")
         if not await self._acquire_dispatch_lock():
             return None
+        retrying_job = await self.db.scalar(
+            select(IncomingIngestJob)
+            .where(
+                IncomingIngestJob.status == "dispatching",
+                IncomingIngestJob.lease_owner == instance_id,
+                IncomingIngestJob.delivery_token.is_not(None),
+                IncomingIngestJob.lease_expires_at.is_not(None),
+                IncomingIngestJob.lease_expires_at > now,
+            )
+            .order_by(IncomingIngestJob.created_at.asc(), IncomingIngestJob.id.asc())
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        )
+        if retrying_job is not None:
+            if retrying_job.priority == "immediate" or is_historical_window(now):
+                return DispatchClaim(job_id=retrying_job.job_id, delivery_token=retrying_job.delivery_token)
+            retrying_job.status = "pending"
+            retrying_job.delivery_token = None
+            retrying_job.lease_owner = None
+            retrying_job.lease_expires_at = None
+            retrying_job.last_heartbeat_at = None
+            retrying_job.next_attempt_at = now
+            await self.db.flush()
         in_flight = await self.db.scalar(
             select(func.count(IncomingIngestJob.id)).where(IncomingIngestJob.status.in_(IN_FLIGHT_STATUSES))
         )
@@ -374,6 +403,17 @@ class IncomingIngestRepository:
     ) -> IncomingIngestJob | None:
         job = await self._get_job_for_update(job_id)
         if job is None or job.delivery_token != delivery_token or job.status not in {"dispatching", "queued"}:
+            return None
+        if job.priority == "historical" and (
+            not is_historical_window(now) or not await self._has_active_history_batch(job.job_id)
+        ):
+            job.status = "pending"
+            job.delivery_token = None
+            job.lease_owner = None
+            job.lease_expires_at = None
+            job.last_heartbeat_at = None
+            job.next_attempt_at = now
+            await self.db.flush()
             return None
         job.status = "running"
         job.lease_owner = worker_id
@@ -475,6 +515,21 @@ class IncomingIngestRepository:
     async def _get_job_for_update(self, job_id: str) -> IncomingIngestJob | None:
         return await self.db.scalar(
             select(IncomingIngestJob).where(IncomingIngestJob.job_id == job_id).with_for_update()
+        )
+
+    async def _has_active_history_batch(self, job_id: str) -> bool:
+        return bool(
+            await self.db.scalar(
+                select(IncomingIngestBatchItem.id)
+                .join(IncomingIngestBatch, IncomingIngestBatch.batch_id == IncomingIngestBatchItem.batch_id)
+                .where(
+                    IncomingIngestBatchItem.job_id == job_id,
+                    IncomingIngestBatch.is_submitted.is_(True),
+                    IncomingIngestBatch.is_paused.is_(False),
+                    IncomingIngestBatch.status == "active",
+                )
+                .limit(1)
+            )
         )
 
     @staticmethod

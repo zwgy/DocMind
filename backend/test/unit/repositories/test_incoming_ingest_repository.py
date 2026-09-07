@@ -68,6 +68,45 @@ async def test_registered_history_is_not_claimed_before_submit_or_when_paused(re
 
 
 @pytest.mark.asyncio
+async def test_worker_does_not_start_queued_history_after_batch_is_paused(repository) -> None:
+    """队列已有消息后暂停批次时，Worker 必须在下载前归还历史任务。"""
+    batch = await repository.create_batch(
+        source_system="legacy-oa",
+        batch_key="paused-after-queue",
+        name="历史来文",
+        created_by="admin",
+    )
+    items = await repository.register_items(
+        batch_id=batch.batch_id,
+        source_system="legacy-oa",
+        items=[
+            {
+                "source_document_id": "paused-history",
+                "document_metadata": {"source_doc_id": "paused-history"},
+                "file_manifest": [],
+            }
+        ],
+        actor_uid="admin",
+    )
+    await repository.submit_batch(batch.batch_id)
+    now = datetime(2026, 9, 7, 10, 0, tzinfo=UTC)
+    claim = await repository.claim_next(instance_id="dispatcher", now=now, concurrency=1)
+    assert claim is not None and claim.job_id == items[0].job_id
+    assert await repository.mark_queued(job_id=claim.job_id, delivery_token=claim.delivery_token)
+    await repository.pause_batch(batch.batch_id)
+
+    assert (
+        await repository.start_delivery(
+            job_id=claim.job_id,
+            delivery_token=claim.delivery_token,
+            worker_id="worker",
+            now=now,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
 async def test_immediate_job_is_claimed_before_submitted_history(repository) -> None:
     """错误的优先级排序会让工作时间的小助手请求排在历史积压之后。"""
     history = await repository.create_batch(
@@ -105,6 +144,24 @@ async def test_immediate_job_is_claimed_before_submitted_history(repository) -> 
 
     assert claim is not None and claim.job_id == immediate.job_id
     assert claim.delivery_token
+
+
+@pytest.mark.asyncio
+async def test_dispatching_job_keeps_same_token_for_enqueue_retry(repository) -> None:
+    """Redis 超时不代表消息未收到，重复投递不得生成能绕过旧消息的新令牌。"""
+    job = await repository.register_immediate(
+        source_system="legacy-oa",
+        source_document_id="retry-same-token",
+        document_metadata={"source_doc_id": "retry-same-token"},
+        file_manifest=[],
+        actor_uid="assistant",
+    )
+    now = datetime(2026, 9, 7, 10, 0, tzinfo=UTC)
+    first = await repository.claim_next(instance_id="dispatcher", now=now, concurrency=1)
+    second = await repository.claim_next(instance_id="dispatcher", now=now, concurrency=1)
+
+    assert first is not None and first.job_id == job.job_id
+    assert second == first
 
 
 @pytest.mark.asyncio
