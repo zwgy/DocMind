@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from yuxi.config.app import config as sys_config
 from yuxi.repositories.incoming_ingest_repository import IncomingIngestRepository
-from yuxi.services.incoming_ingest_dispatcher_service import INCOMING_QUEUE_NAME
+from yuxi.services.incoming_ingest_dispatcher_service import INCOMING_QUEUE_NAME, INCOMING_WORKER_SAFE_CAPACITY
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.redis import get_arq_redis_settings
 from yuxi.utils.datetime_utils import utc_now
@@ -44,6 +44,8 @@ class IncomingIngestWorkerService:
                     delivery_token=delivery_token,
                     worker_id=self._worker_id,
                     now=now,
+                    historical_window_start=sys_config.incoming_history_window_start,
+                    historical_window_end=sys_config.incoming_history_window_end,
         )
         if job is None:
             return False
@@ -132,7 +134,8 @@ async def _worker_shutdown(ctx) -> None:
 class IncomingWorkerSettings:
     functions = [process_incoming_document_job]
     queue_name = INCOMING_QUEUE_NAME
-    max_jobs = 1
+    # ARQ 预留有限安全容量，实际在途数由 Dispatcher 的运行时配置控制。
+    max_jobs = INCOMING_WORKER_SAFE_CAPACITY
     max_tries = 1
     retry_jobs = False
     job_timeout = 21600

@@ -70,6 +70,36 @@ def test_save_writes_runtime_snapshot_after_base_toml(tmp_path, monkeypatch: pyt
     assert all(not key.startswith("_") for key in payload)
 
 
+def test_save_persists_runtime_incoming_scheduler_settings(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    """调度设置必须进入 Redis 快照，来文进程才可在不重启时同步新值。"""
+    redis = _FakeRedis()
+    _patch_runtime_redis(monkeypatch, redis)
+    cfg = Config(save_dir=str(tmp_path))
+
+    cfg.update(
+        {
+            "incoming_history_window_start": "19:15",
+            "incoming_history_window_end": "06:45",
+            "incoming_max_concurrency": 2,
+        }
+    )
+    cfg.save()
+
+    payload = json.loads(redis.data[RUNTIME_CONFIG_REDIS_KEY])
+    assert payload["incoming_history_window_start"] == "19:15"
+    assert payload["incoming_history_window_end"] == "06:45"
+    assert payload["incoming_max_concurrency"] == 2
+
+
+def test_update_rejects_out_of_range_incoming_concurrency(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    """超过 Worker 固定安全容量的值不能保存成看似有效的运行时配置。"""
+    _patch_runtime_redis(monkeypatch, _FakeRedis())
+    cfg = Config(save_dir=str(tmp_path))
+
+    with pytest.raises(ValueError):
+        cfg.update({"incoming_max_concurrency": 5})
+
+
 def test_unknown_config_fields_are_removed_on_save(tmp_path, monkeypatch: pytest.MonkeyPatch):
     _patch_runtime_redis(monkeypatch, _FakeRedis())
     config_dir = tmp_path / "config"

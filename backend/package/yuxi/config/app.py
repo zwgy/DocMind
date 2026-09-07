@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 import tomli
 import tomli_w
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from yuxi.config import cache as runtime_cache
 from yuxi.utils.logging_config import logger
@@ -63,11 +64,32 @@ class Config(BaseModel):
         gt=0,
         description="模型未配置专用预留时，触发输入压缩前必须保留的最小输出 Token 空间",
     )
+    incoming_history_window_start: str = Field(
+        default="18:00", description="历史来文处理窗口开始时间（上海时间，HH:MM）"
+    )
+    incoming_history_window_end: str = Field(
+        default="07:30", description="历史来文处理窗口结束时间（上海时间，HH:MM）"
+    )
+    incoming_max_concurrency: int = Field(
+        default=1, ge=1, le=4, description="来文 Worker 调度并发上限（1 至 4）"
+    )
 
     _config_file: Path | None = PrivateAttr(default=None)
     _runtime_sync_thread: Any = PrivateAttr(default=None)
 
-    model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
+    model_config = {"arbitrary_types_allowed": True, "extra": "allow", "validate_assignment": True}
+
+    @model_validator(mode="after")
+    def _validate_incoming_schedule(self) -> Config:
+        """窗口通过配置页修改，启动前阻止无效值进入跨进程 Redis 快照。"""
+        time_pattern = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
+        if not time_pattern.fullmatch(self.incoming_history_window_start):
+            raise ValueError("历史来文处理窗口开始时间必须是 HH:MM")
+        if not time_pattern.fullmatch(self.incoming_history_window_end):
+            raise ValueError("历史来文处理窗口结束时间必须是 HH:MM")
+        if self.incoming_history_window_start == self.incoming_history_window_end:
+            raise ValueError("历史来文处理窗口开始和结束时间不能相同")
+        return self
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -154,9 +176,15 @@ class Config(BaseModel):
         return config_dict
 
     def update(self, other: dict[str, Any]) -> None:
-        for key, value in other.items():
+        updates = {key: value for key, value in other.items() if self.can_update(key)}
+        if updates:
+            # 批量校验后再写入，避免接口携带多个设置时留下半更新的运行时状态。
+            validated = type(self).model_validate(self.model_dump() | updates)
+            for key in updates:
+                setattr(self, key, getattr(validated, key))
+        for key in other:
             if self.can_update(key):
-                setattr(self, key, value)
+                continue
             elif key in READONLY_CONFIG_FIELDS:
                 logger.warning(f"Readonly config key ignored: {key}")
             else:

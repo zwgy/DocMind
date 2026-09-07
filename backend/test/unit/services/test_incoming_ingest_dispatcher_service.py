@@ -3,6 +3,7 @@ from datetime import timedelta
 import pytest
 
 from yuxi.repositories.incoming_ingest_repository import DispatchClaim
+import yuxi.services.incoming_ingest_dispatcher_service as dispatcher_module
 from yuxi.services.incoming_ingest_dispatcher_service import enqueue_incoming_claim
 
 
@@ -33,3 +34,13 @@ async def test_enqueue_claim_uses_a_dedicated_queue_and_idempotent_message_id():
             },
         )
     ]
+
+
+def test_dispatcher_uses_runtime_concurrency_limit(monkeypatch: pytest.MonkeyPatch):
+    """调度器不读取运行时配置会让管理页修改并发后永远停留在固定值。"""
+    class RuntimeConfig:
+        incoming_max_concurrency = 2
+
+    monkeypatch.setattr(dispatcher_module, "sys_config", RuntimeConfig(), raising=False)
+
+    assert dispatcher_module.runtime_concurrency() == 2

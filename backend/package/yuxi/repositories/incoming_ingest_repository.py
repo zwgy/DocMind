@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -37,10 +37,14 @@ class RegistrationResult:
     error_message: str | None = None
 
 
-def is_historical_window(now: datetime) -> bool:
-    """历史任务只允许在上海时间 18:00 至次日 07:30 启动。"""
+def is_historical_window(now: datetime, *, start_time: str = "18:00", end_time: str = "07:30") -> bool:
+    """按管理员配置的上海时间窗口判断历史任务是否可启动。"""
     local_time = now.astimezone(SHANGHAI_TIMEZONE).time()
-    return local_time.hour >= 18 or (local_time.hour, local_time.minute, local_time.second) < (7, 30, 0)
+    start = time.fromisoformat(start_time)
+    end = time.fromisoformat(end_time)
+    if start < end:
+        return start <= local_time < end
+    return local_time >= start or local_time < end
 
 
 class IncomingIngestRepository:
@@ -387,6 +391,8 @@ class IncomingIngestRepository:
         instance_id: str,
         now: datetime,
         concurrency: int,
+        historical_window_start: str = "18:00",
+        historical_window_end: str = "07:30",
         lease_seconds: int = 60,
     ) -> DispatchClaim | None:
         if concurrency < 1:
@@ -407,7 +413,9 @@ class IncomingIngestRepository:
             .with_for_update(skip_locked=True)
         )
         if retrying_job is not None:
-            if retrying_job.priority == "immediate" or is_historical_window(now):
+            if retrying_job.priority == "immediate" or is_historical_window(
+                now, start_time=historical_window_start, end_time=historical_window_end
+            ):
                 return DispatchClaim(job_id=retrying_job.job_id, delivery_token=retrying_job.delivery_token)
             retrying_job.status = "pending"
             retrying_job.delivery_token = None
@@ -425,7 +433,9 @@ class IncomingIngestRepository:
         job = await self.db.scalar(self.claim_statement(now=now))
         if job is None:
             return None
-        if job.priority == "historical" and not is_historical_window(now):
+        if job.priority == "historical" and not is_historical_window(
+            now, start_time=historical_window_start, end_time=historical_window_end
+        ):
             return None
 
         delivery_token = uuid4().hex
@@ -455,13 +465,16 @@ class IncomingIngestRepository:
         delivery_token: str,
         worker_id: str,
         now: datetime,
+        historical_window_start: str = "18:00",
+        historical_window_end: str = "07:30",
         lease_seconds: int = 120,
     ) -> IncomingIngestJob | None:
         job = await self._get_job_for_update(job_id)
         if job is None or job.delivery_token != delivery_token or job.status not in {"dispatching", "queued"}:
             return None
         if job.priority == "historical" and (
-            not is_historical_window(now) or not await self._has_active_history_batch(job.job_id)
+            not is_historical_window(now, start_time=historical_window_start, end_time=historical_window_end)
+            or not await self._has_active_history_batch(job.job_id)
         ):
             job.status = "pending"
             job.delivery_token = None

@@ -36,6 +36,16 @@ def test_historical_window_uses_shanghai_boundaries() -> None:
     assert not is_historical_window(datetime(2026, 9, 7, 23, 30, tzinfo=UTC))
 
 
+def test_historical_window_accepts_runtime_configured_cross_midnight_boundaries() -> None:
+    """手工调整窗口后，历史任务应按新边界而非写死的默认值启动。"""
+    assert is_historical_window(
+        datetime(2026, 9, 7, 11, 15, tzinfo=UTC), start_time="19:00", end_time="06:30"
+    )
+    assert not is_historical_window(
+        datetime(2026, 9, 7, 10, 30, tzinfo=UTC), start_time="19:00", end_time="06:30"
+    )
+
+
 @pytest.mark.asyncio
 async def test_registered_history_is_not_claimed_before_submit_or_when_paused(repository) -> None:
     """未提交或暂停批次中的历史成员不得因调度轮询而开始下载。"""
