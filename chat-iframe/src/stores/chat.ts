@@ -273,10 +273,7 @@ export const useChatStore = defineStore('chat', {
       )
       if (presentedArtifacts.length) {
         // finished 事件由服务端在消息保存后发出，是本轮交付物的权威完成契约。
-        runtime.runArtifacts = normalizeChatArtifacts([
-          ...runtime.runArtifacts.map((artifact) => artifact.path),
-          ...presentedArtifacts.map((artifact) => artifact.path)
-        ])
+        runtime.runArtifacts = presentedArtifacts
         attachRunArtifacts(runtime)
       }
       if (status === 'stream_event') {

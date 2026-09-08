@@ -218,3 +218,34 @@ test('empty polled agent state does not erase artifacts from the finished event'
     { path: '/home/gem/user-data/outputs/mindmap.svg', name: 'mindmap.svg' }
   ])
 })
+
+test('finished event replaces artifacts inferred from cumulative agent state', () => {
+  setActivePinia(createPinia())
+  const chat = useChatStore()
+  chat.currentThreadId = 'thread-artifact-authority'
+  const runtime = chat.ensureRuntime('thread-artifact-authority')
+  runtime.messages = [
+    {
+      id: 'answer',
+      role: 'assistant',
+      content: 'artifact answer',
+      status: 'done'
+    }
+  ]
+
+  chat.consumeRunStatus(runtime, {
+    status: 'agent_state',
+    agent_state: { artifacts: ['/home/gem/user-data/outputs/old.svg'] }
+  })
+  chat.consumeRunStatus(runtime, {
+    status: 'finished',
+    presented_artifacts: ['/home/gem/user-data/outputs/current.svg']
+  })
+
+  assert.deepEqual(runtime.runArtifacts, [
+    { path: '/home/gem/user-data/outputs/current.svg', name: 'current.svg' }
+  ])
+  assert.deepEqual(runtime.messages[0].artifacts, [
+    { path: '/home/gem/user-data/outputs/current.svg', name: 'current.svg' }
+  ])
+})
