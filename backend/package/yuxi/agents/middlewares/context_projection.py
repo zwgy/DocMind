@@ -204,7 +204,9 @@ def compactable_api_rounds(messages: list[AnyMessage], *, protected_tail_rounds:
     protected_current = set(current_rounds[-protected_tail_rounds:]) if protected_tail_rounds else set()
     candidates: list[ApiRound] = []
     for round_ in rounds:
-        if round_.protected or round_ in protected_current:
+        # L5 会先归档整个闭合轮次，已完成的错误或已回答确认不应永久占用窗口。
+        # 未完成调用仍由协议校验阻止，近期执行细节仍由尾部保护保留。
+        if round_ in protected_current:
             continue
         if round_.end <= latest_human_index or round_.start > latest_human_index:
             candidates.append(round_)

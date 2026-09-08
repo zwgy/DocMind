@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 import hashlib
 import json
 import re
+import logging
 from typing import Any, NotRequired, TypedDict
 
 from langchain.agents.middleware.types import (
@@ -95,6 +97,11 @@ _SUMMARY_MINIMUM_OUTPUT_TOKENS = 64
 # Claude Code 将 compact 输出封顶 20K。Yuxi 同时按窗口比例缩放，避免 32K 部署
 # 被固定大预留挤压，也避免升级到 128K/256K 后把绝大多数窗口误留给摘要输出。
 _SUMMARY_MAX_OUTPUT_TOKENS = 20_000
+# 摘要只是记忆增强；不能让分块、修复和供应商重试无限占用用户等待时间。
+_SUMMARY_TIMEOUT_SECONDS = 30
+_ARCHIVE_TIMEOUT_SECONDS = 10
+_SUMMARY_MAX_CALLS = 4
+logger = logging.getLogger(__name__)
 # 有限摘要无法永久容纳无限历史的每个细节；缺失时回查不可变归档，才能避免模型按相似条目猜测。
 _ARCHIVE_RECOVERY_INSTRUCTION = (
     "当累计检查点缺少所需细节、内容冲突，或需要逐字核对更早的用户要求和事实时，"
@@ -118,6 +125,27 @@ class SummaryOutputTooLargeError(RuntimeError):
 
 class SummaryInvariantLossError(RuntimeError):
     """拒绝提交丢失上一版精确路径、标识符或版本号的累计 checkpoint。"""
+
+
+class _BoundedSummaryModel:
+    """一次摘要尝试共享调用额度，分块和修复不能分别重置上限。"""
+
+    def __init__(self, model: Any) -> None:
+        self.model = model
+        self.calls = 0
+
+    def _consume_call(self) -> None:
+        if self.calls >= _SUMMARY_MAX_CALLS:
+            raise RuntimeError("摘要调用额度已耗尽，改用确定性历史恢复")
+        self.calls += 1
+
+    def invoke(self, prompt: str) -> Any:
+        self._consume_call()
+        return self.model.invoke(prompt)
+
+    async def ainvoke(self, prompt: str) -> Any:
+        self._consume_call()
+        return await self.model.ainvoke(prompt)
 
 
 class ContextCompactionState(AgentState):
@@ -190,11 +218,12 @@ def _summary_text(response: Any) -> str:
     content = getattr(response, "content", None)
     if isinstance(content, str) and content.strip():
         return content.strip()
-    return str(response).strip()
+    # 空 AIMessage 的 repr 含有元数据，不能冒充非空摘要。
+    return ""
 
 
 def _summary_output_tokens(response: Any, summary: str) -> int:
-    """同时满足 provider 输出上限和最终主请求的保守预算。"""
+    """供应商输出额度与最终请求准入分开；后者由完整装配后的请求估算。"""
     estimated = estimate_messages_tokens([SystemMessage(content=summary)])
     usage = getattr(response, "usage_metadata", None)
     if isinstance(usage, dict):
@@ -202,9 +231,8 @@ def _summary_output_tokens(response: Any, summary: str) -> int:
         # 非空摘要却报告 0 token 通常意味着兼容层没有填充 usage。若信任该值，会让
         # 未遵守输出上限的本地部署绕过 checkpoint 校验，因此只接受正数实测值。
         if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            # provider 用量约束摘要调用自身；本地估算约束候选装入主请求后的准入。
-            # 取较大值可在现有有界修复阶段收敛，避免直到最终装配才原子失败。
-            return max(value, estimated)
+            # 本地 JSON/Unicode 估算通常比 tokenizer 偏大，不能拿它判断供应商是否超出生成额度。
+            return value
     return estimated
 
 
@@ -352,6 +380,7 @@ def _archive_manifest_content(messages: list[AnyMessage], revision: int) -> str:
             "name": getattr(message, "name", None),
             "tool_call_id": getattr(message, "tool_call_id", None),
             "tool_calls": getattr(message, "tool_calls", None),
+            "status": getattr(message, "status", None),
             "additional_kwargs": getattr(message, "additional_kwargs", {}),
         }
         records.append(json.dumps(record, ensure_ascii=False, default=str, separators=(",", ":")))
@@ -359,7 +388,7 @@ def _archive_manifest_content(messages: list[AnyMessage], revision: int) -> str:
 
 
 def _required_summary_anchors(previous_summary: str, source_messages: list[AnyMessage]) -> list[str]:
-    """只信任旧 checkpoint 与用户原文，不把候选幻觉或工具调用 ID 加入本次修复锚点。"""
+    """只以原始用户消息校验精确值；生成的旧摘要不是权威事实来源。"""
     sources: list[str] = []
     for message in source_messages:
         if getattr(message, "type", None) == "human" and not is_internal_output_continuation(message):
@@ -375,7 +404,7 @@ def _required_summary_anchors(previous_summary: str, source_messages: list[AnyMe
             )
             if match:
                 sources.append(match.group(1))
-    return _summary_exact_anchors("\n".join([previous_summary, *sources]))
+    return _summary_exact_anchors("\n".join(sources))
 
 
 def _archive_summary_prefix(path: str) -> str:
@@ -601,6 +630,8 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             return "summary_invariant_loss"
         if isinstance(error, SummaryOutputTooLargeError):
             return "summary_output_too_large"
+        if isinstance(error, TimeoutError):
+            return "summary_timeout"
         return "summary_failure"
 
     def _render_summary_prompt(self, previous_summary: str, messages: list[AnyMessage], target_tokens: int) -> str:
@@ -681,8 +712,14 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         """
         bind = getattr(self.model, "bind", None)
         if not callable(bind):
-            return self.model
-        return bind(max_tokens=max(target_tokens, 1))
+            return _BoundedSummaryModel(self.model)
+        model = getattr(self.model, "bound", self.model)
+        field = (
+            "num_predict"
+            if any(base.__module__.startswith("langchain_ollama") for base in type(model).__mro__)
+            else "max_tokens"
+        )
+        return _BoundedSummaryModel(bind(**{field: max(target_tokens, 1)}))
 
     @staticmethod
     def _render_summary_repair_prompt(
@@ -1024,22 +1061,13 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         target_tokens: int,
         budget: ResolvedContextBudget,
     ) -> str:
-        output_limit, input_budget = self._summary_call_limits(budget, target_tokens)
+        # 同步入口也使用可取消的原生异步摘要，避免超时后留下继续占用模型的后台线程。
+        # 正在运行事件循环的调用方应使用 awrap_model_call；此处异常仍由压缩恢复边界接管。
         try:
-            return self._create_summary_once(previous_summary, messages, output_limit, input_budget)
-        except ContextOverflowError:
-            retry_messages = self._summary_ptl_retry_messages(messages)
-            if not retry_messages:
-                raise
-            retry_input_budget = self._retry_summary_input_budget(input_budget)
-            if retry_input_budget >= input_budget:
-                raise
-            return self._create_summary_once(
-                previous_summary,
-                retry_messages,
-                output_limit,
-                retry_input_budget,
-            )
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self._acreate_summary(previous_summary, messages, target_tokens, budget))
+        raise RuntimeError("事件循环内应使用异步上下文压缩入口")
 
     async def _acreate_summary_once(
         self,
@@ -1047,10 +1075,11 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         messages: list[AnyMessage],
         target_tokens: int,
         input_budget: int,
+        summary_model: Any = None,
     ) -> str:
         summary = previous_summary
         pending: list[AnyMessage] = []
-        summary_model = self._summary_model(target_tokens)
+        summary_model = summary_model if summary_model is not None else self._summary_model(target_tokens)
         for segment in _message_segments(messages):
             candidate = [*pending, *segment]
             prompt = self._render_summary_prompt(summary, candidate, target_tokens)
@@ -1116,9 +1145,22 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
         target_tokens: int,
         budget: ResolvedContextBudget,
     ) -> str:
+        async with asyncio.timeout(_SUMMARY_TIMEOUT_SECONDS):
+            return await self._acreate_summary_with_retry(previous_summary, messages, target_tokens, budget)
+
+    async def _acreate_summary_with_retry(
+        self,
+        previous_summary: str,
+        messages: list[AnyMessage],
+        target_tokens: int,
+        budget: ResolvedContextBudget,
+    ) -> str:
         output_limit, input_budget = self._summary_call_limits(budget, target_tokens)
+        summary_model = self._summary_model(output_limit)
         try:
-            return await self._acreate_summary_once(previous_summary, messages, output_limit, input_budget)
+            return await self._acreate_summary_once(
+                previous_summary, messages, output_limit, input_budget, summary_model
+            )
         except ContextOverflowError:
             retry_messages = self._summary_ptl_retry_messages(messages)
             if not retry_messages:
@@ -1131,6 +1173,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 retry_messages,
                 output_limit,
                 retry_input_budget,
+                summary_model,
             )
 
     @staticmethod
@@ -1475,7 +1518,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             messages[candidate["message_index"]] = candidate["replacement"]
             changed = True
 
-    def _build_plan(
+    def _build_semantic_plan(
         self,
         request: ModelRequest,
         *,
@@ -1709,10 +1752,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     budget=budget,
                 )
             except Exception as error:
-                # 第一个可用边界可能只给完整 checkpoint 留出极小空间。摘要过大时继续
-                # 纳入下一个完整 round；其他失败仍立即退出，不能借扩大边界掩盖数据丢失。
-                if isinstance(error, SummaryOutputTooLargeError) and remaining_rounds and not compact_all_history:
-                    continue
+                # 不在每个边界重复调用摘要；记录失败原因后交给外层确定性恢复。
                 request.runtime.stream_writer(
                     self._compaction_event(
                         "failed",
@@ -1773,7 +1813,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
 
         raise ContextBudgetConfigurationError("最终请求仍超过模型可用输入预算，且不存在可安全压缩的完整历史交互段")
 
-    async def _abuild_plan(
+    async def _abuild_semantic_plan(
         self,
         request: ModelRequest,
         *,
@@ -2007,8 +2047,6 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                     budget=budget,
                 )
             except Exception as error:
-                if isinstance(error, SummaryOutputTooLargeError) and remaining_rounds and not compact_all_history:
-                    continue
                 request.runtime.stream_writer(
                     self._compaction_event(
                         "failed",
@@ -2068,6 +2106,178 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 break
 
         raise ContextBudgetConfigurationError("最终请求仍超过模型可用输入预算，且不存在可安全压缩的完整历史交互段")
+
+    @staticmethod
+    def _recovery_archive_messages(request: ModelRequest) -> list[AnyMessage]:
+        """归档原始载荷而非 L1-L3 回执，旧摘要仅作为非权威历史证据保存。"""
+        messages = list(request.messages)
+        previous_summary = request.state.get("context_summary")
+        if previous_summary:
+            messages.append(
+                SystemMessage(
+                    content=str(previous_summary),
+                    id="previous-context-summary",
+                    additional_kwargs={"historical_summary_unverified": True},
+                )
+            )
+        return messages
+
+    def _continuation_plan(
+        self,
+        request: ModelRequest,
+        archive_path: str,
+        error: Exception,
+        *,
+        force_compaction: bool = False,
+        rejected_message_count: int | None = None,
+    ) -> _CompactionPlan:
+        """无需模型参与，按完整 API round 选取能装入窗口的最近历史。"""
+        messages = list(request.messages)
+        rounds = group_messages_by_api_round(messages)
+        state = request.state
+        limit = resolve_context_budget(request).prompt_budget
+        summary = (
+            _archive_summary_prefix(archive_path) + "语义摘要不可用。历史细节须回查原始消息，不得凭旧摘要猜测。"
+            if archive_path
+            else ""
+        )
+        current = self._current_human_input_index(messages)
+        selected = {current} if current is not None else set()
+        survivors = [messages[current]] if current is not None else []
+        prepared = self._request_with_summary(request, messages=survivors, summary=summary)
+        if self._request_tokens(prepared) > limit and summary:
+            # 极小窗口先保留用户问题；归档入口仍可从固定目录查回，状态中也记录真实路径。
+            summary = ""
+            prepared = self._request_with_summary(request, messages=survivors, summary=summary)
+        if self._request_tokens(prepared) > limit and current is not None:
+            if archive_path:
+                survivors = [_input_receipt(messages[current], archive_path, estimate_messages_tokens(survivors))]
+            else:
+                # 存储不可用时不能谎称完整输入已保存；保留原检查点并明确要求分段重发。
+                survivors = [
+                    messages[current].model_copy(
+                        update={
+                            "content": (
+                                "当前输入超过模型窗口且暂时无法归档。请告知用户分段发送本次问题，不要猜测省略内容。"
+                            )
+                        }
+                    )
+                ]
+            prepared = self._request_with_summary(request, messages=survivors, summary=summary)
+        if self._request_tokens(prepared) > limit:
+            raise ContextBudgetConfigurationError("模型窗口无法容纳基本指令和当前输入入口，请调整部署窗口或工具配置")
+
+        current_message = survivors[0] if survivors else None
+        if force_compaction:
+            # 已收到供应商溢出时不能按同一估算重新装回全部历史；至少移除最旧 20% 完整轮次。
+            rounds = rounds[max(1, len(rounds) // 5) :]
+        # 从新到旧加入完整轮次，遇到首个放不下的轮次即停止，避免拼接零散旧历史误导模型。
+        for round_ in reversed(rounds):
+            indexes = selected | set(range(round_.start, round_.end))
+            # 强制恢复必须比刚被拒绝的活动视图更小；原历史中的旧轮次可能早已不在该视图。
+            if rejected_message_count is not None and len(indexes) > max(1, rejected_message_count - 1):
+                break
+            candidate = [current_message if index == current else messages[index] for index in sorted(indexes)]
+            candidate_request = self._request_with_summary(request, messages=candidate, summary=summary)
+            if self._request_tokens(candidate_request) > limit:
+                break
+            selected, survivors, prepared = indexes, candidate, candidate_request
+        group_messages_by_api_round(survivors)
+        removed = [message for index, message in enumerate(messages) if index not in selected]
+        revision = int(state.get("context_revision") or 0)
+        logger.warning("上下文压缩已恢复: cause=%s archive_available=%s", type(error).__name__, bool(archive_path))
+        request.runtime.stream_writer(
+            self._compaction_event(
+                "recovered",
+                level="L5",
+                sequence=5,
+                reason=self._compaction_failure_reason(error, archive_completed=bool(archive_path)),
+                recovery_mode="archived" if archive_path else "request_only",
+                tokens_after=self._request_tokens(prepared),
+                messages_before=len(messages),
+                messages_after=len(survivors),
+                messages_removed=len(removed) if archive_path else 0,
+                archive_count=int(bool(archive_path)),
+                archive_path=archive_path,
+                summary_revision=revision + int(bool(archive_path)),
+                summary_quality="archived" if archive_path else "unavailable",
+            )
+        )
+        return {
+            "request": prepared,
+            "summary": summary,
+            # 只有完整归档成功才允许裁剪持久历史；临时投影不会推进水位或污染原摘要。
+            "survivors": survivors if archive_path else messages,
+            "compacted_through": _message_identifier(removed[-1], len(removed) - 1)
+            if removed
+            else str(state.get("context_compacted_through") or ""),
+            "archive_path": archive_path,
+            "previous_revision": revision,
+            "summary_updated": bool(archive_path),
+            "summary_quality": "archived",
+        }
+
+    def _build_plan(
+        self,
+        request: ModelRequest,
+        *,
+        rejected_message_count: int | None = None,
+        **options: Any,
+    ) -> _CompactionPlan | None:
+        # 配置和工具协议错误不是摘要故障；在恢复边界外检查，避免掩盖损坏的输入。
+        ensure_fixed_context_fits(request)
+        group_messages_by_api_round(list(request.messages))
+        try:
+            return self._build_semantic_plan(request, **options)
+        except Exception as error:
+            archive_path = ""
+            try:
+                archive_path = self._archive_compacted_messages(
+                    request,
+                    messages=self._recovery_archive_messages(request),
+                    revision=int(request.state.get("context_revision") or 0) + 1,
+                )
+            except Exception:
+                logger.warning("上下文恢复归档不可用，保留完整持久历史", exc_info=True)
+            return self._continuation_plan(
+                request,
+                archive_path,
+                error,
+                force_compaction=options.get("force_compaction", False),
+                rejected_message_count=rejected_message_count,
+            )
+
+    async def _abuild_plan(
+        self,
+        request: ModelRequest,
+        *,
+        rejected_message_count: int | None = None,
+        **options: Any,
+    ) -> _CompactionPlan | None:
+        ensure_fixed_context_fits(request)
+        group_messages_by_api_round(list(request.messages))
+        try:
+            # 覆盖摘要前的存储 IO；存储卡住时也不能无限阻塞实际会话。
+            async with asyncio.timeout(_SUMMARY_TIMEOUT_SECONDS + _ARCHIVE_TIMEOUT_SECONDS):
+                return await self._abuild_semantic_plan(request, **options)
+        except Exception as error:
+            archive_path = ""
+            try:
+                async with asyncio.timeout(_ARCHIVE_TIMEOUT_SECONDS):
+                    archive_path = await self._aarchive_compacted_messages(
+                        request,
+                        messages=self._recovery_archive_messages(request),
+                        revision=int(request.state.get("context_revision") or 0) + 1,
+                    )
+            except Exception:
+                logger.warning("上下文恢复归档不可用，保留完整持久历史", exc_info=True)
+            return self._continuation_plan(
+                request,
+                archive_path,
+                error,
+                force_compaction=options.get("force_compaction", False),
+                rejected_message_count=rejected_message_count,
+            )
 
     @staticmethod
     def _response_and_update(response: ModelResponse | ExtendedModelResponse) -> tuple[ModelResponse, dict[str, Any]]:
@@ -2135,7 +2345,11 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             recovery_request = request.override(
                 state={**request.state, "token_usage": exc.token_usage},
             )
-            recovery_plan = self._build_plan(recovery_request, force_compaction=True)
+            recovery_plan = self._build_plan(
+                recovery_request,
+                force_compaction=True,
+                rejected_message_count=len(prepared.messages),
+            )
             if recovery_plan is None:
                 raise
             return self._commit_plan(handler(recovery_plan["request"]), recovery_plan)
@@ -2145,6 +2359,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 request,
                 force_compaction=True,
                 compact_all_history=True,
+                rejected_message_count=len(prepared.messages),
             )
             if recovery_plan is None:
                 raise
@@ -2171,7 +2386,11 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
             recovery_request = request.override(
                 state={**request.state, "token_usage": exc.token_usage},
             )
-            recovery_plan = await self._abuild_plan(recovery_request, force_compaction=True)
+            recovery_plan = await self._abuild_plan(
+                recovery_request,
+                force_compaction=True,
+                rejected_message_count=len(prepared.messages),
+            )
             if recovery_plan is None:
                 raise
             return self._commit_plan(await handler(recovery_plan["request"]), recovery_plan)
@@ -2180,6 +2399,7 @@ class ContextCompactionMiddleware(AgentMiddleware[ContextCompactionState]):
                 request,
                 force_compaction=True,
                 compact_all_history=True,
+                rejected_message_count=len(prepared.messages),
             )
             if recovery_plan is None:
                 raise

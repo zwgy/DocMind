@@ -156,3 +156,26 @@ def test_l5_candidates_ignore_internal_continuation_human_boundary() -> None:
 
     # 私有 Human 不能把前一段回答伪造成已经结束的旧用户轮次。
     assert all(round_.end != 2 for round_ in candidates)
+
+
+@pytest.mark.unit
+def test_l5_can_archive_completed_error_and_confirmation_rounds() -> None:
+    messages = [HumanMessage(content="旧问题"), *_tool_round(1)]
+    messages[-1].status = "error"
+    messages.extend(
+        [
+            AIMessage(
+                content="", id="confirmation", tool_calls=[{"id": "ask", "name": "ask_user_question", "args": {}}]
+            ),
+            ToolMessage(content="已确认", tool_call_id="ask", name="ask_user_question"),
+            HumanMessage(content="继续"),
+            *_tool_round(2),
+            *_tool_round(3),
+            *_tool_round(4),
+        ]
+    )
+    candidates = compactable_api_rounds(messages)
+    archived = {index for round_ in candidates for index in range(round_.start, round_.end)}
+    assert {0, 1, 2, 3, 4} <= archived
+    assert 5 not in archived
+    assert not archived.intersection(range(len(messages) - 4, len(messages)))

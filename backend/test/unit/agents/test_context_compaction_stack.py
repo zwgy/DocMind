@@ -169,6 +169,46 @@ def archive_backend(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize("archive_available", [True, False])
+async def test_summary_failure_allows_followup_in_same_checkpoint(monkeypatch, archive_available) -> None:
+    class FailingSummary(_StackModel):
+        async def ainvoke(self, input, config=None, **kwargs):
+            if isinstance(input, str):
+                self.summary_calls += 1
+                raise RuntimeError("summary unavailable")
+            return await super().ainvoke(input, config, **kwargs)
+
+    class Archive:
+        async def awrite(self, path, content):
+            return SimpleNamespace(error=None if archive_available else "unavailable")
+
+    monkeypatch.setattr(compaction_module, "create_agent_composite_backend", lambda _: Archive())
+    model = FailingSummary()
+    graph = create_agent(
+        model=model,
+        tools=[],
+        middleware=[
+            create_context_compaction_middleware(model=model, summary_prompt="summary\n{messages}"),
+            TokenUsageMiddleware(),
+            create_model_retry_middleware(),
+        ],
+        checkpointer=InMemorySaver(),
+    )
+    config = {"configurable": {"thread_id": "summary-failure-followup"}}
+    original = HumanMessage(content="旧请求" * 1500, id="old-request")
+    first = await graph.ainvoke(
+        {"messages": [original, AIMessage(content="旧回答"), HumanMessage(content="继续")]}, config
+    )
+    second = await graph.ainvoke({"messages": [HumanMessage(content="再核对一次")]}, config)
+    assert first["messages"][-1].content == "可见回答"
+    assert second["messages"][-1].content == "可见回答"
+    assert model.main_calls == 2
+    assert original in second["messages"] if not archive_available else original not in second["messages"]
+    assert second.get("context_summary_quality") == ("archived" if archive_available else None)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_real_stack_preserves_token_usage_and_outer_message_overwrite(
     archive_backend: None,  # noqa: ARG001
 ) -> None:
