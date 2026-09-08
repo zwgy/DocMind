@@ -80,12 +80,8 @@ class Config(BaseModel):
     incoming_history_window_start: str = Field(
         default="18:00", description="历史来文处理窗口开始时间（上海时间，HH:MM）"
     )
-    incoming_history_window_end: str = Field(
-        default="07:30", description="历史来文处理窗口结束时间（上海时间，HH:MM）"
-    )
-    incoming_max_concurrency: int = Field(
-        default=1, ge=1, le=4, description="来文 Worker 调度并发上限（1 至 4）"
-    )
+    incoming_history_window_end: str = Field(default="07:30", description="历史来文处理窗口结束时间（上海时间，HH:MM）")
+    incoming_max_concurrency: int = Field(default=1, ge=1, le=4, description="来文 Worker 调度并发上限（1 至 4）")
     incoming_download_timeout_seconds: int = Field(
         default=60, ge=10, le=900, description="来文来源文件下载超时秒数（10 至 900）"
     )
@@ -193,7 +189,7 @@ class Config(BaseModel):
                 continue
             fields_info[field_name] = {
                 "des": field_info.description,
-                "default": field_info.default,
+                "default": field_info.get_default(call_default_factory=True),
                 "type": field_info.annotation.__name__
                 if hasattr(field_info.annotation, "__name__")
                 else str(field_info.annotation),

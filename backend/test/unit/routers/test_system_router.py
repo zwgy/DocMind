@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 
 from server.routers import system_router
 from server.routers.system_router import system
+from server.utils.auth_middleware import get_admin_user
+from yuxi.config.app import Config
 
 pytestmark = pytest.mark.unit
 
@@ -36,9 +38,26 @@ async def test_batch_config_update_maps_validation_error_to_400(monkeypatch):
     monkeypatch.setattr(system_router, "config", FakeConfig())
 
     with pytest.raises(HTTPException) as exc_info:
-        await system_router.update_config_batch(
-            {"incoming_download_timeout_seconds": 5}, current_user=object()
-        )
+        await system_router.update_config_batch({"incoming_download_timeout_seconds": 5}, current_user=object())
 
     assert exc_info.value.status_code == 400
     assert "下载超时" in exc_info.value.detail
+
+
+def test_batch_config_update_returns_serializable_config_metadata(monkeypatch):
+    test_config = Config.model_construct()
+    monkeypatch.setattr(system_router, "config", test_config)
+    app = FastAPI()
+    app.include_router(system, prefix="/api")
+    app.dependency_overrides[get_admin_user] = lambda: object()
+
+    response = TestClient(app).post(
+        "/api/system/config/update",
+        json={
+            "incoming_history_window_start": "00:00",
+            "incoming_history_window_end": "23:59",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["_config_items"]["document_parser_ocr_engine_config"]["default"] == {}
