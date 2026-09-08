@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from typing import Annotated, Literal
 
 from langchain.tools import InjectedToolCallId
 from langchain_core.tools import ToolException
 from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.types import Command
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from yuxi.agents.artifacts import deliver_artifacts
 from yuxi.agents.toolkits.registry import tool
@@ -49,6 +50,17 @@ class FlowDefinition(BaseModel):
     nodes: list[FlowNode] = Field(min_length=2, max_length=80, description="流程节点")
     edges: list[FlowEdge] = Field(max_length=160, description="流程连线")
     direction: Literal["TB", "LR"] = Field(default="TB", description="从上到下或从左到右")
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_json_string(cls, value):
+        # 部分本地模型会把嵌套对象序列化成 JSON 文本；仅在模型边界还原合法 JSON，工具契约仍保持对象类型。
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value
+        return value
 
 
 def _scope(runtime: ToolRuntime) -> tuple[str, str]:

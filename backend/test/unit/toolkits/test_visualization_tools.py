@@ -89,6 +89,24 @@ def test_flowchart_tool_schema_accepts_chinese_node_ids() -> None:
     assert result.definition.edges[0].source == "开始"
 
 
+def test_flowchart_tool_schema_accepts_json_string_definition_from_local_model() -> None:
+    result = render_flowchart.tool_call_schema.model_validate(
+        {
+            "definition": (
+                '{"nodes":['
+                '{"id":"start","kind":"start","label":"开始"},'
+                '{"id":"end","kind":"end","label":"结束"}'
+                '],"edges":[{"source":"start","target":"end"}],"direction":"TB"}'
+            ),
+            "output_name": "simple-flow",
+        }
+    )
+
+    assert result.definition.nodes[0].kind == "start"
+    assert result.definition.edges[0].target == "end"
+    assert render_flowchart.tool_call_schema.model_json_schema()["$defs"]["FlowDefinition"]["type"] == "object"
+
+
 @pytest.mark.parametrize(
     ("definition", "expected"),
     [
@@ -108,9 +126,7 @@ def test_flowchart_tool_schema_accepts_chinese_node_ids() -> None:
 )
 def test_visualization_validation_error_includes_actionable_reason(definition, expected) -> None:
     with pytest.raises(ValidationError) as exc_info:
-        render_flowchart.tool_call_schema.model_validate(
-            {"definition": definition, "output_name": "simple-flow"}
-        )
+        render_flowchart.tool_call_schema.model_validate({"definition": definition, "output_name": "simple-flow"})
 
     assert expected in tools._validation_error(exc_info.value)
 
