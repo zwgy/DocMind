@@ -102,7 +102,17 @@ ask_user_question(questions=[{
 
 ### B. 来文检索
 
-1. 使用用户给出的时间、分类、条目类型、标题、文号、发文单位或关键词调用 `search_incoming_documents`。
+1. 使用用户给出的时间、分类、条目类型、标题、文号、发文单位或关键词调用 `search_incoming_documents`。日期范围和分页必须直接使用工具字段，不要搜索 Skill 文件或猜测参数名；工具结果已经按来文日期降序排列，无需传入排序参数：
+
+   ```text
+   search_incoming_documents(
+     date_from="YYYY-MM-DD",
+     date_to="YYYY-MM-DD",
+     page=1,
+     page_size=3
+   )
+   ```
+
 2. 没有命中时明确说明未找到，并建议用户放宽标题、单位、时间等已有条件；不要编造结果，也不要擅自切换成无条件全库查询。
 3. 用户只需要列表时，保持工具返回顺序，展示当前页结果、总数、主文件是否存在和附件数量，不调用 `ask_user_question`。用户选定来文或询问详情时，再调用 `read_incoming_document(include_full_text=false)`。
 4. 结果超过当前页时明确说明当前页范围；用户要求下一页时使用工具返回的 `page`、`page_size` 和 `total` 计算，不猜测页码，不一次铺开全部结果。

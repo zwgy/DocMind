@@ -322,6 +322,17 @@ def test_incoming_document_builtin_skill_spec():
     assert "系统已收录的来文" in incoming_document["description"]
 
 
+def test_incoming_document_skill_documents_date_range_pagination_parameters():
+    specs = {spec["slug"]: spec for spec in svc.list_builtin_skill_specs()}
+    skill_content = (specs["incoming-document"]["source_dir"] / "SKILL.md").read_text(encoding="utf-8")
+
+    assert 'date_from="YYYY-MM-DD"' in skill_content
+    assert 'date_to="YYYY-MM-DD"' in skill_content
+    assert "page=1" in skill_content
+    assert "page_size=3" in skill_content
+    assert "无需传入排序参数" in skill_content
+
+
 def test_phase3_incoming_business_skill_specs():
     specs = {spec["slug"]: spec for spec in svc.list_builtin_skill_specs()}
     incoming_tools = {
