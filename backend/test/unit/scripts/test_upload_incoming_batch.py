@@ -1,6 +1,7 @@
 import json
 import os
 import runpy
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,6 +46,32 @@ def _response(items: list[dict]):
             }
 
     return Response()
+
+
+def test_help_explains_arguments_input_fields_and_result_statuses():
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    for text in (
+        "documents_file",
+        "--api-base",
+        "INGEST_API_BASE",
+        "--token",
+        "INGEST_TOKEN",
+        "--source-system",
+        "source_document_id",
+        "source_file_id",
+        "source_url",
+        "source_system + source_document_id",
+        "accepted / exists / requeued / conflict",
+        "python -m pip install requests",
+    ):
+        assert text in result.stdout
 
 
 def test_upload_batch_posts_directly_in_two_hundred_document_chunks(monkeypatch):
