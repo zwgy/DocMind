@@ -208,12 +208,12 @@ async def test_search_normalizes_classification_id_or_label_and_rejects_unknown(
     result = await _tool_callable(tools.search_incoming_documents)(classifications=["风险管理类"])
     invalid = await _tool_callable(tools.search_incoming_documents)(classifications=["风险管控类"])
 
-    assert result["classification_labels"]["risk_management"] == "风险管理类"
+    assert result["items"] == []
     assert "未知分类" in invalid
 
 
 @pytest.mark.asyncio
-async def test_search_returns_document_summary_without_full_details_or_urls(monkeypatch):
+async def test_search_returns_compact_candidates_without_full_details_or_urls(monkeypatch):
     class FakeRepository:
         async def search_business_documents(self, **kwargs):
             assert kwargs["date_from"] == "2026-07-01"
@@ -247,7 +247,10 @@ async def test_search_returns_document_summary_without_full_details_or_urls(monk
     assert result["items"][0]["item_types"] == ["risk_item"]
     assert result["items"][0]["classification"] == "risk_management"
     assert result["items"][0]["classification_label"] == "风险管理类"
-    assert result["item_type_labels"]["risk_item"] == "风险事项"
+    assert result["item_type_labels"] == {"risk_item": "风险事项"}
+    assert "summary" not in result["items"][0]
+    assert "classification_evidence" not in result["items"][0]
+    assert "classification_labels" not in result
     assert "result_groups" not in result["items"][0]
     assert "minio" not in str(result).lower()
 

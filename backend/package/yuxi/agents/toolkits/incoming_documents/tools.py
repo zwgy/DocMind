@@ -114,6 +114,20 @@ def _document_payload(document) -> dict[str, Any]:
     }
 
 
+def _search_document_payload(document) -> dict[str, Any]:
+    """搜索只返回定位候选所需字段，完整摘要和分类证据由详情读取提供。"""
+    classification = document.confirmed_classification or document.ai_classification
+    return {
+        "incoming_id": document.incoming_id,
+        "source_system": document.source_system,
+        "source_document_id": document.source_document_id,
+        "document_metadata": document.document_metadata or {},
+        "classification": classification,
+        "classification_label": document_category_label(classification),
+        "status": document.status,
+    }
+
+
 def _item_type_labels() -> dict[str, str]:
     """复用抽取 Schema 的显示元数据，避免工具和业务模型各维护一份映射。"""
     return extraction_schema_display_metadata().get("schemaLabels") or {}
@@ -364,9 +378,13 @@ async def search_incoming_documents(
         page_size=page_size,
     )
     facets = await repo.get_business_document_facets([document.incoming_id for document in documents])
+    item_type_labels = _item_type_labels()
+    used_item_types = {
+        item_type for document in documents for item_type in facets[document.incoming_id]["item_types"]
+    }
     return {
         "items": [
-            _document_payload(document)
+            _search_document_payload(document)
             | {
                 "item_types": facets[document.incoming_id]["item_types"],
                 "has_main_file": facets[document.incoming_id]["has_main_file"],
@@ -377,8 +395,9 @@ async def search_incoming_documents(
         "total": total,
         "page": page,
         "page_size": page_size,
-        "classification_labels": document_category_label_mapping(),
-        "item_type_labels": _item_type_labels(),
+        "item_type_labels": {
+            item_type: item_type_labels.get(item_type, item_type) for item_type in sorted(used_item_types)
+        },
     }
 
 

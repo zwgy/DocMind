@@ -45,7 +45,7 @@ ask_user_question(questions=[{
 - `read_file`：读取 `read_incoming_document` 返回的 `markdown_path`，用于核验附件原文。
 - `present_artifacts`：把已写入当前线程 outputs 的 Markdown 文件作为交付物展示给用户。
 
-条目类型参数支持内部 ID 或当前中文名称。工具返回的 `item_type_labels` 是当前有效映射；未知类型不要猜测，应依据工具返回的支持列表修正查询。
+条目类型参数支持内部 ID 或当前中文名称。工具返回的 `item_type_labels` 只包含当前结果涉及的映射；未知类型不要猜测，应依据工具错误返回的支持列表修正查询。
 
 ## 固定流程
 
