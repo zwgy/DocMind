@@ -79,7 +79,7 @@
 它不对管理员或单个 Agent 开放，主 Agent、SubAgent、`read_file` 和 `open_kb_document` 复用同一
 运行时值。该单项上限只减少大结果进入工作集的概率，最终安全仍由完整请求预算和 L1～L5 保证。
 
-Token 计数不会调用 `/tokenize` 或其他远程预检接口，因此不会额外延迟首 Token。新会话先使用本地保守估算；模型成功响应后，`TokenUsageMiddleware` 用供应商返回的输入 usage 记录当前请求规模桶的最大正误差。校准键绑定模型部署、地址、请求协议和模板版本；Skill/MCP 造成的工具 Schema 变化会重新计算本地基线和诊断 hash，但不会清空同一部署已经观测到的正误差包络。缺少或不自洽的 usage 不写入校准样本，仍按本地保守估算准入。
+Token 计数不会调用 `/tokenize` 或其他远程预检接口，因此不会额外延迟首 Token。新会话及尚无同规模样本的请求先使用本地字符保守估算；模型成功响应后，`TokenUsageMiddleware` 用供应商返回的输入 usage 记录当前基础估算规模桶的最大正误差，后续同规模请求改用“基础估算 + 误差包络”准入。校准键绑定模型部署、地址、请求协议、模板和校准版本；Skill/MCP 造成的工具 Schema 变化会重新计算本地基线和诊断 hash，但不会清空同一部署已经观测到的正误差包络。缺少或不自洽的 usage 不写入校准样本，仍按本地字符保守估算准入。
 
 OpenAI 兼容服务的 `finish_reason=length` 不等同于输入溢出。带正文时分类为 `output_exhausted`，先提交已生成正文，再由 `OutputContinuationMiddleware` 最多执行一次断点续写；带工具调用时分类为 `tool_call_truncated`，在进入 ToolNode 前明确失败，禁止执行或自动重试可能不完整的参数。空正文且实测 provider input 超过 `prompt_budget` 时，TokenUsage 会把携带校准快照的容量异常交给 ContextCompaction，全级重算后只重试主模型一次；正数 output/reasoning usage 证明输出耗尽但没有可见正文时，由输出恢复器提高上限并按原请求重试一次。空正文又缺少可校验 usage 时分类为 `length_unverified`，不猜测为输入溢出，也不自动压缩或重试。provider 明确抛出 prompt/context too long 但没有 usage 时，压缩器会一次性处理全部安全历史后重试一次。
 

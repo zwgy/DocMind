@@ -29,6 +29,7 @@ from yuxi.agents.backends.composite import _TOOL_RESULT_SAVED_MARKER
 
 _REQUEST_PROTOCOL_VERSION = "langchain-openai-messages-v1"
 _REQUEST_TEMPLATE_VERSION = "yuxi-openai-compatible-template-v1"
+_CALIBRATION_VERSION = "provider-baseline-gap-v2"
 ACTIVE_CONTEXT_SUMMARY_STATE_KEY = "_active_context_summary"
 BASE_SYSTEM_MESSAGE_STATE_KEY = "_base_system_message"
 _RESOLVED_TOOL_TOKEN_LIMIT_ATTR = "_resolved_tool_token_limit_tokens"
@@ -311,8 +312,9 @@ def _calibration_key(request: ModelRequest) -> str:
         "base_url": str(base_url).rstrip("/"),
         "protocol": _REQUEST_PROTOCOL_VERSION,
         "template": _REQUEST_TEMPLATE_VERSION,
+        "calibration": _CALIBRATION_VERSION,
     }
-    # 工具 schema 和 System 提示词会随着 Skill 激活频繁变化；它们的真实开销已由当前 fallback
+    # 工具 schema 和 System 提示词会随着 Skill 激活频繁变化；它们的开销已由当前基础估算
     # 计入。若把它们放进 key，会在最需要历史误差保护的时刻清空校准包络。
     return _stable_hash(descriptor)
 
@@ -452,18 +454,20 @@ def estimate_model_request(
     max_ratio = float(previous_ratio) if isinstance(previous_ratio, int | float) else 1.0
     max_ratio = max(max_ratio, 1.0)
     calibration_samples = _safe_int(previous.get("calibration_samples")) or 0 if valid_previous else 0
-    # 绝对误差保护较固定的模板/工具开销，倍率保护随正文增长的分词误差；取最大值
-    # 可以避免一次较小的新样本把已经观察到的高风险低估重新放行。
+    # 旧版全局绝对误差和倍率只保留诊断价值，准入仅使用同规模桶的误差，避免小请求的
+    # 协议偏差被线性放大到长请求。
     gap_by_bucket = _positive_gap_by_bucket(previous.get("max_positive_gap_by_bucket")) if valid_previous else {}
-    request_size_bucket = _request_size_bucket(fallback)
+    request_size_bucket = _request_size_bucket(baseline)
+    bucket_calibrated = request_size_bucket in gap_by_bucket
     bucket_gap = gap_by_bucket.get(request_size_bucket, 0)
-    # 旧版 ratio 和跨规模 gap 只保留诊断价值；仅同规模桶的最大正误差可以安全参与本次准入。
-    admission = fallback + bucket_gap
+    # Provider 已为同一部署、同一规模提供过真实 usage 后，使用基础估算与该规模最大正误差；
+    # 字符兜底只保护尚无可靠样本的冷启动请求，避免中文与 JSON 令长期准入接近实际值的两倍。
+    admission = baseline + bucket_gap if bucket_calibrated else fallback
     return RequestTokenEstimate(
         baseline=baseline,
         fallback=fallback,
         admission=admission,
-        source="calibrated_estimate" if bucket_gap > 0 else "fallback_estimate",
+        source="calibrated_estimate" if bucket_calibrated else "fallback_estimate",
         breakdown=_breakdown(request, token_counter),
         calibration_key=calibration_key,
         max_positive_error=max_positive_error,
@@ -606,7 +610,7 @@ class TokenUsageMiddleware(AgentMiddleware[TokenUsageState]):
             max_ratio = max(max_ratio, provider_input / estimate.baseline, 1.0)
             # 只学习当前请求规模的低估绝对值。模型服务偶发的 usage 缺失或旧 ratio 不能被
             # 伪造成样本，否则后续压缩时机会变得不可解释。
-            observed_gap = max(provider_input - estimate.fallback, 0)
+            observed_gap = max(provider_input - estimate.baseline, 0)
             gap_by_bucket[estimate.request_size_bucket] = max(
                 gap_by_bucket.get(estimate.request_size_bucket, 0), observed_gap
             )

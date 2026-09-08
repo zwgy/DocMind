@@ -162,7 +162,35 @@ async def test_usage_calibrates_the_next_request_with_bucketed_positive_gap() ->
     assert snapshot["max_ratio"] == pytest.approx(32_601 / 20_284, rel=1e-6)
     assert snapshot["max_positive_gap_by_bucket"] == {"medium": 12_317}
     assert estimate.source == "calibrated_estimate"
-    assert estimate.admission == estimate.fallback + 12_317
+    assert estimate.admission == estimate.baseline + 12_317
+
+
+def test_provider_calibration_replaces_overestimated_character_fallback() -> None:
+    def token_counter(_messages, **_kwargs):
+        return 12_000
+
+    uncalibrated = _request()
+    uncalibrated.messages = [HumanMessage(content="中" * 27_000)]
+    cold_start = estimate_model_request(uncalibrated, token_counter=token_counter)
+    calibrated = _request(
+        state={
+            "token_usage": {
+                "calibration_key": cold_start.calibration_key,
+                "calibration_samples": 3,
+                "max_positive_gap_by_bucket": {"medium": 2_000},
+            }
+        }
+    )
+    calibrated.messages = list(uncalibrated.messages)
+
+    estimate = estimate_model_request(calibrated, token_counter=token_counter)
+
+    assert cold_start.source == "fallback_estimate"
+    assert cold_start.admission == cold_start.fallback
+    assert cold_start.fallback > 27_000
+    assert estimate.source == "calibrated_estimate"
+    assert estimate.admission == 14_000
+    assert estimate.admission < estimate.fallback
 
 
 def test_tool_schema_change_preserves_same_deployment_bucket_calibration() -> None:
@@ -188,7 +216,7 @@ def test_tool_schema_change_preserves_same_deployment_bucket_calibration() -> No
     assert estimate.source == "calibrated_estimate"
     assert estimate.calibration_samples == 2
     assert estimate.max_positive_gap_by_bucket == {"small": 500}
-    assert estimate.admission == estimate.fallback + 500
+    assert estimate.admission == estimate.baseline + 500
 
 
 @pytest.mark.asyncio
