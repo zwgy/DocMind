@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -116,9 +116,13 @@ async def test_immediate_job_is_claimed_before_submitted_history() -> None:
                 file_manifest=[],
                 actor_uid="integration-test",
             )
+            database_now = await repository.database_now()
+            historical_window_time = database_now.replace(hour=11, minute=0, second=0, microsecond=0)
+            if historical_window_time < database_now:
+                historical_window_time += timedelta(days=1)
             claim = await repository.claim_next(
                 instance_id="integration-dispatcher",
-                now=datetime(2026, 9, 7, 11, 0, tzinfo=UTC),
+                now=historical_window_time,
                 concurrency=1,
             )
             assert immediate.job_id is not None
