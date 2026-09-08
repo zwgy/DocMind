@@ -109,6 +109,22 @@ def _normalize_period_type(value: Any) -> Any:
 ExtractedPeriodType = Annotated[PeriodType, BeforeValidator(_normalize_period_type)]
 
 
+RecipientScope = Literal["named", "all", "unknown"]
+
+
+def _normalize_recipient_scope(value: Any) -> Any:
+    # 本地模型常用 null 表示原文未说明接收人，业务语义应与字段缺失时的默认值一致。
+    return "unknown" if value is None else value
+
+
+def _normalize_recipient_names(value: Any) -> Any:
+    return [] if value is None else value
+
+
+ExtractedRecipientScope = Annotated[RecipientScope, BeforeValidator(_normalize_recipient_scope)]
+ExtractedRecipientNames = Annotated[list[str], BeforeValidator(_normalize_recipient_names)]
+
+
 class RiskItem(BaseModel):
     model_config = {"json_schema_extra": {"label": "风险事项"}}
 
@@ -209,12 +225,12 @@ class TaskItem(BaseModel):
         description="原文中的接收人表达；与兼容字段 recipient_expression 保持相同语义",
         json_schema_extra={"label": "原始接收人表达"},
     )
-    recipient_scope: Literal["named", "all", "unknown"] = Field(
+    recipient_scope: ExtractedRecipientScope = Field(
         default="unknown",
         description="接收人是具名人员、全体范围或无法确定",
         json_schema_extra={"label": "接收人范围"},
     )
-    recipient_names: list[str] = Field(
+    recipient_names: ExtractedRecipientNames = Field(
         default_factory=list,
         description="仅当接收人范围为 named 时填写原文姓名，不填写 UID",
         json_schema_extra={"label": "接收人姓名"},

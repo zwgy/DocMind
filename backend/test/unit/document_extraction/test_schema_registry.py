@@ -3,6 +3,7 @@ import pytest
 from yuxi.document_extraction.schemas import (
     DocumentCategoryResult,
     ManagementRequirementItem,
+    TaskItem,
     category_result_for_classification_label,
     extraction_schema_display_metadata,
     extraction_schema_ids_for_categories,
@@ -99,3 +100,19 @@ def test_null_period_type_is_normalized_but_unknown_value_is_rejected():
     assert ManagementRequirementItem.model_validate(payload).period_type == "未明确"
     with pytest.raises(ValueError, match="Input should be"):
         ManagementRequirementItem.model_validate({**payload, "period_type": "临时性"})
+
+
+def test_task_item_normalizes_null_recipient_defaults_but_rejects_invalid_scope():
+    payload = {
+        "task_name": "提交年度重点任务执行计划",
+        "recipient_scope": None,
+        "recipient_names": None,
+        "source_quote": "请各部门制定执行计划",
+    }
+
+    item = TaskItem.model_validate(payload)
+
+    assert item.recipient_scope == "unknown"
+    assert item.recipient_names == []
+    with pytest.raises(ValueError, match="Input should be"):
+        TaskItem.model_validate({**payload, "recipient_scope": "department"})
