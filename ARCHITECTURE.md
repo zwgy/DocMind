@@ -12,7 +12,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - `api-dev`：FastAPI API 服务，挂载 `backend/server` 和 `backend/package` 并热重载。
 - `worker-dev`：ARQ 后台任务 worker，处理智能体运行等异步任务。
 - `scheduler`、`dispatcher`：前者从 PostgreSQL 生成到期业务运行，后者认领动作、投递通知或 Agent Run，并对账无人值守 Agent 的运行终态。
-- `incoming-worker`、`incoming-dispatcher`：来文专用的串行 ARQ Worker 与 PostgreSQL 调度器。后者以数据库任务和租约为准入来源，只把带执行令牌的短消息投递 Redis；前者在执行前复核令牌、批次状态与历史时间窗口。
+- `incoming-worker`、`incoming-dispatcher`：来文专用的串行 ARQ Worker 与 PostgreSQL 调度器。后者以数据库任务和租约为准入来源，只把带执行令牌的短消息投递 Redis；前者在执行前复核令牌与历史时间窗口。
 - `sandbox-provisioner`：为智能体工具执行提供沙盒环境。
 - `postgres`、`redis`、`minio`、`milvus`、`graph`：分别承载业务/知识库元数据、运行事件与队列状态、对象存储、向量检索、Neo4j 图谱。
 - `mineru-*`、`paddlex`：按 `all` profile 启动的文档解析/OCR 能力。
@@ -36,7 +36,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - `knowledge/parser` 是文档解析边界，统一封装 MinerU、PaddleX、RapidOCR、DeepSeek OCR 等解析实现。
 - `models` 封装 chat、embedding、rerank 模型适配；`config` 维护应用配置和内置模型信息；`utils` 放跨领域但足够通用的工具。
 - `scheduled_jobs` 定义业务定时任务的动作、时间规则和独立进程入口；任务定义、单次运行和收件事件持久化在 PostgreSQL，`services/scheduled_job_*` 负责编排，`repositories/scheduled_job_repository.py` 与 `inbox_repository.py` 负责状态迁移和查询。
-- `services/incoming_*`、`repositories/incoming_ingest_repository.py` 与来文模型共同实现三类来文入口的持久化接入。PostgreSQL 保存批次、成员、任务、租约和阶段状态；MinIO 保存文件及解析产物；Redis 不保存待处理文件或长期任务真相。
+- `services/incoming_*`、`repositories/incoming_ingest_repository.py` 与来文模型共同实现三类来文入口的持久化接入。PostgreSQL 保存文档级接入任务、租约和阶段状态；MinIO 保存文件及解析产物；Redis 不保存待处理文件或长期任务真相。
 
 测试代码放在 `backend/test`，按 `unit`、`integration`、`e2e` 分层组织。新增或修改后端行为时，测试应落在最能覆盖风险的那一层。
 
@@ -66,7 +66,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 
 定时 Agent 运行复用同一条 Agent Run/Worker 链路，但每次触发先创建独立 Conversation。Worker 终态同步是结果投影快路径，Dispatcher 定期对账是恢复路径；收件箱只保存状态事件和摘要，完整消息及产物始终以 Conversation 为事实来源。Web 与 chat-iframe 通过同一会话列表接口平铺普通和定时会话，定时会话跨当前 Agent/scope 对任务所有者可见。个人任务与结果 Conversation 生命周期独立：删除任务域历史不删除 Conversation，个人结果 Conversation 也可由用户单独删除。
 
-来文接入不复用 Agent Worker：即时 iframe/当前来文和历史批次都先登记为 PostgreSQL 任务。即时任务全天可执行并优先；历史任务只在 `Asia/Shanghai` 18:00 至次日 07:30 启动，Worker 对 Redis 延迟消息再次检查该限制。首版固定一个来文 Worker 和 `max_jobs=1`，下载、解析、分类和结构化抽取串行，防止与工作时间小助手争用本地模型或 OCR 服务。
+来文接入不复用 Agent Worker：即时 iframe/当前来文和历史来文都先按 `source_system + source_document_id` 幂等登记为 PostgreSQL 任务。即时任务全天可执行并优先；历史任务只在 `Asia/Shanghai` 18:00 至次日 07:30 启动，Worker 对 Redis 延迟消息再次检查该限制。首版固定一个来文 Worker 和 `max_jobs=1`，下载、解析、分类和结构化抽取串行，防止与工作时间小助手争用本地模型或 OCR 服务。
 
 ## 架构不变量
 
@@ -78,7 +78,7 @@ Yuxi 是一个面向 RAG、知识图谱和多智能体工作流的知识库平�
 - 沙盒虚拟路径以 `SANDBOX_VIRTUAL_PATH_PREFIX` 为边界，用户可见路径与宿主机真实路径不要混用。
 - 面向用户或外部系统的输入在边界校验；内部服务之间优先信任已有类型、仓储和框架约束，避免为了假设场景堆叠防御代码。
 - 定时通知和定时 Agent 是不同动作：通知不得创建 Conversation；个人 Agent 每次运行创建独立 Conversation。个人任务只由所有者管理并可物理删除任务域历史；来文任务只允许通知，由管理员管理全局生命周期，用户“删除”来文历史时只隐藏自己的列表状态。
-- 来文任务的事实来源始终是 PostgreSQL，Redis 消息只是可重复投递的执行通知。旧执行令牌、暂停批次或窗口外历史消息不得触发下载、OCR 或业务发布；文件二进制不进入 PostgreSQL 或 Redis。
+- 来文任务的事实来源始终是 PostgreSQL，Redis 消息只是可重复投递的执行通知。旧执行令牌或窗口外历史消息不得触发下载、OCR 或业务发布；文件二进制不进入 PostgreSQL 或 Redis。
 
 ## 跨切面关注点
 

@@ -17,9 +17,7 @@ def test_parse_document_metadata_requires_object_and_accepts_new_contract():
     with pytest.raises(ValueError, match="document_metadata.source_doc_id"):
         incoming_document_router._parse_document_metadata('{"title":"专项检查"}')
     with pytest.raises(ValueError, match="YYYY-MM-DD"):
-        incoming_document_router._parse_document_metadata(
-            '{"source_doc_id":"DOC-1","incoming_date":"2026-02-30"}'
-        )
+        incoming_document_router._parse_document_metadata('{"source_doc_id":"DOC-1","incoming_date":"2026-02-30"}')
 
 
 def test_parse_file_metas_reads_main_file_marker():
@@ -192,37 +190,12 @@ async def test_ingest_multipart_rejects_page_context_fields(field_name):
 
 
 def test_ingest_batch_routes_require_administrator_dependency():
-    protected_paths = {
-        "/incoming-documents/ingest-batches",
-        "/incoming-documents/ingest-batches/{batch_id}/items",
-        "/incoming-documents/ingest-batches/{batch_id}/submit",
-        "/incoming-documents/ingest-batches/{batch_id}/pause",
-    }
     routes = {route.path: route for route in incoming_document_router.incoming_documents.routes}
 
-    for path in protected_paths:
-        dependencies = [dependency.call for dependency in routes[path].dependant.dependencies]
-        assert incoming_document_router.get_admin_user in dependencies
-
-
-async def test_register_ingest_batch_items_rejects_oversized_chunk_before_service_call(monkeypatch):
-    class FakeIncomingDocumentService:
-        def __init__(self):
-            raise AssertionError("超限请求不应进入服务层")
-
-    monkeypatch.setattr(incoming_document_router, "IncomingDocumentService", FakeIncomingDocumentService)
-    payload = incoming_document_router.IncomingIngestBatchItemsRequest(
-        source_system="oa",
-        items=[{}] * (incoming_document_router.INCOMING_INGEST_BATCH_ITEM_LIMIT + 1),
-    )
-
-    with pytest.raises(HTTPException) as exc_info:
-        await incoming_document_router.register_incoming_ingest_batch_items(
-            "ib_1", payload, current_user=SimpleNamespace(uid="admin-1")
-        )
-
-    assert exc_info.value.status_code == 400
-    assert "200" in exc_info.value.detail
+    dependencies = [
+        dependency.call for dependency in routes["/incoming-documents/ingest-batches"].dependant.dependencies
+    ]
+    assert incoming_document_router.get_admin_user in dependencies
 
 
 async def test_expedite_returns_not_found_after_terminal_job(monkeypatch):
@@ -238,9 +211,7 @@ async def test_expedite_returns_not_found_after_terminal_job(monkeypatch):
     with pytest.raises(HTTPException) as exc_info:
         await incoming_document_router.expedite_incoming_ingest_job(
             "ij_finished",
-            incoming_document_router.IncomingIngestJobExpediteRequest(
-                source_system="oa", source_document_id="DOC-1"
-            ),
+            incoming_document_router.IncomingIngestJobExpediteRequest(source_system="oa", source_document_id="DOC-1"),
             current_user=SimpleNamespace(uid="user-1"),
         )
 
@@ -251,21 +222,6 @@ async def test_expedite_returns_not_found_after_terminal_job(monkeypatch):
         "source_document_id": "DOC-1",
         "actor_uid": "user-1",
     }
-
-
-async def test_submit_ingest_batch_returns_service_batch_payload(monkeypatch):
-    class FakeIncomingDocumentService:
-        async def submit_ingest_batch(self, **kwargs):
-            assert kwargs == {"batch_id": "ib_1"}
-            return {"batchId": "ib_1", "status": "active", "isSubmitted": True}
-
-    monkeypatch.setattr(incoming_document_router, "IncomingDocumentService", FakeIncomingDocumentService)
-
-    result = await incoming_document_router.submit_incoming_ingest_batch(
-        "ib_1", current_user=SimpleNamespace(uid="admin-1")
-    )
-
-    assert result == {"batchId": "ib_1", "status": "active", "isSubmitted": True}
 
 
 async def test_retry_ingest_job_delegates_to_service(monkeypatch):

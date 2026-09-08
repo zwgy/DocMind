@@ -3,11 +3,12 @@ from __future__ import annotations
 import io
 import json
 from datetime import date
-from urllib.parse import quote
+from pathlib import Path
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from starlette.datastructures import UploadFile
 from yuxi.document_extraction.schemas import (
     document_category_label,
@@ -15,6 +16,7 @@ from yuxi.document_extraction.schemas import (
     extraction_schema_display_metadata,
     normalize_document_category_ids,
 )
+from yuxi.knowledge.parser import is_supported_file_extension
 from yuxi.knowledge.utils import parse_minio_url
 from yuxi.repositories.document_business_extraction_repository import DocumentBusinessExtractionRepository
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
@@ -68,12 +70,36 @@ class IncomingIngestSourceFields(BaseModel):
 
 
 class IncomingSourceFile(BaseModel):
-    source_file_id: str
-    filename: str
-    source_url: str
+    source_file_id: str = Field(min_length=1, max_length=512)
+    filename: str = Field(min_length=1, max_length=512)
+    source_url: str = Field(min_length=1, max_length=2048)
     is_main_file: bool | None = None
 
     model_config = {"extra": "forbid"}
+
+    @field_validator("source_file_id", mode="before")
+    @classmethod
+    def _normalize_source_file_id(cls, value) -> str:
+        return str(value or "").strip()
+
+    @field_validator("filename", mode="before")
+    @classmethod
+    def _normalize_filename(cls, value) -> str:
+        filename = Path(str(value or "").strip()).name
+        if filename and not is_supported_file_extension(filename):
+            raise ValueError("Unsupported file type")
+        return filename
+
+    @field_validator("source_url", mode="before")
+    @classmethod
+    def _validate_source_url(cls, value) -> str:
+        source_url = str(value or "").strip()
+        parsed = urlsplit(source_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("source_url must be an absolute HTTP or HTTPS URL")
+        if parsed.username or parsed.password:
+            raise ValueError("source_url must not contain credentials")
+        return source_url
 
 
 class IncomingSourceIngestRequest(IncomingIngestSourceFields):
@@ -81,19 +107,53 @@ class IncomingSourceIngestRequest(IncomingIngestSourceFields):
     files: list[IncomingSourceFile]
 
 
-class IncomingIngestBatchRequest(BaseModel):
-    source_system: str = "production"
-    batch_key: str
-    name: str
+class IncomingHistoricalDocument(BaseModel):
+    source_document_id: str = Field(min_length=1, max_length=256)
+    metadata: dict = Field(default_factory=dict)
+    files: list[IncomingSourceFile] = Field(min_length=1)
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("source_document_id", mode="before")
+    @classmethod
+    def _normalize_source_document_id(cls, value) -> str:
+        return str(value or "").strip()
+
+    @model_validator(mode="after")
+    def _validate_document(self):
+        source_file_ids = [item.source_file_id for item in self.files]
+        if len(source_file_ids) != len(set(source_file_ids)):
+            raise ValueError("source_file_id must be unique in one document")
+        if sum(item.is_main_file is True for item in self.files) > 1:
+            raise ValueError("only one main file is allowed")
+        incoming_date = self.metadata.get("incoming_date")
+        if incoming_date is not None:
+            try:
+                if not isinstance(incoming_date, str) or date.fromisoformat(incoming_date).isoformat() != incoming_date:
+                    raise ValueError
+            except ValueError as exc:
+                raise ValueError("metadata.incoming_date must be YYYY-MM-DD") from exc
+        self.files.sort(key=lambda item: item.source_file_id)
+        return self
 
 
-class IncomingIngestBatchItemsRequest(BaseModel):
-    source_system: str = "production"
-    items: list[dict]
+class HistoricalIncomingIngestRequest(BaseModel):
+    source_system: str = Field(min_length=1, max_length=64)
+    documents: list[IncomingHistoricalDocument] = Field(min_length=1, max_length=INCOMING_INGEST_BATCH_ITEM_LIMIT)
 
+    model_config = {"extra": "forbid"}
 
-class IncomingIngestBatchPauseRequest(BaseModel):
-    paused: bool
+    @field_validator("source_system", mode="before")
+    @classmethod
+    def _normalize_source_system(cls, value) -> str:
+        return str(value or "").strip()
+
+    @model_validator(mode="after")
+    def _validate_document_identities(self):
+        identities = [item.source_document_id for item in self.documents]
+        if len(identities) != len(set(identities)):
+            raise ValueError("source_document_id must be unique in one request")
+        return self
 
 
 class IncomingIngestJobExpediteRequest(BaseModel):
@@ -134,29 +194,29 @@ async def query_incoming_document_extractions(
 
 
 @incoming_documents.post("/ingest-batches")
-async def create_incoming_ingest_batch(
-    payload: IncomingIngestBatchRequest,
+async def register_historical_incoming_documents(
+    payload: HistoricalIncomingIngestRequest,
     current_user: User = Depends(get_admin_user),
 ):
+    payload_bytes = len(json.dumps(payload.model_dump(), ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    if payload_bytes > INCOMING_INGEST_BATCH_BYTES_LIMIT:
+        raise HTTPException(status_code=400, detail="单次登记元数据不能超过 5 MiB")
     try:
-        return await IncomingDocumentService().create_ingest_batch(
+        documents = [
+            {
+                "source_document_id": item.source_document_id,
+                "document_metadata": {**item.metadata, "source_doc_id": item.source_document_id},
+                "file_manifest": [file.model_dump() for file in item.files],
+            }
+            for item in payload.documents
+        ]
+        return await IncomingDocumentService().register_historical_ingest(
             source_system=payload.source_system,
-            batch_key=payload.batch_key,
-            name=payload.name,
+            documents=documents,
             actor_uid=current_user.uid,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@incoming_documents.get("/ingest-batches")
-async def list_incoming_ingest_batches(
-    page: int = 1,
-    page_size: int = 20,
-    current_user: User = Depends(get_admin_user),
-):
-    del current_user
-    return await IncomingDocumentService().list_ingest_batches(page=max(page, 1), page_size=min(max(page_size, 1), 100))
 
 
 @incoming_documents.get("/ingest-jobs")
@@ -171,49 +231,6 @@ async def list_incoming_ingest_jobs(
     return await IncomingDocumentService().list_ingest_jobs(
         page=max(page, 1), page_size=min(max(page_size, 1), 100), status=status, priority=priority
     )
-
-
-@incoming_documents.post("/ingest-batches/{batch_id}/items")
-async def register_incoming_ingest_batch_items(
-    batch_id: str,
-    payload: IncomingIngestBatchItemsRequest,
-    current_user: User = Depends(get_admin_user),
-):
-    if len(payload.items) > INCOMING_INGEST_BATCH_ITEM_LIMIT:
-        raise HTTPException(status_code=400, detail="单次登记不能超过 200 项")
-    if len(json.dumps(payload.items, ensure_ascii=False).encode("utf-8")) > INCOMING_INGEST_BATCH_BYTES_LIMIT:
-        raise HTTPException(status_code=400, detail="单次登记元数据不能超过 5 MiB")
-    try:
-        return await IncomingDocumentService().register_ingest_batch_items(
-            batch_id=batch_id,
-            source_system=payload.source_system,
-            items=payload.items,
-            actor_uid=current_user.uid,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@incoming_documents.post("/ingest-batches/{batch_id}/submit")
-async def submit_incoming_ingest_batch(batch_id: str, current_user: User = Depends(get_admin_user)):
-    del current_user
-    try:
-        return await IncomingDocumentService().submit_ingest_batch(batch_id=batch_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@incoming_documents.post("/ingest-batches/{batch_id}/pause")
-async def pause_or_resume_incoming_ingest_batch(
-    batch_id: str,
-    payload: IncomingIngestBatchPauseRequest,
-    current_user: User = Depends(get_admin_user),
-):
-    del current_user
-    try:
-        return await IncomingDocumentService().set_ingest_batch_paused(batch_id=batch_id, paused=payload.paused)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @incoming_documents.post("/ingest-jobs/{job_id}/expedite")
@@ -376,9 +393,7 @@ async def ingest_incoming_document(request: Request, current_user: User = Depend
                 raise ValueError("source_doc_id must be provided in document_metadata")
             context_fields = {"source_function_id", "business_id", "external_user_id", "external_user_name"}
             if any(field in form for field in context_fields):
-                raise ValueError(
-                    "page and user context fields do not belong to incoming document ingestion"
-                )
+                raise ValueError("page and user context fields do not belong to incoming document ingestion")
             # 外部系统直接传文件内容；原文长期存 MinIO，数据库只保存地址和来文元数据。
             uploads = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
             if not uploads:

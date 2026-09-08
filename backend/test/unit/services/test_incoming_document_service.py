@@ -1,5 +1,7 @@
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
+from yuxi.services import incoming_document_service as service_module
 from yuxi.services.incoming_document_service import IncomingDocumentService
 
 
@@ -25,6 +27,51 @@ class FakeExtractionRepo:
 
     async def get_latest_by_incoming_id(self, _incoming_id):
         return self.result
+
+
+async def test_register_historical_ingest_returns_real_item_summary(monkeypatch):
+    documents = [
+        {"source_document_id": "A", "document_metadata": {}, "file_manifest": []},
+        {"source_document_id": "B", "document_metadata": {}, "file_manifest": []},
+        {"source_document_id": "C", "document_metadata": {}, "file_manifest": []},
+        {"source_document_id": "D", "document_metadata": {}, "file_manifest": []},
+    ]
+
+    class FakeIngestRepository:
+        def __init__(self, session):
+            assert session == "session"
+
+        async def register_historical(self, **kwargs):
+            assert kwargs == {"source_system": "oa", "documents": documents, "actor_uid": "admin"}
+            return [
+                SimpleNamespace(source_document_id="A", job_id="ij_a", status="accepted", error_message=None),
+                SimpleNamespace(source_document_id="B", job_id="ij_b", status="exists", error_message=None),
+                SimpleNamespace(source_document_id="C", job_id="ij_c", status="requeued", error_message=None),
+                SimpleNamespace(source_document_id="D", job_id="ij_d", status="conflict", error_message="不同"),
+            ]
+
+    @asynccontextmanager
+    async def fake_session_context():
+        yield "session"
+
+    monkeypatch.setattr(service_module.pg_manager, "get_async_session_context", fake_session_context)
+    monkeypatch.setattr(service_module, "IncomingIngestRepository", FakeIngestRepository)
+
+    result = await IncomingDocumentService().register_historical_ingest(
+        source_system="oa",
+        documents=documents,
+        actor_uid="admin",
+    )
+
+    assert result == {
+        "items": [
+            {"sourceDocumentId": "A", "jobId": "ij_a", "status": "accepted", "message": None},
+            {"sourceDocumentId": "B", "jobId": "ij_b", "status": "exists", "message": None},
+            {"sourceDocumentId": "C", "jobId": "ij_c", "status": "requeued", "message": None},
+            {"sourceDocumentId": "D", "jobId": "ij_d", "status": "conflict", "message": "不同"},
+        ],
+        "summary": {"accepted": 1, "exists": 1, "requeued": 1, "conflict": 1},
+    }
 
 
 async def test_query_returns_each_selected_main_and_attachment():
@@ -296,6 +343,8 @@ async def test_query_hides_previous_extraction_while_document_is_not_ready():
 
     assert result["items"][0]["runId"] is None
     assert result["items"][0]["items"] == []
+
+
 def test_job_payload_exposes_chinese_progress_and_safe_failure_reason() -> None:
     job = SimpleNamespace(
         job_id="ij_failed",

@@ -3,10 +3,9 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from yuxi.repositories import incoming_ingest_repository as ingest_repository_module
 from yuxi.repositories.incoming_ingest_repository import IncomingIngestRepository, is_historical_window
-from yuxi.storage.postgres.models_knowledge import Base, IncomingIngestBatch, IncomingIngestBatchItem, IncomingIngestJob
+from yuxi.storage.postgres.models_knowledge import Base, IncomingIngestJob
 
 
 @pytest.fixture
@@ -23,11 +22,7 @@ async def repository(monkeypatch):
         await connection.run_sync(
             lambda sync_connection: Base.metadata.create_all(
                 sync_connection,
-                tables=[
-                    IncomingIngestBatch.__table__,
-                    IncomingIngestJob.__table__,
-                    IncomingIngestBatchItem.__table__,
-                ],
+                tables=[IncomingIngestJob.__table__],
             )
         )
     sessions = async_sessionmaker(engine, expire_on_commit=False)
@@ -45,31 +40,26 @@ def test_historical_window_uses_shanghai_boundaries() -> None:
 
 def test_historical_window_accepts_runtime_configured_cross_midnight_boundaries() -> None:
     """手工调整窗口后，历史任务应按新边界而非写死的默认值启动。"""
-    assert is_historical_window(
-        datetime(2026, 9, 7, 11, 15, tzinfo=UTC), start_time="19:00", end_time="06:30"
-    )
-    assert not is_historical_window(
-        datetime(2026, 9, 7, 10, 30, tzinfo=UTC), start_time="19:00", end_time="06:30"
-    )
+    assert is_historical_window(datetime(2026, 9, 7, 11, 15, tzinfo=UTC), start_time="19:00", end_time="06:30")
+    assert not is_historical_window(datetime(2026, 9, 7, 10, 30, tzinfo=UTC), start_time="19:00", end_time="06:30")
 
 
 @pytest.mark.asyncio
-async def test_registered_history_is_not_claimed_before_submit_or_when_paused(repository) -> None:
-    """未提交或暂停批次中的历史成员不得因调度轮询而开始下载。"""
-    batch = await repository.create_batch(
+async def test_registered_history_is_claimed_in_configured_window(repository) -> None:
+    """历史任务登记成功后无需提交批次，下一次窗口内扫描即可领取。"""
+    results = await repository.register_historical(
         source_system="legacy-oa",
-        batch_key="2026-history",
-        name="历史来文",
-        created_by="admin",
-    )
-    results = await repository.register_items(
-        batch_id=batch.batch_id,
-        source_system="legacy-oa",
-        items=[
+        documents=[
             {
                 "source_document_id": "history-1",
                 "document_metadata": {"source_doc_id": "history-1", "title": "历史来文"},
-                "file_manifest": [{"source_file_id": "main-1", "download_url": "https://oa.example/doc/1"}],
+                "file_manifest": [
+                    {
+                        "source_file_id": "main-1",
+                        "filename": "main.pdf",
+                        "source_url": "https://oa.example/doc/1",
+                    }
+                ],
             }
         ],
         actor_uid="admin",
@@ -77,26 +67,18 @@ async def test_registered_history_is_not_claimed_before_submit_or_when_paused(re
     assert results[0].status == "accepted"
 
     now = datetime(2026, 9, 7, 10, 0, tzinfo=UTC)
-    assert await repository.claim_next(instance_id="dispatcher", now=now, concurrency=1) is None
+    claim = await repository.claim_next(instance_id="dispatcher", now=now, concurrency=1)
 
-    await repository.submit_batch(batch.batch_id)
-    await repository.pause_batch(batch.batch_id)
-    assert await repository.claim_next(instance_id="dispatcher", now=now, concurrency=1) is None
+    assert claim is not None
+    assert claim.job_id == results[0].job_id
 
 
 @pytest.mark.asyncio
-async def test_worker_does_not_start_queued_history_after_batch_is_paused(repository) -> None:
-    """队列已有消息后暂停批次时，Worker 必须在下载前归还历史任务。"""
-    batch = await repository.create_batch(
+async def test_worker_does_not_start_queued_history_after_window_closes(repository) -> None:
+    """队列已有消息但时间窗口已关闭时，Worker 必须在下载前归还历史任务。"""
+    items = await repository.register_historical(
         source_system="legacy-oa",
-        batch_key="paused-after-queue",
-        name="历史来文",
-        created_by="admin",
-    )
-    items = await repository.register_items(
-        batch_id=batch.batch_id,
-        source_system="legacy-oa",
-        items=[
+        documents=[
             {
                 "source_document_id": "paused-history",
                 "document_metadata": {"source_doc_id": "paused-history"},
@@ -105,19 +87,17 @@ async def test_worker_does_not_start_queued_history_after_batch_is_paused(reposi
         ],
         actor_uid="admin",
     )
-    await repository.submit_batch(batch.batch_id)
     now = datetime(2026, 9, 7, 10, 0, tzinfo=UTC)
     claim = await repository.claim_next(instance_id="dispatcher", now=now, concurrency=1)
     assert claim is not None and claim.job_id == items[0].job_id
     assert await repository.mark_queued(job_id=claim.job_id, delivery_token=claim.delivery_token)
-    await repository.pause_batch(batch.batch_id)
 
     assert (
         await repository.start_delivery(
             job_id=claim.job_id,
             delivery_token=claim.delivery_token,
             worker_id="worker",
-            now=now,
+            now=datetime(2026, 9, 7, 23, 30, tzinfo=UTC),
         )
         is None
     )
@@ -126,16 +106,9 @@ async def test_worker_does_not_start_queued_history_after_batch_is_paused(reposi
 @pytest.mark.asyncio
 async def test_immediate_job_is_claimed_before_submitted_history(repository) -> None:
     """错误的优先级排序会让工作时间的小助手请求排在历史积压之后。"""
-    history = await repository.create_batch(
+    await repository.register_historical(
         source_system="legacy-oa",
-        batch_key="2026-history-priority",
-        name="历史来文",
-        created_by="admin",
-    )
-    await repository.register_items(
-        batch_id=history.batch_id,
-        source_system="legacy-oa",
-        items=[
+        documents=[
             {
                 "source_document_id": "history-first",
                 "document_metadata": {"source_doc_id": "history-first"},
@@ -144,7 +117,6 @@ async def test_immediate_job_is_claimed_before_submitted_history(repository) -> 
         ],
         actor_uid="admin",
     )
-    await repository.submit_batch(history.batch_id)
     immediate = await repository.register_immediate(
         source_system="legacy-oa",
         source_document_id="new-arrival",
@@ -324,6 +296,196 @@ async def test_registering_same_source_identity_reuses_pending_job(repository) -
 
     assert second.job_id == first.job_id
     assert second.reused
+
+
+def _historical_document(source_document_id: str, *, files: list[dict] | None = None) -> dict:
+    return {
+        "source_document_id": source_document_id,
+        "document_metadata": {"source_doc_id": source_document_id, "title": f"来文 {source_document_id}"},
+        "file_manifest": files
+        or [
+            {
+                "source_file_id": "main",
+                "filename": "main.pdf",
+                "source_url": f"https://attachments.test/{source_document_id}.pdf",
+                "is_main_file": True,
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_register_historical_returns_results_in_request_order(repository) -> None:
+    results = await repository.register_historical(
+        source_system="oa",
+        documents=[_historical_document("DOC-2"), _historical_document("DOC-1")],
+        actor_uid="admin",
+    )
+
+    assert [(item.source_document_id, item.status) for item in results] == [
+        ("DOC-2", "accepted"),
+        ("DOC-1", "accepted"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_register_historical_treats_reordered_files_as_same_input(repository) -> None:
+    files = [
+        {
+            "source_file_id": "main",
+            "filename": "main.pdf",
+            "source_url": "https://attachments.test/main.pdf",
+            "is_main_file": True,
+        },
+        {
+            "source_file_id": "attachment",
+            "filename": "attachment.pdf",
+            "source_url": "https://attachments.test/attachment.pdf",
+            "is_main_file": False,
+        },
+    ]
+    first = await repository.register_historical(
+        source_system="oa",
+        documents=[_historical_document("DOC-1", files=files)],
+        actor_uid="admin",
+    )
+    second = await repository.register_historical(
+        source_system="oa",
+        documents=[_historical_document("DOC-1", files=list(reversed(files)))],
+        actor_uid="admin",
+    )
+
+    assert first[0].status == "accepted"
+    assert second[0].status == "exists"
+    assert second[0].job_id == first[0].job_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", ["failed", "cancelled"])
+async def test_register_historical_requeues_same_failed_or_cancelled_input(repository, terminal_status) -> None:
+    first = await repository.register_historical(
+        source_system="oa",
+        documents=[_historical_document("DOC-1")],
+        actor_uid="admin",
+    )
+    job = await repository.get_by_source_identity(source_system="oa", source_document_id="DOC-1")
+    job.status = terminal_status
+    job.stage = terminal_status
+    job.processing_error = "temporary failure"
+    await repository.db.flush()
+
+    second = await repository.register_historical(
+        source_system="oa",
+        documents=[_historical_document("DOC-1")],
+        actor_uid="admin",
+    )
+
+    assert second[0].status == "requeued"
+    assert second[0].job_id == first[0].job_id
+    assert job.status == "pending"
+    assert job.processing_error is None
+
+
+@pytest.mark.asyncio
+async def test_register_historical_reports_conflict_without_replacing_existing_input(repository) -> None:
+    await repository.register_historical(
+        source_system="oa",
+        documents=[_historical_document("DOC-1")],
+        actor_uid="admin",
+    )
+
+    result = await repository.register_historical(
+        source_system="oa",
+        documents=[
+            {
+                **_historical_document("DOC-1"),
+                "document_metadata": {"source_doc_id": "DOC-1", "title": "不同内容"},
+            }
+        ],
+        actor_uid="admin",
+    )
+
+    job = await repository.get_by_source_identity(source_system="oa", source_document_id="DOC-1")
+    assert result[0].status == "conflict"
+    assert result[0].error_message == "来文输入与已有任务不一致"
+    assert job.document_metadata["title"] == "来文 DOC-1"
+
+
+@pytest.mark.asyncio
+async def test_register_historical_does_not_downgrade_existing_immediate_job(repository) -> None:
+    document = _historical_document("DOC-1")
+    immediate = await repository.register_immediate(
+        source_system="oa",
+        source_document_id="DOC-1",
+        document_metadata=document["document_metadata"],
+        file_manifest=document["file_manifest"],
+        actor_uid="user",
+    )
+
+    result = await repository.register_historical(
+        source_system="oa",
+        documents=[document],
+        actor_uid="admin",
+    )
+
+    job = await repository.get_by_source_identity(source_system="oa", source_document_id="DOC-1")
+    assert result[0].status == "exists"
+    assert result[0].job_id == immediate.job_id
+    assert job.priority == "immediate"
+
+
+@pytest.mark.asyncio
+async def test_register_immediate_requeues_same_failed_input(repository) -> None:
+    document = _historical_document("DOC-1")
+    first = await repository.register_immediate(
+        source_system="oa",
+        source_document_id="DOC-1",
+        document_metadata=document["document_metadata"],
+        file_manifest=document["file_manifest"],
+        actor_uid="user",
+    )
+    job = await repository.get_by_source_identity(source_system="oa", source_document_id="DOC-1")
+    job.status = "failed"
+    job.stage = "failed"
+    job.processing_error = "下载失败"
+    await repository.db.flush()
+
+    second = await repository.register_immediate(
+        source_system="oa",
+        source_document_id="DOC-1",
+        document_metadata=document["document_metadata"],
+        file_manifest=document["file_manifest"],
+        actor_uid="user",
+    )
+
+    assert second.status == "requeued"
+    assert second.job_id == first.job_id
+    assert job.status == "pending"
+    assert job.priority == "immediate"
+    assert job.processing_error is None
+
+
+@pytest.mark.asyncio
+async def test_register_immediate_reports_conflict_for_different_input(repository) -> None:
+    document = _historical_document("DOC-1")
+    await repository.register_immediate(
+        source_system="oa",
+        source_document_id="DOC-1",
+        document_metadata=document["document_metadata"],
+        file_manifest=document["file_manifest"],
+        actor_uid="user",
+    )
+
+    result = await repository.register_immediate(
+        source_system="oa",
+        source_document_id="DOC-1",
+        document_metadata={"source_doc_id": "DOC-1", "title": "不同输入"},
+        file_manifest=document["file_manifest"],
+        actor_uid="user",
+    )
+
+    assert result.status == "conflict"
+    assert result.error_message == "来文输入与已有任务不一致"
 
 
 def test_claim_query_uses_postgresql_row_lock_and_stable_priority_order() -> None:

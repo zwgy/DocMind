@@ -11,7 +11,7 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from yuxi.storage.postgres.models_knowledge import IncomingIngestBatch, IncomingIngestBatchItem, IncomingIngestJob
+from yuxi.storage.postgres.models_knowledge import IncomingIngestJob
 from yuxi.utils.datetime_utils import utc_now_naive
 
 IN_FLIGHT_STATUSES = ("dispatching", "queued", "running")
@@ -33,6 +33,7 @@ class RegistrationResult:
 
     status: str
     job_id: str | None
+    source_document_id: str | None = None
     reused: bool = False
     error_message: str | None = None
 
@@ -59,23 +60,13 @@ class IncomingIngestRepository:
             raise RuntimeError("无法读取 PostgreSQL 当前时间")
         return now.astimezone(UTC)
 
-    async def get_by_source_identity(
-        self, *, source_system: str, source_document_id: str
-    ) -> IncomingIngestJob | None:
+    async def get_by_source_identity(self, *, source_system: str, source_document_id: str) -> IncomingIngestJob | None:
         return await self.db.scalar(
             select(IncomingIngestJob).where(
                 IncomingIngestJob.source_system == source_system,
                 IncomingIngestJob.source_document_id == source_document_id,
             )
         )
-
-    async def list_batches(self, *, page: int, page_size: int) -> tuple[list[IncomingIngestBatch], int]:
-        statement = select(IncomingIngestBatch).order_by(
-            IncomingIngestBatch.updated_at.desc(), IncomingIngestBatch.id.desc()
-        )
-        total = await self.db.scalar(select(func.count()).select_from(statement.subquery()))
-        batches = list((await self.db.scalars(statement.offset((page - 1) * page_size).limit(page_size))).all())
-        return batches, int(total or 0)
 
     async def list_jobs(
         self,
@@ -102,61 +93,26 @@ class IncomingIngestRepository:
         )
         return jobs, int(total or 0)
 
-    async def create_batch(
+    async def register_historical(
         self,
         *,
         source_system: str,
-        batch_key: str,
-        name: str,
-        created_by: str,
-    ) -> IncomingIngestBatch:
-        batch = await self.db.scalar(
-            select(IncomingIngestBatch).where(
-                IncomingIngestBatch.source_system == source_system,
-                IncomingIngestBatch.batch_key == batch_key,
-            )
-        )
-        if batch is not None:
-            return batch
-        batch = IncomingIngestBatch(
-            batch_id=f"ib_{uuid4().hex}",
-            source_system=source_system,
-            batch_key=batch_key,
-            name=name,
-            created_by=created_by,
-        )
-        self.db.add(batch)
-        await self.db.flush()
-        return batch
-
-    async def register_items(
-        self,
-        *,
-        batch_id: str,
-        source_system: str,
-        items: list[dict],
+        documents: list[dict],
         actor_uid: str,
     ) -> list[RegistrationResult]:
-        batch = await self.db.scalar(
-            select(IncomingIngestBatch)
-            .where(IncomingIngestBatch.batch_id == batch_id)
-            .with_for_update()
+        """按稳定身份顺序登记历史任务，返回顺序仍与请求一致。"""
+        ordered_documents = sorted(
+            enumerate(documents),
+            key=lambda pair: str(pair[1]["source_document_id"]),
         )
-        if batch is None:
-            raise ValueError("接入批次不存在")
-        if batch.source_system != source_system:
-            raise ValueError("接入批次来源不匹配")
-        if batch.is_submitted:
-            raise ValueError("接入批次已提交，不能继续登记")
-
-        results: list[RegistrationResult] = []
-        for item in items:
-            source_document_id = str(item.get("source_document_id") or "").strip()
-            if not source_document_id:
-                results.append(RegistrationResult(status="invalid", job_id=None, error_message="缺少来源来文 ID"))
-                continue
-            document_metadata = dict(item.get("document_metadata") or {})
-            file_manifest = list(item.get("file_manifest") or [])
+        results: list[RegistrationResult | None] = [None] * len(documents)
+        for original_index, document in ordered_documents:
+            source_document_id = str(document["source_document_id"])
+            document_metadata = dict(document["document_metadata"])
+            file_manifest = sorted(
+                (dict(item) for item in document["file_manifest"]),
+                key=lambda item: str(item["source_file_id"]),
+            )
             job = await self.db.scalar(
                 select(IncomingIngestJob)
                 .where(
@@ -165,14 +121,7 @@ class IncomingIngestRepository:
                 )
                 .with_for_update()
             )
-            reused = job is not None
-            if job is not None and job.status not in TERMINAL_STATUSES and (
-                job.document_metadata != document_metadata or job.file_manifest != file_manifest
-            ):
-                results.append(
-                    RegistrationResult(status="conflict", job_id=job.job_id, error_message="待处理来文输入不一致")
-                )
-                continue
+            created = job is None
             if job is None:
                 new_job = self._new_job(
                     source_system=source_system,
@@ -206,65 +155,39 @@ class IncomingIngestRepository:
                     )
                     if job is None:
                         raise RuntimeError("来文任务登记后未找到来源身份")
-                    reused = job.job_id != new_job.job_id
+                    created = job.job_id == new_job.job_id
                 else:
                     job = new_job
                     self.db.add(job)
                     await self.db.flush()
 
-            member = await self.db.scalar(
-                select(IncomingIngestBatchItem).where(
-                    IncomingIngestBatchItem.batch_id == batch_id,
-                    IncomingIngestBatchItem.source_system == source_system,
-                    IncomingIngestBatchItem.source_document_id == source_document_id,
-                )
-            )
-            if member is None:
-                self.db.add(
-                    IncomingIngestBatchItem(
-                        batch_id=batch_id,
-                        job_id=job.job_id,
-                        source_system=source_system,
-                        source_document_id=source_document_id,
-                        input_version=job.input_version,
-                        registration_status="exists" if reused else "accepted",
-                    )
-                )
-            results.append(
-                RegistrationResult(
-                    status="exists" if reused else "accepted",
+            if not created and (job.document_metadata != document_metadata or job.file_manifest != file_manifest):
+                result = RegistrationResult(
+                    status="conflict",
                     job_id=job.job_id,
-                    reused=reused,
+                    source_document_id=source_document_id,
+                    reused=True,
+                    error_message="来文输入与已有任务不一致",
                 )
-            )
-        batch.updated_by = actor_uid
-        await self.db.flush()
-        return results
+            elif not created and job.status in {"failed", "cancelled"}:
+                self._reset_job_for_retry(job, actor_uid=actor_uid)
+                result = RegistrationResult(
+                    status="requeued",
+                    job_id=job.job_id,
+                    source_document_id=source_document_id,
+                    reused=True,
+                )
+            else:
+                result = RegistrationResult(
+                    status="accepted" if created else "exists",
+                    job_id=job.job_id,
+                    source_document_id=source_document_id,
+                    reused=not created,
+                )
+            results[original_index] = result
 
-    async def submit_batch(self, batch_id: str) -> IncomingIngestBatch:
-        batch = await self._get_batch_for_update(batch_id)
-        batch.is_submitted = True
-        batch.is_paused = False
-        batch.status = "active"
-        batch.submitted_at = utc_now_naive()
         await self.db.flush()
-        return batch
-
-    async def pause_batch(self, batch_id: str) -> IncomingIngestBatch:
-        batch = await self._get_batch_for_update(batch_id)
-        batch.is_paused = True
-        batch.status = "paused"
-        await self.db.flush()
-        return batch
-
-    async def resume_batch(self, batch_id: str) -> IncomingIngestBatch:
-        batch = await self._get_batch_for_update(batch_id)
-        if not batch.is_submitted:
-            raise ValueError("未提交批次不能恢复")
-        batch.is_paused = False
-        batch.status = "active"
-        await self.db.flush()
-        return batch
+        return [result for result in results if result is not None]
 
     async def register_immediate(
         self,
@@ -275,6 +198,10 @@ class IncomingIngestRepository:
         file_manifest: list[dict],
         actor_uid: str,
     ) -> RegistrationResult:
+        normalized_file_manifest = sorted(
+            (dict(item) for item in file_manifest),
+            key=lambda item: str(item["source_file_id"]),
+        )
         job = await self.db.scalar(
             select(IncomingIngestJob)
             .where(
@@ -283,25 +210,81 @@ class IncomingIngestRepository:
             )
             .with_for_update()
         )
-        if job is not None:
+        created = job is None
+        if job is None:
+            new_job = self._new_job(
+                source_system=source_system,
+                source_document_id=source_document_id,
+                document_metadata=document_metadata,
+                file_manifest=normalized_file_manifest,
+                source_kind="immediate",
+                priority="immediate",
+                actor_uid=actor_uid,
+            )
+            if self.db.get_bind().dialect.name == "postgresql":
+                await self.db.execute(
+                    self.job_insert_statement(
+                        job_id=new_job.job_id,
+                        source_system=source_system,
+                        source_document_id=source_document_id,
+                        document_metadata=document_metadata,
+                        file_manifest=normalized_file_manifest,
+                        source_kind="immediate",
+                        priority="immediate",
+                        actor_uid=actor_uid,
+                    )
+                )
+                job = await self.db.scalar(
+                    select(IncomingIngestJob)
+                    .where(
+                        IncomingIngestJob.source_system == source_system,
+                        IncomingIngestJob.source_document_id == source_document_id,
+                    )
+                    .with_for_update()
+                )
+                if job is None:
+                    raise RuntimeError("来文任务登记后未找到来源身份")
+                created = job.job_id == new_job.job_id
+            else:
+                job = new_job
+                self.db.add(job)
+                await self.db.flush()
+
+        if not created:
+            if job.document_metadata != document_metadata or job.file_manifest != normalized_file_manifest:
+                return RegistrationResult(
+                    status="conflict",
+                    job_id=job.job_id,
+                    source_document_id=source_document_id,
+                    reused=True,
+                    error_message="来文输入与已有任务不一致",
+                )
+            if job.status in {"failed", "cancelled"}:
+                self._reset_job_for_retry(job, actor_uid=actor_uid)
+                job.priority = "immediate"
+                await self.db.flush()
+                return RegistrationResult(
+                    status="requeued",
+                    job_id=job.job_id,
+                    source_document_id=source_document_id,
+                    reused=True,
+                )
             if job.status not in TERMINAL_STATUSES:
                 job.priority = "immediate"
                 job.updated_by = actor_uid
                 await self.db.flush()
-            return RegistrationResult(status="exists", job_id=job.job_id, reused=True)
+            return RegistrationResult(
+                status="exists",
+                job_id=job.job_id,
+                source_document_id=source_document_id,
+                reused=True,
+            )
 
-        job = self._new_job(
-            source_system=source_system,
+        return RegistrationResult(
+            status="accepted",
+            job_id=job.job_id,
             source_document_id=source_document_id,
-            document_metadata=document_metadata,
-            file_manifest=file_manifest,
-            source_kind="immediate",
-            priority="immediate",
-            actor_uid=actor_uid,
         )
-        self.db.add(job)
-        await self.db.flush()
-        return RegistrationResult(status="accepted", job_id=job.job_id)
 
     async def expedite(
         self,
@@ -339,42 +322,35 @@ class IncomingIngestRepository:
         priority: str,
         actor_uid: str,
     ):
-        return postgresql_insert(IncomingIngestJob).values(
-            job_id=job_id,
-            source_system=source_system,
-            source_document_id=source_document_id,
-            document_metadata=document_metadata,
-            file_manifest=file_manifest,
-            source_kind=source_kind,
-            priority=priority,
-            status="pending",
-            stage="registered",
-            input_ready=True,
-            next_attempt_at=utc_now_naive(),
-            created_by=actor_uid,
-            updated_by=actor_uid,
-        ).on_conflict_do_nothing(index_elements=("source_system", "source_document_id"))
+        return (
+            postgresql_insert(IncomingIngestJob)
+            .values(
+                job_id=job_id,
+                source_system=source_system,
+                source_document_id=source_document_id,
+                document_metadata=document_metadata,
+                file_manifest=file_manifest,
+                source_kind=source_kind,
+                priority=priority,
+                status="pending",
+                stage="registered",
+                input_ready=True,
+                next_attempt_at=utc_now_naive(),
+                created_by=actor_uid,
+                updated_by=actor_uid,
+            )
+            .on_conflict_do_nothing(index_elements=("source_system", "source_document_id"))
+        )
 
     @staticmethod
     def claim_statement(*, now: datetime):
-        active_history_batch = (
-            select(IncomingIngestBatchItem.id)
-            .join(IncomingIngestBatch, IncomingIngestBatch.batch_id == IncomingIngestBatchItem.batch_id)
-            .where(
-                IncomingIngestBatchItem.job_id == IncomingIngestJob.job_id,
-                IncomingIngestBatch.is_submitted.is_(True),
-                IncomingIngestBatch.is_paused.is_(False),
-                IncomingIngestBatch.status == "active",
-            )
-            .exists()
-        )
         return (
             select(IncomingIngestJob)
             .where(
                 IncomingIngestJob.status == "pending",
                 IncomingIngestJob.input_ready.is_(True),
                 or_(IncomingIngestJob.next_attempt_at.is_(None), IncomingIngestJob.next_attempt_at <= now),
-                or_(IncomingIngestJob.priority == "immediate", active_history_batch),
+                IncomingIngestJob.priority.in_(("immediate", "historical")),
             )
             .order_by(
                 case((IncomingIngestJob.priority == "immediate", 0), else_=1).asc(),
@@ -474,7 +450,6 @@ class IncomingIngestRepository:
             return None
         if job.priority == "historical" and (
             not is_historical_window(now, start_time=historical_window_start, end_time=historical_window_end)
-            or not await self._has_active_history_batch(job.job_id)
         ):
             job.status = "pending"
             job.delivery_token = None
@@ -508,9 +483,7 @@ class IncomingIngestRepository:
         await self.db.flush()
         return True
 
-    async def snapshot_parser_params(
-        self, *, job_id: str, delivery_token: str, parser_params: dict
-    ) -> dict | None:
+    async def snapshot_parser_params(self, *, job_id: str, delivery_token: str, parser_params: dict) -> dict | None:
         """首次执行时固定解析参数，失败恢复不得随环境变量悄悄改变解析语义。"""
         job = await self._get_job_for_update(job_id)
         if job is None or job.status != "running" or job.delivery_token != delivery_token:
@@ -683,32 +656,9 @@ class IncomingIngestRepository:
         locked = await self.db.scalar(select(func.pg_try_advisory_xact_lock(func.hashtext("incoming-ingest-dispatch"))))
         return bool(locked)
 
-    async def _get_batch_for_update(self, batch_id: str) -> IncomingIngestBatch:
-        batch = await self.db.scalar(
-            select(IncomingIngestBatch).where(IncomingIngestBatch.batch_id == batch_id).with_for_update()
-        )
-        if batch is None:
-            raise ValueError("接入批次不存在")
-        return batch
-
     async def _get_job_for_update(self, job_id: str) -> IncomingIngestJob | None:
         return await self.db.scalar(
             select(IncomingIngestJob).where(IncomingIngestJob.job_id == job_id).with_for_update()
-        )
-
-    async def _has_active_history_batch(self, job_id: str) -> bool:
-        return bool(
-            await self.db.scalar(
-                select(IncomingIngestBatchItem.id)
-                .join(IncomingIngestBatch, IncomingIngestBatch.batch_id == IncomingIngestBatchItem.batch_id)
-                .where(
-                    IncomingIngestBatchItem.job_id == job_id,
-                    IncomingIngestBatch.is_submitted.is_(True),
-                    IncomingIngestBatch.is_paused.is_(False),
-                    IncomingIngestBatch.status == "active",
-                )
-                .limit(1)
-            )
         )
 
     @staticmethod

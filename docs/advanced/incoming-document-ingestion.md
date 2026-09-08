@@ -302,23 +302,47 @@ print(response.json())
 
 ## 历史来文批量登记
 
-历史来文使用管理员接口和仓库脚本 `scripts/upload_incoming_batch.py` 登记；任务元数据保存在 PostgreSQL，文件原件、附件、Markdown 和解析图片保存在 MinIO。Redis 只承载已被 Dispatcher 领取的 `job_id + delivery_token` 短消息，因此重启或消息过期不会丢失待处理任务。
+历史来文使用管理员接口 `POST /api/incoming-documents/ingest-batches` 登记。虽然路径保留 `ingest-batches`，后端不创建批次实体，也不要求 `batch_key`、批次名称或提交步骤。单次请求通过 `documents` 数组登记 1 至 200 份来文；登记单份来文时数组只放一项即可。
 
-脚本读取包含来源来文 ID、元数据和长期有效下载地址的 JSON 清单，每次登记 200 项。同一 `--batch-key` 可以在网络中断后重复执行，已经成功登记的项会复用而不会重复创建任务。先完成登记，再提交批次：
+```json
+{
+  "source_system": "oa",
+  "documents": [
+    {
+      "source_document_id": "37908",
+      "metadata": {
+        "document_number": "上铁辆〔2020〕316号",
+        "title": "通知",
+        "incoming_date": "2020-10-20"
+      },
+      "files": [
+        {
+          "source_file_id": "202608110001",
+          "filename": "来文.pdf",
+          "source_url": "http://oa.internal/download?id=202608110001",
+          "is_main_file": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+调用方可以分页读取自身数据库，直接构造上述请求，不需要先把全部历史来文整理成 manifest。仓库脚本 `scripts/upload_incoming_batch.py` 也可读取一个 JSON 对象数组并自动按 200 项和 5 MiB 请求上限分块；这个 JSON 文件只是脚本输入，不是服务端协议的一部分：
 
 ```bash
 python scripts/upload_incoming_batch.py \
   ./history-2025.json \
   --api-base "$DOCMIND_BASE_URL" \
   --token "$DOCMIND_API_KEY" \
-  --source-system oa \
-  --batch-key history-2025 \
-  --name "2025 年历史来文"
+  --source-system oa
 ```
 
-历史任务默认仅在上海时区 18:00（含）至次日 07:30（不含）开始；07:30 后不会启动新的历史任务，已运行的任务允许自然完成。即时来文不受此时间窗口限制，并优先于尚未开始的历史任务。历史来源的下载接口必须可由 Worker 长期访问，不能依赖浏览器 Cookie 或短期登录态。
+幂等身份是 `source_system + source_document_id`。相同元数据和附件清单重复登记时复用原任务；失败或已取消任务重新进入待处理；同一身份的输入内容不同则返回 `conflict`，不会覆盖原任务。脚本遇到冲突会输出对应的来源来文 ID 并以非零状态退出。网络中断或响应丢失后可原样重跑，不需要构造额外幂等键。
 
-提交批次后，Dispatcher 每 5 秒从 PostgreSQL 检查一次可执行任务：即时任务始终优先；历史任务只会在配置窗口内被领取；当前在途任务数达到配置的并发上限时，本轮不投递，下一轮再检查。因此大批历史来文会在每个夜间窗口持续补位，直到全部处理完成，不会在白天积压到 Redis。PostgreSQL 是任务状态的唯一事实来源，Redis 仅承载已经领取任务的短消息。
+历史任务默认仅在上海时区 18:00（含）至次日 07:30（不含）开始；07:30 后不会启动新的历史任务，已运行的任务允许自然完成。即时来文不受此时间窗口限制，并优先于尚未开始的历史任务。历史来源的下载接口必须可由 Worker 长期访问，不能依赖浏览器 Cookie 或短期登录态。来源地址只要求为不含内嵌账号密码的绝对 HTTP/HTTPS URL；内网部署不配置来源主机白名单，也不做 DNS/IP 检测。下载仍限制超时、最多 5 次重定向、100 MiB 文件大小并拒绝非文档 HTML 响应。
+
+登记后，Dispatcher 每 5 秒从 PostgreSQL 检查一次可执行任务：即时任务始终优先；历史任务只会在配置窗口内被领取；当前在途任务数达到配置的并发上限时，本轮不投递，下一轮再检查。因此大批历史来文会在每个夜间窗口持续补位，直到全部处理完成，不会在白天积压到 Redis。任务元数据保存在 PostgreSQL，文件原件、附件、Markdown 和解析图片保存在 MinIO；Redis 仅承载已领取任务的 `job_id + delivery_token` 短消息。
 
 ## 处理任务与调度设置
 

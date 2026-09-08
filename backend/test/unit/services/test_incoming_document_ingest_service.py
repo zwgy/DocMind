@@ -281,6 +281,59 @@ async def test_download_source_files_rejects_html_login_page(monkeypatch):
         )
 
 
+async def test_download_source_files_reports_timeout(monkeypatch):
+    real_async_client = httpx.AsyncClient
+
+    def handle_request(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    def create_client(**kwargs):
+        return real_async_client(transport=httpx.MockTransport(handle_request), **kwargs)
+
+    monkeypatch.setattr(ingest_module.httpx, "AsyncClient", create_client)
+    service = IncomingDocumentIngestService(incoming_repo=FakeIncomingRepo(), tasker=FakeTasker())
+
+    with pytest.raises(ValueError, match="附件下载超时"):
+        await service.download_source_files(
+            files=[
+                {
+                    "source_file_id": "S001",
+                    "filename": "会议纪要.pdf",
+                    "source_url": "http://attachments.test/download?id=S001",
+                }
+            ],
+        )
+
+
+async def test_download_source_files_rejects_declared_size_over_limit(monkeypatch):
+    real_async_client = httpx.AsyncClient
+
+    def create_client(**kwargs):
+        transport = httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                headers={"Content-Type": "application/pdf", "Content-Length": "6"},
+                content=b"123456",
+            )
+        )
+        return real_async_client(transport=transport, **kwargs)
+
+    monkeypatch.setattr(ingest_module, "MAX_UPLOAD_SIZE_BYTES", 5)
+    monkeypatch.setattr(ingest_module.httpx, "AsyncClient", create_client)
+    service = IncomingDocumentIngestService(incoming_repo=FakeIncomingRepo(), tasker=FakeTasker())
+
+    with pytest.raises(ValueError, match="100 MB"):
+        await service.download_source_files(
+            files=[
+                {
+                    "source_file_id": "S001",
+                    "filename": "会议纪要.pdf",
+                    "source_url": "http://attachments.test/download?id=S001",
+                }
+            ],
+        )
+
+
 async def test_download_source_files_rejects_non_http_url():
     service = IncomingDocumentIngestService(incoming_repo=FakeIncomingRepo(), tasker=FakeTasker())
 

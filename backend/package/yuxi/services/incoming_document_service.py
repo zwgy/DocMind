@@ -4,7 +4,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import BaseModel
-
 from yuxi.document_extraction.schemas import document_category_label, extraction_schema_display_metadata
 from yuxi.repositories.document_business_extraction_repository import DocumentBusinessExtractionRepository
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
@@ -63,22 +62,34 @@ class IncomingDocumentService:
             results.append(item)
         return {"items": results}
 
-    async def create_ingest_batch(
-        self, *, source_system: str, batch_key: str, name: str, actor_uid: str
+    async def register_historical_ingest(
+        self,
+        *,
+        source_system: str,
+        documents: list[dict[str, Any]],
+        actor_uid: str,
     ) -> dict[str, Any]:
         async with pg_manager.get_async_session_context() as session:
-            batch = await IncomingIngestRepository(session).create_batch(
+            results = await IncomingIngestRepository(session).register_historical(
                 source_system=source_system,
-                batch_key=batch_key,
-                name=name,
-                created_by=actor_uid,
+                documents=documents,
+                actor_uid=actor_uid,
             )
-        return self._batch_payload(batch)
-
-    async def list_ingest_batches(self, *, page: int, page_size: int) -> dict[str, Any]:
-        async with pg_manager.get_async_session_context() as session:
-            batches, total = await IncomingIngestRepository(session).list_batches(page=page, page_size=page_size)
-        return {"items": [self._batch_payload(batch) for batch in batches], "total": total}
+        summary = {status: 0 for status in ("accepted", "exists", "requeued", "conflict")}
+        for result in results:
+            summary[result.status] += 1
+        return {
+            "items": [
+                {
+                    "sourceDocumentId": result.source_document_id,
+                    "jobId": result.job_id,
+                    "status": result.status,
+                    "message": result.error_message,
+                }
+                for result in results
+            ],
+            "summary": summary,
+        }
 
     async def list_ingest_jobs(
         self, *, page: int, page_size: int, status: str | None, priority: str | None
@@ -88,29 +99,6 @@ class IncomingDocumentService:
                 page=page, page_size=page_size, status=status, priority=priority
             )
         return {"items": [self._job_payload(job) for job in jobs], "total": total}
-
-    async def register_ingest_batch_items(
-        self, *, batch_id: str, source_system: str, items: list[dict[str, Any]], actor_uid: str
-    ) -> dict[str, Any]:
-        async with pg_manager.get_async_session_context() as session:
-            results = await IncomingIngestRepository(session).register_items(
-                batch_id=batch_id,
-                source_system=source_system,
-                items=items,
-                actor_uid=actor_uid,
-            )
-        return {"items": [result.__dict__ for result in results]}
-
-    async def submit_ingest_batch(self, *, batch_id: str) -> dict[str, Any]:
-        async with pg_manager.get_async_session_context() as session:
-            batch = await IncomingIngestRepository(session).submit_batch(batch_id)
-        return self._batch_payload(batch)
-
-    async def set_ingest_batch_paused(self, *, batch_id: str, paused: bool) -> dict[str, Any]:
-        async with pg_manager.get_async_session_context() as session:
-            repository = IncomingIngestRepository(session)
-            batch = await (repository.pause_batch(batch_id) if paused else repository.resume_batch(batch_id))
-        return self._batch_payload(batch)
 
     async def register_immediate_ingest(
         self,
@@ -270,18 +258,6 @@ class IncomingDocumentService:
                 source_system=source_system,
                 source_document_id=source_document_id,
             )
-
-    @staticmethod
-    def _batch_payload(batch) -> dict[str, Any]:
-        return {
-            "batchId": batch.batch_id,
-            "sourceSystem": batch.source_system,
-            "batchKey": batch.batch_key,
-            "name": batch.name,
-            "status": batch.status,
-            "isSubmitted": batch.is_submitted,
-            "isPaused": batch.is_paused,
-        }
 
     @staticmethod
     def _job_payload(job) -> dict[str, Any]:
