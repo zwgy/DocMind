@@ -116,3 +116,16 @@ def test_task_item_normalizes_null_recipient_defaults_but_rejects_invalid_scope(
     assert item.recipient_names == []
     with pytest.raises(ValueError, match="Input should be"):
         TaskItem.model_validate({**payload, "recipient_scope": "department"})
+
+
+def test_task_item_normalizes_model_scope_placeholder():
+    item = TaskItem.model_validate(
+        {
+            "task_name": "报送季度经营数据",
+            "recipient_scope": "scope",
+            "recipient_names": [],
+            "source_quote": "各业务部门应按统一口径汇总季度经营数据",
+        }
+    )
+
+    assert item.recipient_scope == "unknown"

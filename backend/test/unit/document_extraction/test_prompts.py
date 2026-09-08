@@ -1,5 +1,5 @@
 from yuxi.document_extraction.prompts import build_attachment_summary_prompt, build_extraction_prompt
-from yuxi.document_extraction.schemas import ManagementRequirementItem
+from yuxi.document_extraction.schemas import ManagementRequirementItem, TaskItem
 
 
 def test_extraction_prompt_defines_item_granularity():
@@ -14,6 +14,13 @@ def test_extraction_prompt_defines_item_granularity():
     assert "不要把多个无关位置的信息拼成原文没有表达过的结论" in prompt
     assert "第X章" not in prompt
     assert "第X条" not in prompt
+
+
+def test_task_extraction_prompt_lists_recipient_scope_literals():
+    prompt = build_extraction_prompt(TaskItem, "各业务部门应按统一口径汇总季度经营数据。")
+
+    assert "recipient_scope" in prompt
+    assert "named、all 或 unknown" in prompt
 
 
 def test_attachment_summary_prompt_does_not_request_classification_or_business_items():

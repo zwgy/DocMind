@@ -113,8 +113,8 @@ RecipientScope = Literal["named", "all", "unknown"]
 
 
 def _normalize_recipient_scope(value: Any) -> Any:
-    # 本地模型常用 null 表示原文未说明接收人，业务语义应与字段缺失时的默认值一致。
-    return "unknown" if value is None else value
+    # null 和字段名占位词都没有业务语义，按“无法确定”处理；其他非法值仍由枚举校验拒绝。
+    return "unknown" if value is None or value == "scope" else value
 
 
 def _normalize_recipient_names(value: Any) -> Any:
@@ -227,7 +227,7 @@ class TaskItem(BaseModel):
     )
     recipient_scope: ExtractedRecipientScope = Field(
         default="unknown",
-        description="接收人是具名人员、全体范围或无法确定",
+        description="只能填写 named、all 或 unknown，分别表示具名人员、全体范围或无法确定",
         json_schema_extra={"label": "接收人范围"},
     )
     recipient_names: ExtractedRecipientNames = Field(
