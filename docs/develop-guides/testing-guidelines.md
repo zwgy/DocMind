@@ -169,6 +169,14 @@ docker compose exec api uv run --group test pytest test/integration
 docker compose exec api uv run --group test pytest test/e2e -m e2e
 ```
 
+知识库完整入库与检索验收：
+
+```bash
+docker compose exec api uv run --group test pytest test/e2e/test_knowledge_ingestion_e2e.py -q
+```
+
+该用例需要管理员测试凭据、已启用且可连接的 embedding 模型，以及可识别扫描件的系统默认 OCR。使用内置 OCR 时，在系统设置中将文档解析默认引擎设为 `rapid_ocr`；第一次识别需要下载 ONNX 模型。用例在项目容器内使用已安装的中文字体生成无文字层 PNG/PDF，逐项核对解析、入库和向量/全文/混合检索结果；只删除自身创建的任务及知识库。现有会话级清理夹具仍可能按 `pytest` 前缀清理资源，连接共享环境前须检查其边界；本次部署验收只在测试进程设置 `LITE_MODE=true` 禁用该全局清理，部署服务本身保持非 LITE 模式。
+
 运行全部测试：
 
 ```bash
