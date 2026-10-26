@@ -54,6 +54,28 @@ docker logs api-dev --tail 100
 
 ### 2. 创建分支
 
+`main` 是统一集成与发布基线。目录名、文件修改时间和功能分支的活跃程度不能替代 Git 提交关系；部署时应记录 `main` 上的具体提交或发布标签。
+
+新任务从最新主线创建短期分支，Codex 创建的分支使用 `codex/` 前缀：
+
+```bash
+git fetch origin
+git switch main
+git pull --ff-only origin main
+git switch -c codex/任务名称
+```
+
+多个任务并行时可使用 Git worktree（同一仓库的独立工作目录），每个目录绑定一个任务分支。开始新一轮开发和提交合并前，先提交本任务改动，再同步主线：
+
+```bash
+git fetch origin
+git merge origin/main
+# 解决冲突后，重新执行本次改动所需的检查、测试和 Lint
+git push -u origin HEAD
+```
+
+通过验证和审查后尽早合并回 `main`，后续新任务重新从主线开分支。共享分支使用合并保留历史，不用强制推送覆盖他人提交；旧分支和工作目录确认无独有提交、无未提交文件后再清理。主线已在其他 worktree 中检出时，进入该目录更新，避免重复检出。
+
 请使用语义明确的分支名，例如：
 
 ```bash

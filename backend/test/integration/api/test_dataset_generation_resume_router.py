@@ -17,13 +17,17 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 
 @pytest.fixture(autouse=True)
-async def reinit_pg_manager():
-    """重新初始化 pg_manager 异步引擎，使其绑定到当前测试的事件循环。"""
-    if pg_manager.async_engine:
-        await pg_manager.async_engine.dispose()
+async def reinit_pg_manager(admin_headers):
+    """先确认测试身份，再在当前事件循环内创建并关闭数据库连接资源。"""
+    # 缺少身份时应在打开连接池前跳过，避免跳过用例也遗留后台连接任务。
+    await pg_manager.close()
     pg_manager._initialized = False
     pg_manager.initialize()
-    yield
+    try:
+        yield
+    finally:
+        await pg_manager.close()
+        pg_manager._initialized = False
 
 
 async def test_resume_dataset_generation_enqueues_task(

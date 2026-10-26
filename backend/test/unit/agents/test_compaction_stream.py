@@ -17,7 +17,8 @@ from yuxi.agents.middlewares.context_compaction import create_context_compaction
 class _CompactionStreamModel(BaseChatModel):
     """同时模拟主模型流和摘要模型，避免测试依赖真实模型服务。"""
 
-    profile: dict = {"max_input_tokens": 600, "min_output_reserve_tokens": 100, "context_safety_tokens": 80}
+    # 窗口需能容纳完整摘要协议；过小窗口只会走归档恢复，无法验证摘要生命周期。
+    profile: dict = {"max_input_tokens": 1_200, "min_output_reserve_tokens": 500, "context_safety_tokens": 80}
     summary_calls: int = 0
 
     @property

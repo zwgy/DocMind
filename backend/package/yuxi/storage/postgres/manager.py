@@ -778,7 +778,8 @@ class PostgresManager(metaclass=SingletonMeta):
             CREATE INDEX IF NOT EXISTS idx_agent_runs_subagent_lookup
             ON agent_runs(uid, thread_id, run_type, created_at DESC)
             """,
-            "CREATE INDEX IF NOT EXISTS idx_agent_run_requests_thread_queue ON agent_run_requests(thread_id, uid, status, id)",
+            "CREATE INDEX IF NOT EXISTS idx_agent_run_requests_thread_queue "
+            "ON agent_run_requests(thread_id, uid, status, id)",
             "CREATE INDEX IF NOT EXISTS idx_agent_run_requests_dispatched_run ON agent_run_requests(dispatched_run_id)",
             "CREATE INDEX IF NOT EXISTS ix_conversations_is_pinned ON conversations(is_pinned)",
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_model_providers_provider_id ON model_providers(provider_id)",

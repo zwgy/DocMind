@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
@@ -67,12 +67,16 @@ async def test_stale_history_message_after_0730_does_not_start_ingest(monkeypatc
 
     source_system = f"integration-incoming-{uuid4().hex}"
     job_id = await _register_history(source_system=source_system, source_document_id="old-redis-message")
-    queued_at = datetime(2026, 9, 7, 23, 29, 59, tzinfo=UTC)
-    after_window = datetime(2026, 9, 7, 23, 30, tzinfo=UTC)
     executed = False
     try:
         async with pg_manager.get_async_session_context() as session:
             repository = IncomingIngestRepository(session)
+            # 登记后的任务不能在过去被认领，使用下一次上海时间 07:30 边界避免日期过期。
+            database_now = await repository.database_now()
+            queued_at = database_now.replace(hour=23, minute=29, second=59, microsecond=0)
+            if queued_at <= database_now:
+                queued_at += timedelta(days=1)
+            after_window = queued_at + timedelta(seconds=1)
             claim = await repository.claim_next(instance_id="integration-dispatcher", now=queued_at, concurrency=1)
             assert claim is not None and claim.job_id == job_id
             assert await repository.mark_queued(job_id=claim.job_id, delivery_token=claim.delivery_token)

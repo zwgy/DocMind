@@ -116,7 +116,9 @@ async def fetch_url_content(
                     content_type = response.headers.get("Content-Type", "").lower()
                     allowed_types = allowed_content_types or ALLOWED_CONTENT_TYPES
                     if not any(allowed in content_type for allowed in allowed_types):
-                        raise ValueError(f"Unsupported Content-Type: {content_type}. Only configured content types are supported.")
+                        raise ValueError(
+                            f"Unsupported Content-Type: {content_type}. Only configured content types are supported."
+                        )
 
                     # Download content with size limit
                     content = bytearray()
