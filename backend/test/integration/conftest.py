@@ -46,9 +46,14 @@ def ensure_live_api_schema():
         from yuxi.storage.postgres.manager import pg_manager
 
         pg_manager.initialize()
-        await pg_manager.create_tables()
-        await pg_manager.ensure_business_schema()
-        await pg_manager.ensure_knowledge_schema()
+        try:
+            await pg_manager.create_tables()
+            await pg_manager.ensure_business_schema()
+            await pg_manager.ensure_knowledge_schema()
+        finally:
+            # anyio.run 随后会关闭此事件循环，连接资源不能留给后续用例复用。
+            await pg_manager.close()
+            pg_manager._initialized = False
 
     anyio.run(run_schema_setup)
 
