@@ -91,5 +91,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # 激活虚拟环境并添加到PATH
 ENV PATH="/app/.venv/bin:$PATH"
 
+# 资源必须进入镜像层；仅在开发容器里下载后 docker save 不会带走这些文件。
+COPY scripts/offline/prepare_offline_resources.py /app/prepare_offline_resources.py
+RUN python /app/prepare_offline_resources.py
+# 验收脚本变化不应导致已经准备好的模型重复下载。
+COPY scripts/offline/verify_offline_resources.py /app/verify_offline_resources.py
+
 # 复制 server 代码
 COPY ../backend/server /app/server

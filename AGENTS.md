@@ -151,6 +151,7 @@ make format        # 格式化代码
 1. 参考 [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) 规范编写提交信息。
 2. 使用中文提交信息，标题简洁明了，描述具体改动内容和原因。
 3. 创建 PR 必须参考 [contributing.md](docs/develop-guides/contributing.md) 以及 PR 模板[PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)，并在提交前完成其中的检查项。
+4. `main` 是统一集成和部署基线。任务分支完成测试与审查后及时合并回 `main`；后续任务从最新主线开始，不继续在落后的长期功能分支上叠加开发。远端部署记录主线的具体提交或发布标签，分支同步细节见 `contributing.md`。
 
 **特别注意**
 

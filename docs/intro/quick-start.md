@@ -127,15 +127,12 @@ bash scripts/pull_image.sh python:3.12-slim
 **离线环境部署方案**：
 
 ```bash
-# 在有网络的环境导出镜像，注意检查镜像列表，不一定是最新的。
-bash docker/save_docker_images.sh
-
-# 传输到目标机器
-scp docker_images_xxx.tar user@host:/path/
-
-# 导入镜像
-docker load -i docker_images_xxx.tar
+# 联网 Linux 构建机：从已提交源码生成包含运行镜像和 Compose 插件的交付包
+bash scripts/package-offline.sh 2026.11.11-r1
 ```
+
+内网侧解压后执行 `bash deploy.sh init`，填写配置，再执行 `bash deploy.sh install`。
+完整步骤及验收见[内网离线部署](../advanced/offline-deployment.md)。旧基础镜像导出脚本不再作为部署入口。
 </details>
 
 <details>

@@ -314,7 +314,8 @@ services:
       - ./docker/volumes/neo4j/data:/data
       - ./docker/volumes/neo4j/logs:/var/lib/neo4j/logs
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:7474 || exit 1"]
+      # 官方 Neo4j 镜像自带 wget，但近期补丁镜像不再包含 curl。
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
       interval: 20s
       timeout: 10s
       retries: 5

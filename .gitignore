@@ -85,6 +85,8 @@ docker/volumes
 
 .taskr/
 .firecrawl/
+.superpowers/
+dist-offline/
 
 .svn
 .omc
