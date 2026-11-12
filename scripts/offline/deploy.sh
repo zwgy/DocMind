@@ -15,18 +15,25 @@ main() {
             ;;
         install)
             verify_package
+            sha256sum --check --quiet images.sha256
             require_configuration
             initialize_sandbox_configuration
             ensure_compose
             docker info >/dev/null
             compose config --quiet
-            docker load -i images.tar
+            local digest archive
+            while read -r digest archive; do
+                docker load -i "$archive"
+            done < images.sha256
             verify_images
             compose up -d --no-build --pull never --wait --wait-timeout 600
             compose ps
             echo "服务启动检查已通过；请按 DEPLOY.md 完成模型、OCR、知识库与沙盒验收。"
             ;;
-        status|logs|restart)
+        update)
+            update_application "${2:-}"
+            ;;
+        status|logs|restart|stop|apply)
             require_configuration
             use_bundle_docker_config
             docker compose version >/dev/null
@@ -34,6 +41,8 @@ main() {
                 status) compose ps ;;
                 logs) compose logs --tail 200 "${@:2}" ;;
                 restart) compose restart "${@:2}" ;;
+                stop) compose stop ;;
+                apply) compose up -d --no-build --pull never --wait --wait-timeout 600 ;;
             esac
             ;;
         *) usage >&2; return 2 ;;
@@ -42,14 +51,44 @@ main() {
 
 usage() {
     cat <<'EOF'
-用法：bash deploy.sh <init|install|status|logs|restart> [服务名]
+用法：bash deploy.sh <init|install|update|status|logs|restart|stop|apply> [参数]
   init     沿用生产初始化流程创建 .env.prod，已有文件保持原样
-  install  校验包、补装包内 Compose 插件、导入镜像并离线启动；也用于升级
+  install  校验包、补装包内 Compose 插件、导入三个镜像包并离线启动
+  update   更新应用：bash deploy.sh update /path/docmind-app-新版本.tar.gz；不导入镜像
   status   查看服务状态
   logs     查看最近 200 行日志，可附服务名（例如 api）
-  restart  重启服务，可附服务名；修改配置后请用 install 使其生效
+  restart  重启服务，可附服务名
+  stop     停止本实例所有服务，保留容器和数据
+  apply    修改 .env.prod 后重新创建相关容器，不导入镜像
 首次部署：init → 填写 .env.prod → install → 按 DEPLOY.md 验收
 EOF
+}
+
+update_application() {
+    # 先检查再停服务，避免坏包或依赖变化导致不必要的停机；普通更新不碰数据库和本机配置。
+    local archive="$1" stage
+    [ -f "$archive" ] || { echo "用法：bash deploy.sh update /path/docmind-app-新版本.tar.gz" >&2; return 2; }
+    require_configuration
+    stage="$(mktemp -d "$PWD/.docmind-update-XXXXXX")"
+    update_stage="$stage"
+    trap 'rm -rf -- "$update_stage"' EXIT
+    tar -xzf "$archive" -C "$stage"
+    (cd "$stage" && verify_package)
+    if ! cmp -s runtime-release.txt "$stage/runtime-release.txt" || ! cmp -s runtime-inputs.sha256 "$stage/runtime-inputs.sha256"; then
+        echo "运行环境不一致，请使用完整分包更新环境，不能仅更新代码。" >&2
+        return 1
+    fi
+    ensure_compose
+    docker compose --project-directory "$PWD" --env-file .env.prod -f "$stage/compose.yaml" config --quiet
+    verify_images
+    local services=(api worker incoming-worker incoming-dispatcher scheduler dispatcher sandbox-provisioner web chat-iframe)
+    compose stop "${services[@]}"
+    # 整体替换 app，保证新版本已删除的源码不会残留；数据和配置始终在 app 外。
+    rm -rf -- app
+    mv "$stage/app" app
+    cp -a "$stage/." .
+    compose up -d --no-build --pull never --no-deps --force-recreate --wait --wait-timeout 600 "${services[@]}"
+    echo "应用更新完成，未导入镜像，配置和业务数据已保留。"
 }
 
 verify_package() {

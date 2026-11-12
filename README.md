@@ -95,7 +95,7 @@ bash scripts/manage.sh dev deploy
 
 > 💡 不需要知识库 / 知识图谱等重依赖时，可使用 `make up-lite` 以 LITE 轻量模式启动，加快冷启动速度。更多部署说明见 [项目文档](https://xerrors.github.io/Yuxi)。
 
-内网交付使用[离线部署指南](docs/advanced/offline-deployment.md)：联网侧执行 `bash scripts/package-offline.sh <release>`，内网侧只需初始化配置并运行包内 `deploy.sh install`，无需联网构建或安装 Compose 插件。
+内网交付使用[离线部署指南](docs/advanced/offline-deployment.md)：首次交付基础服务、应用环境、沙盒三个镜像包和独立应用包；后续通过 `package-offline.sh --code-only` 生成代码与前端产物，内网执行 `deploy.sh update <应用包>`，无需重复上传镜像。目标机无需联网构建或安装 Compose 插件。
 
 ## 致谢
 

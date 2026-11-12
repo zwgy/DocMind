@@ -22,6 +22,25 @@ def prepare(source: Path, destination: Path, release: str) -> None:
             service["environment"] = [offline_sandbox_setting(item, release) for item in service["environment"]]
         elif service["image"].startswith("yuxi-"):
             service["image"] = f"{service['image'].split(':')[0]}:{release}"
+        # 只覆盖应用文件，保留镜像内依赖及原有数据卷；六个后台进程必须读取同一份代码。
+        mounts = []
+        if service["image"].startswith("yuxi-api:"):
+            mounts = [
+                "./app/backend/package:/app/package:ro",
+                "./app/backend/server:/app/server:ro",
+            ]
+        elif name == "sandbox-provisioner":
+            mounts = ["./app/docker/sandbox_provisioner/app.py:/app/app.py:ro"]
+        elif name in {"web", "chat-iframe"}:
+            target = "/usr/share/nginx/html" if name == "web" else "/usr/share/nginx/html/chat-iframe"
+            default_config = "docker/nginx/default.conf" if name == "web" else "chat-iframe/nginx.conf"
+            mounts = [
+                f"./app/{name}/dist:{target}:ro",
+                "./app/docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro",
+                f"./app/{default_config}:/etc/nginx/conf.d/default.conf:ro",
+            ]
+        if mounts:
+            service.setdefault("volumes", []).extend(mounts)
     config["networks"]["app-network"].pop("name", None)
     config["services"]["web"]["ports"] = ["${WEB_PORT:-80}:80"]
     # 服务间用容器网络访问数据库，无需占用宿主机端口，便于同机部署测试与生产。
@@ -30,6 +49,13 @@ def prepare(source: Path, destination: Path, release: str) -> None:
     (destination / "compose.yaml").write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     images = sorted({service["image"] for service in config["services"].values()} | {f"yuxi-sandbox-runtime:{release}"})
     (destination / "images.txt").write_text("\n".join(images) + "\n", encoding="utf-8")
+    groups = {
+        "infra": [image for image in images if not image.startswith("yuxi-")],
+        "app": [image for image in images if image.startswith(("yuxi-api:", "yuxi-web:", "yuxi-chat-iframe:"))],
+        "sandbox": [image for image in images if image.startswith("yuxi-sandbox-")],
+    }
+    for group, members in groups.items():
+        (destination / f"images-{group}.txt").write_text("\n".join(members) + "\n", encoding="utf-8")
     template = (source / ".env.template").read_text(encoding="utf-8")
     template += "\n# 同机测试/生产使用不同项目名和端口，项目名仅用小写字母、数字和连字符。\n"
     template += "COMPOSE_PROJECT_NAME=docmind\nWEB_PORT=80\n"

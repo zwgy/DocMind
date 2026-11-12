@@ -52,6 +52,26 @@ def test_generated_compose_contains_all_runtime_images_and_isolates_instances(tm
     assert "WEB_PORT=80" in template
 
 
+def test_generated_compose_mounts_application_code_for_every_process_and_groups_images(tmp_path):
+    """所有共享后台环境的进程都应读取挂载源码，不能只更新 API。"""
+    result = run(
+        [sys.executable, str(ROOT / "scripts/offline/prepare_compose.py"), str(ROOT), str(tmp_path), "runtime-v1"],
+        cwd=ROOT,
+    )
+    assert result.returncode == 0, result.stderr
+    services = json.loads((tmp_path / "compose.yaml").read_text())["services"]
+    for name in ("api", "worker", "incoming-worker", "incoming-dispatcher", "scheduler", "dispatcher"):
+        assert "./app/backend/package:/app/package:ro" in services[name]["volumes"]
+        assert "./app/backend/server:/app/server:ro" in services[name]["volumes"]
+    assert "./app/web/dist:/usr/share/nginx/html:ro" in services["web"]["volumes"]
+    assert "./app/chat-iframe/dist:/usr/share/nginx/html/chat-iframe:ro" in services["chat-iframe"]["volumes"]
+    assert "./app/docker/sandbox_provisioner/app.py:/app/app.py:ro" in services["sandbox-provisioner"]["volumes"]
+    groups = [set((tmp_path / f"images-{name}.txt").read_text().splitlines()) for name in ("infra", "app", "sandbox")]
+    assert [len(group) for group in groups] == [6, 3, 2]
+    assert set.union(*groups) == set((tmp_path / "images.txt").read_text().splitlines())
+    assert not (groups[0] & groups[1] or groups[0] & groups[2] or groups[1] & groups[2])
+
+
 @pytest.fixture
 def bundle(tmp_path):
     """只模拟 Docker 边界，实际执行 Bash、文件校验、插件安装和配置保留。"""
@@ -65,7 +85,18 @@ def bundle(tmp_path):
     (package / ".env.template").write_text("COMPOSE_PROJECT_NAME=docmind\n")
     (package / ".env.prod").write_text("COMPOSE_PROJECT_NAME=docmind-test\nJWT_SECRET_KEY=keep-me\n")
     (package / "compose.yaml").write_text('{"services":{}}')
-    (package / "images.tar").write_text("fake Docker save archive")
+    for group in ("infra", "app", "sandbox"):
+        (package / f"docmind-images-{group}-runtime-v1.tar.gz").write_bytes(b"fake Docker archive")
+    (package / "images.sha256").write_text(
+        "".join(
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
+            for path in sorted(package.glob("docmind-images-*.tar.gz"))
+        )
+    )
+    (package / "runtime-release.txt").write_text("runtime-v1\n")
+    (package / "runtime-inputs.sha256").write_text("fixed environment inputs\n")
+    (package / "app/backend/server").mkdir(parents=True)
+    (package / "app/backend/server/old.py").write_text("old code")
     (package / "images.txt").write_text("yuxi-api:test\nyuxi-sandbox-runtime:test\n")
     sandbox_config = package / "docker/sandbox_provisioner"
     sandbox_config.mkdir(parents=True)
@@ -76,7 +107,7 @@ def bundle(tmp_path):
         "".join(
             f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(package)}\n"
             for path in sorted(package.rglob("*"))
-            if path.is_file() and path.name != ".env.prod"
+            if path.is_file() and path.name != ".env.prod" and not path.name.startswith("docmind-images-")
         )
     )
     fake_bin = tmp_path / "fake-bin"
@@ -88,12 +119,12 @@ def bundle(tmp_path):
         'if [[ "$1 $2" == "compose version" ]]; then\n'
         '  [[ -x "$DOCKER_CONFIG/cli-plugins/docker-compose" ]] || exit 1\n'
         '  exec "$DOCKER_CONFIG/cli-plugins/docker-compose" version\n'
-        'fi\n'
+        "fi\n"
         'if [[ "$1" == "info" ]]; then echo linux/x86_64; fi\n'
         'if [[ "$1 $2" == "image inspect" ]]; then\n'
         '  [[ "$*" != *"${MISSING_IMAGE:-not-missing}"* ]] || exit 1\n'
-        '  echo linux/amd64\n'
-        'fi\n'
+        "  echo linux/amd64\n"
+        "fi\n"
     )
     docker.chmod(0o755)
     env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", DOCKER_TEST_LOG=str(tmp_path / "docker.log"))
@@ -108,7 +139,7 @@ def test_install_adds_missing_plugin_and_starts_without_network_or_build(bundle)
     result = run(["bash", "deploy.sh", "install"], cwd=package, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
     calls = Path(env["DOCKER_TEST_LOG"]).read_text()
-    assert "load -i images.tar" in calls
+    assert calls.count("load -i docmind-images-") == 3
     assert "--no-build --pull never --wait" in calls
     assert "image inspect yuxi-sandbox-runtime:test" in calls
     assert "--build" not in calls
@@ -175,7 +206,7 @@ def test_init_sandbox_configuration_once_and_preserves_local_settings(bundle):
 
 def test_install_rejects_damaged_package_before_docker_load(bundle):
     package, env = bundle
-    (package / "images.tar").write_text("damaged on USB")
+    (package / "docmind-images-app-runtime-v1.tar.gz").write_text("damaged on USB")
     result = run(["bash", "deploy.sh", "install"], cwd=package, env=env)
     assert result.returncode != 0
     calls = Path(env["DOCKER_TEST_LOG"])
@@ -189,6 +220,61 @@ def test_install_rejects_missing_dynamic_sandbox_image_before_start(bundle):
     result = run(["bash", "deploy.sh", "install"], cwd=package, env=env)
     assert result.returncode != 0
     assert "up -d" not in Path(env["DOCKER_TEST_LOG"]).read_text()
+
+
+def create_update_archive(package, tmp_path, *, runtime="runtime-v1", damaged=False):
+    """生成真正的更新归档，让 Bash 测试文件替换而非模拟替换结果。"""
+    stage = tmp_path / "new-application"
+    shutil.copytree(package, stage, ignore=shutil.ignore_patterns("docmind-images-*", ".env.prod", "SHA256SUMS"))
+    (stage / "app/backend/server/old.py").unlink()
+    (stage / "app/backend/server/new.py").write_text("new code")
+    (stage / "runtime-release.txt").write_text(runtime + "\n")
+    (stage / "SHA256SUMS").write_text(
+        "".join(
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(stage)}\n"
+            for path in sorted(stage.rglob("*"))
+            if path.is_file()
+        )
+    )
+    if damaged:
+        (stage / "app/backend/server/new.py").write_text("damaged code")
+    archive = tmp_path / "docmind-app-update.tar.gz"
+    with tarfile.open(archive, "w:gz") as output:
+        for path in stage.iterdir():
+            output.add(path, arcname=path.name)
+    return archive
+
+
+def test_update_replaces_deleted_source_preserves_configuration_and_never_loads_images(bundle, tmp_path):
+    package, env = bundle
+    data = package / "docker/volumes/keep.txt"
+    data.parent.mkdir(parents=True)
+    data.write_text("business data")
+    archive = create_update_archive(package, tmp_path)
+    result = run(["bash", "deploy.sh", "update", str(archive)], cwd=package, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = Path(env["DOCKER_TEST_LOG"]).read_text()
+    assert not any(call.startswith(("load ", "pull ")) for call in calls.splitlines())
+    assert "--build" not in calls
+    assert (
+        "stop api worker incoming-worker incoming-dispatcher scheduler dispatcher sandbox-provisioner web chat-iframe"
+    ) in calls
+    assert "--no-deps --force-recreate" in calls
+    assert not (package / "app/backend/server/old.py").exists()
+    assert (package / "app/backend/server/new.py").read_text() == "new code"
+    assert data.read_text() == "business data"
+    assert "JWT_SECRET_KEY=keep-me" in (package / ".env.prod").read_text()
+
+
+@pytest.mark.parametrize("runtime,damaged", [("different-runtime", False), ("runtime-v1", True)])
+def test_update_rejects_bad_package_before_stopping_services(bundle, tmp_path, runtime, damaged):
+    package, env = bundle
+    archive = create_update_archive(package, tmp_path, runtime=runtime, damaged=damaged)
+    result = run(["bash", "deploy.sh", "update", str(archive)], cwd=package, env=env)
+    assert result.returncode != 0
+    calls = Path(env["DOCKER_TEST_LOG"])
+    assert not calls.exists() or "stop " not in calls.read_text()
+    assert (package / "app/backend/server/old.py").read_text() == "old code"
 
 
 def test_release_packager_and_resource_preparation_exist():
@@ -209,14 +295,37 @@ def test_packager_creates_complete_verified_archive_from_git_snapshot(tmp_path):
     """执行完整打包编排，Docker/下载以进程替身隔离；不冒充真实镜像构建验收。"""
     repo = tmp_path / "source"
     files = [
-        "scripts/package-offline.sh", "scripts/offline/prepare_compose.py", "scripts/offline/deploy.sh",
-        "scripts/manage.sh", "docker-compose.prod.yml", ".env.template", "docs/advanced/offline-deployment.md",
+        "scripts/package-offline.sh",
+        "scripts/offline/prepare_compose.py",
+        "scripts/offline/deploy.sh",
+        "scripts/manage.sh",
+        "docker-compose.prod.yml",
+        ".env.template",
+        "docs/advanced/offline-deployment.md",
         "docker/sandbox_provisioner/sandbox.env",
+        "backend/pyproject.toml",
+        "backend/package/pyproject.toml",
+        "backend/uv.lock",
+        "backend/package.json",
+        "backend/package-lock.json",
+        "docker/api.Dockerfile",
+        "docker/web.Dockerfile",
+        "docker/chat-iframe.Dockerfile",
+        "docker/sandbox_runtime/Dockerfile",
+        "docker/sandbox_provisioner/Dockerfile",
+        "docker/sandbox_provisioner/requirements.txt",
+        "scripts/offline/prepare_offline_resources.py",
+        "docker/sandbox_provisioner/app.py",
+        "docker/nginx/nginx.conf",
+        "docker/nginx/default.conf",
+        "chat-iframe/nginx.conf",
     ]
     for relative in files:
         target = repo / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / relative, target)
+    (repo / "backend/server").mkdir()
+    (repo / "backend/server/main.py").write_text("# application source\n")
     git_commands = (
         ["init", "-q"],
         ["add", "."],
@@ -233,6 +342,7 @@ def test_packager_creates_complete_verified_archive_from_git_snapshot(tmp_path):
         f"#!{sys.executable}\n"
         "import json, os, pathlib, subprocess, sys\n"
         "args = sys.argv[1:]\n"
+        "with open(os.environ['FAKE_DOCKER_LOG'], 'a') as log: log.write(' '.join(args) + '\\n')\n"
         "state_path = pathlib.Path(os.environ['FAKE_DOCKER_STATE'])\n"
         "state = json.loads(state_path.read_text()) if state_path.exists() else []\n"
         "if args[0] in ('build', 'pull'):\n"
@@ -247,7 +357,11 @@ def test_packager_creates_complete_verified_archive_from_git_snapshot(tmp_path):
         "    command = [sys.executable, mounts['/source'] + '/scripts/offline/prepare_compose.py']\n"
         "    subprocess.check_call(command + [mounts['/source'], mounts['/output'], args[-1]])\n"
         "elif args[0] == 'save':\n"
-        "    pathlib.Path(args[args.index('-o') + 1]).write_text('simulated docker archive')\n"
+        "    print('simulated docker archive')\n"
+        "elif args[0] == 'create': print('export-container')\n"
+        "elif args[0] == 'cp':\n"
+        "    destination = pathlib.Path(args[-1])\n"
+        "    (destination / 'index.html').write_text('<html>built frontend</html>')\n"
     )
     curl = fake_bin / "curl"
     curl.write_text(
@@ -261,21 +375,59 @@ def test_packager_creates_complete_verified_archive_from_git_snapshot(tmp_path):
     )
     docker.chmod(0o755)
     curl.chmod(0o755)
-    env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", FAKE_DOCKER_STATE=str(tmp_path / "images.json"))
+    env = dict(
+        os.environ,
+        PATH=f"{fake_bin}:{os.environ['PATH']}",
+        FAKE_DOCKER_STATE=str(tmp_path / "images.json"),
+        FAKE_DOCKER_LOG=str(tmp_path / "docker.log"),
+    )
     output = tmp_path / "release with spaces"
     command = ["bash", "scripts/package-offline.sh", "test-release", str(output)]
     result = run(command, cwd=repo, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
     package = output / "docmind-offline-test-release"
     assert run(["sha256sum", "--check", "SHA256SUMS"], cwd=package).returncode == 0
-    with tarfile.open(output / "docmind-offline-test-release.tar.gz") as archive:
+    base = tmp_path / "base-application"
+    base.mkdir()
+    with tarfile.open(package / "docmind-app-test-release.tar.gz") as archive:
         names = archive.getnames()
-        assert "docmind-offline-test-release/bin/docker-compose" in names
-        assert "docmind-offline-test-release/images.tar" in names
-        assert "docmind-offline-test-release/docker/sandbox_provisioner/sandbox.env.template" in names
-        assert "docmind-offline-test-release/docker/sandbox_provisioner/sandbox.env" not in names
+        assert "./bin/docker-compose" in names
+        assert "./app/backend/server/main.py" in names
+        assert "./app/web/dist/index.html" in names
+        assert "./app/chat-iframe/dist/index.html" in names
+        assert "./docker/sandbox_provisioner/sandbox.env.template" in names
+        assert "./docker/sandbox_provisioner/sandbox.env" not in names
         assert not any(name.endswith(".env.prod") for name in names)
-    assert len((package / "images.txt").read_text().splitlines()) == 11
-    assert "DO_NOT_SHIP_THIS_SECRET" not in (package / ".env.template").read_text()
+        archive.extractall(base, filter="data")
+    assert len(list(package.glob("docmind-images-*.tar.gz"))) == 3
+    assert run(["sha256sum", "--check", "SHA256SUMS"], cwd=base).returncode == 0
+    assert len((base / "images.txt").read_text().splitlines()) == 11
+    assert "DO_NOT_SHIP_THIS_SECRET" not in (base / ".env.template").read_text()
     repeated = run(command, cwd=repo, env=env)
     assert repeated.returncode != 0
+    Path(env["FAKE_DOCKER_LOG"]).write_text("")
+    code_result = run(
+        ["bash", "scripts/package-offline.sh", "--code-only", "code-v2", str(base), str(output)], cwd=repo, env=env
+    )
+    assert code_result.returncode == 0, code_result.stdout + code_result.stderr
+    code_package = output / "docmind-offline-code-v2"
+    assert (code_package / "docmind-app-code-v2.tar.gz").exists()
+    assert not list(code_package.glob("docmind-images-*"))
+    with tarfile.open(code_package / "docmind-app-code-v2.tar.gz") as archive:
+        assert "./bin/docker-compose" not in archive.getnames()
+    calls = Path(env["FAKE_DOCKER_LOG"]).read_text().splitlines()
+    builds = [call for call in calls if call.startswith("build ")]
+    assert len(builds) == 2 and all("--target build-stage" in call for call in builds)
+    assert not any(call.startswith(("save ", "pull ")) for call in calls)
+    # 依赖变更必须在构建前失败，不产生一个伪装成代码包的新环境。
+    with (repo / "backend/package/pyproject.toml").open("a") as changed:
+        changed.write("\n# changed dependency input\n")
+    for args in (["add", "."], ["-c", "user.name=test", "-c", "user.email=test@local", "commit", "-qm", "dependency"]):
+        assert run(["git", *args], cwd=repo).returncode == 0
+    Path(env["FAKE_DOCKER_LOG"]).write_text("")
+    rejected = run(
+        ["bash", "scripts/package-offline.sh", "--code-only", "code-v3", str(base), str(output)], cwd=repo, env=env
+    )
+    assert rejected.returncode != 0
+    assert "运行环境依赖或构建文件已变化" in rejected.stderr
+    assert "build " not in Path(env["FAKE_DOCKER_LOG"]).read_text()
