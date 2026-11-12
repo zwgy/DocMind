@@ -116,6 +116,8 @@ def bundle(tmp_path):
     docker.write_text(
         "#!/bin/bash\n"
         'printf "%s\\n" "$*" >> "$DOCKER_TEST_LOG"\n'
+        'if [[ "${REJECT_STAGED_CONFIG:-}" == 1 && "$*" == *".docmind-update-"*\n'
+        '      && "$*" == *"config --quiet"* ]]; then exit 1; fi\n'
         'if [[ "$1 $2" == "compose version" ]]; then\n'
         '  [[ -x "$DOCKER_CONFIG/cli-plugins/docker-compose" ]] || exit 1\n'
         '  exec "$DOCKER_CONFIG/cli-plugins/docker-compose" version\n'
@@ -277,6 +279,19 @@ def test_update_rejects_bad_package_before_stopping_services(bundle, tmp_path, r
     assert (package / "app/backend/server/old.py").read_text() == "old code"
 
 
+def test_update_validates_new_compose_with_current_configuration_before_stopping(bundle, tmp_path):
+    """新编排无法使用本机配置时，在停止现有应用前拒绝更新。"""
+    package, env = bundle
+    env["REJECT_STAGED_CONFIG"] = "1"
+    archive = create_update_archive(package, tmp_path)
+    result = run(["bash", "deploy.sh", "update", str(archive)], cwd=package, env=env)
+    assert result.returncode != 0
+    calls = Path(env["DOCKER_TEST_LOG"]).read_text()
+    assert "--project-directory" in calls and "config --quiet" in calls
+    assert "stop api" not in calls
+    assert (package / "app/backend/server/old.py").read_text() == "old code"
+
+
 def test_release_packager_and_resource_preparation_exist():
     """构建入口必须主动验证无网络加载，不能把开发容器缓存误当成镜像内容。"""
     script = ROOT / "scripts/package-offline.sh"
@@ -327,7 +342,7 @@ def test_packager_creates_complete_verified_archive_from_git_snapshot(tmp_path):
     (repo / "backend/server").mkdir()
     (repo / "backend/server/main.py").write_text("# application source\n")
     git_commands = (
-        ["init", "-q"],
+        ["init", "-q", "--initial-branch=main"],
         ["add", "."],
         ["-c", "user.name=test", "-c", "user.email=test@local", "commit", "-qm", "source"],
     )
@@ -431,3 +446,6 @@ def test_packager_creates_complete_verified_archive_from_git_snapshot(tmp_path):
     assert rejected.returncode != 0
     assert "运行环境依赖或构建文件已变化" in rejected.stderr
     assert "build " not in Path(env["FAKE_DOCKER_LOG"]).read_text()
+    assert run(["git", "switch", "-qc", "feature-only"], cwd=repo).returncode == 0
+    wrong_branch = run(command, cwd=repo, env=env)
+    assert wrong_branch.returncode != 0 and "main 分支" in wrong_branch.stderr

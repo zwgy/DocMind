@@ -21,6 +21,7 @@ main() {
     mkdir -p "$output_parent"
     output_parent="$(cd "$output_parent" && pwd)"
     cd "$(dirname "${BASH_SOURCE[0]}")/.."
+    [ "$(git branch --show-current)" = main ] || { echo "正式交付请从 main 分支打包。" >&2; return 1; }
     git diff --quiet HEAD -- || { echo "请先提交已跟踪源码的修改，再生成发布包。" >&2; return 1; }
     local commit runtime="$release" delivery application compose_version=v2.29.7
     commit="$(git rev-parse HEAD)"
@@ -73,7 +74,7 @@ main() {
         export_image_groups "$application" "$delivery" "$runtime"
     fi
     (cd "$application" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
-    tar -I 'gzip -1' -cf "$delivery/docmind-app-$release.tar.gz" -C "$application" .
+    tar -I 'gzip -6' -cf "$delivery/docmind-app-$release.tar.gz" -C "$application" .
     cp "$application/DEPLOY.md" "$delivery/DEPLOY.md"
     cp "$application/release.txt" "$delivery/release.txt"
     (cd "$delivery" && sha256sum ./*.tar.gz > SHA256SUMS)
@@ -141,7 +142,7 @@ export_image_groups() {
     for group in infra app sandbox; do
         mapfile -t images < "$application/images-$group.txt"
         archive="docmind-images-$group-$runtime.tar.gz"
-        docker save "${images[@]}" | gzip -1 > "$delivery/$archive"
+        docker save "${images[@]}" | gzip -6 > "$delivery/$archive"
         (cd "$delivery" && sha256sum "$archive") >> "$application/images.sha256"
     done
 }
