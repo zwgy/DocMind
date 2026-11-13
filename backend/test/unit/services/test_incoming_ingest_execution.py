@@ -65,7 +65,11 @@ async def test_execute_ingest_job_skips_stale_token_before_external_processing(m
 
 
 @pytest.mark.asyncio
-async def test_execute_ingest_job_processes_manifest_for_current_delivery(monkeypatch):
+@pytest.mark.parametrize("ocr_engine", ["disable", "rapid_ocr"])
+async def test_execute_ingest_job_processes_manifest_for_current_delivery(monkeypatch, ocr_engine):
+    # 解析默认值来自持久化配置，测试不能依赖开发主机当前选择的 OCR 引擎。
+    monkeypatch.setattr(ingest_module.sys_config, "document_parser_ocr_engine", ocr_engine)
+    monkeypatch.setattr(ingest_module.sys_config, "document_parser_ocr_engine_config", {})
     job = SimpleNamespace(
         job_id="ij_1",
         delivery_token="current-token",
@@ -117,7 +121,7 @@ async def test_execute_ingest_job_processes_manifest_for_current_delivery(monkey
         "process",
         "inc_1",
         "admin",
-        {"ocr_engine": "disable", "ocr_engine_config": {}},
+        {"ocr_engine": ocr_engine, "ocr_engine_config": {}},
     )
     assert repository.bound_incoming_ids == ["inc_1"]
     assert repository.stages == ["parsing", "extracting"]

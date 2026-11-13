@@ -327,7 +327,9 @@ async def test_delete_cascade_removes_document_runs_and_returns_files(monkeypatc
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("job_status", ["succeeded", "failed", "cancelled"])
+@pytest.mark.parametrize(
+    "job_status", ["succeeded", "failed", "cancelled", "pending", "dispatching", "queued", "running"]
+)
 async def test_deleted_document_can_register_new_ingest_job(monkeypatch, job_status):
     """删除来文后必须释放来源身份，避免助手复用无来文的旧任务而永久等待。"""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -367,6 +369,19 @@ async def test_deleted_document_can_register_new_ingest_job(monkeypatch, job_sta
                 ]
             )
             await session.commit()
+
+        if job_status in {"pending", "dispatching", "queued", "running"}:
+            # 来文先落 ready、接入任务后落终态；这段时间仍不能删除来源。
+            with pytest.raises(ValueError, match="接入任务尚未结束"):
+                await IncomingDocumentRepository().delete_cascade("inc-1")
+            async with sessions() as session:
+                assert await session.scalar(
+                    select(IncomingDocument).where(IncomingDocument.incoming_id == "inc-1")
+                ) is not None
+                job = await session.scalar(select(IncomingIngestJob).where(IncomingIngestJob.job_id == "old-job"))
+                assert job is not None and job.status == job_status
+                job.status = "succeeded"
+                await session.commit()
 
         deleted, _ = await IncomingDocumentRepository().delete_cascade("inc-1")
 

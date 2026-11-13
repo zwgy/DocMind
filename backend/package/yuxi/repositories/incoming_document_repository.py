@@ -548,6 +548,7 @@ class IncomingDocumentRepository:
 
         删除规则与业务约束：
         - 状态处于 ``parsing`` / ``extracting`` 时拒绝（处理任务运行中）。
+        - 关联的接入任务尚未结束时拒绝，避免来文先完成、任务后结束时留下孤立任务。
         - 已入库知识库（``knowledge_import_status`` 在 importing/partial/indexed 或
           ``linked_kb_id`` 非空）时拒绝，避免与 KB 文件状态不一致。
         - 已确认、已有候选审计记录或已启用来源任务时拒绝；这些记录必须保留来源。
@@ -570,6 +571,19 @@ class IncomingDocumentRepository:
                 document, "linked_kb_id", None
             ):
                 raise ValueError("该来文已入库知识库，请先在知识库中删除对应文件后再清理")
+            # 来文 ready 的提交早于接入任务终态，必须同时检查任务是否仍占用来源。
+            active_ingest_job = (
+                await session.execute(
+                    select(IncomingIngestJob.job_id)
+                    .where(
+                        IncomingIngestJob.incoming_id == incoming_id,
+                        IncomingIngestJob.status.not_in(TERMINAL_STATUSES),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if active_ingest_job is not None:
+                raise ValueError("来文接入任务尚未结束，请稍后再删除")
             candidate_ids = (
                 select(ScheduledJobCandidate.id)
                 .where(ScheduledJobCandidate.incoming_id == incoming_id)

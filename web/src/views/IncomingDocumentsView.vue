@@ -678,7 +678,7 @@
       :confirm-loading="deletingId === deleteTarget?.incomingId"
       :destroy-on-close="true"
       ok-text="确认删除"
-      ok-button-props="{ danger: true }"
+      :ok-button-props="{ danger: true }"
       @ok="confirmDelete"
       @cancel="closeDeleteConfirm"
     >
