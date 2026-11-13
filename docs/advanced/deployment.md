@@ -30,7 +30,7 @@ bash scripts/manage.sh prod init
 .\scripts\manage.ps1 prod init
 ```
 
-脚本会复制 `.env.template`，自动生成并写入以下启动与安全必需项，且不会把密钥输出到终端：
+脚本会复制 `.env.prod.template`，自动生成并写入以下启动与安全必需项，且不会把密钥输出到终端：
 
 - `JWT_SECRET_KEY`：随机生成至少 32 字节的密钥
 - `YUXI_INSTANCE_ID`：为当前部署设置稳定且唯一的实例 ID
@@ -41,14 +41,14 @@ bash scripts/manage.sh prod init
 
 首次执行 `prod deploy` 时如果缺少 `.env.prod`，会自动进入同一交互流程。脚本不会覆盖已有 `.env.prod`；如需重新生成密码，应在确认尚未使用旧数据卷后手动修改对应值。
 
-以下变量不影响容器启动，但应在部署前按实际环境手动添加或修改：
+初始化后按实际用途确认配置：
 
-- `SILICONFLOW_API_KEY` 或其他模型提供商密钥：不配置时平台可启动，但无法正常调用模型
-- `YUXI_CORS_ORIGINS`：浏览器跨域访问时必填
-- `CHAT_IFRAME_*`：仅在需要限制 chat-iframe 自助换票来源或调整限流时配置
-- 宿主机端口、GPU OCR、Sandbox、MinerU 等基础设施相关变量
+- 模型地址、模型名称和密钥在首次登录后的网页“模型配置”中设置。使用自建模型不需要公网模型密钥；如选择环境变量方式保存凭据，再按生产模板的注释示例添加变量。
+- `YUXI_CORS_ORIGINS`：仅跨域访问时填写；同源访问可留空。
+- `CHAT_IFRAME_ALLOWED_ORIGINS`：需要限制换票来源时填写具体来源，留空不限制；不支持 `*` 通配符。
+- 内置 OCR 在网页系统设置中选择，不需要 MinerU 参数。沙盒等可选设置按需取消模板注释，其他部署方式和联网构建参数参见[配置说明](./configuration.md)。
 
-仍可手动执行 `cp .env.template .env.prod`，但随后必须自行填写上面的安全变量；推荐优先使用 `prod init`。
+仍可手动执行 `cp .env.prod.template .env.prod`，但随后必须自行填写上面的安全变量；推荐优先使用 `prod init`。
 
 chat-iframe 默认直接使用父页面传入的外部用户身份自助换票。如需限制可换票的宿主来源，可设置：
 

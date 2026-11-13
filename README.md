@@ -91,9 +91,11 @@ bash scripts/manage.sh dev deploy
 
 **3. 访问平台**
 
-管理脚本会先校验 Compose 配置，再构建镜像并后台启动服务。等待启动完成后，浏览器打开 `http://localhost:5173`，使用初始化时生成的管理员账户登录即可。嵌入式助手开发服务位于 `http://localhost:5174/chat-iframe/`。两个前端开发服务均使用稳定的 Nginx 静态资源；修改前端代码后执行 `docker compose up -d --build web chat-iframe` 更新对应镜像。
+管理脚本会先校验 Compose 配置，再构建镜像并后台启动服务。等待启动完成后，浏览器打开 `http://localhost:5173`，按首次使用页面创建管理员账户并登录。嵌入式助手开发服务位于 `http://localhost:5174/chat-iframe/`。两个前端开发服务均使用稳定的 Nginx 静态资源；修改前端代码后执行 `docker compose up -d --build web chat-iframe` 更新对应镜像。
 
 > 💡 不需要知识库 / 知识图谱等重依赖时，可使用 `make up-lite` 以 LITE 轻量模式启动，加快冷启动速度。更多部署说明见 [项目文档](https://xerrors.github.io/Yuxi)。
+
+环境配置分开维护：开发使用 `.env.template`，生产和离线使用 `.env.prod.template`。生产初始化自动生成密码，模型地址、模型和默认 OCR 在网页设置；可选项默认注释，已有配置保持原样。逐项说明见[配置说明](docs/advanced/configuration.md)。
 
 内网交付使用[离线部署指南](docs/advanced/offline-deployment.md)：首次交付基础服务、应用环境、沙盒三个镜像包和独立应用包；后续通过 `package-offline.sh --code-only` 生成代码与前端产物，内网执行 `deploy.sh update <应用包>`，无需重复上传镜像。目标机无需联网构建或安装 Compose 插件。
 

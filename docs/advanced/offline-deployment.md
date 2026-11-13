@@ -50,14 +50,16 @@ tar -xzf docmind-app-2026.11.12-r2.tar.gz
 bash deploy.sh init
 ```
 
-init 创建独立随机密码及配置；已有配置保持原样。编辑 `.env.prod`，核对：
+init 使用包内专用 `.env.prod.template`，只确认一次并生成独立随机密码；不再询问特定云供应商密钥。已有 `.env.prod` 原样保留，更新不会自动清理旧文件中的多余参数。
+
+模板分为必需且自动生成、部署时确认、按需取消注释三类。离线模板不包含 APT 软件源、网页构建变量、开发端口、旧来文 OCR 或额外 OCR 服务参数；模型和默认 OCR 去网页设置。完整分类见[配置说明](./configuration.md)。编辑 `.env.prod`，核对：
 
 | 配置 | 说明 |
 | --- | --- |
 | `COMPOSE_PROJECT_NAME=docmind` | 同机测试与生产必须不同，如 docmind-test、docmind-prod |
 | `WEB_PORT=80` | 浏览器入口端口，同机其他环境不能重复 |
-| `YUXI_CORS_ORIGINS`、`CHAT_IFRAME_ALLOWED_ORIGINS` | 按浏览器和 iframe 宿主系统的实际访问来源填写 |
-| 实际使用的模型凭据变量 | 可以在此配置，也可启动后在模型设置页填写 |
+| `YUXI_CORS_ORIGINS`、`CHAT_IFRAME_ALLOWED_ORIGINS` | 按实际网页来源填写；前者支持 `*`，后者不支持。前者空值不开放跨域，后者空值不限制换票来源 |
+| 实际使用的模型凭据变量 | 默认注释示例 `INTRANET_MODEL_API_KEY`；供应商可引用任意变量名，也可在模型设置页直接填凭据 |
 
 不要修改已初始化使用的数据库密码和实例标识。执行：
 

@@ -56,10 +56,10 @@ def prepare(source: Path, destination: Path, release: str) -> None:
     }
     for group, members in groups.items():
         (destination / f"images-{group}.txt").write_text("\n".join(members) + "\n", encoding="utf-8")
-    template = (source / ".env.template").read_text(encoding="utf-8")
+    template = (source / ".env.prod.template").read_text(encoding="utf-8")
     template += "\n# 同机测试/生产使用不同项目名和端口，项目名仅用小写字母、数字和连字符。\n"
     template += "COMPOSE_PROJECT_NAME=docmind\nWEB_PORT=80\n"
-    (destination / ".env.template").write_text(template, encoding="utf-8")
+    (destination / ".env.prod.template").write_text(template, encoding="utf-8")
 
 
 def offline_sandbox_setting(setting: str, release: str) -> str:

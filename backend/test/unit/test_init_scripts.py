@@ -74,7 +74,7 @@ def test_management_scripts_share_the_same_safe_compose_contract():
 def test_production_compose_requires_security_credentials_without_public_defaults():
     """直接调用生产 Compose 时也必须执行密钥门禁，不能依赖管理脚本才安全。"""
 
-    template = (ROOT / ".env.template").read_text(encoding="utf-8")
+    template = (ROOT / ".env.prod.template").read_text(encoding="utf-8")
     production = (ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
 
     for key in (

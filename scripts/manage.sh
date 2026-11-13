@@ -110,8 +110,8 @@ initialize_production_env() {
         echo "$env_file 已存在，保留现有配置。"
         return 0
     fi
-    if [ ! -f .env.template ]; then
-        echo "Error: .env.template not found; cannot create $env_file." >&2
+    if [ ! -f .env.prod.template ]; then
+        echo "Error: .env.prod.template not found; cannot create $env_file." >&2
         return 1
     fi
     if [ ! -t 0 ]; then
@@ -129,7 +129,9 @@ initialize_production_env() {
             ;;
     esac
 
-    cp .env.template "$env_file"
+    # 源码生产入口和离线入口共用此函数，密码文件都只允许当前用户读取。
+    umask 077
+    cp .env.prod.template "$env_file"
     sed -i.bak $'s/\r$//' "$env_file"
     rm -f "${env_file}.bak"
     write_prod_env_value YUXI_ENV production
@@ -141,16 +143,14 @@ initialize_production_env() {
     write_prod_env_value MINIO_ACCESS_KEY "minio-$(generate_hex 12)"
     write_prod_env_value MINIO_SECRET_KEY "$(generate_hex 32)"
 
-    read -r -p "现在填写 SILICONFLOW_API_KEY 吗？直接回车跳过: " answer
-    [ -n "$answer" ] && write_prod_env_value SILICONFLOW_API_KEY "$answer"
-
     cat <<EOF
 ✅ 已生成 $env_file 的启动必需安全配置（密钥不会打印到终端）。
 部署前请按实际环境检查或补充：
-  - SILICONFLOW_API_KEY 或其他模型提供商密钥（不填可启动，但无法正常调用模型）
+  - 模型地址、模型 ID、凭据和默认模型：启动后在系统设置 → 模型配置中填写
   - YUXI_CORS_ORIGINS（存在跨域浏览器访问时）
   - CHAT_IFRAME_*（启用外部用户自助换票时）
-  - 端口、GPU OCR、Sandbox、MinerU 等部署相关配置
+  - 内置 OCR：系统设置 → 文档解析配置中选择 RapidOCR (ONNX)
+  - 离线实例名和网页端口：检查包内模板追加的 COMPOSE_PROJECT_NAME、WEB_PORT
 EOF
 }
 

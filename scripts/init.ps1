@@ -48,14 +48,15 @@ function Update-EnvVar($Name, $Value) {
     $envPath = (Resolve-Path ".env").Path
     $lines = [System.IO.File]::ReadAllLines($envPath)
     $matchedLine = -1
+    $pattern = '^\s*#?\s*' + [regex]::Escape($Name) + '='
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -notmatch ('^' + [regex]::Escape($Name) + '=')) {
+        if ($lines[$i] -notmatch $pattern) {
             continue
         }
         # 提取等号后的内容
         $idx = $lines[$i].IndexOf('=')
         $val = $lines[$i].Substring($idx + 1)
-        if ($val -match '^\s*(#|$)') {
+        if ($lines[$i] -match '^\s*#' -or $val -match '^\s*(#|$)') {
             # 空值或仅注释 → 替换该行
             $matchedLine = $i
         } else {
@@ -161,9 +162,9 @@ Update-EnvVar "SANDBOX_PROVISIONER_TOKEN" (New-RandomHex 32)
 
 # 第 3 步：补齐缺失项
 Write-Host ""
-Write-Host "🔑 SiliconFlow API Key（首次必填，用于调用大模型）" -ForegroundColor Yellow
+Write-Host "🔑 SiliconFlow API Key（可选；自建模型可在启动后通过网页配置）" -ForegroundColor Yellow
 Write-Host "Get your API key from: https://cloud.siliconflow.cn/i/Eo5yTHGJ" -ForegroundColor Blue
-Read-UserInput "SILICONFLOW_API_KEY" "请输入 SILICONFLOW_API_KEY" "required"
+Read-UserInput "SILICONFLOW_API_KEY" "请输入 SILICONFLOW_API_KEY" "optional"
 
 Write-Host ""
 Write-Host "🔍 Tavily API Key（可选，用于搜索服务）" -ForegroundColor Yellow

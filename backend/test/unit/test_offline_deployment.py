@@ -47,7 +47,7 @@ def test_generated_compose_contains_all_runtime_images_and_isolates_instances(tm
     images = (tmp_path / "images.txt").read_text().splitlines()
     assert len(images) == len(set(images)) == 11
     assert "yuxi-sandbox-runtime:test-release" in images
-    template = (tmp_path / ".env.template").read_text()
+    template = (tmp_path / ".env.prod.template").read_text()
     assert "COMPOSE_PROJECT_NAME=docmind" in template
     assert "WEB_PORT=80" in template
 
@@ -82,7 +82,7 @@ def bundle(tmp_path):
         shutil.copyfile(source, package / "deploy.sh")
     (package / "scripts").mkdir()
     shutil.copyfile(ROOT / "scripts/manage.sh", package / "scripts/manage.sh")
-    (package / ".env.template").write_text("COMPOSE_PROJECT_NAME=docmind\n")
+    (package / ".env.prod.template").write_text("COMPOSE_PROJECT_NAME=docmind\n")
     (package / ".env.prod").write_text("COMPOSE_PROJECT_NAME=docmind-test\nJWT_SECRET_KEY=keep-me\n")
     (package / "compose.yaml").write_text('{"services":{}}')
     for group in ("infra", "app", "sandbox"):
@@ -170,7 +170,7 @@ def test_first_init_generates_private_independent_credentials(bundle):
     )
     os.close(slave)
     try:
-        os.write(master, b"y\n\n")
+        os.write(master, b"y\n")
         process.wait(timeout=15)
         output = bytearray()
         while True:
@@ -315,7 +315,7 @@ def test_packager_creates_complete_verified_archive_from_git_snapshot(tmp_path):
         "scripts/offline/deploy.sh",
         "scripts/manage.sh",
         "docker-compose.prod.yml",
-        ".env.template",
+        ".env.prod.template",
         "docs/advanced/offline-deployment.md",
         "docker/sandbox_provisioner/sandbox.env",
         "backend/pyproject.toml",
@@ -417,7 +417,7 @@ def test_packager_creates_complete_verified_archive_from_git_snapshot(tmp_path):
     assert len(list(package.glob("docmind-images-*.tar.gz"))) == 3
     assert run(["sha256sum", "--check", "SHA256SUMS"], cwd=base).returncode == 0
     assert len((base / "images.txt").read_text().splitlines()) == 11
-    assert "DO_NOT_SHIP_THIS_SECRET" not in (base / ".env.template").read_text()
+    assert "DO_NOT_SHIP_THIS_SECRET" not in (base / ".env.prod.template").read_text()
     repeated = run(command, cwd=repo, env=env)
     assert repeated.returncode != 0
     Path(env["FAKE_DOCKER_LOG"]).write_text("")

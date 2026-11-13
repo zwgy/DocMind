@@ -93,8 +93,8 @@ function Initialize-ProductionEnv([string]$EnvFile) {
         Write-Host "$EnvFile 已存在，保留现有配置。" -ForegroundColor Yellow
         return
     }
-    if (-not (Test-Path ".env.template")) {
-        throw ".env.template 不存在，无法创建 $EnvFile。"
+    if (-not (Test-Path ".env.prod.template")) {
+        throw ".env.prod.template 不存在，无法创建 $EnvFile。"
     }
     if ([Console]::IsInputRedirected) {
         throw "生产配置初始化需要交互式终端，无法自动创建 $EnvFile。"
@@ -105,7 +105,7 @@ function Initialize-ProductionEnv([string]$EnvFile) {
         throw "已取消生产配置初始化。"
     }
 
-    Copy-Item ".env.template" $EnvFile
+    Copy-Item ".env.prod.template" $EnvFile
     Set-ProductionEnvValue $EnvFile "YUXI_ENV" "production"
     Set-ProductionEnvValue $EnvFile "JWT_SECRET_KEY" (New-RandomHex 32)
     Set-ProductionEnvValue $EnvFile "YUXI_INSTANCE_ID" ("instance-" + (New-RandomHex 8))
@@ -115,17 +115,13 @@ function Initialize-ProductionEnv([string]$EnvFile) {
     Set-ProductionEnvValue $EnvFile "MINIO_ACCESS_KEY" ("minio-" + (New-RandomHex 12))
     Set-ProductionEnvValue $EnvFile "MINIO_SECRET_KEY" (New-RandomHex 32)
 
-    $apiKey = Read-Host "现在填写 SILICONFLOW_API_KEY 吗？直接回车跳过"
-    if (-not [string]::IsNullOrWhiteSpace($apiKey)) {
-        Set-ProductionEnvValue $EnvFile "SILICONFLOW_API_KEY" $apiKey
-    }
-
     Write-Host "✅ 已生成 $EnvFile 的启动必需安全配置（密钥不会打印到终端）。" -ForegroundColor Green
     Write-Host "部署前请按实际环境检查或补充：" -ForegroundColor Yellow
-    Write-Host "  - SILICONFLOW_API_KEY 或其他模型提供商密钥（不填可启动，但无法正常调用模型）"
+    Write-Host "  - 模型地址、模型 ID、凭据和默认模型：启动后在系统设置 → 模型配置中填写"
     Write-Host "  - YUXI_CORS_ORIGINS（存在跨域浏览器访问时）"
     Write-Host "  - CHAT_IFRAME_*（启用外部用户自助换票时）"
-    Write-Host "  - 端口、GPU OCR、Sandbox、MinerU 等部署相关配置"
+    Write-Host "  - 内置 OCR：系统设置 → 文档解析配置中选择 RapidOCR (ONNX)"
+    Write-Host "  - 离线实例名和网页端口：检查包内模板追加的 COMPOSE_PROJECT_NAME、WEB_PORT"
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot

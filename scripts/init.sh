@@ -36,9 +36,12 @@ ensure_env_var() {
     if grep -Eq "^${var_name}=[^[:space:]#]" .env; then
         return 0
     fi
-    if grep -Eq "^${var_name}=" .env; then
-        # 前面 grep 已保证模式能匹配；sed -i.bak 兼容 GNU/BSD sed
-        sed -i.bak "s|^${var_name}=.*|${var_name}=${var_value}|" .env
+    # 可选凭据在模板中默认注释，填写后在原位置启用，避免同时留下两份同名变量。
+    local escaped_value="${var_value//\\/\\\\}"
+    escaped_value="${escaped_value//&/\\&}"
+    escaped_value="${escaped_value//|/\\|}"
+    if grep -Eq "^[[:space:]]*#?[[:space:]]*${var_name}=" .env; then
+        sed -i.bak -E "s|^[[:space:]]*#?[[:space:]]*${var_name}=.*|${var_name}=${escaped_value}|" .env
         rm -f .env.bak
     else
         printf "\n%s=%s\n" "$var_name" "$var_value" >> .env
@@ -127,9 +130,9 @@ ensure_env_var SANDBOX_PROVISIONER_TOKEN "$(generate_hex 32)"
 
 # 第 3 步：补齐缺失项
 echo ""
-echo "🔑 SiliconFlow API Key（首次必填，用于调用大模型）"
+echo "🔑 SiliconFlow API Key（可选；自建模型可在启动后通过网页配置）"
 echo "Get your API key from: https://cloud.siliconflow.cn/i/Eo5yTHGJ" >&2
-ask_or_skip SILICONFLOW_API_KEY "请输入 SILICONFLOW_API_KEY" required
+ask_or_skip SILICONFLOW_API_KEY "请输入 SILICONFLOW_API_KEY" optional
 
 echo ""
 echo "🔍 Tavily API Key（可选，用于搜索服务）"
