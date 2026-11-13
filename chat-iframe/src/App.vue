@@ -752,21 +752,6 @@ async function sendChat(payload: {
   restoreUploadDraft: (retry: { files: boolean; image: boolean; message: string }) => void
 }) {
   const selectedPageFiles = payload.selectedPageFiles || []
-  const selectedDocumentFiles = filesForSelectedDocuments(selectedPageFiles)
-  if (
-    selectedPageFiles.length &&
-    !(await refreshExtraction(selectedDocumentFiles, true))
-  ) {
-    payload.restoreUploadDraft({
-      files: false,
-      image: false,
-      message:
-        attachmentPreparationNotice.value?.message ||
-        error.value ||
-        '来文附件尚未准备完成，请稍后重试'
-    })
-    return
-  }
   const selectedContextFile = selectedPageFiles[0] || null
   const selectedContextResult = selectedContextFile
     ? results.value[selectedContextFile.source_file_id] || null

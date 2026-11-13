@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import test from 'node:test'
+import { runInNewContext } from 'node:vm'
 
 const source = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
 const appCssSource = readFileSync(new URL('../src/assets/css/app.css', import.meta.url), 'utf8')
@@ -41,17 +43,15 @@ test('ready extraction summaries are reused without querying again', () => {
   assert.match(source, /摘要一旦 ready 就是当前页面可复用的终态/)
 })
 
-test('page attachments are downloaded by DocMind and block questions until parsing is ready', () => {
+test('page attachments continue preparing independently of submitted questions', () => {
   assert.doesNotMatch(contextSource, /normalized\[0\]\.selected/)
   assert.doesNotMatch(inputSource, /if \(!next\.size && props\.selectedPageSourceFileId\)/)
-  assert.match(source, /refreshExtraction\(selectedDocumentFiles, true\)/)
   assert.match(
     source,
     /context\.files\.filter\(\(file\) => selectedKeys\.has\(documentKey\(file\)\)\)/
   )
   assert.match(source, /await ingestIncomingDocument\(files, context\.config\.token\)/)
   assert.match(source, /attachmentPreparationPromises\.set\(key, tracked\)/)
-  assert.match(source, /const selectedDocumentFiles = filesForSelectedDocuments\(selectedPageFiles\)/)
   assert.match(
     source,
     /queryFiles: IncomingPageFile\[\] = selectedFile\.value\s*\? filesForSelectedDocuments\(\[selectedFile\.value\]\)/
@@ -59,12 +59,64 @@ test('page attachments are downloaded by DocMind and block questions until parsi
   assert.match(source, /同一来文可以整组同步到后端/)
   assert.match(source, /selectedPageFiles,\s*\n\s*extractionResults:/)
   assert.doesNotMatch(source, /selectedPageFiles: selectedDocumentFiles/)
-  assert.match(source, /attachmentPreparationNotice\.value\?\.message/)
   assert.match(source, /class="attachment-preparation-status"/)
   assert.match(source, /showAttachmentPreparation\('ready', related\)/)
   assert.doesNotMatch(source, /ingestIncomingDocument\([\s\S]*?\.catch\(\(\) => null\)/)
   assert.match(source, /以下附件缺少下载地址，无法形成完整来文/)
-  assert.match(source, /来文附件尚未准备完成，请稍后重试/)
+})
+
+test('questions are submitted with the current attachment state without waiting for extraction', async () => {
+  // 执行真实提交函数，只替换网络边界，确保未完成附件不会吞掉本轮问题。
+  const sendSource = source.slice(
+    source.indexOf('async function sendChat('),
+    source.indexOf('\nfunction windowDragPayload')
+  )
+  for (const status of ['pending', 'parsing', 'extracting', 'ready']) {
+    const file = { name: '测试来文.txt', source_file_id: 'pending-file' }
+    const selectedFiles = [file]
+    const extraction = {
+      matchStatus: 'matched',
+      extractionStatus: status,
+      hasParsedMarkdown: status === 'extracting' || status === 'ready'
+    }
+    const sent = []
+    const restored = []
+    const notifications = []
+    const context = {
+      pageContent: { text: '测试页面正文' },
+      config: { token: 'test-token', agentId: 'test-agent', conversationScopeKey: 'test-scope' }
+    }
+    const send = runInNewContext(`(${stripTypeScriptTypes(sendSource)})`, {
+      context,
+      results: { value: { 'pending-file': extraction } },
+      hasPageContent: { value: true },
+      filesForSelectedDocuments: (files) => files,
+      refreshExtraction: async () => false,
+      attachmentPreparationNotice: { value: { message: '附件处理中' } },
+      error: { value: '' },
+      chat: {
+        send: async (options, ...identity) => {
+          sent.push({ options, identity })
+          return { threadId: 'test-thread', messageId: 'test-message' }
+        }
+      },
+      notifyMessageSent: (message) => notifications.push(message)
+    })
+    await send({
+      text: '请介绍一下安全培训的组织方法',
+      files: [],
+      selectedPageFiles: selectedFiles,
+      restoreUploadDraft: (retry) => restored.push(retry)
+    })
+    assert.equal(sent.length, 1, `${status} 状态仍应提交问题`)
+    assert.equal(sent[0].options.text, '请介绍一下安全培训的组织方法')
+    assert.equal(sent[0].options.selectedPageFiles, selectedFiles)
+    assert.equal(sent[0].options.extractionResult, extraction)
+    assert.equal(sent[0].options.pageContent, context.pageContent)
+    assert.equal(sent[0].identity.join(','), 'test-token,test-agent,test-scope')
+    assert.equal(restored.length, 0)
+    assert.equal(notifications[0].conversationId, 'test-thread')
+  }
 })
 
 test('attachment status stays scoped to the current business page and can reattach after switching back', () => {
