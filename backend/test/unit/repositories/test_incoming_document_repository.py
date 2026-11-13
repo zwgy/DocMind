@@ -4,10 +4,24 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from yuxi.repositories import incoming_document_repository as repo_module
 from yuxi.repositories.incoming_document_repository import IncomingDocumentRepository
-from yuxi.storage.postgres.models_knowledge import IncomingDocument
+from yuxi.repositories.incoming_ingest_repository import IncomingIngestRepository
+from yuxi.storage.postgres.models_knowledge import (
+    Base,
+    DocumentBusinessExtractionRun,
+    IncomingDocument,
+    IncomingDocumentFile,
+    IncomingIngestJob,
+)
+from yuxi.storage.postgres.models_scheduled_jobs import (
+    IncomingTaskBatch,
+    ScheduledJob,
+    ScheduledJobAuditLog,
+    ScheduledJobCandidate,
+)
 
 
 def test_business_query_filters_cover_document_metadata_files_and_latest_items():
@@ -304,9 +318,72 @@ async def test_delete_cascade_removes_document_runs_and_returns_files(monkeypatc
     assert [file.incoming_file_id for file in returned_files] == ["incf-1", "incf-2"]
     assert session.committed is True
     # 草稿没有调度审计时按候选、批次、抽取运行、来文的依赖逆序删除。
-    assert len(delete_calls) == 4
+    assert len(delete_calls) == 5
     joined = " | ".join(delete_calls).upper()
     assert "SCHEDULED_JOB_CANDIDATES" in joined
     assert "INCOMING_TASK_BATCHES" in joined
     assert "DOCUMENT_BUSINESS_EXTRACTION_RUNS" in joined
     assert "INCOMING_DOCUMENTS" in joined
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("job_status", ["succeeded", "failed", "cancelled"])
+async def test_deleted_document_can_register_new_ingest_job(monkeypatch, job_status):
+    """删除来文后必须释放来源身份，避免助手复用无来文的旧任务而永久等待。"""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    tables = [
+        IncomingDocument.__table__,
+        IncomingDocumentFile.__table__,
+        IncomingIngestJob.__table__,
+        DocumentBusinessExtractionRun.__table__,
+        IncomingTaskBatch.__table__,
+        ScheduledJobCandidate.__table__,
+        ScheduledJobAuditLog.__table__,
+        ScheduledJob.__table__,
+    ]
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(lambda connection: Base.metadata.create_all(connection, tables=tables))
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setattr(repo_module.pg_manager, "get_async_session_context", sessions)
+        metadata = {"title": "删除后重新入库"}
+        manifest = [{"source_file_id": "main-1", "filename": "main.pdf", "source_url": "https://oa.example/1"}]
+        async with sessions() as session:
+            session.add_all(
+                [
+                    IncomingDocument(incoming_id="inc-1", source_system="oa", source_document_id="1", status="ready"),
+                    IncomingIngestJob(
+                        job_id="old-job",
+                        incoming_id="inc-1",
+                        source_system="oa",
+                        source_document_id="1",
+                        status=job_status,
+                        document_metadata=metadata,
+                        file_manifest=manifest,
+                    ),
+                    IncomingIngestJob(
+                        job_id="other-job", source_system="oa", source_document_id="2", status="succeeded"
+                    ),
+                ]
+            )
+            await session.commit()
+
+        deleted, _ = await IncomingDocumentRepository().delete_cascade("inc-1")
+
+        assert deleted.incoming_id == "inc-1"
+        async with sessions() as session:
+            assert await session.scalar(select(IncomingDocument)) is None
+            remaining_jobs = (await session.scalars(select(IncomingIngestJob.job_id))).all()
+            assert remaining_jobs == ["other-job"]
+            registration = await IncomingIngestRepository(session).register_immediate(
+                source_system="oa",
+                source_document_id="1",
+                document_metadata=metadata,
+                file_manifest=manifest,
+                actor_uid="admin",
+            )
+            assert registration.status == "accepted"
+            assert registration.job_id != "old-job"
+            assert not registration.reused
+    finally:
+        await engine.dispose()

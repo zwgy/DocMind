@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yuxi.repositories.incoming_ingest_repository import TERMINAL_STATUSES
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_knowledge import (
     DocumentBusinessExtractionItem,
@@ -12,6 +13,7 @@ from yuxi.storage.postgres.models_knowledge import (
     DocumentBusinessExtractionRun,
     IncomingDocument,
     IncomingDocumentFile,
+    IncomingIngestJob,
 )
 from yuxi.storage.postgres.models_scheduled_jobs import (
     IncomingTaskBatch,
@@ -612,6 +614,13 @@ class IncomingDocumentRepository:
             # 外键全部为 RESTRICT，删除只允许在没有任务/审计引用的草稿上显式逆序进行。
             await session.execute(delete(ScheduledJobCandidate).where(ScheduledJobCandidate.incoming_id == incoming_id))
             await session.execute(delete(IncomingTaskBatch).where(IncomingTaskBatch.incoming_id == incoming_id))
+            # 同步释放已结束任务的来源身份，避免重新打开助手时命中没有来文的旧任务。
+            await session.execute(
+                delete(IncomingIngestJob).where(
+                    IncomingIngestJob.incoming_id == incoming_id,
+                    IncomingIngestJob.status.in_(TERMINAL_STATUSES),
+                )
+            )
             await session.execute(delete(IncomingDocument).where(IncomingDocument.incoming_id == incoming_id))
             await session.commit()
         return document, files
