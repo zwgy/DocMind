@@ -1,5 +1,128 @@
 """
-来文文档上传脚本
+来文接入说明与本地文件上传脚本
+
+纯 HTTP API 调用示例（供生产系统后端接入）
+========================================
+
+本节可直接用于 Java、Python 等任意后端的 HTTP 调用，不需要运行本脚本。
+下方可执行代码仍是读取本地文件后 multipart 上传的演示，与本节的 JSON
+下载地址方式不同；本节示例不会自动修改脚本的开发环境默认配置。
+
+调用时机：上级来文同步到生产数据库，且文件服务中的正文和附件全部准备
+完成后，按一份独立来文调用一次接口。DocMind 后台负责下载、解析和提取。
+一份来文有多个附件时，放在同一个 files 数组中；多份来文分别调用。
+
+接口地址：http://10.132.235.32/api/incoming-documents/ingest
+请求方式：POST
+认证方式：Authorization: Bearer <线上 DocMind API Key>
+请求格式：Content-Type: application/json
+
+地址按离线部署默认 80 端口编写；如果修改了 WEB_PORT，需要补上实际端口。
+API Key 在线上 DocMind 的“账户设置 → API Key 管理”中创建，不是模型
+服务的 API Key；所属账号必须已绑定部门，否则接口返回 HTTP 400。
+以下格式已根据项目代码核对，尚未连接内网环境实测。
+
+完整 HTTP 请求（替换密钥、来文数据和文件服务地址后使用）
+------------------------------------------------------
+
+POST /api/incoming-documents/ingest HTTP/1.1
+Host: 10.132.235.32
+Authorization: Bearer <替换为线上 DocMind API Key>
+Content-Type: application/json
+
+{
+  "source_system": "oa",
+  "document_metadata": {
+    "source_doc_id": "37908",
+    "title": "关于开展安全检查工作的通知",
+    "document_number": "某单位〔2026〕123号",
+    "incoming_type": "集团公司文件",
+    "source_unit": "安全管理部门",
+    "incoming_date": "2026-11-16"
+  },
+  "files": [
+    {
+      "source_file_id": "202611160001",
+      "filename": "关于开展安全检查工作的通知.pdf",
+      "source_url": "http://文件服务地址/download?fileid=202611160001",
+      "is_main_file": true
+    },
+    {
+      "source_file_id": "202611160002",
+      "filename": "附件1：安全检查清单.xlsx",
+      "source_url": "http://文件服务地址/download?fileid=202611160002",
+      "is_main_file": false
+    }
+  ]
+}
+
+输入字段与数据来源
+------------------
+
+- source_system：来源系统标识，示例为 oa。应明确传入并保持稳定，必须与
+  小助手页面配置一致；省略时接口默认 production。
+- document_metadata：必填对象，保存来文身份及业务信息。
+  - source_doc_id：必填非空字符串，取生产数据库中独立来文的唯一 ID。
+    不能用多份来文共用的业务记录 ID；与小助手页面中的来文 ID 保持一致。
+  - title、document_number：可选，分别取来文标题、文号，建议填写。
+  - incoming_type、source_unit：可选，分别取来文类型、来文单位。
+  - incoming_date：可选，提供时必须使用 YYYY-MM-DD，不能带时间部分。
+- files：必填数组，提交该份来文完整、非空的正文和附件清单。
+  - source_file_id：必填非空字符串，取生产系统的文件唯一 ID，同一来文内
+    不重复，并与小助手页面中的文件 ID 保持一致。
+  - filename：必填原始文件名，保留正确扩展名，使用 DocMind 支持的格式。
+  - source_url：必填 HTTP/HTTPS 文件下载地址，由文件服务提供，必须能被
+    DocMind 后台直接访问并返回文件内容，不能是预览页或登录页。
+  - is_main_file：可选布尔值，建议明确填写；正文 true，附件 false，
+    一份来文只标记一个正文。
+
+此接口不接收 function_id、source_function_id、business_id、用户账号或
+用户姓名。来文按 source_system + source_doc_id 识别，附件在这份来文下
+按 source_file_id 识别；这些 ID 均应长期保持稳定。
+
+输出示例与处理规则
+------------------
+
+首次登记正常时返回 HTTP 200，JSON 示例：
+
+{
+  "jobId": "任务ID",
+  "status": "accepted",
+  "priority": "immediate",
+  "fileCount": 2
+}
+
+- jobId：DocMind 任务 ID，调用方可记录下来用于后续排查。
+- status：本次任务登记结果，必须检查，不能只看 HTTP 状态码。
+  - accepted：新任务已登记，后续在后台处理。
+  - exists：完全相同的任务已经存在，复用原任务，不代表处理完成。
+  - requeued：原任务失败或取消，本次已重新排队。
+  - conflict：相同来文 ID 的元数据或文件清单与已有任务不同，本次未覆盖
+    原任务；检查差异，不要原样反复重试。此状态也可能返回 HTTP 200。
+- priority：immediate 表示即时接入任务，不保证立即完成，有并发限制时
+  仍会排队，不能理解为同步返回解析结果。
+- fileCount：本次请求提交的文件数量，包括正文和附件。
+
+接口返回只表示任务登记结果，不代表文件已下载、解析或提取完成。后台
+处理结果可在 DocMind“来文管理”中查看。请求参数错误通常返回 HTTP 400，
+认证失败返回 HTTP 401；非 2xx 时应记录响应内容排查，不要记为提交成功。
+
+接入限制与重试
+--------------
+
+1. 当前 JSON 方式不自动追加附件。应在一份来文同步完整后提交；同一来文
+   后续改变元数据、文件清单或下载地址会返回 conflict。不要换来文 ID
+   绕过冲突，否则会生成重复来文。
+2. 网络超时或服务端错误后，可使用完全相同的内容有限重试；超时也可能
+   已登记成功。避免每次生成新 ID 或变化的临时下载地址。
+3. DocMind 下载文件时不会自动携带生产系统浏览器 Cookie 或专用认证
+   请求头，下载地址不得包含用户名和密码。若文件服务要求此类认证，
+   由生产后端先下载文件，再采用本脚本演示的 multipart 文件上传方式。
+4. 单个文件上限为 100 MiB。首次联调选一份正文与附件齐全的来文提交，
+   再到“来文管理”确认解析提取结果；不要把接口受理当成全流程验收。
+
+以下为本地文件 multipart 上传脚本说明
+====================================
 
 设计原则
 ========
