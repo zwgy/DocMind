@@ -7,8 +7,6 @@ import {
   getAvatarInitials
 } from '../pixelAvatar.js'
 
-const DICEBEAR_GLYPHS_AVATAR_BASE_URL = 'https://api.dicebear.com/10.x/glyphs/svg'
-
 const run = () => {
   {
     const first = generatePixelAvatar('user-001')
@@ -26,22 +24,20 @@ const run = () => {
 
   {
     const avatar = generatePixelAvatar('user-003')
-    assert.equal(
-      avatar,
-      `${DICEBEAR_GLYPHS_AVATAR_BASE_URL}?seed=user-003`,
-      'Should return a DiceBear glyphs avatar URL'
-    )
-    console.log('T3 DiceBear URL: PASS')
+    assert.match(avatar, /^data:image\/svg\+xml,/, 'Avatar should load without a network request')
+    const svg = decodeURIComponent(avatar.split(',')[1])
+    assert.match(svg, /<svg\b/)
+    assert.match(svg, /<rect\b/)
+    assert.doesNotMatch(svg, /<(?:script|image|foreignObject)\b|(?:href|src)=/i)
+    console.log('T3 Local SVG: PASS')
   }
 
   {
     const avatar = generatePixelAvatar(' user/中文 ')
-    assert.equal(
-      avatar,
-      `${DICEBEAR_GLYPHS_AVATAR_BASE_URL}?seed=user%2F%E4%B8%AD%E6%96%87`,
-      'Seed should be trimmed and URL encoded'
-    )
-    console.log('T4 Encoded seed: PASS')
+    assert.equal(avatar, generatePixelAvatar('user/中文'), 'Seed should be trimmed')
+    const unsafeAvatar = generatePixelAvatar('<script>alert(1)</script>')
+    assert.doesNotMatch(decodeURIComponent(unsafeAvatar), /<script>/)
+    console.log('T4 Normalized seed: PASS')
   }
 
   {

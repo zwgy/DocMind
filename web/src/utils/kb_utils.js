@@ -1,7 +1,8 @@
 import { h } from 'vue'
 import { Database, DatabaseZap } from 'lucide-vue-next'
 
-const ICON_BASE = 'https://registry.npmmirror.com/@lobehub/icons-static-svg/latest/files/icons'
+// 与模型厂商图标共用包内资源，避免离线环境加载失败。
+const ICON_BASE = '/icons/brands'
 
 const createBrandIcon = (url) => {
   const Icon = ({ size = 20 }) =>

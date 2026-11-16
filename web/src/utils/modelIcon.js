@@ -1,4 +1,5 @@
-const ICON_BASE = 'https://registry.npmmirror.com/@lobehub/icons-static-svg/latest/files/icons'
+// 图标随网页一起交付，内网浏览器无需访问外部图片站。
+const ICON_BASE = '/icons/brands'
 
 export const modelIcons = {
   default: `${ICON_BASE}/default.svg`,
